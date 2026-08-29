@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import io
 import os
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 import frame_compare.services.alignment_reuse_prompt as reuse_prompt
-from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.alignment_reuse_prompt import (
     PROMPT_UNAVAILABLE_MESSAGE,
     REUSE_PREVIOUS_OFFSETS_PROMPT,
@@ -33,6 +33,17 @@ class _TTYStringIO(io.StringIO):
 
     def isatty(self) -> bool:
         return self._is_tty
+
+
+class _EchoingTTYStringIO(_TTYStringIO):
+    def __init__(self, value: str, *, is_tty: bool, echo_to: io.StringIO) -> None:
+        super().__init__(value, is_tty=is_tty)
+        self._echo_to = echo_to
+
+    def readline(self, *_args: object, **_kwargs: object) -> str:
+        response = super().readline()
+        self._echo_to.write(response)
+        return response
 
 
 class _FailingTTYStringIO(_TTYStringIO):
@@ -126,22 +137,133 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     stderr_output = stderr.getvalue()
     assert accepted is True
     assert captured.out == ""
-    assert "Previous Alignment Offsets" in stderr_output
-    assert REUSE_CACHE_FILE_NAME in stderr_output
+    assert "[WAIT] Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
+    panel_line = next(
+        line for line in stderr_output.splitlines() if "[WAIT] Alignment reuse" in line
+    )
+    assert panel_line.startswith("  ")
+    assert not panel_line.startswith("   ")
+    prompt_line = next(
+        line for line in stderr_output.splitlines() if "Reuse these offsets?" in line
+    )
+    assert prompt_line == f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
+    assert stderr_output.index("[WAIT] Alignment reuse") < stderr_output.index(
+        "    Reuse these offsets?"
+    )
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
     assert "A [red].mkv" in stderr_output
-    normalized_output = stderr_output.replace("\\", "/")
-    assert "[green]/A [red].mkv" in normalized_output
-    assert "+12f" in stderr_output
-    assert "-4f" in stderr_output
+    assert stderr_output.count("A [red].mkv") == 1
+    assert "+12 frames" in stderr_output
+    assert "-4 frames" in stderr_output
     assert "0.5" in stderr_output
     assert "-0.166" in stderr_output
-    assert "2026-06-06T12:34:56Z" in stderr_output
-    assert "computed" in stderr_output
-    assert "confirmed" in stderr_output
+    assert "2026-06-06 12:34:56 UTC" in stderr_output
+    assert "Computed" in stderr_output
+    assert "Preview-confirmed" in stderr_output
     assert "cached" not in stderr_output
+    assert stderr_output.index("+12 frames") < stderr_output.index("Computed")
+    assert stderr_output.index("Computed") < stderr_output.index("Accepted")
+    assert stderr_output.index("Accepted") < stderr_output.index("Cache")
+
+
+def test_prompt_leaves_one_blank_line_after_a_normal_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(
+        reuse_prompt.sys,
+        "stdin",
+        _EchoingTTYStringIO("yes\n", is_tty=True, echo_to=stderr),
+    )
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    assert prompt_for_previous_offset_reuse(
+        prompt_input=_prompt_input(request),
+        progress=None,
+        no_color=True,
+    )
+
+    stderr.write("  [OK] ALIGN  Completed in 20s\n")
+    rendered = stderr.getvalue()
+    assert rendered.endswith(
+        f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}yes\n\n  [OK] ALIGN  Completed in 20s\n"
+    )
+    assert (
+        rendered.index("[WAIT] Alignment reuse")
+        < rendered.index("    Reuse these offsets?")
+        < rendered.index("  [OK] ALIGN")
+    )
+
+
+def test_prompt_shows_full_filename_once_when_label_equals_stem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    prompt_input = _prompt_input(request)
+    first_row = prompt_input.rows[0]
+    prompt_input = replace(
+        prompt_input,
+        reference_label=Path(prompt_input.reference_filename).stem,
+        shared_cache_path=Path("generated/cache/alignment/alignment_reuse.toml"),
+        rows=(replace(first_row, label=first_row.stem),),
+    )
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    prompt_for_previous_offset_reuse(prompt_input=prompt_input, progress=None, no_color=True)
+
+    output = stderr.getvalue()
+    assert output.count(prompt_input.reference_filename) == 1
+    assert output.count(first_row.filename) == 1
+    assert str(prompt_input.shared_cache_path) in "".join(output.split())
+
+
+def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    request = replace(
+        request,
+        reference=replace(
+            request.reference,
+            presentation_name="2160p | PMTP WEB-DL | DV HDR10+ | Kitsune",
+        ),
+        presentation_content="Avatar Aang The Last Airbender (2026)",
+    )
+    prompt_input = _prompt_input(request)
+    prompt_input = replace(
+        prompt_input,
+        shared_cache_path=Path("generated/cache/alignment/alignment_reuse.toml"),
+        rows=(
+            replace(
+                prompt_input.rows[0],
+                presentation_name="2160p | ATV WEB-DL | DV HDR10+ | REPACK | Kitsune",
+            ),
+        ),
+    )
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("\n", is_tty=True))
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    assert not prompt_for_previous_offset_reuse(
+        prompt_input=prompt_input, progress=None, no_color=True
+    )
+    output = stderr.getvalue()
+    assert "[WAIT] Alignment reuse" in output
+    assert "Avatar Aang The Last Airbender (2026)" in output
+    assert "PMTP WEB-DL" in output
+    assert "ATV WEB-DL" in output
+    assert str(request.reference.path) not in output
+    assert str(request.comparisons[0].path) not in output
+    assert "Cache" in output
+    assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
 def test_prompt_does_not_use_unbounded_terminal_width(
@@ -175,6 +297,37 @@ def test_prompt_does_not_use_unbounded_terminal_width(
     assert accepted is False
     assert console_widths
     assert all(width is not None and width < 240 for width in console_widths)
+
+
+@pytest.mark.parametrize("columns", [60, 80, 120, 240])
+def test_prompt_uses_actual_narrow_terminal_width(
+    columns: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    monkeypatch.setattr(
+        reuse_prompt.shutil,
+        "get_terminal_size",
+        lambda **_: os.terminal_size((columns, 24)),
+    )
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
+
+    assert (
+        prompt_for_previous_offset_reuse(
+            prompt_input=_prompt_input(request),
+            progress=None,
+            no_color=True,
+        )
+        is False
+    )
+    stderr_output = stderr.getvalue()
+    assert "[WAIT] Alignment reuse" in stderr_output
+    assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
+    assert "\x1b[" not in stderr_output
+    assert all(len(line) <= columns for line in stderr_output.splitlines())
 
 
 @pytest.mark.parametrize("response", ["\n", "n\n", "NO\n", "anything else\n"])
@@ -217,7 +370,7 @@ def test_prompt_non_tty_stdin_prints_only_fallback_line(
     assert accepted is False
     assert captured.out == ""
     assert _fallback_only_output(stderr_output)
-    assert "Previous Alignment Offsets" not in stderr_output
+    assert "Alignment reuse" not in stderr_output
     assert "[y/N]" not in stderr_output
     assert "Comparison [cyan] <one>" not in stderr_output
 
@@ -246,9 +399,11 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert accepted is False
     assert captured.out == ""
     stderr_output = stderr.getvalue()
-    assert "Previous Alignment Offsets" in stderr_output
+    assert "[WAIT] Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
-    assert f"{REUSE_PREVIOUS_OFFSETS_PROMPT}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
+    expected_prompt = f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
+    assert f"{expected_prompt}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
+    assert f"    {PROMPT_UNAVAILABLE_MESSAGE}" not in stderr_output
 
 
 def test_prompt_emits_no_human_diagnostic_when_stderr_is_not_tty(

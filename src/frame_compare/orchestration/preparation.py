@@ -18,6 +18,7 @@ from frame_compare.config.effective import (
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.active_rect import (
     metric_cache_request_for_clip,
     propagate_resolved_aspect_ratio_evidence,
@@ -46,6 +47,7 @@ from frame_compare.orchestration.execution_types import (
     PrepState,
     RunArtifacts,
 )
+from frame_compare.orchestration.full_window_retry import compute_selection_window_with_recovery
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probing.probe_cache import (
@@ -61,9 +63,8 @@ from frame_compare.orchestration.probing.probe_props import (
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
     build_selection_domain_clips_with_diagnostics,
-    compute_selection_window_for_clips,
 )
-from frame_compare.orchestration.source_labels import resolve_source_labels
+from frame_compare.orchestration.source_labels import resolve_source_label_details
 from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.orchestration.types import (
     ReservedRunCapture,
@@ -71,10 +72,13 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.services.errors import (
+    GeneratedDataReservationError,
     MetadataError,
     TmdbError,
     TmdbRateLimitedError,
 )
+from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
+from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.services.run_info import (
     RunInfo,
@@ -82,8 +86,13 @@ from frame_compare.services.run_info import (
     RunInfoTmdbSkipReason,
     write_run_info,
 )
-from frame_compare.services.types import TmdbMetadata
+from frame_compare.services.tmdb_cache import TmdbCache
+from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.paths import (
+    require_managed_descendant,
+    require_managed_immediate_child,
+)
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -115,72 +124,88 @@ async def _resolve_run_directory(
     deps: RunDependencies,
     preflight_duration: float,
     preflight_warnings: tuple[str, ...],
+    run_warnings: list[str],
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
     metadata = None
     was_attempted = False
-    if config.paths.use_run_folders:
-        tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
-            enabled=config.tmdb.enabled,
-            skip_metadata=request.skip_metadata,
-            has_http_client=deps.http_client is not None,
-        )
-        if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
-            try:
-                metadata = await resolve_run_metadata(
-                    filenames=[input_videos[0].name],
-                    config=config,
-                    client=deps.http_client,
-                )
-                was_attempted = True
-                tmdb_facts = _attempted_run_info_tmdb_prefetch_facts(metadata)
-            except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
-                tmdb_facts = RunInfoTmdbPrefetchFacts(
-                    enabled=config.tmdb.enabled,
-                    attempted=True,
-                    resolved=False,
-                    failed=True,
-                    error_type=type(exc).__name__,
-                )
-                log.warning(
-                    "metadata_prefetch_degraded",
-                    filenames=[input_videos[0].name],
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    exc_info=exc,
-                )
-
-        filenames = [video.name for video in input_videos]
-        run_dir = reserve_run_folder(
-            input_dir=workspace.generated_dir,
-            filenames=filenames,
-            tmdb_metadata=metadata,
-        )
+    tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
+        enabled=config.tmdb.enabled,
+        skip_metadata=request.skip_metadata,
+        has_http_client=deps.http_client is not None,
+    )
+    if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
         try:
-            write_run_info(
-                run_dir.path / "run_info.toml",
-                RunInfo(
-                    created_at=deps.clock(),
-                    folder_name=run_dir.folder_name,
-                    naming_source=run_dir.naming_source,
-                    source_filenames=filenames,
-                    tmdb=tmdb_facts,
-                ),
+            metadata = await resolve_run_metadata(
+                filenames=[input_videos[0].name],
+                config=config,
+                client=deps.http_client,
+                cache=TmdbCache(workspace.shared_tmdb_cache_path),
             )
-        except OSError as exc:
-            _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
-            raise
-        new_workspace = workspace.with_run_dir(run_dir.path)
-        if deps.capture_reserved_run is not None:
-            deps.capture_reserved_run(
-                ReservedRunCapture(
-                    workspace=new_workspace,
-                    clip_count=len(input_videos),
-                    preflight_duration=preflight_duration,
-                    preflight_warnings=preflight_warnings,
-                )
+            was_attempted = True
+            tmdb_facts = _attempted_run_info_tmdb_prefetch_facts(metadata)
+        except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
+            tmdb_facts = RunInfoTmdbPrefetchFacts(
+                enabled=config.tmdb.enabled,
+                attempted=True,
+                resolved=False,
+                failed=True,
+                error_type=type(exc).__name__,
             )
-        return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
-    return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
+            log.warning(
+                "metadata_prefetch_degraded",
+                filenames=[input_videos[0].name],
+                error_type=type(exc).__name__,
+                error=str(exc),
+                exc_info=exc,
+            )
+
+    filenames = [video.name for video in input_videos]
+    run_dir = reserve_run_folder(
+        generated_root=workspace.generated_root,
+        filenames=filenames,
+        tmdb_metadata=metadata,
+    )
+    try:
+        resolved_run_dir = require_managed_immediate_child(
+            workspace.generated_root,
+            run_dir.path,
+        )
+        run_info_path = require_managed_descendant(
+            resolved_run_dir,
+            resolved_run_dir / "run_info.toml",
+        )
+        new_workspace = workspace.with_run_dir(resolved_run_dir)
+    except PathEscapesRootError as exc:
+        _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
+        raise
+    except (OSError, RuntimeError) as exc:
+        _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
+        raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
+    try:
+        write_run_info(
+            run_info_path,
+            RunInfo(
+                created_at=deps.clock(),
+                folder_name=run_dir.folder_name,
+                naming_source=run_dir.naming_source,
+                source_filenames=filenames,
+                tmdb=tmdb_facts,
+            ),
+        )
+    except OSError as exc:
+        _cleanup_empty_reserved_run_dir(resolved_run_dir, original_error=exc)
+        raise
+    if deps.capture_reserved_run is not None:
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=new_workspace,
+                clip_count=len(input_videos),
+                preflight_duration=preflight_duration,
+                preflight_warnings=preflight_warnings,
+                run_warnings=run_warnings,
+            )
+        )
+    return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
 
 
 def _skipped_run_info_tmdb_prefetch_facts(
@@ -227,12 +252,12 @@ def _attempted_run_info_tmdb_prefetch_facts(
     )
 
 
-def _cleanup_empty_reserved_run_dir(run_dir: Path, *, original_error: OSError) -> None:
+def _cleanup_empty_reserved_run_dir(run_dir: Path, *, original_error: Exception) -> None:
     try:
         run_dir.rmdir()
     except OSError as cleanup_error:
         log.warning(
-            "run_info_write_cleanup_degraded",
+            "reserved_run_cleanup_degraded",
             run_dir=str(run_dir),
             error_type=type(cleanup_error).__name__,
             error=str(cleanup_error),
@@ -319,7 +344,7 @@ def _cached_probe_snapshots_for_cache_only(
 
 
 def _shared_probe_cache_path(workspace: WorkspacePaths) -> Path:
-    return workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
+    return workspace.generated_root / "clip_probe.toml"
 
 
 def _probe_cache_paths_for_run(workspace: WorkspacePaths) -> list[Path]:
@@ -350,14 +375,7 @@ def _persist_probe_snapshots_for_run(
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
 
-    if shared_cache_path == run_cache_path:
-        # Non-run-folder / legacy layout: single file is both run-local and
-        # shared.  Merge current entries on top of existing shared entries so
-        # probes from earlier runs are preserved.
-        merge_shared_clip_probe_cache(shared_cache_path, current_entries)
-        return
-
-    # Run-folder layout: run-local cache gets only this run's entries.
+    # Run-local cache gets only this run's entries.
     save_clip_probe_cache(run_cache_path, current_entries)
 
     # Shared cache merges current entries on top of any existing entries.
@@ -372,6 +390,8 @@ def _probe_input_videos(
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
     labels_by_path: dict[Path, str],
+    release_identities_by_path: dict[Path, ReleaseIdentity],
+    explicit_labels_by_path: dict[Path, bool],
 ) -> tuple[list[ClipState], list[str], list[str]]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
@@ -417,6 +437,8 @@ def _probe_input_videos(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         labels_by_path=labels_by_path,
+        release_identities_by_path=release_identities_by_path,
+        explicit_labels_by_path=explicit_labels_by_path,
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
@@ -481,6 +503,8 @@ def _probe_input_videos_from_snapshots(
     config: ConfigSchema,
     overrides_by_path: dict[Path, SourceOverrideConfig],
     labels_by_path: dict[Path, str],
+    release_identities_by_path: dict[Path, ReleaseIdentity],
+    explicit_labels_by_path: dict[Path, bool],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
 ) -> tuple[list[ClipState], list[str], list[str]]:
     result = build_selection_domain_clips_with_diagnostics(
@@ -488,6 +512,8 @@ def _probe_input_videos_from_snapshots(
         snapshots_by_path=snapshots_by_path,
         overrides_by_path=overrides_by_path,
         labels_by_path=labels_by_path,
+        release_identities_by_path=release_identities_by_path,
+        explicit_labels_by_path=explicit_labels_by_path,
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
@@ -526,12 +552,26 @@ async def execute_prep(
     )
     input_videos = source_selection.ordered_paths
     overrides_by_path = dict(source_selection.overrides_by_path)
-    labels_by_path = resolve_source_labels(
+    parsed_metadata_by_path: dict[Path, ParsedMetadata] = {}
+    release_identities_by_path: dict[Path, ReleaseIdentity] = {}
+    for path in input_videos:
+        parsed_metadata, release_identity = parse_filename_with_release_identity(
+            path.name,
+            parser_priority=config.sources.label_parser,
+        )
+        parsed_metadata_by_path[path] = parsed_metadata
+        release_identities_by_path[path] = release_identity
+    label_details_by_path = resolve_source_label_details(
         ordered_paths=input_videos,
         overrides_by_path=overrides_by_path,
         label_mode=config.sources.label_mode,
         label_parser=config.sources.label_parser,
+        parsed_metadata_by_path=parsed_metadata_by_path,
     )
+    labels_by_path = {path: detail.value for path, detail in label_details_by_path.items()}
+    explicit_labels_by_path = {
+        path: detail.explicit for path, detail in label_details_by_path.items()
+    }
     analysis_required = not request.skip_analysis and needs_analysis(config.analysis)
     if (
         request.from_cache_only
@@ -546,6 +586,7 @@ async def execute_prep(
     prevalidated_selection_window: SelectionWindow | None = None
     prevalidated_selection_domain: str | None = None
     prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
+    full_window_retry_override = None
     load_source_diagnostics: list[str] = []
     source_warnings: list[str] = []
 
@@ -563,13 +604,20 @@ async def execute_prep(
             config=config,
             overrides_by_path=overrides_by_path,
             labels_by_path=labels_by_path,
+            release_identities_by_path=release_identities_by_path,
+            explicit_labels_by_path=explicit_labels_by_path,
             snapshots_by_path=prevalidated_snapshots_by_path,
         )
         _validate_source_fps_compatibility(prevalidated_clips)
-        prevalidated_selection_window = compute_selection_window_for_clips(
+        prevalidated_window_state = compute_selection_window_with_recovery(
             clips=prevalidated_clips,
             config=config,
+            confirm=None,
         )
+        config = prevalidated_window_state.config
+        prevalidated_selection_window = prevalidated_window_state.selection_window
+        full_window_retry_override = prevalidated_window_state.override
+        artifacts.warnings.extend(prevalidated_window_state.warnings)
         prevalidated_clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
             clips=prevalidated_clips,
             selection_window=prevalidated_selection_window,
@@ -614,6 +662,7 @@ async def execute_prep(
         deps=deps,
         preflight_duration=preflight_duration,
         preflight_warnings=tuple(preflight.warnings),
+        run_warnings=artifacts.warnings,
     )
 
     if prevalidated_clips is not None:
@@ -639,9 +688,20 @@ async def execute_prep(
             config=config,
             overrides_by_path=overrides_by_path,
             labels_by_path=labels_by_path,
+            release_identities_by_path=release_identities_by_path,
+            explicit_labels_by_path=explicit_labels_by_path,
         )
         _validate_source_fps_compatibility(clips)
-        selection_window = compute_selection_window_for_clips(clips=clips, config=config)
+        window_state = compute_selection_window_with_recovery(
+            clips=clips,
+            config=config,
+            confirm=deps.confirm_full_window_retry,
+            warning_sink=artifacts.warnings,
+        )
+        config = window_state.config
+        selection_window = window_state.selection_window
+        full_window_retry_override = window_state.override
+        artifacts.warnings.extend(window_state.warnings)
         clips, auto_warnings = _refine_auto_active_rects_after_selection_window(
             clips=clips,
             selection_window=selection_window,
@@ -689,6 +749,7 @@ async def execute_prep(
         input_videos=input_videos,
         analysis_selection_domain=selection_domain,
         analysis_clip=analysis_clip,
+        full_window_retry_override=full_window_retry_override,
         selection_window=selection_window,
         clips=clips,
         artifacts=artifacts,

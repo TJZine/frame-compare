@@ -20,7 +20,13 @@ jobs:
     outputs:
       enabled: ${{ steps.guard.outputs.enabled }}
     steps:
-      - name: Require published stable v0.1.0
+      - name: Checkout manifest state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require published stable manifest version
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -28,20 +34,38 @@ jobs:
         run: |
           set -euo pipefail
           printf 'enabled=false\n' >> "$GITHUB_OUTPUT"
-          if ! release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v0.1.0" 2>/dev/null)"; then
-            echo "Release Please remains dormant until stable v0.1.0 is published."
+          manifest_version="$(
+            jq -er '.["."] | select(type == "string" and length > 0)' \
+              .release-please-manifest.json
+          )"
+          if [[ ! "$manifest_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release Please manifest contains an invalid stable version: $manifest_version" >&2
+            exit 1
+          fi
+          release_tag="v${manifest_version}"
+          if ! release_json="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" 2>/dev/null
+          )"; then
+            echo "Release Please remains dormant until stable ${release_tag} is published."
             exit 0
           fi
           draft="$(jq -r '.draft' <<<"$release_json")"
           prerelease="$(jq -r '.prerelease' <<<"$release_json")"
           tag_name="$(jq -r '.tag_name' <<<"$release_json")"
-          if [[ "$draft" != "false" || "$prerelease" != "false" || "$tag_name" != "v0.1.0" ]]; then
-            echo "Release Please remains dormant until v0.1.0 is a published stable release."
+          if [[
+            "$draft" != "false" ||
+            "$prerelease" != "false" ||
+            "$tag_name" != "$release_tag"
+          ]]; then
+            echo "Release Please remains dormant until ${release_tag} is a published stable release."
             exit 0
           fi
-          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v0.1.0" --jq '.object.sha')"
+          tag_sha="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" \
+              --jq '.object.sha'
+          )"
           if [[ ! "$tag_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Published v0.1.0 does not resolve to a direct commit tag." >&2
+            echo "Published ${release_tag} does not resolve to a direct commit tag." >&2
             exit 1
           fi
           printf 'enabled=true\n' >> "$GITHUB_OUTPUT"

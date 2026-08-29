@@ -36,6 +36,7 @@ from frame_compare.orchestration.source_selection import (
 from .cli_helpers import HandleErrorFn, TextWriter
 from .wizard_policy import (
     GOAL_MENU_LINES,
+    VISUAL_COVERAGE_SCAN_NOTE,
     GoalChoice,
     WizardGoal,
     copy_payload,
@@ -50,6 +51,7 @@ from .wizard_policy import (
 )
 
 _CANCELED = "Canceled; configuration unchanged."
+_DISCOVERY_PREVIEW_LIMIT = 8
 _STALE_REFERENCE_WARNING = (
     "Current reference does not match the discovered files; a run may fail until the files "
     "or selector change."
@@ -66,6 +68,10 @@ class PromptFn(Protocol):
 
 class PromptInputDirFn(Protocol):
     def __call__(self, default: str, *, base_dir: Path) -> str: ...
+
+
+class PromptGeneratedDirFn(Protocol):
+    def __call__(self, default: str) -> str: ...
 
 
 class WriteWizardPayloadFn(Protocol):
@@ -94,6 +100,7 @@ def handle_wizard(
     config_path: Path,
     *,
     prompt_input_dir: PromptInputDirFn,
+    prompt_generated_dir: PromptGeneratedDirFn,
     prompt: PromptFn,
     confirm: ConfirmFn,
     write_payload: WriteWizardPayloadFn,
@@ -123,6 +130,11 @@ def handle_wizard(
         input_changed = not existing or input_value != current_config.paths.input_dir
         if input_changed:
             set_table_values(candidate, "paths", {"input_dir": input_value})
+
+        generated_value = prompt_generated_dir(current_config.paths.generated_dir)
+        generated_changed = not existing or generated_value != current_config.paths.generated_dir
+        if generated_changed:
+            set_table_values(candidate, "paths", {"generated_dir": generated_value})
 
         input_dir = _resolve_input_dir(input_value, root)
         discovered = _discover_for_wizard(input_dir)
@@ -161,6 +173,7 @@ def handle_wizard(
             old_config=current_config,
             new_config=validated_candidate,
             input_changed=input_changed,
+            generated_changed=generated_changed,
             reference_change=reference_change,
             frame_changed=frame_changed,
             goal=goal,
@@ -196,6 +209,12 @@ def prompt_input_dir(default: str, *, base_dir: Path) -> str:
         typer.echo("Input directory does not exist or is not a directory.")
 
 
+def prompt_generated_dir(default: str) -> str:
+    """Prompt for the authored generated-data location without checking availability."""
+    typer.echo("Generated data location contains durable comparison folders and reusable caches.")
+    return str(typer.prompt("Generated data location", default=default))
+
+
 def _resolve_input_dir(value: str, root: Path) -> Path:
     path = Path(os.path.expandvars(value))
     return path.resolve() if path.is_absolute() else (root / path).resolve()
@@ -209,7 +228,10 @@ def _discover_for_wizard(input_dir: Path) -> list[Path]:
         return []
     relative_names = [_relative_name(path, input_dir) for path in discovered]
     noun = "file" if len(relative_names) == 1 else "files"
-    typer.echo(f"Found {len(relative_names)} video {noun}: {', '.join(relative_names)}")
+    if len(relative_names) <= _DISCOVERY_PREVIEW_LIMIT:
+        typer.echo(f"Found {len(relative_names)} video {noun}: {', '.join(relative_names)}")
+    else:
+        typer.echo(f"Found {len(relative_names)} video {noun}; reference choices are listed below.")
     return discovered
 
 
@@ -308,7 +330,7 @@ def _prompt_goal(
     current_config: ConfigSchema,
     existing: bool,
 ) -> GoalChoice:
-    typer.echo("What do you want to compare?")
+    typer.echo("How should frames be selected?")
     if existing:
         typer.echo("  0. Keep current frame selection")
     for line in GOAL_MENU_LINES:
@@ -364,23 +386,46 @@ def _print_review(
     old_config: ConfigSchema,
     new_config: ConfigSchema,
     input_changed: bool,
+    generated_changed: bool,
     reference_change: tuple[str, str] | None,
     frame_changed: bool,
     goal: GoalChoice,
     stale_reference: bool,
 ) -> None:
     typer.echo("Review configuration changes")
+    typer.echo("Changes")
     typer.echo(f"  Config: {config_path}")
     if input_changed:
         old_input = old_config.paths.input_dir if existing else "<not configured>"
         typer.echo(f"  Input directory: {old_input} -> {new_config.paths.input_dir}")
+    if generated_changed:
+        old_generated = old_config.paths.generated_dir if existing else "<not configured>"
+        typer.echo(
+            f"  Generated data location: {old_generated} -> {new_config.paths.generated_dir}"
+        )
+        typer.echo("  Stores durable comparison folders and reusable caches")
     if reference_change is not None:
         typer.echo(f"  Reference: {reference_change[0]} -> {reference_change[1]}")
     if frame_changed:
         old_summary = keep_goal(old_config).summary if existing else "<default>"
         typer.echo(f"  Frame selection: {old_summary} -> {goal.summary}")
+
+    typer.echo("Runtime impact")
     typer.echo(f"  Metric scan: {goal.metric_scan}")
+    if goal.metric_scan == "quality":
+        typer.echo(f"  {VISUAL_COVERAGE_SCAN_NOTE}")
+    if stale_reference:
+        typer.echo(f"  {_STALE_REFERENCE_WARNING}")
+
+    typer.echo("Privacy")
+    typer.echo("  Secret values are never displayed.")
     webhook_removed = existing and table_key(original, "slowpics", "webhook_url") is not None
+    if webhook_removed:
+        typer.echo("  Webhook URL: removed from generated configuration")
+    if existing and table_key(original, "tmdb", "api_key") is not None:
+        typer.echo("  TMDB API key: removed from generated configuration")
+
+    typer.echo("Preserved settings")
     publishing = (
         "preserved except webhook URL"
         if webhook_removed
@@ -388,12 +433,6 @@ def _print_review(
     )
     typer.echo(f"  Publishing settings: {publishing}; environment may override at run time")
     typer.echo("  Other settings: preserved")
-    if webhook_removed:
-        typer.echo("  Webhook URL: removed from generated configuration")
-    if existing and table_key(original, "tmdb", "api_key") is not None:
-        typer.echo("  TMDB API key: removed from generated configuration")
-    if stale_reference:
-        typer.echo(f"  {_STALE_REFERENCE_WARNING}")
 
 
 def _relative_name(path: Path, input_dir: Path) -> str:

@@ -7,13 +7,14 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
+from frame_compare.utils.paths import (
+    require_managed_descendant,
+    require_managed_immediate_child,
+)
+
 type AlignmentPreviousOffsetsPolicy = Literal["disabled", "prompt", "always"]
 type AlignmentSelectedReferenceRelationship = Literal["auto", "configured"]
 type PreservedFrameProps = dict[str, str | int | float]
-
-
-def _empty_preserved_frame_props() -> PreservedFrameProps:
-    return {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,20 +25,26 @@ class WorkspacePaths:
     the execution context. All paths are guaranteed to be absolute
     and (for output paths) writable.
 
-    Run folder mode (when run_dir is set):
+    ``generated_root`` is the resolved, stable generated-data root. It remains
+    unchanged when ``with_run_dir`` switches the current run's generated state
+    into a child folder.
+
+    Reserved run layout (when run_dir is set):
     - screenshots_dir and generated_dir are resolved relative to run_dir
     - analysis_cache_dir remains at the workspace-level generated cache path
     - This enables fresh per-comparison outputs beneath the contained workspace
       generated base without writing into input_dir, while preserving reusable
       analysis results across runs
 
-    Legacy mode (when run_dir is None):
-    - screenshots_dir and generated_dir are resolved at workspace root level
+    Before reservation (when run_dir is None):
+    - generated_dir points at the stable generated-data root so cache-only
+      prevalidation can inspect shared state without creating output
 
     Attributes:
         root: Workspace root directory (contains sentinel like .frame-compare)
         input_dir: Video input directory (may be same as root or subdir)
-        run_dir: Run folder for centralized outputs (None = legacy mode)
+        generated_root: Resolved persistent generated-data root
+        run_dir: Current run folder (None only before reservation)
         screenshots_dir: Screenshot output directory
         generated_dir: Generated files directory for the current run
         analysis_cache_dir: Workspace-level shared analysis cache directory
@@ -48,6 +55,7 @@ class WorkspacePaths:
 
     root: Path
     input_dir: Path
+    generated_root: Path
     run_dir: Path | None
     screenshots_dir: Path
     generated_dir: Path
@@ -61,14 +69,19 @@ class WorkspacePaths:
         """Workspace-level shared analysis cache directory."""
         if self.analysis_cache_dir is not None:
             return self.analysis_cache_dir
-        return self.generated_dir / "cache" / "analysis"
+        return self.generated_root / "cache" / "analysis"
 
     @property
     def shared_alignment_cache_dir(self) -> Path:
         """Workspace-level shared alignment reuse cache directory."""
         if self.alignment_cache_dir is not None:
             return self.alignment_cache_dir
-        return self.generated_dir / "cache" / "alignment"
+        return self.generated_root / "cache" / "alignment"
+
+    @property
+    def shared_tmdb_cache_path(self) -> Path:
+        """Workspace-level shared TMDB response cache file."""
+        return self.generated_root / "cache" / "tmdb.toml"
 
     @property
     def cache_dir(self) -> Path:
@@ -87,16 +100,30 @@ class WorkspacePaths:
         preserving the workspace-level shared analysis cache path.
 
         Args:
-            run_dir: The run folder path (e.g., workspace_generated_dir / "Movie (2024)")
+            run_dir: The reserved immediate-child run folder beneath generated_root.
 
         Returns:
             New WorkspacePaths instance with run folder mode enabled
         """
+        resolved_run_dir = require_managed_immediate_child(self.generated_root, run_dir)
+        resolved_root = self.generated_root.resolve()
+        for managed_path in (
+            resolved_run_dir / "screenshots",
+            resolved_run_dir / "generated",
+            self.shared_analysis_cache_dir,
+            self.shared_alignment_cache_dir,
+            self.shared_tmdb_cache_path,
+            self.generated_root / "clip_probe.toml",
+        ):
+            require_managed_descendant(
+                resolved_run_dir if managed_path.parent == resolved_run_dir else resolved_root,
+                managed_path,
+            )
         return replace(
             self,
-            run_dir=run_dir,
-            screenshots_dir=run_dir / "screenshots",
-            generated_dir=run_dir / "generated",
+            run_dir=resolved_run_dir,
+            screenshots_dir=resolved_run_dir / "screenshots",
+            generated_dir=resolved_run_dir / "generated",
             analysis_cache_dir=self.shared_analysis_cache_dir,
             alignment_cache_dir=self.shared_alignment_cache_dir,
         )
@@ -104,7 +131,11 @@ class WorkspacePaths:
 
 @dataclass(frozen=True, slots=True)
 class AlignmentClipIdentity:
-    """Layer-neutral source identity facts for alignment cache validation."""
+    """Layer-neutral stat identity for performance-first cache validation.
+
+    Media contents are intentionally not hashed, so a same-path, same-size,
+    same-mtime replacement retains identity.
+    """
 
     path: Path
     size_bytes: int
@@ -123,7 +154,8 @@ class AlignmentClipRequest:
     effective_fps_num: int
     effective_fps_den: int
     selected_audio_stream: int | None = None
-    preserved_frame_props: PreservedFrameProps = field(default_factory=_empty_preserved_frame_props)
+    preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
+    presentation_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,3 +193,4 @@ class AlignmentRequest:
     generated_dir: Path
     shared_alignment_cache_dir: Path
     settings: AlignmentCacheSettings
+    presentation_content: str | None = None

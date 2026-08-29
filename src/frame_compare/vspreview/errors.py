@@ -20,7 +20,20 @@ class VSPreviewNotFoundError(DependencyError):
 class VSPreviewError(ProcessingError):
     """VSPreview failed to launch or run (FC-4019)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        missing_module: str | None = None,
+        command: tuple[str, ...] = (),
+        returncode: int | None = None,
+        startup_stderr: str | None = None,
+    ) -> None:
+        self.public_reason = reason
+        self.missing_module = missing_module
+        self.command = command
+        self.returncode = returncode
+        self.startup_stderr = startup_stderr
         super().__init__(
             ErrorContext(
                 code="FC-4019",

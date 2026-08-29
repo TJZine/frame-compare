@@ -5,15 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict
+from typing import Final, Literal, NotRequired, TypedDict
 
 import tomli_w
 
 from frame_compare import __version__
 from frame_compare.services.run_folder import RunFolderNamingSource
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.vs.runtime_contract import MediaRuntimeReport, supported_media_runtime_report
 
 type RunInfoTmdbSkipReason = Literal["disabled", "skip_metadata", "no_http_client"]
+
+# run_info.toml is a write-only provenance artifact. Version 1 predates the
+# coordinated media-runtime identity and is intentionally unsupported rather
+# than migrated or interpreted as current evidence.
+RUN_INFO_SCHEMA_VERSION: Final = 2
 
 
 class RunInfoTmdbPayload(TypedDict):
@@ -36,6 +42,7 @@ class RunInfoPayload(TypedDict):
     naming_source: RunFolderNamingSource
     source_filenames: list[str]
     frame_compare_version: str
+    media_runtime: MediaRuntimeReport
     tmdb: NotRequired[RunInfoTmdbPayload]
 
 
@@ -61,7 +68,6 @@ class RunInfo:
     source_filenames: list[str]
     tmdb: RunInfoTmdbPrefetchFacts | None = None
     frame_compare_version: str = __version__
-    version: int = 1
 
 
 def _format_created_at(created_at: datetime) -> str:
@@ -98,12 +104,13 @@ def _tmdb_table(facts: RunInfoTmdbPrefetchFacts) -> RunInfoTmdbPayload:
 def serialize_run_info(info: RunInfo) -> str:
     """Serialize run identity as deterministic TOML without null placeholders."""
     payload: RunInfoPayload = {
-        "version": info.version,
+        "version": RUN_INFO_SCHEMA_VERSION,
         "created_at": _format_created_at(info.created_at),
         "folder_name": info.folder_name,
         "naming_source": info.naming_source,
         "source_filenames": info.source_filenames,
         "frame_compare_version": info.frame_compare_version,
+        "media_runtime": supported_media_runtime_report(),
     }
     if info.tmdb is not None:
         payload["tmdb"] = _tmdb_table(info.tmdb)

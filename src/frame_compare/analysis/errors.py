@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from frame_compare.errors import ErrorContext, InputError, ProcessingError
+from frame_compare.errors import ErrorContext, InputError, JSONValue, ProcessingError
 
 
 class InsufficientFramesError(InputError):
@@ -28,16 +28,38 @@ class InsufficientFramesError(InputError):
 class SelectionError(ProcessingError):
     """Frame selection algorithm failure (FC-4012)."""
 
-    def __init__(self, reason: str, requested: int, found: int) -> None:
+    def __init__(
+        self,
+        reason: str,
+        requested: int,
+        found: int,
+        *,
+        hint: str = "Adjust selection criteria",
+        details: dict[str, JSONValue] | None = None,
+    ) -> None:
+        error_details: dict[str, JSONValue] = {
+            "reason": reason,
+            "requested": requested,
+            "found": found,
+        }
+        if details is not None:
+            error_details.update(details)
         super().__init__(
             ErrorContext(
                 code="FC-4012",
                 name="SELECTION_ERROR",
                 message=f"Frame selection failed: {reason}",
-                hint="Adjust selection criteria",
-                details={"reason": reason, "requested": requested, "found": found},
+                hint=hint,
+                details=error_details,
             )
         )
+        self.reason = reason
+        self.requested = requested
+        self.found = found
+
+
+class ExclusionRecoverySelectionError(SelectionError):
+    """Selection failure that must not enter the unrelated uniform fallback."""
 
 
 class AnalysisError(ProcessingError):

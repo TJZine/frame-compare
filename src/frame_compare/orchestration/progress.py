@@ -7,9 +7,13 @@ progress reporter selection.
 
 import sys
 
+from rich.console import Console
+from rich.rule import Rule
+
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
+    PlainProgressReporter,
     RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -33,6 +37,35 @@ def phase_display_label(name: str) -> str:
     return _PHASE_DISPLAY_LABELS.get(name, name.replace("_", " ").upper())
 
 
+def uses_rich_progress(reporter: ProgressReporter) -> bool:
+    """Return whether runtime presentation uses the interactive Rich owner."""
+    return isinstance(reporter, RichProgressReporter)
+
+
+def emit_execution_section_start(
+    reporter: ProgressReporter,
+    *,
+    no_color: bool,
+) -> None:
+    """Open the interactive runtime section."""
+    if not uses_rich_progress(reporter):
+        return
+    console = Console(stderr=True, no_color=no_color)
+    console.print(Rule("[bold bright_cyan]Execution[/]", style="dim cyan"))
+    console.print()
+
+
+def emit_execution_section_end(
+    reporter: ProgressReporter,
+    *,
+    no_color: bool,
+) -> None:
+    """Close the interactive runtime section."""
+    if not uses_rich_progress(reporter):
+        return
+    Console(stderr=True, no_color=no_color).print(Rule(style="dim cyan"))
+
+
 def start_phase_progress(
     reporter: ProgressReporter,
     *,
@@ -40,7 +73,7 @@ def start_phase_progress(
     display_label: str,
     total: int,
 ) -> None:
-    """Start progress with human labels for Rich and internal names for log output."""
+    """Start progress with human labels except for structured log output."""
     if isinstance(reporter, LogProgressReporter):
         reporter.start_phase(name, total=total)
         return
@@ -60,10 +93,10 @@ def select_reporter(
     2. json_output=True -> LogProgressReporter
     3. force_tty is not None:
        - True -> RichProgressReporter(no_color=no_color)
-       - False -> LogProgressReporter
+       - False -> PlainProgressReporter
     4. TTY detection (sys.stdout/sys.stderr isatty):
        - Interactive -> RichProgressReporter(no_color=no_color)
-       - Non-interactive -> LogProgressReporter
+       - Non-interactive -> PlainProgressReporter
 
     Args:
         quiet: If True, suppress all progress output.
@@ -83,9 +116,9 @@ def select_reporter(
     if force_tty is not None:
         if force_tty:
             return RichProgressReporter(no_color=no_color)
-        return LogProgressReporter()
+        return PlainProgressReporter()
 
     if stream_is_tty(sys.stdout) or stream_is_tty(sys.stderr):
         return RichProgressReporter(no_color=no_color)
 
-    return LogProgressReporter()
+    return PlainProgressReporter()

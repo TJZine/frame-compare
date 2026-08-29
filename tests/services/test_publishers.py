@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from frame_compare.config.schema import SlowpicsConfig, Visibility
+from frame_compare.services import publishers
 from frame_compare.services.errors import (
     SlowpicsError,
     SlowpicsUnavailableError,
@@ -202,9 +203,12 @@ async def test_publish_to_slowpics_success_returns_url(
     tmp_path: Path,
     async_client: httpx.AsyncClient,
     respx_mock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     upload_plan = _plan(tmp_path)
     _mock_successful_browser_flow(respx_mock)
+    logger = Mock()
+    monkeypatch.setattr(publishers, "log", logger)
 
     result = await publish_to_slowpics(
         _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
@@ -213,6 +217,20 @@ async def test_publish_to_slowpics_success_returns_url(
     assert result.url == "https://slow.pics/c/first-key"
     assert result.screenshot_count == 4
     assert result.upload_duration_seconds >= 0.0
+    lifecycle_event_names = {
+        "slowpics_upload_start",
+        "slowpics_upload_complete",
+    }
+    lifecycle_events = [
+        call.args[0]
+        for call in logger.debug.call_args_list
+        if call.args and call.args[0] in lifecycle_event_names
+    ]
+    assert lifecycle_events == [
+        "slowpics_upload_start",
+        "slowpics_upload_complete",
+    ]
+    logger.info.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -238,7 +256,10 @@ async def test_publish_to_slowpics_reports_progress_for_each_completed_image(
         total=4,
     )
     assert progress.advance.call_count == 4
-    progress.complete_phase.assert_called_once_with(ProgressPhaseStatus.COMPLETED)
+    progress.complete_phase.assert_called_once_with(
+        ProgressPhaseStatus.COMPLETED,
+        retain=False,
+    )
 
 
 @pytest.mark.anyio
@@ -944,7 +965,10 @@ async def test_publish_to_slowpics_partial_image_failure_does_not_delete_files(
 
     assert all(path.exists() for path in files)
     assert mock_sleep.await_count == 1
-    progress.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
+    progress.complete_phase.assert_called_once_with(
+        ProgressPhaseStatus.FAILED,
+        retain=False,
+    )
 
 
 @pytest.mark.anyio

@@ -40,13 +40,12 @@ def test_infer_color_props_hd_defaults_to_bt709():
 
 
 def test_infer_color_props_hdr_matrix_prefers_ncl():
-    """Verify matrix backfill prefers MATRIX_BT2020_NCL (value 9) if present."""
+    """Verify matrix backfill uses the R79 MATRIX_BT2020_NCL constant."""
     clip = MagicMock()
     clip.height = 2160
     props = ColorProps(primaries=2, transfer=16, matrix=2, color_range=1)
 
     mock_vs = MagicMock()
-    mock_vs.MATRIX_BT2020_CL = 10
     mock_vs.MATRIX_BT2020_NCL = 9
 
     with patch.dict("sys.modules", {"vapoursynth": mock_vs}):
@@ -54,37 +53,6 @@ def test_infer_color_props_hdr_matrix_prefers_ncl():
 
     assert inferred.matrix == 9
     assert inferred.primaries == 9
-
-
-def test_infer_color_props_hdr_matrix_fallbacks_to_cl():
-    """Verify matrix backfill uses MATRIX_BT2020_CL (value 10) if NCL missing."""
-    clip = MagicMock()
-    clip.height = 2160
-    props = ColorProps(primaries=2, transfer=16, matrix=2, color_range=1)
-
-    # Use strict spec to ensure missing attributes raise AttributeError
-    class MockVS:
-        MATRIX_BT2020_CL = 10
-
-    with patch.dict("sys.modules", {"vapoursynth": MockVS}):
-        inferred = infer_color_props(clip, props)
-
-    assert inferred.matrix == 10
-
-
-def test_infer_color_props_hdr_matrix_fallbacks_to_9_if_constants_missing():
-    """Verify matrix backfill uses 9 if both constants missing."""
-    clip = MagicMock()
-    clip.height = 2160
-    props = ColorProps(primaries=2, transfer=16, matrix=2, color_range=1)
-
-    class MockVS:
-        pass
-
-    with patch.dict("sys.modules", {"vapoursynth": MockVS}):
-        inferred = infer_color_props(clip, props)
-
-    assert inferred.matrix == 9
 
 
 def test_infer_color_props_preserves_specified_props():

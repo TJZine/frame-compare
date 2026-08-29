@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER, source_index_path
 
 
 def write_vspreview_session_script(
@@ -22,6 +23,7 @@ def write_vspreview_session_script(
     suggested_offsets_by_key: dict[str, int | None],
     cache_dir: Path,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    presentation_names_by_stem: dict[str, str] | None = None,
 ) -> Path:
     """Generate and write a self-contained VSPreview script.
 
@@ -44,6 +46,7 @@ def write_vspreview_session_script(
         suggested_offsets_by_key=suggested_offsets_by_key,
         bootstrap_paths=bootstrap_paths,
         frame_props_by_stem=frame_props_by_stem,
+        presentation_names_by_stem=presentation_names_by_stem,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -124,6 +127,7 @@ untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -147,7 +151,10 @@ for _raw_path in _BOOTSTRAP_PATHS:
 
 
 def _build_helpers_section() -> str:
-    return '''\
+    marker = json.dumps(INDEX_CONSTRUCTION_FAILURE_MARKER)
+    return (
+        f"INDEX_CONSTRUCTION_FAILURE_MARKER = {marker}\n\n"
+        + '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
 def _reconfigure_text_stream(stream):
     reconfigure = getattr(stream, "reconfigure", None)
@@ -194,12 +201,13 @@ def _hint(text):
     return _style(text, "33")
 
 
-def _warning(text):
-    return _style(text, "33")
+def _status(marker):
+    codes = {"[RUN]": "96", "[OK]": "32", "[WARN]": "33", "[FAIL]": "31"}
+    return _style(marker, codes[marker])
 
 
-def _error(text):
-    return _style(text, "31")
+def _status_line(marker, text):
+    return f"  {_status(marker)} {text}"
 
 
 def safe_print(*args, **kwargs):
@@ -212,13 +220,56 @@ def safe_print(*args, **kwargs):
         print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
 
 
+_EMPTY_FRAME_ASSUMPTION_BODY = (
+    "The following frame properties had to be assumed for previewing: <>\\n"
+    "You may want to set explicit frame properties instead. "
+    "See https://www.vapoursynth.com/doc/apireference.html#reserved-frame-properties "
+    "for more information."
+)
+
+
+class _VSPreviewWarningFilter(logging.Filter):
+    def filter(self, record):
+        node_label, separator, body = record.getMessage().partition(": ")
+        is_exact_empty_warning = (
+            record.name == "root"
+            and record.levelno == logging.WARNING
+            and bool(separator)
+            and node_label.startswith("Video Node ")
+            and node_label.removeprefix("Video Node ").isdecimal()
+            and body == _EMPTY_FRAME_ASSUMPTION_BODY
+        )
+        return not is_exact_empty_warning
+
+
+def install_vspreview_warning_filter():
+    logging.getLogger().addFilter(_VSPreviewWarningFilter())
+
+
 def resolve_lwlibavsource(core):
-    """Resolve LWLibavSource using Frame Compare's lsmas-then-lw contract."""
+    """Resolve LWLibavSource from the VapourSynth R79 core.lsmas namespace."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
-        return core.lsmas.LWLibavSource
-    if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
-        return core.lw.LWLibavSource
-    raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+        return core.lsmas
+    raise RuntimeError("LWLibavSource not found on core.lsmas")
+
+
+def load_preview_source(loader, path, index_path, display_name):
+    try:
+        return loader.LWLibavSource(str(path), cachefile=str(index_path))
+    except Exception as original_error:
+        if INDEX_CONSTRUCTION_FAILURE_MARKER not in str(original_error).casefold():
+            raise
+
+        safe_print(
+            _status_line(
+                "[WARN]",
+                f"Retrying {display_name} without an L-SMASH index cache after index construction failed",
+            )
+        )
+        try:
+            return loader.LWLibavSource(str(path), cache=0)
+        except Exception as fallback_error:
+            raise original_error from fallback_error
 
 
 FRAME_PROP_ALIASES = {
@@ -246,10 +297,6 @@ def _parse_frame_prop_int(value):
     return None
 
 
-def _join_prop_names(names):
-    return "/".join(names)
-
-
 def _read_prop(props, canonical_key):
     for key in FRAME_PROP_ALIASES[canonical_key]:
         if key in props:
@@ -257,46 +304,68 @@ def _read_prop(props, canonical_key):
     raise KeyError(canonical_key)
 
 
-def collect_preview_assumption(label):
+def _range_issue(props):
+    if "_Range" not in props:
+        return "missing"
+    parsed_value = _parse_frame_prop_int(props["_Range"])
+    if parsed_value in (0, 1):
+        return None
+    if parsed_value == UNSPECIFIED_FRAME_PROP:
+        return "unspecified"
+    return "invalid"
+
+
+def collect_preview_assumption(label, display_name):
     props = FRAME_PROPS_BY_LABEL.get(label)
     if props is None:
         return None
 
-    missing = []
-    unspecified = []
-    unparseable = []
+    color_metadata_incomplete = False
     for key in FRAME_PROP_ALIASES:
         try:
             raw_value = _read_prop(props, key)
-        except KeyError:
-            missing.append(key)
-            continue
         except Exception:
-            unparseable.append(key)
+            color_metadata_incomplete = True
             continue
 
         parsed_value = _parse_frame_prop_int(raw_value)
-        if parsed_value is None:
-            unparseable.append(key)
-        elif parsed_value == UNSPECIFIED_FRAME_PROP:
-            unspecified.append(key)
+        if parsed_value is None or parsed_value == UNSPECIFIED_FRAME_PROP:
+            color_metadata_incomplete = True
 
-    details = []
-    if missing:
-        details.append(f"missing {_join_prop_names(missing)}")
-    if unspecified:
-        details.append(f"unspecified {_join_prop_names(unspecified)}")
-    if unparseable:
-        details.append(f"unparseable {_join_prop_names(unparseable)}")
-    if not details:
+    range_issue = _range_issue(props)
+    if not color_metadata_incomplete and range_issue is None:
         return None
 
-    return (
-        f"{label} {'; '.join(details)}; "
-        "assuming display-safe defaults for preview only; "
-        "render/report semantics unchanged"
-    )
+    assumption = {"source": display_name}
+    if color_metadata_incomplete:
+        assumption["preview"] = (
+            "Color metadata incomplete; using standard display defaults (BT.709)"
+        )
+    if range_issue is not None:
+        assumption["range"] = (
+            f"Color-range metadata {range_issue}; VSPreview infers preview range"
+        )
+    return assumption
+
+
+def apply_preview_defaults(core, clip, label):
+    props = FRAME_PROPS_BY_LABEL.get(label)
+    if props is None:
+        return clip
+
+    defaults = {}
+    for key in FRAME_PROP_ALIASES:
+        try:
+            parsed_value = _parse_frame_prop_int(_read_prop(props, key))
+        except Exception:
+            parsed_value = None
+        if parsed_value is None or parsed_value == UNSPECIFIED_FRAME_PROP:
+            defaults[key] = 1
+    if not defaults:
+        return clip
+    return core.std.SetFrameProps(clip, **defaults)
 '''
+    )
 
 
 def _build_clip_data_section(
@@ -304,10 +373,18 @@ def _build_clip_data_section(
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int | None],
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None,
+    presentation_names_by_stem: dict[str, str] | None,
 ) -> str:
+    presentation_names = presentation_names_by_stem or {}
     targets_lines: list[str] = []
     for comp in comparisons:
-        targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
+        targets_lines.append(
+            f"    {json.dumps(comp.stem)}: {{"
+            f'"path": {json.dumps(str(comp))}, '
+            f'"index_path": {json.dumps(str(source_index_path(comp)))}, '
+            f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}'
+            "},"
+        )
 
     offset_lines: list[str] = []
     for key in sorted(suggested_offsets_by_key.keys()):
@@ -329,6 +406,8 @@ def _build_clip_data_section(
 REFERENCE = {{
     "label": {json.dumps(reference.stem)},
     "path": {json.dumps(str(reference))},
+    "index_path": {json.dumps(str(source_index_path(reference)))},
+    "display_name": {json.dumps(presentation_names.get(reference.stem, reference.stem))},
 }}
 
 TARGETS = {{
@@ -371,139 +450,152 @@ def main():
     try:
         import vapoursynth as vs
     except ImportError:
-        safe_print(_error("ERROR: VapourSynth not found. Install VapourSynth first."))
+        safe_print(_status_line("[FAIL]", "VapourSynth is unavailable"))
         sys.exit(1)
-
     core = vs.core
+    install_vspreview_warning_filter()
     try:
         load_source = resolve_lwlibavsource(core)
     except RuntimeError as e:
-        safe_print(_error(f"ERROR: Failed to resolve LWLibavSource loader: {e}"))
+        safe_print(_status_line("[FAIL]", f"Failed to resolve LWLibavSource loader: {e}"))
         sys.exit(1)
 
     ref_path = Path(REFERENCE["path"])
     if not ref_path.exists():
-        safe_print(_error(f"ERROR: Reference not found: {ref_path}"))
+        safe_print(_status_line("[FAIL]", f"Reference not found: {ref_path}"))
         sys.exit(1)
 
+    safe_print("")
+    safe_print(_status_line("[RUN]", "VSPreview Bootstrap"))
+    safe_print(f"    {_key('reference')}     {_value(REFERENCE['display_name'])}")
+
     try:
-        ref_clip = load_source(str(ref_path))
+        ref_clip = load_preview_source(
+            load_source,
+            ref_path,
+            Path(REFERENCE["index_path"]),
+            REFERENCE["display_name"],
+        )
     except Exception as e:
-        safe_print(_error(f"ERROR: Failed to load reference: {e}"))
+        safe_print(_status_line("[FAIL]", f"Reference source could not be loaded: {e}"))
         sys.exit(1)
 
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
     preview_assumptions = []
-    ref_assumption = collect_preview_assumption(REFERENCE["label"])
+    ref_assumption = collect_preview_assumption(
+        REFERENCE["label"], REFERENCE["display_name"]
+    )
     if ref_assumption is not None:
         preview_assumptions.append(ref_assumption)
+    ref_clip = apply_preview_defaults(core, ref_clip, REFERENCE["label"])
 
-    safe_print("")
-    safe_print(_header("VSPreview Bootstrap"))
-    reference_fps = f"{ref_fps_num}/{ref_fps_den} fps"
-    safe_print(
-        f"  {_key('reference')}  {_value(REFERENCE['label'])} @ {_hint(reference_fps)}"
-    )
+    safe_print(f"    {_key('fps')}           {_hint(f'{ref_fps_num}/{ref_fps_den}')}")
 
     # Apply overlay to reference (best-effort)
     try:
         ref_clip = core.text.Text(
             ref_clip,
-            f"REF: {REFERENCE['label']}",
+            f"REF: {REFERENCE['display_name']}",
             alignment=7,
         )
     except Exception:
-        safe_print(_warning("Warning: Could not apply reference text overlay (plugin missing?)"))
+        safe_print(_status_line("[WARN]", "Could not apply reference text overlay"))
 
-    loaded_comparisons = []
+    loaded_comparison_count = 0
 
-    for label, path_str in TARGETS.items():
-        comp_path = Path(path_str)
+    for comparison_number, (label, target) in enumerate(TARGETS.items(), start=1):
+        comp_path = Path(target["path"])
+        display_name = target["display_name"]
+        safe_print("")
+        safe_print(f"    {_key(f'comparison {comparison_number}')}  {_value(display_name)}")
         if not comp_path.exists():
-            safe_print(_warning(f"WARNING: Comparison not found: {comp_path}"))
+            safe_print(_status_line("[WARN]", f"Comparison source not found: {comp_path}"))
             continue
 
         try:
-            comp_clip = load_source(str(comp_path))
+            comp_clip = load_preview_source(
+                load_source,
+                comp_path,
+                Path(target["index_path"]),
+                display_name,
+            )
         except Exception as e:
-            safe_print(_warning(f"WARNING: Failed to load {label}: {e}"))
+            safe_print(_status_line("[WARN]", f"Comparison source could not be loaded: {e}"))
             continue
 
-        comp_assumption = collect_preview_assumption(label)
+        comp_assumption = collect_preview_assumption(label, display_name)
         if comp_assumption is not None:
             preview_assumptions.append(comp_assumption)
 
         # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
+        comp_clip = apply_preview_defaults(core, comp_clip, label)
 
         key = f"{REFERENCE['label']}:{label}"
         suggested_offset = suggested_offsets_by_key.get(key)
         if suggested_offset is None:
             audio_hint = "no trusted audio hint"
-            hint_pair = "confirm source frames manually"
-        elif suggested_offset >= 0:
-            audio_hint = f"{suggested_offset} frames"
-            hint_pair = f"hint pair: ref frame {suggested_offset} ~= comparison frame 0"
+            hint_pair = "Suggested match: unavailable"
+            trim_hint = "Find matching source frames manually"
+        elif suggested_offset > 0:
+            audio_hint = f"+{suggested_offset}f"
+            hint_pair = f"Suggested match: REF {suggested_offset} <-> CMP 0"
+            trim_hint = f"If confirmed: trim {suggested_offset}f from reference"
+        elif suggested_offset < 0:
+            audio_hint = f"{suggested_offset}f"
+            comparison_frame = -suggested_offset
+            hint_pair = f"Suggested match: REF 0 <-> CMP {comparison_frame}"
+            trim_hint = f"If confirmed: trim {comparison_frame}f from comparison"
         else:
-            audio_hint = f"{suggested_offset} frames"
-            hint_pair = f"hint pair: ref frame 0 ~= comparison frame {-suggested_offset}"
+            audio_hint = "+0f"
+            hint_pair = "Suggested match: REF 0 <-> CMP 0"
+            trim_hint = "If confirmed: no trim"
 
         # Apply overlay with the audio-derived hint only (best-effort)
         try:
             overlay_text = (
-                f"CMP: {label}\\n"
+                f"CMP: {display_name}\\n"
                 f"Audio hint: {audio_hint}\\n"
-                f"{hint_pair}"
+                f"{hint_pair}\\n"
+                f"{trim_hint}"
             )
-            if suggested_offset is not None and suggested_offset > 0:
-                overlay_text += "\\n(+N would trim reference after confirmation)"
-            elif suggested_offset is not None and suggested_offset < 0:
-                overlay_text += "\\n(-N would trim comparison after confirmation)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
-            safe_print(_warning("Warning: Could not apply comparison text overlay (plugin missing?)"))
+            safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
 
-        loaded_comparisons.append(
-            {
-                "label": label,
-                "clip": comp_clip,
-                "suggested_offset": suggested_offset,
-                "audio_hint": audio_hint,
-            }
-        )
-
+        safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
+        reference_output = loaded_comparison_count * 2
+        comparison_output = reference_output + 1
+        ref_clip.set_output(reference_output)
+        comp_clip.set_output(comparison_output)
         safe_print(
-            f"  {_key('loaded')}     {_value(label)} "
-            f"{_hint(f'(audio hint: {audio_hint})')}"
+            f"    {_key('outputs')}       "
+            f"Reference {reference_output} | Comparison {comparison_number} {comparison_output}"
         )
+        loaded_comparison_count += 1
 
-    if not loaded_comparisons:
-        safe_print(_error("ERROR: No comparison clips loaded successfully."))
+    if loaded_comparison_count == 0:
+        safe_print(_status_line("[FAIL]", "No comparison clips loaded successfully"))
         sys.exit(1)
 
     if preview_assumptions:
-        safe_print("\\n" + _header("VSPreview Assumptions"))
-        for assumption in preview_assumptions:
-            safe_print(f"  {_key('preview')}   {_hint(assumption)}")
+        safe_print("\\n" + _status_line("[WARN]", "VSPreview Display Assumptions"))
+        for assumption_number, assumption in enumerate(preview_assumptions):
+            if assumption_number:
+                safe_print()
+            safe_print(f"    {_key('source')}      {_value(assumption['source'])}")
+            if "preview" in assumption:
+                safe_print(f"    {_key('preview')}     {_hint(assumption['preview'])}")
+            if "range" in assumption:
+                safe_print(f"    {_key('range')}       {_hint(assumption['range'])}")
+            safe_print(
+                f"    {_key('impact')}      "
+                f"{_hint('Preview only; source, render, and report unchanged')}"
+            )
 
-    clips = []
-    labels = []
-    for entry in loaded_comparisons:
-        clips.append(ref_clip)  # Even slot (untrimmed reference)
-        labels.append(f"{REFERENCE['label']} (ref)")
-        clips.append(entry["clip"])  # Odd slot (untrimmed comparison)
-        labels.append(f"{entry['label']} (audio hint: {entry['audio_hint']})")
-
-    for i, (clip, label) in enumerate(zip(clips, labels)):
-        clip.set_output(i)
-        safe_print(f"  {_key(f'output {i:<2}')}  {_value(label)}")
-
-    safe_print("\\n" + _header("VSPreview Ready"))
-    safe_print(
-        f"  {_key('inspect')}   inspect untrimmed source clips, "
-        "then confirm source frames in the terminal"
-    )
+    safe_print("\\n" + _status_line("[OK]", "VSPreview Ready"))
+    safe_print("    Inspect the untrimmed clips in VSPreview, then return here to confirm frames.")
 
 main()
 """
@@ -515,6 +607,7 @@ def _build_script_content(
     suggested_offsets_by_key: dict[str, int | None],
     bootstrap_paths: list[Path],
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    presentation_names_by_stem: dict[str, str] | None = None,
 ) -> str:
     """Build the script content for VSPreview.
 
@@ -528,6 +621,7 @@ def _build_script_content(
         comparisons,
         suggested_offsets_by_key,
         frame_props_by_stem,
+        presentation_names_by_stem,
     )
     main_execution = _build_main_execution_section()
 

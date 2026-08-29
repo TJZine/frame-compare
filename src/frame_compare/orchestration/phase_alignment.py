@@ -1,54 +1,46 @@
-"""Alignment and render phase work plus local frame-normalization helpers."""
+"""Audio-alignment phase execution and aligned-frame normalization."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import structlog
 
 from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.frame_plan import create_frame_plan
 from frame_compare.analysis.metrics import slice_frame_metrics
-from frame_compare.analysis.selection import select_frames
+from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
     FrameMetrics,
     SelectionBreakdown,
     SelectionDetail,
     SelectionDetailsByFrame,
 )
-from frame_compare.config.schema import AnalysisConfig, OverlayMode
-from frame_compare.orchestration.context import (
-    ClipAlignmentState,
-    ClipProbeSnapshot,
-    ClipState,
-    RunContext,
-)
-from frame_compare.orchestration.execution_types import (
-    AlignPhaseOutput,
-    RenderArtifacts,
-    RenderPhaseOutput,
-)
+from frame_compare.config.schema import AnalysisConfig
+from frame_compare.orchestration.context import ClipAlignmentState, ClipState, RunContext
+from frame_compare.orchestration.execution_types import AlignPhaseOutput
+from frame_compare.orchestration.full_window_retry import raise_if_full_window_retry_failed
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
     generated_frame_count,
-    map_aligned_to_source_frame,
     selection_breakdown_with_source_offset,
-    selection_detail_for_frame,
     selection_details_with_source_offset,
-    selection_label_for_frame,
     selection_timecode_for_frame,
     source_frames_for_reference_base_domain,
-    to_overlay_selection_detail,
 )
-from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import (
     align_clips_from_request,
     calculate_alignment_trims,
     format_rejected_alignment_warning,
 )
 from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.release_identity import (
+    common_content_identity,
+    format_compact_identity,
+    format_content_identity,
+    format_release_descriptor,
+)
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
@@ -57,244 +49,13 @@ from frame_compare.utils.types import (
     AlignmentRequest,
     AlignmentSelectedReferenceRelationship,
 )
-from frame_compare.vs.props import range_label_from_props
 
 log = structlog.get_logger()
 
-if TYPE_CHECKING:
-    from frame_compare.render.types import (
-        OverlayDiagnosticMetadata,
-        OverlayDolbyVisionMetadata,
-        OverlayFrameMeasurement,
-        OverlaySelectionDetail,
-    )
 
-
-def _normalize_preserved_prop_key(key: str) -> str:
-    return key.lstrip("_").lower()
-
-
-def _coerce_float(value: str | int | float) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def _coerce_int(value: str | int | float) -> int | None:
-    number = _coerce_float(value)
-    if number is None:
-        return None
-    return int(round(number))
-
-
-def _color_range_from_preserved_props(
-    preserved_props: dict[str, str | int | float],
-) -> str | None:
-    normalized_props: dict[str, int] = {}
-    for key, value in preserved_props.items():
-        normalized = _normalize_preserved_prop_key(key)
-        if normalized not in {"range", "colorrange"}:
-            continue
-        coerced = _coerce_int(value)
-        if coerced is not None:
-            if normalized == "range":
-                normalized_props["_Range"] = coerced
-            else:
-                normalized_props["_ColorRange"] = coerced
-    return range_label_from_props(normalized_props)
-
-
-def _dolby_vision_metadata_from_preserved_props(
-    preserved_props: dict[str, str | int | float],
-) -> OverlayDolbyVisionMetadata | None:
-    from frame_compare.render.types import OverlayDolbyVisionMetadata
-
-    rpu_present = False
-    block_index: int | None = None
-    block_total: int | None = None
-    target_nits: float | None = None
-    l2_target_nits: float | None = None
-    l1_average: float | None = None
-    l1_maximum: float | None = None
-    l5_left: int | None = None
-    l5_right: int | None = None
-    l5_top: int | None = None
-    l5_bottom: int | None = None
-    l6_max_cll: float | None = None
-    l6_max_fall: float | None = None
-
-    for key, value in preserved_props.items():
-        normalized = _normalize_preserved_prop_key(key)
-        if normalized == "dolbyvisionrpu":
-            rpu_present = True
-            continue
-        if not any(
-            token in normalized for token in ("dolby", "dovi", "rpu", "l1", "l2", "l5", "l6")
-        ):
-            continue
-        if "l2" in normalized and "target" in normalized:
-            if l2_target_nits is None:
-                l2_target_nits = _coerce_float(value)
-            continue
-        if "l1" in normalized and any(token in normalized for token in ("avg", "average", "mean")):
-            if l1_average is None:
-                l1_average = _coerce_float(value)
-            continue
-        if "l1" in normalized and "max" in normalized:
-            if l1_maximum is None:
-                l1_maximum = _coerce_float(value)
-            continue
-        if "l5" in normalized:
-            coerced = _coerce_int(value)
-            if coerced is None or coerced < 0:
-                continue
-            if "left" in normalized and l5_left is None:
-                l5_left = coerced
-            elif "right" in normalized and l5_right is None:
-                l5_right = coerced
-            elif "top" in normalized and l5_top is None:
-                l5_top = coerced
-            elif "bottom" in normalized and l5_bottom is None:
-                l5_bottom = coerced
-            continue
-        if "l6" in normalized:
-            if "cll" in normalized and l6_max_cll is None:
-                l6_max_cll = _coerce_float(value)
-            elif "fall" in normalized and l6_max_fall is None:
-                l6_max_fall = _coerce_float(value)
-            continue
-        if "block" in normalized and "index" in normalized and block_index is None:
-            block_index = _coerce_int(value)
-            continue
-        if (
-            "block" in normalized
-            and ("total" in normalized or "count" in normalized)
-            and block_total is None
-        ):
-            block_total = _coerce_int(value)
-            continue
-        if (
-            "target" in normalized
-            and any(token in normalized for token in ("nit", "pq", "brightness"))
-            and target_nits is None
-        ):
-            target_nits = _coerce_float(value)
-
-    has_metadata = rpu_present or any(
-        value is not None
-        for value in (
-            block_index,
-            block_total,
-            target_nits,
-            l2_target_nits,
-            l1_average,
-            l1_maximum,
-            l5_left,
-            l5_right,
-            l5_top,
-            l5_bottom,
-            l6_max_cll,
-            l6_max_fall,
-        )
-    )
-    if not has_metadata:
-        return None
-    return OverlayDolbyVisionMetadata(
-        rpu_present=rpu_present,
-        block_index=block_index,
-        block_total=block_total,
-        target_nits=target_nits,
-        l2_target_nits=l2_target_nits,
-        l1_average=l1_average,
-        l1_maximum=l1_maximum,
-        l5_left=l5_left,
-        l5_right=l5_right,
-        l5_top=l5_top,
-        l5_bottom=l5_bottom,
-        l6_max_cll=l6_max_cll,
-        l6_max_fall=l6_max_fall,
-    )
-
-
-def _score_measurement_for_selection(
-    *,
-    selection_detail: OverlaySelectionDetail | None,
-    overlay_mode: OverlayMode,
-    per_frame_nits_enabled: bool,
-    target_nits: int,
-) -> OverlayFrameMeasurement | None:
-    from frame_compare.render.types import OverlayFrameMeasurement
-
-    if (
-        not per_frame_nits_enabled
-        or overlay_mode != OverlayMode.DIAGNOSTIC
-        or selection_detail is None
-        or selection_detail.score is None
-    ):
-        return None
-    score = float(selection_detail.score)
-    if score != score:
-        return None
-    clamped_score = max(0.0, min(score, 1.0))
-    measurement_nits = clamped_score * float(target_nits)
-    category = selection_detail.label.strip() or None
-    return OverlayFrameMeasurement(
-        avg_nits=measurement_nits,
-        max_nits=measurement_nits,
-        category=category,
-    )
-
-
-def _overlay_diagnostic_metadata_for_frame(
-    *,
-    probe: ClipProbeSnapshot,
-    selection_detail: OverlaySelectionDetail | None,
-    overlay_mode: OverlayMode,
-    per_frame_nits_enabled: bool,
-    target_nits: int,
-) -> OverlayDiagnosticMetadata | None:
-    from frame_compare.render.types import OverlayDiagnosticMetadata
-
-    hdr_metadata = probe.hdr_metadata
-    measurement = _score_measurement_for_selection(
-        selection_detail=selection_detail,
-        overlay_mode=overlay_mode,
-        per_frame_nits_enabled=per_frame_nits_enabled,
-        target_nits=target_nits,
-    )
-    color_range = _color_range_from_preserved_props(probe.preserved_frame_props)
-    dolby_vision = _dolby_vision_metadata_from_preserved_props(probe.preserved_frame_props)
-    mastering_display = hdr_metadata.mastering_display if hdr_metadata is not None else None
-    max_cll = hdr_metadata.max_cll if hdr_metadata is not None else None
-    max_fall = hdr_metadata.max_fall if hdr_metadata is not None else None
-    if (
-        mastering_display is None
-        and max_cll is None
-        and max_fall is None
-        and color_range is None
-        and dolby_vision is None
-        and measurement is None
-    ):
-        return None
-    return OverlayDiagnosticMetadata(
-        mastering_display=mastering_display,
-        max_cll=max_cll,
-        max_fall=max_fall,
-        color_range=color_range,
-        dolby_vision=dolby_vision,
-        measurement=measurement,
-    )
-
-
-def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhaseOutput:
+def run_align_phase(
+    ctx: RunContext, *, selected_frames: list[int], verbose: bool = False
+) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
             reference=ctx.reference,
@@ -341,12 +102,11 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
+        verbose=verbose,
     )
 
     updated_comparisons: list[ClipState] = []
-    warnings = [
-        format_rejected_alignment_warning(result) for result in results if not result.applied
-    ]
+    warnings: list[str] = []
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
         if result.applied:
@@ -358,6 +118,37 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
                 comparison_stem=Path(result.comparison_clip).stem,
                 relative_offset_frames=frame_offset,
                 source=result.source,
+                stability=result.stability,
+            )
+            if result.stability is not None and result.stability.classification in {
+                "possible_drift",
+                "possible_discontinuity",
+                "variable",
+            }:
+                detail = {
+                    "possible_drift": "may drift across the source",
+                    "possible_discontinuity": "varies across the source; possible edit discontinuity",
+                    "variable": "varies across the source",
+                }[result.stability.classification]
+                position = result.stability.change_position_seconds
+                if (
+                    position is not None
+                    and result.stability.classification == "possible_discontinuity"
+                ):
+                    seconds = round(position)
+                    detail += (
+                        f" near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+                    )
+                warnings.append(
+                    f"align: {comparison.label} alignment {detail}. "
+                    "The applied constant offset was retained and should be verified."
+                )
+        else:
+            warnings.append(
+                format_rejected_alignment_warning(
+                    result,
+                    comparison_label=comparison.label,
+                )
             )
         updated_comparisons.append(
             replace(
@@ -383,16 +174,24 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
         reference=ctx.reference,
         selected_frames=selected_frames,
     )
-    normalized_selection = _normalize_selected_frames_for_trimmed_domain(
-        selected_frames=selected_source_frames,
-        user_source_frames=set(ctx.config.analysis.user_frames),
-        reference=reference,
-        comparisons=comparisons,
-        selection_source_window=selection_source_window,
-        generated_requested_count=generated_frame_count(ctx.config.analysis),
-        seed=ctx.config.analysis.random_seed,
-        allow_fallback=generated_frame_count(ctx.config.analysis) > 0,
-    )
+    try:
+        normalized_selection = _normalize_selected_frames_for_trimmed_domain(
+            selected_frames=selected_source_frames,
+            user_source_frames=set(ctx.config.analysis.user_frames),
+            reference=reference,
+            comparisons=comparisons,
+            selection_source_window=selection_source_window,
+            generated_requested_count=generated_frame_count(ctx.config.analysis),
+            seed=ctx.config.analysis.random_seed,
+            allow_fallback=(
+                generated_frame_count(ctx.config.analysis) > 0
+                and ctx.full_window_retry_override is None
+            ),
+            require_full_generated_selection=ctx.full_window_retry_override is not None,
+        )
+    except SelectionError as error:
+        raise_if_full_window_retry_failed(ctx, error)
+        raise
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:
         warnings.append(
@@ -408,16 +207,20 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> AlignPhas
             for frame in normalized_selected_frames
             if frame + reference.trim.trim_start_frames in configured_user_source_frames
         ]
-        trimmed_selection = _reselect_frames_for_trimmed_overlap(
-            metrics=ctx.analysis_metrics,
-            reference=reference,
-            comparisons=comparisons,
-            selection_source_window=selection_source_window,
-            config=ctx.config.analysis,
-            accepted_user_source_frames={
-                frame + reference.trim.trim_start_frames for frame in normalized_user_frames
-            },
-        )
+        try:
+            trimmed_selection = _reselect_frames_for_trimmed_overlap(
+                metrics=ctx.analysis_metrics,
+                reference=reference,
+                comparisons=comparisons,
+                selection_source_window=selection_source_window,
+                config=ctx.config.analysis,
+                accepted_user_source_frames={
+                    frame + reference.trim.trim_start_frames for frame in normalized_user_frames
+                },
+            )
+        except SelectionError as error:
+            raise_if_full_window_retry_failed(ctx, error)
+            raise
         if trimmed_selection is not None:
             normalized_selected_frames = sorted(
                 {*normalized_user_frames, *trimmed_selection.selected_frames}
@@ -489,10 +292,26 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         refinement_mode=ctx.config.audio_alignment.refinement_mode,
         refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
     )
+    clips = [ctx.reference, *ctx.comparisons]
+    identities = [clip.release_identity for clip in clips]
+    common_content = (
+        common_content_identity([identity for identity in identities if identity is not None])
+        if all(identity is not None for identity in identities)
+        else None
+    )
+    presentation_names = [
+        _alignment_presentation_name(clip, common_content is not None) for clip in clips
+    ]
+    counts = {name: presentation_names.count(name) for name in presentation_names}
+    presentation_names = [
+        clip.path.name if not name or counts[name] > 1 else name
+        for clip, name in zip(clips, presentation_names, strict=True)
+    ]
     return AlignmentRequest(
         reference=_alignment_clip_request(
             ctx.reference,
             selected_audio_stream=ctx.config.audio_alignment.reference_stream,
+            presentation_name=presentation_names[0],
         ),
         selected_reference_relationship=_selected_reference_relationship(ctx),
         comparisons=[
@@ -501,14 +320,27 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
                 selected_audio_stream=ctx.config.audio_alignment.comparison_streams.get(
                     comparison.path.stem
                 ),
+                presentation_name=presentation_names[index],
             )
-            for comparison in ctx.comparisons
+            for index, comparison in enumerate(ctx.comparisons, start=1)
         ],
         previous_offsets=ctx.config.audio_alignment.previous_offsets,
         generated_dir=ctx.workspace.generated_dir,
         shared_alignment_cache_dir=ctx.workspace.shared_alignment_cache_dir,
         settings=settings,
+        presentation_content=(
+            None if common_content is None else format_content_identity(common_content)
+        ),
     )
+
+
+def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> str:
+    if clip.label_is_explicit and clip.label.strip():
+        return clip.label.strip()
+    if clip.release_identity is None:
+        return clip.path.name
+    formatter = format_release_descriptor if has_common_content else format_compact_identity
+    return formatter(clip.release_identity) or clip.path.name
 
 
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
@@ -519,7 +351,7 @@ def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedRefere
 
 
 def _alignment_clip_request(
-    clip: ClipState, *, selected_audio_stream: int | None
+    clip: ClipState, *, selected_audio_stream: int | None, presentation_name: str | None = None
 ) -> AlignmentClipRequest:
     fingerprint = clip.probe.fingerprint
     return AlignmentClipRequest(
@@ -536,6 +368,7 @@ def _alignment_clip_request(
         effective_fps_den=clip.effective_fps.denominator,
         selected_audio_stream=selected_audio_stream,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
+        presentation_name=presentation_name,
     )
 
 
@@ -561,116 +394,6 @@ def _compose_alignment_trim(clip: ClipState, alignment_trim: tuple[int, int | No
     return clip.with_trim(
         trim_start_frames=clip.trim.trim_start_frames + alignment_trim[0],
         trim_end_frame_inclusive=min(base_end, alignment_end),
-    )
-
-
-def run_render_phase(
-    ctx: RunContext,
-    *,
-    frames: list[int],
-    runner: FFmpegRunner,
-) -> RenderPhaseOutput:
-    from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
-    from frame_compare.render.geometry import GeometryRect
-    from frame_compare.render.types import (
-        BatchRenderOptions,
-        ScreenshotBatchRequest,
-    )
-
-    clips_state = [ctx.reference, *ctx.comparisons]
-    output_dir = ctx.workspace.screenshots_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    overlay_mode = ctx.config.screenshots.overlay_mode
-    reference_source_frames = [
-        map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame)
-        for aligned_frame in frames
-    ]
-    selection_details: list[OverlaySelectionDetail | None] = [
-        to_overlay_selection_detail(detail)
-        if (
-            detail := selection_detail_for_frame(
-                source_frame,
-                ctx.selection_details_by_source_frame,
-            )
-        )
-        is not None
-        else None
-        for source_frame in reference_source_frames
-    ]
-    selection_labels = [
-        detail.label
-        if detail is not None
-        else selection_label_for_frame(source_frame, ctx.selection_breakdown)
-        for source_frame, detail in zip(reference_source_frames, selection_details, strict=True)
-    ]
-
-    batch_requests: list[ScreenshotBatchRequest] = []
-    for clip in clips_state:
-        source_frames = [
-            map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
-            for aligned_frame in frames
-        ]
-        diagnostic_metadata = [
-            _overlay_diagnostic_metadata_for_frame(
-                probe=clip.probe,
-                selection_detail=detail,
-                overlay_mode=overlay_mode,
-                per_frame_nits_enabled=ctx.config.diagnostics.per_frame_nits,
-                target_nits=ctx.config.color.target_nits,
-            )
-            for detail in selection_details
-        ]
-        batch_requests.append(
-            ScreenshotBatchRequest(
-                clip_path=clip.path,
-                label=clip.label,
-                filename_label=clip.path.stem,
-                source_frames=source_frames,
-                display_frames=frames,
-                selection_labels=selection_labels,
-                selection_details=selection_details,
-                diagnostic_metadata=diagnostic_metadata,
-                active_rect=GeometryRect(
-                    clip.active_rect.x if clip.active_rect is not None else 0,
-                    clip.active_rect.y if clip.active_rect is not None else 0,
-                    clip.active_rect.width if clip.active_rect is not None else clip.probe.width,
-                    clip.active_rect.height if clip.active_rect is not None else clip.probe.height,
-                ),
-                active_rect_source=(
-                    clip.active_rect.source if clip.active_rect is not None else "full-frame"
-                ),
-                active_rect_detection_mode=(
-                    clip.active_rect.detection_mode
-                    if clip.active_rect is not None
-                    else ctx.config.screenshots.active_rect_detection.value
-                ),
-                probe_width=clip.probe.width,
-                probe_height=clip.probe.height,
-                probe_num_frames=clip.probe.num_frames,
-                probe_is_hdr=clip.probe.is_hdr,
-            )
-        )
-
-    render_warnings: list[str] = []
-    rendered = render_screenshots_from_batch(
-        batch_requests=batch_requests,
-        output_dir=output_dir,
-        config=ctx.config,
-        options=BatchRenderOptions(
-            overlay_mode=overlay_mode,
-            ffmpeg_runner=runner,
-            reporter=ctx.reporter,
-            warnings=render_warnings,
-        ),
-    )
-
-    return RenderPhaseOutput(
-        render=RenderArtifacts(
-            screenshots_by_label=rendered,
-            screenshot_dir=output_dir,
-            warnings=render_warnings,
-        )
     )
 
 
@@ -736,6 +459,7 @@ def _reselect_frames_for_trimmed_overlap(
                 local_user_frames=local_user_frames,
             )
         ),
+        selection_fps=reference.effective_fps,
     )
     local_user_frame_set = set(local_user_frames)
     return _TrimmedOverlapSelection(
@@ -780,6 +504,7 @@ def _normalize_selected_frames_for_trimmed_domain(
     generated_requested_count: int,
     seed: int,
     allow_fallback: bool = True,
+    require_full_generated_selection: bool = False,
 ) -> _NormalizedFrameSelection:
     selectable_start, selectable_length = _selectable_aligned_source_window(
         reference=reference,
@@ -820,6 +545,15 @@ def _normalize_selected_frames_for_trimmed_domain(
             found=generated_capacity,
         )
     generated_target_count = generated_requested_count
+    if (
+        require_full_generated_selection
+        and len(normalized_generated_frames) < generated_target_count
+    ):
+        raise SelectionError(
+            "insufficient generated frames after full-window retry alignment",
+            requested=generated_target_count,
+            found=len(normalized_generated_frames),
+        )
     normalized_frames = sorted(
         {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}
     )
@@ -856,6 +590,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             selectable_length=selectable_length,
             selectable_start=selectable_start,
             reference_trim_start=reference.trim.trim_start_frames,
+            selection_fps=reference.effective_fps,
             seed=seed,
             count=generated_target_count,
             excluded_frames={
@@ -907,6 +642,7 @@ def _fallback_generated_frames_for_aligned_window(
     selectable_length: int,
     selectable_start: int,
     reference_trim_start: int,
+    selection_fps: Fraction,
     seed: int,
     count: int,
     excluded_frames: set[int],
@@ -914,20 +650,21 @@ def _fallback_generated_frames_for_aligned_window(
     if count <= 0:
         return []
     fallback_offset = selectable_start - reference_trim_start
-    sample_count = min(selectable_length, count + len(excluded_frames))
-    while True:
-        selected = [
-            frame + fallback_offset
-            for frame in create_frame_plan(
-                num_frames=selectable_length,
-                count=sample_count,
-                seed=seed,
-            ).frames
-            if frame + selectable_start not in excluded_frames
-        ]
-        if len(selected) >= count or sample_count >= selectable_length:
-            return selected[:count]
-        sample_count = min(selectable_length, sample_count * 2)
+    local_exclusions = {
+        frame - selectable_start
+        for frame in excluded_frames
+        if selectable_start <= frame < selectable_start + selectable_length
+    }
+    return [
+        frame + fallback_offset
+        for frame in select_random_frames(
+            selectable_length,
+            count,
+            seed,
+            local_exclusions,
+            selection_fps=selection_fps,
+        )
+    ]
 
 
 def _selectable_aligned_source_window(

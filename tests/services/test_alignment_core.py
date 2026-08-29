@@ -24,7 +24,11 @@ from frame_compare.services.alignment_math import (
     samples_to_frames as _samples_to_frames,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentRefinementMode,
+    AlignmentResult,
+)
 
 
 def test_alignment_result_is_frozen():
@@ -121,8 +125,11 @@ def test_cross_correlate_empty_signal_raises() -> None:
         _cross_correlate(ref, comp)
 
 
-def test_estimate_alignment_offset_raw_fft_preserves_current_mode() -> None:
-    """The config-driven estimator keeps raw FFT available for debug comparisons."""
+@pytest.mark.parametrize("refinement_mode", ["disabled", "local"])
+def test_estimate_alignment_offset_uses_reference_minus_comparison_sign(
+    refinement_mode: AlignmentRefinementMode,
+) -> None:
+    """The configured estimator converts correlation lag to the alignment contract."""
     reference = np.array([0, 0, 1, 2, 3, 0, 0], dtype=np.float32)
     comparison = np.array([0, 0, 0, 0, 1, 2, 3], dtype=np.float32)
 
@@ -134,10 +141,11 @@ def test_estimate_alignment_offset_raw_fft_preserves_current_mode() -> None:
             max_offset_seconds=1.0,
             correlation_mode="raw_fft",
             preprocessing_mode="none",
+            refinement_mode=refinement_mode,
         ),
     )
 
-    assert estimate.sample_offset == 2
+    assert estimate.sample_offset == -2
 
 
 def test_gcc_phat_standard_preprocessing_recovers_offset_with_dc_and_gain() -> None:
@@ -195,6 +203,7 @@ def test_consensus_rejects_low_confidence_without_offset() -> None:
         reference,
         comparison,
         config=AlignmentConfig(confidence_threshold=1.1),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is False
@@ -214,6 +223,7 @@ def test_consensus_rejects_single_window_ambiguous_correlation_peak() -> None:
             max_offset_seconds=24 / 8000,
             ambiguity_peak_ratio=1.1,
         ),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is False
@@ -239,6 +249,7 @@ def test_consensus_rejects_repeated_windows_with_ambiguous_correlation_peak() ->
             consensus_minimum_ratio=1.0,
             ambiguity_peak_ratio=3.0,
         ),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is False
@@ -264,9 +275,10 @@ def test_windowed_consensus_accepts_quorum_offset() -> None:
             minimum_valid_windows=2,
             consensus_minimum_ratio=0.75,
         ),
+        fps=Fraction(24, 1),
     )
 
     assert estimate.applied is True
-    assert estimate.sample_offset == 2
+    assert estimate.sample_offset == -2
     assert estimate.valid_windows >= 2
     assert estimate.consensus_ratio >= 0.75

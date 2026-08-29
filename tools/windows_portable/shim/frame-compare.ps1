@@ -188,19 +188,34 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   }
 
   $exitCode = 0
-  $originalPath = Get-FrameCompareShimEnvironmentValue -Name "PATH"
-  $originalPythonUtf8 = Get-FrameCompareShimEnvironmentValue -Name "PYTHONUTF8"
-  $originalPythonPath = Get-FrameCompareShimEnvironmentValue -Name "PYTHONPATH"
-  $originalVsExtraPluginPath = Get-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
-  $originalVsPluginPath = Get-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
+  $environmentNames = @(
+    "PATH",
+    "PYTHONUTF8",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONPATH",
+    "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
+    "VAPOURSYNTH_PLUGIN_PATH",
+    "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT",
+    "FRAME_COMPARE_RUNTIME_KIND",
+    "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED",
+    "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+    "FRAME_COMPARE_FFPROBE_EXECUTABLE"
+  )
+  $originalEnvironment = @{}
+  foreach ($name in $environmentNames) {
+    $originalEnvironment[$name] = Get-FrameCompareShimEnvironmentValue -Name $name
+  }
   $locationPushed = $false
   try {
     Push-Location $bundlePath
     $locationPushed = $true
+    $global:LASTEXITCODE = $null
     & $bundleLauncher @forwardArgs
-    if ($null -ne $LASTEXITCODE) {
-      $exitCode = $LASTEXITCODE
-    } elseif ($?) {
+    $launcherSucceeded = $?
+    $launcherExitCode = $global:LASTEXITCODE
+    if ($null -ne $launcherExitCode) {
+      $exitCode = $launcherExitCode
+    } elseif ($launcherSucceeded) {
       $exitCode = 0
     } else {
       $exitCode = 1
@@ -209,11 +224,9 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
     if ($locationPushed) {
       Pop-Location
     }
-    Restore-FrameCompareShimEnvironmentValue -Name "PATH" -Value $originalPath
-    Restore-FrameCompareShimEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
-    Restore-FrameCompareShimEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
-    Restore-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
-    Restore-FrameCompareShimEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
+    foreach ($name in $environmentNames) {
+      Restore-FrameCompareShimEnvironmentValue -Name $name -Value $originalEnvironment[$name]
+    }
   }
   Set-FrameCompareShimExitCode -ExitCode $exitCode
 }

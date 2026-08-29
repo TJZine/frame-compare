@@ -73,6 +73,7 @@ def _shared_reuse_prompt_input(
                 time_offset_seconds=result.time_offset_seconds,
                 accepted_at=entry.accepted_at,
                 source="computed" if entry.origin == "computed" else "confirmed",
+                presentation_name=comparison.presentation_name,
             )
         )
     return previous_offset_prompt_input_from_rows(

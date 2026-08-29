@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, assert_never
+
+from frame_compare.utils.media_facts import ActivePictureProvenance
 
 GeometryMode = Literal["native", "aligned"]
 ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
@@ -27,6 +29,46 @@ ProvidedActiveRectSource = ActiveRectSource
 ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
 ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005
 ASPECT_RATIO_MAX_HEIGHT_REMOVAL_FRACTION = 0.35
+
+
+def active_rect_source_from_provenance(
+    provenance: ActivePictureProvenance,
+) -> ActiveRectSource:
+    """Convert canonical active-picture provenance to render geometry provenance."""
+    match provenance:
+        case "explicit":
+            return "explicit"
+        case "dolby_vision_l5":
+            return "metadata"
+        case "dimension_derived":
+            return "dimension-derived"
+        case "aspect_ratio_derived":
+            return "aspect-ratio-derived"
+        case "content_derived":
+            return "content-derived"
+        case "full_frame":
+            return "full-frame"
+    assert_never(provenance)
+
+
+def active_picture_provenance_from_rect_source(
+    source: ActiveRectSource,
+) -> ActivePictureProvenance:
+    """Convert render geometry provenance to canonical active-picture provenance."""
+    match source:
+        case "explicit":
+            return "explicit"
+        case "metadata":
+            return "dolby_vision_l5"
+        case "dimension-derived":
+            return "dimension_derived"
+        case "aspect-ratio-derived":
+            return "aspect_ratio_derived"
+        case "content-derived":
+            return "content_derived"
+        case "full-frame":
+            return "full_frame"
+    assert_never(source)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +121,7 @@ class RenderGeometryOptions:
 
 @dataclass(frozen=True, slots=True)
 class RenderGeometryPlan:
-    """Pure crop/scale/pad plan for one rendered screenshot source."""
+    """Source active-picture evidence plus one pure crop/scale/pad plan."""
 
     source: SourceGeometry
     source_rect: GeometryRect
@@ -121,9 +163,9 @@ def plan_render_geometry(
 ) -> tuple[RenderGeometryPlan, ...]:
     """Plan pure screenshot geometry for one or more sources.
 
-    ``native`` preserves current full-frame behavior. ``aligned`` crops to safe
-    active rectangles, fits active content inside a selected target canvas, and
-    centers padding on that canvas.
+    ``native`` preserves full-frame output while retaining known active-picture
+    evidence. ``aligned`` crops to safe active rectangles, fits active content
+    inside a selected target canvas, and centers padding on that canvas.
     """
 
     if mode not in ("native", "aligned"):
@@ -216,6 +258,9 @@ def _validate_options(options: RenderGeometryOptions) -> None:
 
 def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeometryPlan:
     source_rect = GeometryRect(0, 0, source.width, source.height)
+    active_rect, active_rect_source = _resolve_active_rects(
+        (source,), active_rect_detection="provided"
+    )[0]
     overlay_origin = (
         min(overlay_margin, source.width - 1),
         min(overlay_margin, source.height - 1),
@@ -223,8 +268,8 @@ def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeomet
     return RenderGeometryPlan(
         source=source,
         source_rect=source_rect,
-        active_rect=source_rect,
-        active_rect_source="full-frame",
+        active_rect=active_rect,
+        active_rect_source=active_rect_source,
         crop_rect=source_rect,
         crop=GeometryMargins(),
         cropped_size=(source.width, source.height),

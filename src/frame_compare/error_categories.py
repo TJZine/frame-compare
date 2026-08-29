@@ -21,14 +21,9 @@ class NetworkError(FrameCompareError):
     """Base class for network failures."""
 
 
-class InternalError(FrameCompareError):
-    """Base class for bugs/invariants."""
-
-
 __all__ = [
     "DependencyError",
     "InputError",
-    "InternalError",
     "NetworkError",
     "ProcessingError",
 ]

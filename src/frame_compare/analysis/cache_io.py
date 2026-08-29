@@ -65,7 +65,13 @@ def compute_cache_key(
     selection_domain: str | None = None,
     metric_request: MetricCacheRequest | None = None,
 ) -> str:
-    """Generate deterministic cache key from video files and analysis config."""
+    """Generate a deterministic cache key from stat identities and analysis config.
+
+    Source contents are intentionally not hashed: media files can be multi-gigabyte,
+    and reading them solely to validate a cache lookup would defeat the cache's
+    performance purpose. A same-path, same-size, same-mtime replacement is therefore
+    treated as the same source by policy.
+    """
     h = hashlib.sha256()
     if video_paths:
         reference_path = video_paths[0]
@@ -416,6 +422,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
             "active_rect_source",
             "active_rect_detection_mode",
             "active_rect_algorithm_id",
+            "version",
         },
     )
 
@@ -475,7 +482,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
         data["active_rect_detection_mode"]
     )
     active_rect_algorithm_id = _parse_active_rect_algorithm_id(data["active_rect_algorithm_id"])
-    metadata_version = _parse_cache_version(data.get("version", CACHE_VERSION))
+    metadata_version = _parse_cache_version(data["version"])
     if metadata_version != CACHE_VERSION:
         raise _CacheParseError
 

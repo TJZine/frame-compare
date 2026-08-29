@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import pytest
 
@@ -23,12 +23,12 @@ from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
-    RenderArtifacts,
     RenderPhaseOutput,
     RunArtifacts,
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
@@ -41,12 +41,14 @@ from .execute_run_helpers import (
     create_config,
     create_video_files,
 )
+from .phase_task_helpers import _render_artifacts
 
 
 def _workspace(tmp_path: Path) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -80,7 +82,7 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 
     assert result.success is True
     assert result.warnings == []
-    assert result.screenshot_dir == (tmp_path / "screenshots").resolve()
+    assert result.screenshot_dir == (tmp_path / "generated" / "source" / "screenshots").resolve()
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
@@ -158,18 +160,72 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     assert result.warnings == ["preflight: warned", "report: warned"]
 
 
+def test_execute_run_closes_execution_section_without_masking_phase_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=ConfigSchema(),
+        input_videos=[tmp_path / "reference.mkv"],
+        analysis_selection_domain="test-selection-domain",
+        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=_zero_monotonic_timer(),
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    events: list[str] = []
+    phase_error = RuntimeError("phase failed")
+
+    async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    async def _execute_phases(*_args: object, **_kwargs: object) -> None:
+        raise phase_error
+
+    monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
+    monkeypatch.setattr(coordinator, "execute_phases", _execute_phases)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        coordinator,
+        "emit_execution_section_start",
+        lambda *_args, **_kwargs: events.append("start"),
+    )
+
+    def _failing_close(*_args: object, **_kwargs: object) -> None:
+        events.append("end")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(coordinator, "emit_execution_section_end", _failing_close)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(
+            execute_run(
+                RunRequest(root=tmp_path),
+                deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
+            )
+        )
+
+    assert exc_info.value is phase_error
+    assert events == ["start", "end"]
+
+
 def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = ConfigSchema()
     config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = False
     config.slowpics.delete_after_upload = True
     config.report.enable = False
     uploaded = tmp_path / "screenshots" / "planned.png"
     uploaded.parent.mkdir(parents=True, exist_ok=True)
     uploaded.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [uploaded]},
         screenshot_dir=uploaded.parent,
     )
@@ -251,9 +307,10 @@ def test_execute_run_webhook_action_warning_is_warning_only(
 ) -> None:
     config = ConfigSchema()
     config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = False
     config.report.enable = False
     webhook_warning = "slow.pics webhook: delivery failed"
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "screenshots" / "planned.png"]},
         screenshot_dir=tmp_path / "screenshots",
     )
@@ -327,13 +384,14 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
 ) -> None:
     config = ConfigSchema()
     config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = False
     config.slowpics.delete_after_upload = True
     config.report.enable = True
     config.report.embed_images = True
     uploaded = tmp_path / "screenshots" / "planned.png"
     uploaded.parent.mkdir(parents=True, exist_ok=True)
     uploaded.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [uploaded]},
         screenshot_dir=uploaded.parent,
     )
@@ -463,14 +521,52 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         no_upload=True,
         no_color=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+        progress=LogProgressReporter(),
+    )
 
-    fps_calls: list[tuple[str, bool, tuple[str, ...]]] = []
-    alignment_calls: list[tuple[str, bool, bool, bool, tuple[int, ...]]] = []
+    class FpsCall(NamedTuple):
+        stage: str
+        no_color: bool
+        rich_output: bool
+        clip_labels: tuple[str, ...]
+        input_dir: Path
+        verbose: bool
 
-    def _record_emit(*, stage: str, no_color: bool, clips: Any, **_kwargs: Any) -> None:
+    class AlignmentCall(NamedTuple):
+        stage: str
+        no_color: bool
+        json_output: bool
+        quiet: bool
+        selected_frames: tuple[int, ...]
+        verbose: bool
+
+    fps_calls: list[FpsCall] = []
+    alignment_calls: list[AlignmentCall] = []
+
+    def _record_emit(
+        *,
+        stage: str,
+        no_color: bool,
+        rich_output: bool,
+        clips: Any,
+        input_dir: Path,
+        verbose: bool,
+        **_kwargs: Any,
+    ) -> None:
         clip_labels = tuple(clip.label for clip in clips)
-        fps_calls.append((stage, no_color, clip_labels))
+        fps_calls.append(
+            FpsCall(
+                stage=stage,
+                no_color=no_color,
+                rich_output=rich_output,
+                clip_labels=clip_labels,
+                input_dir=input_dir,
+                verbose=verbose,
+            )
+        )
 
     def _record_alignment_emit(
         *,
@@ -479,15 +575,17 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         json_output: bool,
         quiet: bool,
         selected_frames: Any,
+        verbose: bool,
         **_kwargs: Any,
     ) -> None:
         alignment_calls.append(
-            (
-                stage,
-                no_color,
-                json_output,
-                quiet,
-                tuple(cast(list[int], selected_frames)),
+            AlignmentCall(
+                stage=stage,
+                no_color=no_color,
+                json_output=json_output,
+                quiet=quiet,
+                selected_frames=tuple(cast(list[int], selected_frames)),
+                verbose=verbose,
             )
         )
 
@@ -497,13 +595,32 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
     asyncio.run(execute_run(request, deps=deps))
 
     assert fps_calls == [
-        ("after_load_sources", True, ("comp", "source")),
-        ("after_align", True, ("comp", "source")),
+        FpsCall(
+            stage="after_load_sources",
+            no_color=True,
+            rich_output=False,
+            clip_labels=("comp", "source"),
+            input_dir=tmp_path / "comparison_videos",
+            verbose=False,
+        ),
+        FpsCall(
+            stage="after_align",
+            no_color=True,
+            rich_output=False,
+            clip_labels=("comp", "source"),
+            input_dir=tmp_path / "comparison_videos",
+            verbose=False,
+        ),
     ]
     assert len(alignment_calls) == 1
-    assert alignment_calls[0][:4] == ("after_align", True, False, False)
-    assert len(alignment_calls[0][4]) == 10
-    assert all(isinstance(frame, int) for frame in alignment_calls[0][4])
+    alignment_call = alignment_calls[0]
+    assert alignment_call.stage == "after_align"
+    assert alignment_call.no_color is True
+    assert alignment_call.json_output is False
+    assert alignment_call.quiet is False
+    assert len(alignment_call.selected_frames) == 10
+    assert alignment_call.verbose is False
+    assert all(isinstance(frame, int) for frame in alignment_call.selected_frames)
 
 
 def test_execute_run_emits_final_selection_at_post_align_boundary(
@@ -558,6 +675,16 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
     monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda **_kwargs: None)
     monkeypatch.setattr(coordinator, "emit_final_selection_report", _record_selection)
+    monkeypatch.setattr(
+        coordinator,
+        "emit_execution_section_start",
+        lambda *_args, **_kwargs: events.append("execution_start"),
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "emit_execution_section_end",
+        lambda *_args, **_kwargs: events.append("execution_end"),
+    )
 
     request = RunRequest(
         root=tmp_path,
@@ -573,7 +700,13 @@ def test_execute_run_emits_final_selection_at_post_align_boundary(
         )
     )
 
-    assert events == ["align", "selection_report", "after_align_phase"]
+    assert events == [
+        "execution_start",
+        "align",
+        "selection_report",
+        "after_align_phase",
+        "execution_end",
+    ]
     assert len(selection_calls) == 1
     assert selection_calls[0] == {
         "selected_frames": [2, 6],
@@ -592,7 +725,6 @@ def test_execute_run_applies_cli_overrides_before_phase_execution(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -648,7 +780,6 @@ def test_execute_run_publish_skip_follows_effective_slowpics_config(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 

@@ -9,9 +9,9 @@ from __future__ import annotations
 import fnmatch
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
-from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.errors import ConfigNotFoundError, ConfigValidationError
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import PathEscapesRootError
@@ -20,6 +20,7 @@ from frame_compare.orchestration.errors import (
     InputDiscoveryError,
     NoVideosFoundError,
 )
+from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.types import WorkspacePaths
 
 # Canonical video patterns
@@ -66,6 +67,110 @@ def _resolve_path(path_str: str, root: Path) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (root / path).resolve()
+
+
+def _is_filesystem_root(path_value: str, resolved_path: Path | None = None) -> bool:
+    """Return whether a generated-directory value names a filesystem root."""
+    windows_path = PureWindowsPath(path_value)
+    windows_root = bool(windows_path.anchor) and windows_path == PureWindowsPath(
+        windows_path.anchor
+    )
+    if windows_root:
+        return True
+    if resolved_path is None:
+        return False
+    posix_root = resolved_path.anchor != "" and resolved_path == Path(resolved_path.anchor)
+    return windows_root or posix_root
+
+
+def _invalid_generated_root_error(path_value: str | Path) -> ConfigValidationError:
+    return ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["paths", "generated_dir"],
+                "msg": "paths.generated_dir must name a dedicated directory, not a filesystem root",
+                "input": str(path_value),
+            }
+        ],
+        message="Invalid generated-data location",
+        hint=(
+            "Choose a normal directory for generated data; filesystem roots, drive roots, "
+            "and bare UNC share roots are not supported"
+        ),
+    )
+
+
+def _empty_generated_root_error(path_value: str | Path) -> ConfigValidationError:
+    return ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["paths", "generated_dir"],
+                "msg": "paths.generated_dir must not be empty or whitespace-only",
+                "input": str(path_value),
+            }
+        ],
+        message="Invalid generated-data location",
+        hint="Choose a non-empty directory for generated data",
+    )
+
+
+def _generated_root_resolution_error(
+    path_value: str | Path,
+    cause: OSError | RuntimeError,
+) -> ConfigValidationError:
+    return ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["paths", "generated_dir"],
+                "msg": f"Unable to resolve paths.generated_dir: {cause}",
+                "input": str(path_value),
+            }
+        ],
+        message=f"Unable to resolve generated-data location {path_value}: {cause}",
+        hint=(
+            "Reconnect the selected location, repair its link/junction, or choose "
+            "another paths.generated_dir"
+        ),
+    )
+
+
+def _resolve_generated_root(path_value: str | Path, root: Path) -> Path:
+    """Resolve and structurally validate the configured generated-data root."""
+    expanded = os.path.expandvars(str(path_value))
+    if not expanded.strip():
+        raise _empty_generated_root_error(path_value)
+    if _is_filesystem_root(expanded):
+        raise _invalid_generated_root_error(path_value)
+    candidate = Path(expanded)
+    try:
+        resolved_root = root.resolve()
+        resolved_path = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (resolved_root / candidate).resolve()
+        )
+    except (OSError, RuntimeError) as exc:
+        raise _generated_root_resolution_error(path_value, exc) from exc
+    if _is_filesystem_root(expanded, resolved_path):
+        raise _invalid_generated_root_error(path_value)
+    return resolved_path
+
+
+def _validate_generated_descendants(generated_root: Path) -> None:
+    """Reject redirected shared generated paths before any cache or run use."""
+    try:
+        for managed_path in (
+            generated_root / "cache" / "analysis",
+            generated_root / "cache" / "alignment",
+            generated_root / "cache" / "tmdb.toml",
+            generated_root / "clip_probe.toml",
+        ):
+            require_managed_descendant(generated_root, managed_path)
+    except (OSError, RuntimeError) as exc:
+        raise _generated_root_resolution_error(generated_root, exc) from exc
 
 
 def resolve_contained_path(path_value: str | Path, root: Path) -> Path:
@@ -116,16 +221,8 @@ def validate_and_normalize_config_paths(
     """Validate contained config paths without mutating the supplied config."""
     resolved_root = root.resolve()
     resolve_contained_path(config.paths.config_dir, resolved_root)
-    resolve_contained_path(config.paths.screenshots_dir, resolved_root)
-    resolve_contained_path(config.paths.generated_dir, resolved_root)
-
-    if config.report.output_dir is None:
-        return config
-
-    output_dir = resolve_contained_path(config.report.output_dir, resolved_root)
-    return config.model_copy(
-        update={"report": config.report.model_copy(update={"output_dir": str(output_dir)})}
-    )
+    _resolve_generated_root(config.paths.generated_dir, resolved_root)
+    return config
 
 
 def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
@@ -134,13 +231,15 @@ def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     validated_config = validate_and_normalize_config_paths(config, resolved_root)
     paths = validated_config.paths
     config_dir = resolve_contained_path(paths.config_dir, resolved_root)
-    generated_dir = resolve_contained_path(paths.generated_dir, resolved_root)
+    generated_dir = _resolve_generated_root(paths.generated_dir, resolved_root)
+    _validate_generated_descendants(generated_dir)
 
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
-        run_dir=None,  # Legacy mode: run folder disabled
-        screenshots_dir=resolve_contained_path(paths.screenshots_dir, resolved_root),
+        generated_root=generated_dir,
+        run_dir=None,  # Real runs reserve a child before rendering.
+        screenshots_dir=generated_dir / "screenshots",
         generated_dir=generated_dir,
         config_dir=config_dir,
         config_file=config_dir / "config.toml",
@@ -156,13 +255,15 @@ def _resolve_paths_with_config_file(
     resolved_root = root.resolve()
     validated_config = validate_and_normalize_config_paths(config, resolved_root)
     paths = validated_config.paths
-    generated_dir = resolve_contained_path(paths.generated_dir, resolved_root)
+    generated_dir = _resolve_generated_root(paths.generated_dir, resolved_root)
+    _validate_generated_descendants(generated_dir)
 
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
-        run_dir=None,  # Legacy mode: run folder disabled
-        screenshots_dir=resolve_contained_path(paths.screenshots_dir, resolved_root),
+        generated_root=generated_dir,
+        run_dir=None,  # Real runs reserve a child before rendering.
+        screenshots_dir=generated_dir / "screenshots",
         generated_dir=generated_dir,
         config_dir=resolve_contained_path(paths.config_dir, resolved_root),
         config_file=config_file,

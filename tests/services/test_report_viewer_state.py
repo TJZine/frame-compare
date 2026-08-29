@@ -18,6 +18,11 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])
 
+    assert summary["clipDisplayProfiles"] == {
+        "requiredPayloadProfiles": True,
+        "stableInspectorRoles": True,
+    }
+
     restored = summary["restoreFourClip"]
     assert restored["clipCount"] == 4
     assert restored["leftClipIdx"] != restored["rightClipIdx"]
@@ -51,7 +56,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert inspector_state["blinkPausedPersisted"] is False
     assert inspector_state["closedInspectorInert"] is True
     assert inspector_state["closedInspectorTabIndex"] == "-1"
-    assert inspector_state["restoredKeyboardFocusToInfo"] is True
+    assert inspector_state["restoredKeyboardFocusToOrigin"] is True
     assert inspector_state["clearedKeyboardFocusRestoreTarget"] is True
 
     assert summary["escapeOrder"] == {
@@ -67,6 +72,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
     assert summary["inspectorSlowpics"]["unsafeAsText"] is True
     assert summary["inspectorSlowpics"]["missingStatus"] == "Not uploaded"
+    assert summary["inspectorFrameSources"] == [
+        "Clip 1 — 10 / 100 · B-frame · DV RPU",
+        "Clip 2 — 10 / 100 · B-frame",
+    ]
 
     single_mode = summary["singleModeAlignment"]
     assert single_mode["mode"] == "overlay"
@@ -84,6 +93,22 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "nestedInButton": True,
         "plain": False,
     }
+    assert summary["radioGroupKeyboard"] == {
+        "wrapsAndSelects": True,
+        "rovingTabStop": True,
+        "preventsNativeScroll": True,
+        "stopsGlobalShortcut": True,
+    }
+    assert summary["frameKeyboard"] == {
+        "selectedNextFrame": True,
+        "preventsNativeScroll": True,
+    }
+    assert summary["filmstripKeyboard"] == {
+        "selectedNextFrame": True,
+        "focusedSelection": True,
+        "preventsNativeScroll": True,
+        "stopsGlobalShortcut": True,
+    }
     assert summary["directionalFourClip"]["swappedAlignment"] == [6, 7]
     assert summary["directionalFourClip"]["reversePairAlignment"] == [-6, -7]
     assert summary["paletteOrientationState"] == {
@@ -92,6 +117,16 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     }
     assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
     assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True
+    assert summary["sourceOverlayLabels"] == {
+        "single": "Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
+        "slider": "LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
+        "diff": "BASE: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
+    }
+    assert summary["blinkLabels"] == {
+        "labels": {"left": "FIRST: Clip 1", "right": "SECOND: Clip 2"},
+        "activeLabelMoved": False,
+        "activeStateMoved": True,
+    }
     assert summary["lensPanIndependence"] == {
         "panAppliedWithoutInspectorGestureGate": True,
         "panMovedRecorded": True,

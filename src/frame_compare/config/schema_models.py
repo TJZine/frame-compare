@@ -37,20 +37,14 @@ from frame_compare.config.text_validation import reject_control_characters
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
 
-def _empty_user_frames() -> list[int]:
-    return []
-
-
 class PathsConfig(BaseModel):
     """Filesystem paths relative to the workspace root."""
 
     model_config = ConfigDict(extra="forbid")
 
     input_dir: str = "comparison_videos"
-    screenshots_dir: str = "screenshots"
     generated_dir: str = "generated"
     config_dir: str = "config"
-    use_run_folders: bool = True
 
 
 class AnalysisConfig(BaseModel):
@@ -58,7 +52,7 @@ class AnalysisConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    user_frames: list[int] = Field(default_factory=_empty_user_frames)
+    user_frames: list[int] = Field(default_factory=list[int])
     random_frame_count: int = Field(default=10, ge=0)
     dark_frame_count: int = Field(default=0, ge=0)
     bright_frame_count: int = Field(default=0, ge=0)
@@ -329,27 +323,10 @@ class ReportConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enable: bool = True
-    output_dir: str | None = None
     default_mode: ViewerMode = ViewerMode.SLIDER
     include_filmstrip: bool = True
     embed_images: bool = False
     auto_open: bool = True
-
-    @field_validator("output_dir", mode="before")
-    @classmethod
-    def normalize_empty_string(cls, v: str | None) -> str | None:
-        """Convert empty string to None for output_dir."""
-        if v == "":
-            return None
-        return v
-
-
-class DiagnosticsConfig(BaseModel):
-    """Optional diagnostic outputs for development and debugging."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    per_frame_nits: bool = False
 
 
 class LoggingConfig(BaseModel):
@@ -365,7 +342,6 @@ __all__ = [
     "AnalysisConfig",
     "AudioAlignmentConfig",
     "ColorConfig",
-    "DiagnosticsConfig",
     "LoggingConfig",
     "PathsConfig",
     "ReportConfig",

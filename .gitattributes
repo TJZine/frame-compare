@@ -6,5 +6,7 @@ tools/windows_portable/shim/*.cmd text eol=crlf
 tools/windows_portable/*.ps1 text eol=crlf
 tools/windows_portable/shim/*.ps1 text eol=crlf
 
-# Vendored license files are byte-hashed in the Windows portable manifest.
+# Vendored license files that are byte-hashed must use deterministic LF endings.
 tools/windows_portable/licenses/**/*.txt text eol=lf
+tools/windows_portable/licenses/**/*.txt whitespace=-blank-at-eof
+src/frame_compare/assets/fonts/Inter-OFL.txt text eol=lf

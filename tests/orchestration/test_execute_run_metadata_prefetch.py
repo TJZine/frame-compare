@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import tomllib
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -16,6 +17,7 @@ from frame_compare.orchestration import phase_post_render, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.errors import TmdbError
 from frame_compare.services.run_folder import RunFolderReservation
+from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
 
@@ -83,8 +85,9 @@ def test_execute_run_from_cache_only_missing_shared_cache_skips_metadata_prefetc
         filenames: list[str],
         config: MetadataConfig,
         client: httpx.AsyncClient,
+        cache: object,
     ) -> TmdbMetadata:
-        del config, client
+        del config, client, cache
         metadata_calls.append(filenames)
         return TmdbMetadata(
             tmdb_id=123,
@@ -143,8 +146,9 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         filenames: list[str],
         config: MetadataConfig,
         client: httpx.AsyncClient,
+        cache: object,
     ) -> TmdbMetadata:
-        del config, client
+        del config, client, cache
         metadata_calls.append(filenames)
         return TmdbMetadata(
             tmdb_id=123,
@@ -155,11 +159,11 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         )
 
     def _reserve_run_folder(
-        input_dir: Path,
+        generated_root: Path,
         filenames: list[str],
         tmdb_metadata: TmdbMetadata | None,
     ) -> RunFolderReservation:
-        del input_dir, tmdb_metadata
+        del generated_root, tmdb_metadata
         reserve_calls.append(filenames)
         return RunFolderReservation(
             path=Path("should-not-be-used"),
@@ -204,14 +208,15 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     )
     captured_tmdb_metadata: list[TmdbMetadata | None] = []
     resolve_calls: list[list[str]] = []
+    cache_paths: list[Path] = []
 
     def _capture_reserve_run_folder(
-        input_dir: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
+        generated_root: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
     ) -> RunFolderReservation:
         del filenames
         captured_tmdb_metadata.append(tmdb_metadata)
         return RunFolderReservation(
-            path=input_dir / "Fight Club (1999)",
+            path=generated_root / "Fight Club (1999)",
             folder_name="Fight Club (1999)",
             base_name="Fight Club (1999)",
             naming_source="tmdb",
@@ -222,8 +227,10 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         filenames: list[str],
         config: MetadataConfig,
         client: httpx.AsyncClient,
+        cache: object,
     ) -> TmdbMetadata | None:
         del config, client
+        cache_paths.append(cast(TmdbCache, cache).path)
         resolve_calls.append(filenames)
         return expected_metadata
 
@@ -245,6 +252,7 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     assert result.success is True
     assert captured_tmdb_metadata == [expected_metadata]
     assert resolve_calls == [["source.mkv"]]
+    assert cache_paths == [(tmp_path / "generated" / "cache" / "tmdb.toml").resolve()]
     assert result.screenshot_dir is not None
     assert (
         result.screenshot_dir
@@ -291,8 +299,9 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
         filenames: list[str],
         config: MetadataConfig,
         client: httpx.AsyncClient,
+        cache: object,
     ) -> TmdbMetadata | None:
-        del client
+        del client, cache
         captured_configs.append(config)
         if not prefetch_calls:
             prefetch_calls.append(filenames)
@@ -351,8 +360,9 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
         filenames: list[str],
         config: MetadataConfig,
         client: httpx.AsyncClient,
+        cache: object,
     ) -> TmdbMetadata | None:
-        del filenames, config, client
+        del filenames, config, client, cache
         raise RuntimeError("unexpected metadata failure")
 
     monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)

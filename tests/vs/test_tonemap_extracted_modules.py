@@ -11,13 +11,13 @@ from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
     convert_non_rgb_with_matrix_hint,
+    resolve_hdr_tonemap_inputs,
 )
 from frame_compare.vs.tonemap_fallback import fallback_tonemap
 from frame_compare.vs.tonemap_libplacebo import (
     HdrTonemapInputs,
     apply_libplacebo,
     build_libplacebo_tonemap_kwargs,
-    call_libplacebo_with_compat_retry,
 )
 from frame_compare.vs.tonemap_presets import TONEMAP_PRESETS, get_preset_settings
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
@@ -170,8 +170,40 @@ def test_fallback_tonemap_prefers_explicit_source_peak_over_metadata() -> None:
     assert clip.std.expr_calls[0] == ["x 4 * dup 1 + / 2 * 0 max 1 min"] * 3
 
 
+def test_fallback_tonemap_uses_probed_hdr_signal_for_untagged_yuv_conversion() -> None:
+    clip = _Clip(props={}, format_id=vs.YUV420P10, color_family=vs.YUV, bits_per_sample=10)
+    metadata = HDRMetadata(None, 1000, 400, 9, 16, 9)
+
+    fallback_tonemap(cast("VideoNode", clip), TonemapSettings(), metadata)
+
+    assert clip.resize.bicubic_calls[0] == {
+        "format": vs.RGBS,
+        "matrix_in": 9,
+        "range_in": vs.RANGE_LIMITED,
+        "transfer_in": 16,
+        "primaries_in": 9,
+    }
+
+
+def test_resolve_hdr_inputs_preserves_explicit_sdr_signal_and_range() -> None:
+    clip = _Clip(props={"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": vs.RANGE_FULL})
+    metadata = HDRMetadata(None, 1000, 400, 9, 16, 9)
+
+    inputs = resolve_hdr_tonemap_inputs(cast("VideoNode", clip), metadata)
+
+    assert inputs.transfer == 1
+    assert inputs.primaries == 1
+    assert inputs.detected_is_hdr is False
+    assert inputs.props == {
+        "_Matrix": 1,
+        "_Transfer": 1,
+        "_Primaries": 1,
+        "_Range": vs.RANGE_FULL,
+    }
+
+
 def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
-    """HDR10 metadata should map to the legacy libplacebo kwargs."""
+    """HDR10 metadata should map to the selected libplacebo kwargs."""
     metadata = HDRMetadata(
         mastering_display=None,
         max_cll=1000,
@@ -197,7 +229,7 @@ def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
     assert kwargs == {
         "src_max": 1000,
         "dst_max": 203,
-        "tone_mapping_function_s": "bt.2390",
+        "tone_mapping_function_s": "bt2390",
         "tone_mapping_param": 0.5,
         "dst_csp": 0,
         "dst_prim": 1,
@@ -216,121 +248,42 @@ def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
     }
 
 
-def test_call_libplacebo_with_compat_retry_drops_newer_kwargs_after_typeerror() -> None:
-    """Compatibility retry should preserve baseline kwargs on unknown TypeError."""
-    clip = _Clip()
-    placebo = _Placebo([TypeError("signature mismatch"), clip])
+def test_libplacebo_uses_probed_hdr_signal_for_untagged_yuv_conversion() -> None:
+    clip = _Clip(props={}, format_id=vs.YUV420P10, color_family=vs.YUV, bits_per_sample=10)
+    placebo = _Placebo([clip])
     core = SimpleNamespace(placebo=placebo)
+    metadata = HDRMetadata(None, 1000, 400, 9, 16, 9)
 
-    result = call_libplacebo_with_compat_retry(
-        cast("Core", core),
+    result = apply_libplacebo(
         cast("VideoNode", clip),
-        {
-            "src_max": 1000,
-            "dst_max": 203,
-            "tone_mapping_function": 2,
-            "dst_csp": 0,
-            "dst_prim": 1,
-            "src_csp": 1,
-        },
+        TonemapSettings(),
+        cast("Core", core),
+        metadata,
     )
 
     assert result is clip
-    assert placebo.calls == [
-        {
-            "src_max": 1000,
-            "dst_max": 203,
-            "tone_mapping_function": 2,
-            "dst_csp": 0,
-            "dst_prim": 1,
-            "src_csp": 1,
-        },
-        {
-            "src_max": 1000,
-            "dst_max": 203,
-            "tone_mapping_function": 2,
-            "dst_csp": 0,
-            "dst_prim": 1,
-            "src_csp": 1,
-        },
-    ]
-
-
-def test_call_libplacebo_with_compat_retry_drops_only_rejected_kwargs() -> None:
-    """Compatibility retry should preserve supported legacy tonemap settings."""
-    clip = _Clip()
-    placebo = _Placebo(
-        [
-            TypeError("Function does not take argument(s) named metadata, use_dovi"),
-            clip,
-        ]
-    )
-    core = SimpleNamespace(placebo=placebo)
-
-    call_libplacebo_with_compat_retry(
-        cast("Core", core),
-        cast("VideoNode", clip),
-        {
-            "src_max": 1000,
-            "dst_max": 100,
-            "tone_mapping_function": 2,
-            "dst_min": 0.18,
-            "dynamic_peak_detection": 1,
-            "metadata": 0,
-            "use_dovi": 1,
-            "contrast_recovery": 0.3,
-        },
-    )
-
-    assert placebo.calls[1] == {
-        "src_max": 1000,
-        "dst_max": 100,
-        "tone_mapping_function": 2,
-        "dst_min": 0.18,
-        "dynamic_peak_detection": 1,
-        "contrast_recovery": 0.3,
+    assert clip.resize.bicubic_calls[0] == {
+        "format": vs.RGB48,
+        "matrix_in": 9,
+        "range_in": vs.RANGE_LIMITED,
+        "transfer_in": 16,
+        "primaries_in": 9,
     }
+    assert placebo.calls[0]["src_csp"] == 1
 
 
-def test_call_libplacebo_with_compat_retry_parses_unexpected_keyword_message() -> None:
-    """Single-kwarg TypeError messages should not drop the full legacy baseline."""
-    clip = _Clip()
-    placebo = _Placebo(
-        [
-            TypeError("got an unexpected keyword argument 'metadata'"),
-            clip,
-        ]
-    )
-    core = SimpleNamespace(placebo=placebo)
-
-    call_libplacebo_with_compat_retry(
-        cast("Core", core),
-        cast("VideoNode", clip),
-        {
-            "dst_max": 100,
-            "tone_mapping_function_s": "bt.2390",
-            "metadata": 0,
-            "contrast_recovery": 0.3,
-        },
-    )
-
-    assert placebo.calls[1] == {
-        "dst_max": 100,
-        "tone_mapping_function_s": "bt.2390",
-        "contrast_recovery": 0.3,
-    }
-
-
-def test_call_libplacebo_retry_adds_numeric_curve_when_string_curve_is_rejected() -> None:
-    """Production-built kwargs should preserve non-default curves on older runtimes."""
-    clip = _Clip()
-    placebo = _Placebo(
-        [
-            TypeError("got an unexpected keyword argument 'tone_mapping_function_s'"),
-            clip,
-        ]
-    )
-    core = SimpleNamespace(placebo=placebo)
+@pytest.mark.parametrize(
+    ("tone_curve", "expected_name"),
+    [
+        (ToneCurve.BT2390, "bt2390"),
+        (ToneCurve.SPLINE, "spline"),
+        (ToneCurve.REINHARD, "reinhard"),
+    ],
+)
+def test_build_libplacebo_kwargs_emits_canonical_tone_curve_name(
+    tone_curve: ToneCurve,
+    expected_name: str,
+) -> None:
     inputs = HdrTonemapInputs(
         hdr_metadata=None,
         transfer=16,
@@ -339,15 +292,12 @@ def test_call_libplacebo_retry_adds_numeric_curve_when_string_curve_is_rejected(
         detected_is_hdr=True,
     )
     kwargs = build_libplacebo_tonemap_kwargs(
-        settings=TonemapSettings(tone_curve=ToneCurve.SPLINE),
+        settings=TonemapSettings(tone_curve=tone_curve),
         target_nits=100,
         inputs=inputs,
     )
 
-    call_libplacebo_with_compat_retry(cast("Core", core), cast("VideoNode", clip), kwargs)
-
-    assert "tone_mapping_function_s" not in placebo.calls[1]
-    assert placebo.calls[1]["tone_mapping_function"] == 1
+    assert kwargs["tone_mapping_function_s"] == expected_name
 
 
 def test_apply_post_processing_does_not_apply_contrast_recovery_expr() -> None:
@@ -410,6 +360,7 @@ def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalizat
             "src_csp": 2,
         }
     ]
+    assert len(placebo.calls) == 1
     assert clip.resize.point_calls == []
 
 

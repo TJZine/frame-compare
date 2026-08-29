@@ -13,9 +13,8 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
 from frame_compare.orchestration.preflight import (
-    resolve_contained_path,
+    resolve_paths,
     resolve_selected_config_path,
-    validate_and_normalize_config_paths,
 )
 from frame_compare.services.errors import HistoryOpenError
 from frame_compare.services.run_result_record import (
@@ -31,9 +30,8 @@ def _resolve_history_roots(root: Path, config_path: Path) -> tuple[Path, Path]:
     resolved_root = root.resolve()
     selected_config = resolve_selected_config_path(config_path, resolved_root)
     config: ConfigSchema = load_config(selected_config)
-    validated = validate_and_normalize_config_paths(config, resolved_root)
-    generated_root = resolve_contained_path(validated.paths.generated_dir, resolved_root)
-    return resolved_root, generated_root
+    workspace = resolve_paths(config, resolved_root)
+    return resolved_root, workspace.generated_root
 
 
 def _timestamp(value: datetime | None) -> str | None:
@@ -64,8 +62,8 @@ def handle_history_list(
 ) -> None:
     """Resolve config and print contained run history."""
     try:
-        workspace_root, generated_root = _resolve_history_roots(root, config_path)
-        entries = list_history(workspace_root, generated_root)
+        _, generated_root = _resolve_history_roots(root, config_path)
+        entries = list_history(generated_root)
         if json_output:
             typer.echo(
                 json.dumps(
@@ -98,8 +96,8 @@ def handle_history_open(
 ) -> None:
     """Open one exact-name, contained recorded report."""
     try:
-        workspace_root, generated_root = _resolve_history_roots(root, config_path)
-        report_path = resolve_history_report(workspace_root, generated_root, run_name)
+        _, generated_root = _resolve_history_roots(root, config_path)
+        report_path = resolve_history_report(generated_root, run_name)
         try:
             opened = open_report(report_path)
         except Exception as exc:

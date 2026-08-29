@@ -7,6 +7,7 @@ from typing import Literal, cast
 import httpx
 
 from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
+from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 type _TmdbMediaType = Literal["movie", "tv"]
@@ -40,7 +41,7 @@ def _build_search_params(
 
 async def _request_tmdb_search(
     url: str,
-    params: dict[str, str | int],
+    params: Mapping[str, str | int],
     config: MetadataConfig,
     client: httpx.AsyncClient,
 ) -> httpx.Response:
@@ -157,6 +158,42 @@ def _map_tmdb_results(
     return mapped_results
 
 
+def _map_tmdb_results_with_cacheability(
+    data: object,
+    *,
+    endpoint_media_type: _TmdbMediaType | None = None,
+) -> tuple[list[TmdbMetadata], bool]:
+    """Map results and report whether the response was structurally complete."""
+    mapped_results = _map_tmdb_results(data, endpoint_media_type=endpoint_media_type)
+    if not isinstance(data, dict):
+        return mapped_results, False
+    results_raw = cast(dict[str, object], data).get("results")
+    if not isinstance(results_raw, list):
+        return mapped_results, False
+    cacheable = all(
+        _tmdb_result_is_cacheable(item, endpoint_media_type)
+        for item in cast(list[object], results_raw)
+    )
+    return mapped_results, cacheable
+
+
+def _tmdb_result_is_cacheable(
+    item: object,
+    endpoint_media_type: _TmdbMediaType | None,
+) -> bool:
+    if not isinstance(item, dict):
+        return False
+    typed_item = cast(dict[str, object], item)
+    if endpoint_media_type is None and typed_item.get("media_type") == "person":
+        person_id = typed_item.get("id")
+        name = typed_item.get("name")
+        has_valid_id = (isinstance(person_id, int) and not isinstance(person_id, bool)) or (
+            isinstance(person_id, str) and person_id.isdigit()
+        )
+        return has_valid_id and isinstance(name, str) and bool(name.strip())
+    return _map_tmdb_result(typed_item, endpoint_media_type=endpoint_media_type) is not None
+
+
 def _map_tmdb_alternative_titles(
     data: object,
     media_type: _TmdbMediaType,
@@ -181,6 +218,27 @@ def _map_tmdb_alternative_titles(
     return titles
 
 
+def _map_tmdb_alternative_titles_with_cacheability(
+    data: object,
+    media_type: _TmdbMediaType,
+) -> tuple[list[str], bool]:
+    """Map alternative titles and reject incomplete containers for caching."""
+    titles = _map_tmdb_alternative_titles(data, media_type)
+    if not isinstance(data, dict):
+        return titles, False
+    key = "titles" if media_type == "movie" else "results"
+    titles_raw = cast(dict[str, object], data).get(key)
+    if not isinstance(titles_raw, list):
+        return titles, False
+    cacheable = all(
+        isinstance(item, dict)
+        and isinstance(cast(dict[str, object], item).get("title"), str)
+        and bool(cast(dict[str, object], item).get("title"))
+        for item in cast(list[object], titles_raw)
+    )
+    return titles, cacheable
+
+
 def _build_alternative_titles_url(tmdb_id: int, media_type: _TmdbMediaType) -> str:
     return f"{TMDB_API_BASE_URL}/{media_type}/{tmdb_id}/alternative_titles"
 
@@ -198,7 +256,7 @@ def _validate_tmdb_api_key(config: MetadataConfig) -> str | None:
 
 async def _request_tmdb_json(
     url: str,
-    params: dict[str, str | int],
+    params: Mapping[str, str | int],
     config: MetadataConfig,
     client: httpx.AsyncClient,
 ) -> object:
@@ -227,6 +285,7 @@ async def _search_tmdb_endpoint(
     *,
     url: str,
     endpoint_media_type: _TmdbMediaType | None = None,
+    cache: TmdbCache | None = None,
 ) -> list[TmdbMetadata]:
     api_key = _validate_tmdb_api_key(config)
     if api_key is None:
@@ -234,20 +293,33 @@ async def _search_tmdb_endpoint(
 
     year_param_name = "first_air_date_year" if endpoint_media_type == "tv" else "year"
     params = _build_search_params(parsed, api_key, year_param_name=year_param_name)
+    if cache is not None:
+        cached = cache.get_search(url, params)
+        if cached is not None:
+            return cached
     data = await _request_tmdb_json(url, params, config, client)
-    return _map_tmdb_results(data, endpoint_media_type=endpoint_media_type)
+    results, cacheable = _map_tmdb_results_with_cacheability(
+        data,
+        endpoint_media_type=endpoint_media_type,
+    )
+    if cache is not None and cacheable:
+        await cache.store_search(url, params, results)
+    return results
 
 
 async def search_tmdb(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    *,
+    cache: TmdbCache | None = None,
 ) -> list[TmdbMetadata]:
     return await _search_tmdb_endpoint(
         parsed,
         config,
         client,
         url=TMDB_MULTI_SEARCH_URL,
+        cache=cache,
     )
 
 
@@ -255,6 +327,8 @@ async def search_tmdb_movie(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    *,
+    cache: TmdbCache | None = None,
 ) -> list[TmdbMetadata]:
     return await _search_tmdb_endpoint(
         parsed,
@@ -262,6 +336,7 @@ async def search_tmdb_movie(
         client,
         url=TMDB_MOVIE_SEARCH_URL,
         endpoint_media_type="movie",
+        cache=cache,
     )
 
 
@@ -269,6 +344,8 @@ async def search_tmdb_tv(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    *,
+    cache: TmdbCache | None = None,
 ) -> list[TmdbMetadata]:
     return await _search_tmdb_endpoint(
         parsed,
@@ -276,6 +353,7 @@ async def search_tmdb_tv(
         client,
         url=TMDB_TV_SEARCH_URL,
         endpoint_media_type="tv",
+        cache=cache,
     )
 
 
@@ -284,18 +362,24 @@ async def fetch_tmdb_alternative_titles(
     media_type: _TmdbMediaType,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    *,
+    cache: TmdbCache | None = None,
 ) -> list[str]:
     api_key = _validate_tmdb_api_key(config)
     if api_key is None:
         return []
 
-    data = await _request_tmdb_json(
-        _build_alternative_titles_url(tmdb_id, media_type),
-        {"api_key": api_key},
-        config,
-        client,
-    )
-    return _map_tmdb_alternative_titles(data, media_type)
+    url = _build_alternative_titles_url(tmdb_id, media_type)
+    params = {"api_key": api_key}
+    if cache is not None:
+        cached = cache.get_alternative_titles(url, params)
+        if cached is not None:
+            return cached
+    data = await _request_tmdb_json(url, params, config, client)
+    titles, cacheable = _map_tmdb_alternative_titles_with_cacheability(data, media_type)
+    if cache is not None and cacheable:
+        await cache.store_alternative_titles(url, params, titles)
+    return titles
 
 
 def is_valid_tmdb_api_key(api_key: str) -> bool:
@@ -307,6 +391,8 @@ async def lookup_tmdb(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    *,
+    cache: TmdbCache | None = None,
 ) -> TmdbMetadata | None:
     """
     Look up media on TMDB.
@@ -328,5 +414,8 @@ async def lookup_tmdb(
         TmdbError: If API key is invalid format, or API call fails
         TmdbRateLimitedError: If rate limited (HTTP 429)
     """
-    results = await search_tmdb(parsed, config, client)
+    if cache is None:
+        results = await search_tmdb(parsed, config, client)
+    else:
+        results = await search_tmdb(parsed, config, client, cache=cache)
     return results[0] if results else None

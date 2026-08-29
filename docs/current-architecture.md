@@ -37,7 +37,7 @@ The main run path is:
    beneath the resolved workspace root while permitting external media reads.
 3. Discover input clips.
 4. Validate shared analysis cache mode flags when needed.
-5. Create a fresh run folder when configured.
+5. Create a fresh run folder for every run that proceeds to output reservation.
 6. Load or compute clip probe data.
 7. Execute orchestration phases in order:
    `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`
@@ -67,7 +67,14 @@ monotonic total rather than wall-clock subtraction.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
-- `frame_compare.orchestration.phase_tasks`: align and render phase bodies plus alignment/render-specific helpers
+- `frame_compare.orchestration.full_window_retry`: the run-scoped effective-config,
+  confirmation-result, authoritative window/domain recomputation, and fatal
+  retry-once boundary for exclusion-constrained selection failures; the CLI owns
+  the injected stderr confirmation callback
+- `frame_compare.orchestration.phase_alignment`: audio-alignment phase execution,
+  alignment request mapping, trim application, and aligned-frame normalization
+- `frame_compare.orchestration.phase_render`: screenshot-render phase execution and
+  overlay diagnostic metadata mapping
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
@@ -98,14 +105,33 @@ series. Performance returns a sampled metric series with an explicit source-fram
 map; metric-based dark, bright, and motion selection is limited to those samples.
 Configured user and random frames remain eligible across the whole selectable
 window and are not restricted to sampled metric frames.
+Automatic selection divides that whole window into deterministic integer-coordinate
+temporal strata. Dark, bright, and motion candidates retain their existing metric
+rankings, while random candidates retain stable seed-derived ordering; all categories
+prefer a half-second separation, represented by `ceil(selection-domain effective FPS / 2)`
+frames, globally backfill empty strata, and use bounded gap relaxation that skips
+unreachable integer gaps by advancing to the next reachable occupied-frame distance,
+down to one-frame uniqueness when distinct candidates can otherwise satisfy the requested
+count. The selection-domain FPS is the effective reference FPS, even when metric arrays
+come from another analysis source. Sparse performance samples remain in source-frame
+coordinates during this allocation.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
+`frame_compare.orchestration.presentation` owns the stable reference/comparison
+role labels and bounded console-width policy shared by orchestration reports.
+`frame_compare.services.release_identity` owns dependency-light, non-persisted
+content/release identity types and plain formatters. Preparation invokes the existing
+GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
+metadata and explicit-label provenance to `ClipState`; these fields are excluded from
+source, cache, selection, and report identity.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
-cache/alignment identity, and stem-based physical PNG filenames remain
-unchanged.
+cache/alignment identity, and stem-based physical PNG filename ownership remain
+unchanged. `frame_compare.render.naming` bounds overlong absolute screenshot paths
+for legacy Windows browser compatibility by retaining a readable stem prefix and a
+deterministic digest suffix.
 
 ## Module Boundaries
 
@@ -149,6 +175,11 @@ the explicit owner of the import-time contract. Owner-specific exceptions belong
 imports belong in focused protocol modules such as
 `frame_compare.utils.progress_protocol`.
 
+Render orchestration derives optional, unique progress labels from already-parsed
+release identities and passes them through the batch request seam. Render workers only
+present that string; `OverlayConfig.label`, overlay pixels, output paths, and
+label-keyed result mappings continue to use canonical clip labels.
+
 `docs/api.md` is generated reference material for importable conveniences. It does
 not promote package roots or module exports into supported stable APIs beyond the
 compatibility policy in the runbook.
@@ -159,13 +190,31 @@ The repo uses filesystem persistence, not a database.
 
 Primary owned paths:
 
+Source freshness for the analysis, probe, and alignment reuse caches follows one
+performance-first policy: source identity uses path, byte size, and modification
+time (nanosecond precision where available), and does not hash media contents.
+Reading multi-gigabyte sources solely for cache lookup would defeat the cache's
+purpose. A replacement that preserves all three identity fields is intentionally
+treated as the same source and can reuse cached data; workflows that replace media
+while preserving size and mtime must advance the mtime or remove the relevant cache.
+
+Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
+guaranteed for the managed Windows portable and Debian/Docker profiles, whose
+identities include their selected packaged runtime lineages. Unmanaged Windows,
+Linux, and native macOS fingerprints intentionally encode only the selected Frame
+Compare contract and operating-system class; replacing native decoder or FFmpeg
+binaries outside those packaged profiles requires clearing generated caches and
+Frame Compare-owned indexes before reuse. See
+[Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
+recovery requirement.
+
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
   are excluded from every generated TOML payload
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
-  workspace root, but follows the configured `paths.generated_dir`). The full
+  workspace root, but follows the sole configured `paths.generated_dir`). The full
   fingerprint includes the selected reference identity plus an all-source
   selection-domain token. The token stores `analysis_source_path`,
   `reference_path`, source identities, source trims, effective FPS values,
@@ -173,6 +222,10 @@ Primary owned paths:
   resolved active rectangle, and the final shared selectable window.
   Cache schema v8 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
+  the scoped media-runtime analysis fingerprint through that algorithm identity. A
+  For the managed Windows portable and Debian/Docker profiles, a selected decoder
+  lineage change cannot satisfy the previous metric cache, while tone-mapping-only
+  and standalone FFmpeg changes do not invalidate metric arrays. It also stores
   `metric_active_rect`, active-rect source, detection mode, and active-rect
   resolver algorithm ID in `MetricsMetadata`. It also stores the original source
   frame count and exact inclusive/exclusive selectable metric range. Performance
@@ -195,83 +248,123 @@ Primary owned paths:
   `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
   VSPreview-confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
-  relationship, selected audio streams, and alignment settings that affect
-  computed offsets. VSPreview-confirmed entries may also retain the computed
+  relationship, selected audio streams, alignment settings that affect
+  computed offsets, and the scoped media-runtime alignment fingerprint. For the
+  managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
+  lineage change therefore misses cleanly rather than reusing offsets computed by a
+  different decoder/tool build. VSPreview-confirmed
+  entries may also retain the computed
   audio alignment result that produced the preview suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Unreadable, corrupt, unsupported-version, malformed source-table, or
+  alignment. Cache schema v1 requires a bounded scalar stability summary for computed
+  entries and embedded computed results; no per-window evidence or audio is persisted.
+  Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
   can silently return no reusable set and continue through the normal alignment
   path.
+- `<resolved paths.generated_dir>/cache/tmdb.toml`: shared low-level TMDB response
+  cache owned by `frame_compare.services.tmdb_cache`. It stores ordered normalized
+  search results and alternative-title lists, never the resolver's selected match or
+  the API key. Request keys are opaque hashes rather than plain query text. Positive
+  responses expire after 30 days, valid empty responses after 24 hours, and the cache
+  is capped at 2,000 entries and 5 MiB with deterministic oldest-first eviction.
+  Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked cache
+  state degrades to the normal network path; external request failures are not cached.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
-  run-folder reservation
-- `<run-folder>/run_info.toml`: root-level run identity metadata written
-  immediately after run-folder reservation when run folders are enabled. It
-  stores creation time, final folder name, naming source, source filenames,
-  Frame Compare version, and optional TMDB prefetch facts. It is user-facing
-  creation-time identity, not an end-of-run outcome manifest.
+  run-folder reservation. The file format remains version 1, while each probe key
+  uses key schema 2 and includes the scoped media-runtime probe fingerprint so a
+  selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
+  portable or Debian/Docker profiles misses without invalidating unrelated file-format
+  data.
+- `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
+  Compare-owned L-SMASH-Works index. The token is profile scoped (currently
+  `lsw1310-56c451f754fd` on managed/portable Windows,
+  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
+  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
+  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
+  changes. Legacy adjacent `<media>.lwi` files are ignored,
+  not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
+  failure is warned and an unusable index location falls back to a cache-free source
+  open. Generated VSPreview sessions reuse this exact owned path for reference and
+  comparison source loads, allowing L-SMASH-Works to create it there when missing.
+  The self-contained external preview child leaves rejected parent-owned indexes
+  untouched and retries only index-construction failures cache-free.
+- `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
+  immediately after every run-folder reservation. It stores creation time, final
+  folder name, naming source, source filenames, Frame Compare version, the full
+  supported media-runtime contract/fingerprints, and optional TMDB prefetch facts.
+  It is user-facing creation-time identity, not an end-of-run outcome manifest.
 - `<run-folder>/run_result.toml`: versioned V1 run outcome owned by
   `frame_compare.services.run_result_record` and written atomically only after a
-  reserved run completes or fails. It stores sanitized workspace-relative output
+  reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
   slow.pics outcome, and a sanitized typed failure when applicable. The service
-  also owns strict TOML validation, immediate-child history discovery, legacy
-  `unknown` entries, malformed-record isolation, deterministic ordering, exact
-  run-name validation, record-file/run-directory containment, and report-path
-  containment. Symlinked run-directory aliases are not history entries. It never mutates
-  `run_info.toml` or migrates legacy folders.
-- `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache when
-  run folders are enabled
-- `generated/manual_overrides.toml` or `<run-folder>/generated/manual_overrides.toml`:
-  persisted VSPreview-confirmed manual alignment overrides. These live in the
-  stable generated area when run folders are disabled and in the current run
-  folder when run folders are enabled.
+  also owns strict TOML validation, immediate-child history discovery that admits
+  only folders containing a supported result record, malformed-record isolation,
+  deterministic ordering, exact run-name validation, record-file/run-directory
+  containment, and report-path containment. Recordless folders and symlinked
+  run-directory aliases are not history entries. An unavailable selected generated
+  root raises a typed actionable history error; the service never creates a missing
+  root, falls back, or mutates `run_info.toml`.
+- `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
+- `<run-folder>/generated/manual_overrides.toml`: persisted VSPreview-confirmed
+  manual alignment overrides for the current run
 - generated VSPreview session files under the current generated/run area
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
+`frame_compare.vs.runtime_contract` is the sole component-identity owner for the
+coordinated media stack. It emits narrow analysis, probe, alignment, and index
+fingerprints plus the full deployment fingerprint. Docker and Windows portable
+declare the full fingerprint through deployment metadata; `doctor --json` compares
+the declaration with the code-owned expectation without trusting the environment
+value as authority. See [Supported Media Runtime](supported-media-runtime.md).
+
 `frame_compare.orchestration.preflight` owns hybrid path enforcement. The selected
-config file, configured config/screenshots/generated directories, and explicit report
-output resolve under the workspace root after environment expansion and symlink
-resolution; escaping paths raise `FC-3009` before config or output side effects.
+config file and configured `paths.config_dir` resolve under the workspace root after
+environment expansion and symlink resolution; escaping paths raise `FC-3009` before
+config or output side effects. The sole generated-data root is resolved once and may
+be external, while its managed descendants are checked before runtime use.
 Configured and CLI-overridden media inputs remain unrestricted read-only paths. The
 only selected-config exception is the installed Windows portable shim's exact resolved
-LocalAppData state `config.toml`; it does not extend to configured output paths or a
+LocalAppData state `config.toml`; it does not extend to generated-data paths or a
 symlinked config leaf that resolves elsewhere.
 
-`WorkspacePaths` resolves the runtime path set and can switch into run-folder mode so
-screenshots and generated files live inside a fresh directory beneath the contained
-resolved `paths.generated_dir`, never beneath an external media input. The
-analysis and shared alignment reuse caches are the exceptions:
+`WorkspacePaths` resolves the runtime path set and switches into a reserved run folder
+so screenshots and generated files live inside a fresh directory beneath the resolved
+`paths.generated_dir`, never beneath an external media input. The analysis,
+shared alignment reuse, and TMDB response caches are the exceptions:
 `WorkspacePaths.cache_dir` and `WorkspacePaths.shared_analysis_cache_dir` remain
 the shared workspace-level `<resolved paths.generated_dir>/cache/analysis` path,
 and `WorkspacePaths.shared_alignment_cache_dir` remains the shared
-workspace-level `<resolved paths.generated_dir>/cache/alignment` path, even after
-`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run
-folder.
+workspace-level `<resolved paths.generated_dir>/cache/alignment` path. The
+`WorkspacePaths.shared_tmdb_cache_path` file remains at
+`<resolved paths.generated_dir>/cache/tmdb.toml`. All three stay shared after
+`with_run_dir()` moves `generated_dir` and `screenshots_dir` into a fresh run folder.
 
-When `paths.use_run_folders = true`, normal runs and cache-only runs that proceed
-reserve a fresh run folder beneath the resolved `paths.generated_dir`. Existing run
-folders are not reused for analysis cache
+Normal runs and cache-only runs that proceed reserve a fresh run folder beneath the
+resolved `paths.generated_dir`. Existing run folders are not reused for analysis cache
 hits. Screenshots, slow.pics upload inputs, manual overrides, and VSPreview
 artifacts remain scoped to the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache
 so future `--from-cache-only` runs can validate the exact all-source analysis
-selection domain before metadata prefetch or run-folder reservation. Configured
-`report.output_dir` continues to own report placement; only fallback report
-placement follows the screenshot/current run output location.
+selection domain before metadata prefetch or run-folder reservation. Report generation
+receives the explicit canonical `<run-folder>/report.html` path from post-render
+orchestration; no report-specific output directory or fallback placement exists.
 
 Run-folder names are title-first and capped at 64 characters for Windows path
 headroom. The base name comes from resolved TMDB title/year, common parsed
 metadata, combined filename stems, or `unnamed_run`. Exact timestamps are not
 part of folder names; collisions use compact numeric suffixes such as `_2` and
 `_3`, then a short random suffix if bounded numeric claiming cannot reserve a
-directory. The exact creation time lives in `<run-folder>/run_info.toml`, which is
-written before probing, rendering, or other runtime-heavy work. If that write
-fails, the run fails immediately and cleanup attempts to remove the empty
-reserved directory as best effort.
+directory. Preparation validates the reserved immediate-child path and completes
+the `WorkspacePaths` transition before writing metadata. The exact creation time
+then lives in `<run-folder>/run_info.toml`, which is written before probing,
+rendering, or other runtime-heavy work. If reservation validation, the workspace
+transition, or the metadata write fails, the run fails immediately and cleanup
+attempts to remove the empty reserved directory as best effort.
 
 Preparation reports the reserved `WorkspacePaths` through an internal dependency
 capture immediately after `run_info.toml` succeeds, without changing the
@@ -282,19 +375,26 @@ exception unchanged. Completed-run record failures add a stable warning and do
 not change successful media work into failure.
 
 The align phase uses a typed orchestration-to-services request seam:
-`frame_compare.orchestration.phase_tasks.run_align_phase()` builds a
+`frame_compare.orchestration.phase_alignment.run_align_phase()` builds a
 `frame_compare.utils.types.AlignmentRequest` for
 `frame_compare.services.alignment`. The request carries current-run generated
 state, the workspace-level shared alignment cache path, reference/comparison
 labels, source identity facts, trims, effective FPS values, selected reference
 relationship, selected audio streams, cache-identity settings, and preserved
-frame props. These cache-identity DTOs use layer-neutral primitives or
+frame props. Orchestration also supplies presentation-only common-content and
+per-source display strings as optional primitives for the reuse prompt; alignment
+services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
-precedence, while `frame_compare.services.alignment_previous_offsets` owns
+precedence and carries diagnostic-only stability summaries without allowing them to
+change the applied constant offset or trims. `alignment_correlation` converts its raw
+correlation lag into the signed `reference source frame - comparison source frame`
+contract before consensus results reach hints, caches, or trim calculation. Immutable
+orchestration alignment state carries that summary to warning and human-report owners
+without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
 previous-offset reuse policy. Exact-match computed audio alignment cache hits are
 treated as deterministic and can be reused independently of the human
 confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed
@@ -340,7 +440,8 @@ Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata` remains the facade owner;
   `frame_compare.services.tmdb_resolution` owns resolver policy and
-  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping
+  `frame_compare.services.tmdb_lookup` owns low-level TMDB HTTP and response mapping,
+  while `frame_compare.services.tmdb_cache` owns bounded durable response reuse
 - publishing: `frame_compare.services.publishers`
 - slow.pics post-upload shortcut/webhook policy and action aggregation:
   `frame_compare.services.slowpics_post_upload`
@@ -355,8 +456,8 @@ Keep these integrations at their current owners:
 - isolated slow.pics post-upload webhook delivery:
   `frame_compare.services.slowpics_webhook`
 - HTML report generation: `frame_compare.services.report`
-- VS loading, non-destructive adjacent L-SMASH index recovery, and HDR/tonemap
-  logic: `frame_compare.vs.*`
+- VS loading, runtime-versioned Frame Compare-owned L-SMASH-Works index recovery,
+  and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
 The default Docker behavior is intentionally narrower than the native Windows
@@ -371,8 +472,8 @@ Current Docker owner seams for optional profiles remain explicit:
 
 - `docker-compose.yml`: default headless software-Vulkan services, including a
   configuration-writable `frame-compare-wizard` setup service and a
-  configuration-read-only `frame-compare-run` service with persistent screenshot
-  and generated-output mounts
+  configuration-read-only `frame-compare-run` service with the single persistent
+  generated-data mount
 - `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
 - `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
 - `tools/verify_docker_integration.sh`: canonical default Docker gate
@@ -396,9 +497,9 @@ manual Linux desktop action outside the default Docker verification gate.
 The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser
 behavior. Instead, it runs on the host, translates only the default compose
-mounts `/workspace/screenshots` -> `./screenshots` and `/workspace/generated` ->
-`./generated`, rejects `/workspace/config` and `/workspace/comparison_videos`,
-and allows remote opening only for explicit `https://slow.pics/...` URLs.
+mount `/workspace/generated` -> `./generated`, rejects `/workspace/config`,
+`/workspace/comparison_videos`, and the removed `/workspace/screenshots` output
+root, and allows remote opening only for explicit `https://slow.pics/...` URLs.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
@@ -408,7 +509,11 @@ retry/idempotency handling, and advance a nested image-count progress task after
 each completed upload. `frame_compare.services.slowpics_upload_plan` owns the
 explicit upload-plan seam for current render artifacts, row/image names, and
 upload ordering; the final upload path uses that plan and does not scan the
-screenshot directory for membership. After a successful upload, orchestration
+screenshot directory for membership. Orchestration carries canonical clip labels as
+local screenshot lookup keys while assigning exact explicit labels or unique release
+descriptors as remote image names. Collection metadata, row names, membership,
+ordering, and multipart construction remain owned by their existing seams. After a
+successful upload, orchestration
 carries the exact uploaded planned local file paths into `post_report_cleanup`
 and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
@@ -447,12 +552,10 @@ The existing non-confirmed rule remains: an attempted slow.pics browser open
 suppresses generated-report auto-open for that run.
 
 `frame_compare.services.slowpics_shortcut` owns deterministic `.url` output for
-successful slow.pics uploads. It selects the current run folder when present, or
-the safe common parent of the resolved screenshots/generated directories when
-run folders are disabled. The service rejects unsafe parent choices outside the
-workspace root, filesystem anchors, drive/share roots, and the user home
-directory; filename selection is deterministic and repeated writes overwrite the
-same path. Filename selection consumes the single final resolved upload title;
+successful slow.pics uploads. It selects the current reserved run folder and rejects
+missing or escaped run aliases before writing. Filename selection is deterministic
+and repeated writes overwrite the same path. Filename selection consumes the single
+final resolved upload title;
 it does not independently fall back through metadata or screenshot directories.
 
 `frame_compare.services.slowpics_webhook` owns isolated outbound webhook
@@ -470,12 +573,14 @@ Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.
 
-`frame_compare.cli.entry` and its run-command helper own interactive-only
-slow.pics URL copy/browser actions and the precedence rule between slow.pics
-browser opening and generated-report auto-open. Those actions run only for
-human, non-quiet, TTY stdout runs; JSON stdout stays a single object.
-The same CLI owner presents the local report and asks for confirmation in the
-report-confirmed workflow before post-upload URL actions are considered.
+`frame_compare.cli.entry` and `frame_compare.cli.run_command` own run-command
+coordination, interactive-only slow.pics URL copy/browser actions, and the
+precedence rule between slow.pics browser opening and generated-report auto-open.
+Those actions run only for human, non-quiet, TTY stdout runs; JSON stdout stays a
+single object. The same CLI owner presents the local report and asks for
+confirmation in the report-confirmed workflow before post-upload URL actions are
+considered. `frame_compare.cli.run_contracts` owns validation policy for public
+run-mode combinations before orchestration begins.
 
 `frame_compare.cli.wizard_command` owns the interactive goal-oriented config editor,
 while `frame_compare.cli.wizard_policy` owns its typed code-defined frame-selection
@@ -492,9 +597,37 @@ assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; an inspector drawer with Frame, Clips, Align, Review, and
-Export tabs; fullscreen support; viewport pan, zoom, actual/width/height fit, reveal,
-and adjacent-frame preloading.
+filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Align,
+Review, and Export tabs; fullscreen support; viewport pan, zoom,
+actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
+CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
+reflows them to two rows and a narrow stack without JavaScript measurement or DOM
+reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
+native document and filmstrip scrolling; the selected filmstrip item owns its roving
+tab stop. Custom view-mode, fit, timeline-size, and lens-option radio groups use
+standard arrow and Home/End selection. The header Help dialog is the single persistent
+shortcut reference; the timeline is the final visible report region. One responsive
+Inspector width token owns both desktop drawer width and
+stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
+zero.
+
+Report payload v1.2 carries one orchestration-built, presentation-only display profile
+per clip. `phase_post_render` reuses prepared release identities, explicit-label
+provenance, shared formatters, stable roles, and set-level collision handling once per
+report. Report controls consume control or micro names, while Inspector/info and ARIA
+surfaces consume primary identity and exact filename. Canonical clip labels continue
+to own image mappings, geometry, browser state, and review JSON; payload identity
+shaping explicitly omits display profiles.
+
+The Clips inspector composes those profiles into stable Reference/Comparison cards.
+Primary and informative release identities wrap normally, exact filenames and long
+technical values may wrap anywhere, and drawer/panel overflow is constrained locally
+rather than masked at the document boundary.
+Visible Single, Slider, Diff, Blink, and Grid HUD labels reuse the payload's canonical
+container byte size through the shared IEC formatter; hiding the HUD hides that size
+with the source label, and no report payload or probing owner is duplicated.
+Stage labels participate directly in accessible text, while Grid cell names retain
+primary identity and exact filename and append the same size only while the HUD is shown.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report
@@ -542,10 +675,29 @@ presentation, and visible-range controls. It consumes the viewer's single viewpo
 state while exposing visible image entries to the lens rather than duplicating either. In
 Grid mode the shared pan fields represent normalized image-box translation and each
 cell derives its CSS-pixel transform from its own contained image dimensions; the
-viewer converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
+viewport owner converts those fields at the Grid/pair-mode boundary so mixed-aspect cells keep
 one normalized viewport center without changing pair-mode persistence semantics.
 
 #### Review State And Viewer Composition
+
+`assets/viewer_format.js` is the dependency-free owner for clip display profiles,
+exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
+active-picture labels, mode names, and stable clip roles. It does not read the DOM,
+storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
+open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
+Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
+activation through the root viewer. Hidden Inspectors update only visibility and tab
+semantics; opening refreshes their content before focus moves into the drawer.
+
+`assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
+normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
+pair-alignment normalization and offsets, and Lens/Grid viewport refreshes. It mutates
+the root viewer's canonical state and routes persistence back through the root; it does
+not create a second state or storage owner. The owner holds an explicit reference to
+the root viewer rather than inheriting the root prototype, and consumers call the
+Viewport owner directly instead of relying on a root forwarding facade. The root
+continues to register events, route shortcuts and mode/source/frame transitions, and
+sequence rendering.
 
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
@@ -555,9 +707,9 @@ created on first visible Review use, keeps form rendering stable across unrelate
 refreshes, and routes transition announcements through the existing shared polite live
 region. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
-`assets/viewer.js` caches the Review DOM and composes that focused controller with the
-other owners and the existing mode,
-pointer, viewport, alignment, and inspector state rather than owning duplicate
+`assets/viewer.js` caches the Review DOM and composes those focused owners with the
+existing canonical report, mode, viewport, alignment, and Inspector state
+rather than owning duplicate Inspector rendering/focus policy or
 coordinate conversions
 or grid mount policy. Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
@@ -597,6 +749,12 @@ static geometry inference; render does not sample content. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
+The render batch scheduler treats each clip as one production work unit and runs at
+most two clip units at once. Compatible ordered FFmpeg requests within a clip use one
+decode pass; VapourSynth, custom-runner, and non-PNG frames within one clip render
+sequentially while a second clip may overlap. Results remain in request order, and
+overlay/color processing is unchanged. Nested screenshot progress advances after each
+serialized frame completes, or for all FFmpeg frames when their batch completes.
 
 Runtime ownership matrix:
 
@@ -615,8 +773,9 @@ Runtime ownership matrix:
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
-| VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
+| VSPreview availability, launch adapter, VSJetPack compatibility bootstrap, and managed-Windows media-runtime preload | `frame_compare.vspreview.adapter`, `frame_compare.vspreview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
+| Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
 | Doctor check ordering, categories, and check implementations | `frame_compare.orchestration.doctor_checks` |
 | Doctor diagnostic DTOs | `frame_compare.orchestration.doctor_types` |

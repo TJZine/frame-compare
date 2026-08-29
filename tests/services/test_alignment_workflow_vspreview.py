@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from frame_compare.services.alignment import align_clips
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
@@ -24,6 +24,28 @@ from frame_compare.vspreview.overrides import (
     load_manual_overrides,
     save_manual_override,
 )
+from tests.services.alignment_request_test_support import alignment_request
+
+
+def _run_alignment(
+    reference: Path,
+    comparisons: list[Path],
+    config: AlignmentConfig,
+    generated_dir: Path,
+    *,
+    reference_fps: Fraction | None = None,
+) -> list[AlignmentResult]:
+    request = alignment_request(
+        reference=reference,
+        comparisons=comparisons,
+        config=config,
+        generated_dir=generated_dir,
+    )
+    return align_clips_from_request(
+        request,
+        config,
+        reference_fps=reference_fps,
+    )
 
 
 def _write_manual_override_offset(
@@ -61,7 +83,7 @@ def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) 
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_launches_vspreview_when_enabled(
+def test_alignment_launches_vspreview_when_enabled(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -71,7 +93,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """When configured, align_clips should generate/launch a VSPreview verification session."""
+    """When configured, alignment should generate/launch a VSPreview verification session."""
     _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
@@ -92,7 +114,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=False)
-    align_clips(ref, [comp_a, comp_b], config, tmp_path)
+    _run_alignment(ref, [comp_a, comp_b], config, tmp_path)
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
@@ -111,7 +133,7 @@ def test_align_clips_launches_vspreview_when_enabled(
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_rejected_computed_result_passes_none_hint_to_vspreview(
+def test_alignment_rejected_computed_result_passes_none_hint_to_vspreview(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -147,7 +169,7 @@ def test_align_clips_rejected_computed_result_passes_none_hint_to_vspreview(
     )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
-    results = align_clips(
+    results = _run_alignment(
         ref,
         [comp],
         AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
@@ -170,7 +192,7 @@ def test_align_clips_rejected_computed_result_passes_none_hint_to_vspreview(
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-def test_align_clips_full_manual_override_still_launches_vspreview_when_enabled(
+def test_alignment_full_manual_override_still_launches_vspreview_when_enabled(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -203,7 +225,7 @@ def test_align_clips_full_manual_override_still_launches_vspreview_when_enabled(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 12
@@ -217,7 +239,7 @@ def test_align_clips_full_manual_override_still_launches_vspreview_when_enabled(
 
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
+def test_alignment_force_interactive_raises_when_vspreview_unavailable(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -246,14 +268,14 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
         cache_results=True,
     )
     with pytest.raises(AudioAlignmentError, match="Interactive alignment requested"):
-        align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+        _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     mock_launch.assert_not_called()
 
 
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_vspreview_unavailable_generates_script_without_launch(
+def test_alignment_vspreview_unavailable_generates_script_without_launch(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -277,7 +299,7 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+    _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
@@ -297,7 +319,7 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
         ("108 120\n", -12),
     ],
 )
-def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
+def test_alignment_vspreview_confirmed_offset_is_saved_and_applied(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -326,7 +348,7 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
     )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
-    results = align_clips(
+    results = _run_alignment(
         ref,
         [comp],
         AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
@@ -345,7 +367,7 @@ def test_align_clips_vspreview_confirmed_offset_is_saved_and_applied(
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_align_clips_vspreview_confirm_skip_confirm_keeps_prior_and_later_offsets(
+def test_alignment_vspreview_confirm_skip_confirm_keeps_prior_and_later_offsets(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -378,7 +400,7 @@ def test_align_clips_vspreview_confirm_skip_confirm_keeps_prior_and_later_offset
     )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
-    results = align_clips(
+    results = _run_alignment(
         ref,
         [zeta, alpha, mid],
         AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
@@ -397,7 +419,7 @@ def test_align_clips_vspreview_confirm_skip_confirm_keeps_prior_and_later_offset
 @patch("frame_compare.services.alignment_vspreview.log.warning")
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_optional_vspreview_probe_failure_generates_script_without_launch(
+def test_alignment_optional_vspreview_probe_failure_generates_script_without_launch(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
@@ -423,7 +445,7 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 7
@@ -439,7 +461,7 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
 
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_force_interactive_launches_when_vspreview_available(
+def test_alignment_force_interactive_launches_when_vspreview_available(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -471,7 +493,7 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
         force_interactive=True,
         cache_results=True,
     )
-    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 3
@@ -482,7 +504,7 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
 
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
+def test_alignment_force_interactive_probe_failure_raises_alignment_error(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -512,7 +534,7 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
         cache_results=True,
     )
     with pytest.raises(AudioAlignmentError, match=r"availability probe failed \(RuntimeError\)"):
-        align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+        _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     mock_launch.assert_not_called()
 
@@ -520,7 +542,7 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
 @patch("frame_compare.services.alignment_vspreview.log.warning")
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
+def test_alignment_vspreview_errors_are_warning_only_when_not_forced(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
@@ -545,7 +567,7 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     mock_launch.side_effect = VSPreviewError("launch exited with code 7")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 1
@@ -558,7 +580,7 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
 
 @patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_align_clips_vspreview_errors_raise_when_force_interactive(
+def test_alignment_vspreview_errors_raise_when_force_interactive(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -595,4 +617,4 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
         cache_results=True,
     )
     with pytest.raises(VSPreviewError, match="launch exited with code 7"):
-        align_clips(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+        _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from frame_compare.services.report.category_display import (
     humanize_category,
     label_repeats_category,
 )
-from frame_compare.services.report.payload import REPORT_VERSION
 from frame_compare.services.report.viewer import get_css, get_js
 
 ALL_CATEGORY_FILTER_KEY = "__fc_all__"
@@ -45,6 +45,19 @@ def _safe_http_href(url: str | None) -> str | None:
     return _esc_attr(url)
 
 
+def _object_mapping(value: object) -> Mapping[str, object]:
+    """Narrow dynamic payload values without allowing untyped data inward."""
+    if isinstance(value, Mapping):
+        return cast(Mapping[str, object], value)
+    return {}
+
+
+def _render_tone_curve(value: object) -> str:
+    curves = {"bt2390": "BT.2390", "reinhard": "Reinhard", "spline": "Spline"}
+    normalized = str(value).lower()
+    return curves.get(normalized, normalized.replace("_", " "))
+
+
 def _json_for_script_tag(data: ReportPayload) -> str:
     """Serialize JSON safely for embedding inside a <script> tag.
 
@@ -63,7 +76,7 @@ def _render_frame_options(
         f'<option value="{_esc_attr(i)}" '
         f'data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" '
         f'data-category="{_esc_attr(frame["category"])}">'
-        f"{_esc_text(frame['label'])}</option>"
+        f"{_esc_text(_frame_filmstrip_label(frame))}</option>"
         for i, frame in enumerate(frames)
     )
 
@@ -71,16 +84,31 @@ def _render_frame_options(
 def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int | None) -> str:
     if selected_index is None:
         return "".join(
-            f'<option value="{_esc_attr(i)}">{_esc_text(clip["label"])}</option>'
+            f'<option value="{_esc_attr(i)}" title="{_esc_attr(_clip_accessible_name(clip))}">'
+            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
             for i, clip in enumerate(clips)
         )
     options: list[str] = []
     for i, clip in enumerate(clips):
         selected_attr = " selected" if i == selected_index else ""
         options.append(
-            f'<option value="{_esc_attr(i)}"{selected_attr}>{_esc_text(clip["label"])}</option>'
+            f'<option value="{_esc_attr(i)}"{selected_attr} '
+            f'title="{_esc_attr(_clip_accessible_name(clip))}">'
+            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
         )
     return "".join(options)
+
+
+def _clip_display(
+    clip: ReportClipPayload, profile: Literal["primary", "release", "control", "micro"]
+) -> str:
+    return clip["display"][profile]
+
+
+def _clip_accessible_name(clip: ReportClipPayload) -> str:
+    primary = _clip_display(clip, "primary")
+    filename = clip["display"]["filename"]
+    return f"{primary} — {filename}" if filename else primary
 
 
 def _clip_index_or_default(value: object, *, clip_count: int, fallback: int) -> int:
@@ -169,7 +197,7 @@ def _render_filmstrip(
     include_filmstrip: bool,
     category_filter_keys: dict[str, str],
 ) -> str:
-    first_clip_label = clips[0]["label"] if clips else "Clip"
+    first_clip_label = _clip_display(clips[0], "primary") if clips else "Clip"
     items = (
         "".join(
             f"""
@@ -214,9 +242,9 @@ def _render_bottom_panel(
         </div>
         <div class="rv-filmstrip-controls">
             <div class="rv-filmstrip-size-control" role="radiogroup" aria-label="Filmstrip size">
-                <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false"{disabled_attr}>Compact</button>
+                <button type="button" data-filmstrip-size="compact" role="radio" aria-checked="false" tabindex="-1"{disabled_attr}>Compact</button>
                 <button type="button" data-filmstrip-size="normal" class="active" role="radio" aria-checked="true"{disabled_attr}>Normal</button>
-                <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false"{disabled_attr}>Large</button>
+                <button type="button" data-filmstrip-size="large" role="radio" aria-checked="false" tabindex="-1"{disabled_attr}>Large</button>
             </div>
             <button id="btn-filmstrip-toggle" type="button" aria-expanded="{aria_expanded}" aria-label="{aria_label}" title="{title}"{disabled_attr}>{expanded_label}</button>
         </div>
@@ -233,9 +261,64 @@ def _render_fps(fps: float) -> str:
     return f"{fps:g} fps"
 
 
+def _render_tonemap_summary(rendering: object) -> str:
+    """Render the concise archival tonemap summary from raw payload values."""
+    rendering_map = _object_mapping(rendering)
+    tonemap_map = _object_mapping(rendering_map.get("tonemap"))
+    if not tonemap_map.get("applied"):
+        return "Not applied"
+    settings_map = _object_mapping(tonemap_map.get("settings"))
+    if not settings_map:
+        return "Applied"
+    preset = str(settings_map.get("preset", "")).replace("_", " ").title()
+    curve = _render_tone_curve(settings_map.get("tone_curve", ""))
+    target = settings_map.get("target_nits")
+    parts = [part for part in (preset, curve) if part]
+    summary = " · ".join(parts)
+    if target is not None and summary:
+        return f"{summary} · {target} nits"
+    return summary or "Applied"
+
+
+def _render_tonemap_details(rendering: object) -> str:
+    """Render raw effective tonemap settings into an accessible details list."""
+    rendering_map = _object_mapping(rendering)
+    tonemap_map = _object_mapping(rendering_map.get("tonemap"))
+    settings_map = _object_mapping(tonemap_map.get("settings"))
+    if not settings_map:
+        return ""
+    labels = (
+        ("dynamic_peak_detection", "Dynamic peak detection"),
+        ("contrast_recovery", "Contrast recovery"),
+        ("gamma_lift", "Gamma lift"),
+        ("source_peak", "Source peak"),
+        ("dst_min_nits", "Destination minimum"),
+        ("knee_offset", "Knee offset"),
+        ("smoothing_period", "Smoothing period"),
+        ("percentile", "Percentile"),
+        ("scene_threshold_low", "Scene threshold low"),
+        ("scene_threshold_high", "Scene threshold high"),
+        ("gamut_mapping", "Gamut mapping"),
+        ("metadata", "Metadata mode"),
+        ("use_dovi", "Dolby Vision metadata use"),
+    )
+    rows: list[str] = []
+    for key, label in labels:
+        value = settings_map.get(key)
+        if value is None:
+            value_text = "Auto" if key == "source_peak" else None
+        elif isinstance(value, bool):
+            value_text = "On" if value else "Off"
+        else:
+            value_text = str(value)
+        if value_text is not None:
+            rows.append(f"<div><dt>{_esc_text(label)}</dt><dd>{_esc_text(value_text)}</dd></div>")
+    return "".join(rows)
+
+
 def _clip_label_for_index(clips: list[ReportClipPayload], index: int) -> str:
     if 0 <= index < len(clips):
-        return clips[index]["label"]
+        return _clip_display(clips[index], "control")
     return f"Clip {index + 1}"
 
 
@@ -270,15 +353,24 @@ def _render_info_modal(
 
     clip_items: list[str] = []
     for i, clip in enumerate(clips):
-        hdr_tag = "HDR" if clip["hdr"] else "SDR"
+        signal = clip.get("signal") or {}
+        hdr_tag = "HDR" if signal.get("is_hdr", False) else "SDR"
+        primary = _clip_display(clip, "primary")
+        release = _clip_display(clip, "release")
+        release_html = (
+            f'<div class="rv-clip-meta-release">{_esc_text(release)}</div>'
+            if release and release != primary and not primary.endswith(f"| {release}")
+            else ""
+        )
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
-            f"<span>{_esc_text(clip['label'])}</span>"
+            f"<span>{_esc_text(primary)}</span>"
             f"<span>{hdr_tag}</span>"
             f"</div>"
+            f"{release_html}"
             f'<dl class="rv-metadata-list">'
-            f"<div><dt>Name</dt><dd>{_esc_text(clip['name'])}</dd></div>"
+            f"<div><dt>Filename</dt><dd>{_esc_text(clip['display']['filename'])}</dd></div>"
             f"<div><dt>Resolution</dt><dd>{_render_resolution(clip['resolution'])}</dd></div>"
             f"<div><dt>FPS</dt><dd>{_render_fps(clip['fps'])}</dd></div>"
             f"<div><dt>Frames</dt><dd>{clip['frame_count']}</dd></div>"
@@ -290,6 +382,25 @@ def _render_info_modal(
         if clip_items
         else '<div class="rv-metadata-empty">No clips in payload.</div>'
     )
+    rendering = data.get("rendering")
+    tonemap_summary = _render_tonemap_summary(rendering)
+    advanced_rows = _render_tonemap_details(rendering)
+    advanced_details = (
+        f"""<details class="rv-tonemap-details" data-rendering-details>
+                        <summary>Advanced tonemap settings</summary>
+                        <dl class="rv-metadata-list">{advanced_rows}</dl>
+                    </details>"""
+        if advanced_rows
+        else ""
+    )
+    rendering_section = f"""
+                <div class="rv-info-section">
+                    <h3>Rendering</h3>
+                    <dl class="rv-metadata-list rv-rendering-summary">
+                        <div><dt>Tonemap</dt><dd data-rendering-tonemap-summary>{_esc_text(tonemap_summary)}</dd></div>
+                    </dl>
+                    {advanced_details}
+                </div>"""
 
     return f"""    <div id="info-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="info-modal-title" tabindex="-1">
         <div class="rv-modal-content rv-modal-content--wide">
@@ -312,6 +423,7 @@ def _render_info_modal(
                     <h3>Clips</h3>
                     {clip_list_html}
                 </div>
+                {rendering_section}
             </div>
             <div class="rv-modal-actions rv-modal-actions--spacious">
                 <button id="btn-close-info">Close</button>
@@ -327,6 +439,7 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
+    inspector_button = '<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)"><span class="rv-btn-icon">☷</span></button>'
     info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info"><span class="rv-btn-icon">ℹ</span></button>'
     help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)"><span class="rv-btn-icon">?</span></button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
@@ -336,7 +449,7 @@ def _render_header(
                 <div class="rv-meta">Generated {_esc_text(generated_at)} • {frame_count} frames • {clip_count} clips</div>
             </div>
             <div class="rv-header-right">
-                {slowpics_block}{info_button} {help_button}
+                {slowpics_block}{inspector_button} {info_button} {help_button}
             </div>
         </header>"""
 
@@ -358,21 +471,22 @@ def _render_controls(
             <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
         </div>
 
-        <div class="rv-control-group" role="radiogroup" aria-label="View mode">
+        <div class="rv-control-group rv-mode-controls" role="radiogroup" aria-label="View mode">
             <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S)">Slider</button>
-            <button data-mode="overlay" role="radio" aria-checked="false" aria-label="Single clip view" title="Single clip view (O)">Single</button>
-            <button data-mode="diff" role="radio" aria-checked="false" aria-label="Difference mode" title="Difference (D)">Diff</button>
-            <button data-mode="blink" role="radio" aria-checked="false" aria-label="Blink mode" title="Blink (B)">Blink</button>
-            <button data-mode="grid" role="radio" aria-checked="false" aria-label="Grid mode" title="Grid comparison">Grid</button>
+            <button data-mode="overlay" role="radio" aria-checked="false" tabindex="-1" aria-label="Single clip view" title="Single clip view (O)">Single</button>
+            <button data-mode="diff" role="radio" aria-checked="false" tabindex="-1" aria-label="Difference mode" title="Difference (D)">Diff</button>
+            <button data-mode="blink" role="radio" aria-checked="false" tabindex="-1" aria-label="Blink mode" title="Blink (B)">Blink</button>
+            <button data-mode="grid" role="radio" aria-checked="false" tabindex="-1" aria-label="Grid mode" title="Grid comparison">Grid</button>
         </div>
 
-        <div class="rv-control-group rv-grid-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
+        <div class="rv-context-zone">
+        <div class="rv-control-group rv-grid-controls rv-context-controls" data-control-scope="grid" aria-label="Grid clips" hidden>
             <button id="btn-grid-prev" type="button" aria-label="Previous grid clips">←</button>
             <span class="rv-grid-position" data-grid-position aria-live="off"></span>
             <button id="btn-grid-next" type="button" aria-label="Next grid clips">→</button>
         </div>
 
-        <div class="rv-control-group" data-control-scope="pair" aria-label="Comparison pair">
+        <div class="rv-control-group rv-context-controls" data-control-scope="pair" aria-label="Comparison pair">
             <span class="rv-clip-prefix left">L:</span>
             <select id="left-select" aria-label="Left clip">
                 {left_clip_options}
@@ -385,13 +499,14 @@ def _render_controls(
             </select>
         </div>
 
-        <div class="rv-control-group" data-control-scope="active" aria-label="Single clip" hidden>
+        <div class="rv-control-group rv-context-controls" data-control-scope="active" aria-label="Single clip" hidden>
             <span class="rv-clip-prefix active">Clip:</span>
             <select id="active-select" aria-label="Single clip">
                 {active_clip_options}
             </select>
         </div>
         <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite">Aligned: none</div>
+        </div>
         </div>
     </div>"""
 
@@ -401,17 +516,17 @@ def _render_lens_settings() -> str:
             <fieldset>
                 <legend>Size</legend>
                 <div class="rv-lens-setting-options" role="radiogroup" aria-label="Lens size">
-                    <button type="button" role="radio" data-lens-size="small" aria-checked="false">Small</button>
+                    <button type="button" role="radio" data-lens-size="small" aria-checked="false" tabindex="-1">Small</button>
                     <button type="button" role="radio" data-lens-size="medium" aria-checked="true">Medium</button>
-                    <button type="button" role="radio" data-lens-size="large" aria-checked="false">Large</button>
+                    <button type="button" role="radio" data-lens-size="large" aria-checked="false" tabindex="-1">Large</button>
                 </div>
             </fieldset>
             <fieldset>
                 <legend>Sample marker</legend>
                 <div class="rv-lens-setting-options" role="radiogroup" aria-label="Sample marker style">
                     <button type="button" role="radio" data-lens-marker="off" aria-checked="true">Off</button>
-                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="false">Ring</button>
-                    <button type="button" role="radio" data-lens-marker="brackets" aria-checked="false">Brackets</button>
+                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="false" tabindex="-1">Ring</button>
+                    <button type="button" role="radio" data-lens-marker="brackets" aria-checked="false" tabindex="-1">Brackets</button>
                 </div>
             </fieldset>
             <div data-lens-comparison-settings hidden>
@@ -444,8 +559,8 @@ def _render_viewport_palette() -> str:
 
         <div class="rv-palette-group" role="radiogroup" aria-label="Fit mode">
             <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size (1:1)">1:1</button>
-            <button data-fit="width" role="radio" aria-checked="false" aria-label="Fit width" title="Fit width (↔)">↔</button>
-            <button data-fit="height" role="radio" aria-checked="false" aria-label="Fit height" title="Fit height (↕)">↕</button>
+            <button data-fit="width" role="radio" aria-checked="false" tabindex="-1" aria-label="Fit width" title="Fit width (↔)">↔</button>
+            <button data-fit="height" role="radio" aria-checked="false" tabindex="-1" aria-label="Fit height" title="Fit height (↕)">↕</button>
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
@@ -517,10 +632,10 @@ def _render_stage() -> str:
                 <img src="" alt="" class="rv-image">
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
-            <div class="rv-stage-labels" aria-hidden="true">
-                <div id="label-left" class="rv-overlay-label"></div>
-                <div id="label-right" class="rv-overlay-label right"></div>
-            </div>
+        </div>
+        <div class="rv-stage-labels">
+            <div id="label-left" class="rv-overlay-label"></div>
+            <div id="label-right" class="rv-overlay-label right"></div>
         </div>
         <span id="rv-lens-target" class="rv-lens-target" aria-hidden="true" hidden><i></i><i></i><i></i><i></i></span>
         <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
@@ -580,6 +695,10 @@ def _render_inspector() -> str:
                 <div><dt>Detail</dt><dd data-inspector-frame-detail></dd></div>
                 <div><dt>Shown</dt><dd data-inspector-frame-position></dd></div>
             </dl>
+            <div class="rv-inspector-source-group" data-inspector-source-group>
+                <h3>Source frames</h3>
+                <ol class="rv-inspector-source-list" data-inspector-source-frames></ol>
+            </div>
         </section>
         <section id="inspector-panel-clips" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-clips" tabindex="-1" hidden>
             <ol class="rv-inspector-clip-list" data-inspector-clips></ol>
@@ -680,13 +799,8 @@ def _render_help_modal() -> str:
     </div>"""
 
 
-def _render_footer(json_str: str) -> str:
-    return f"""    <footer class="rv-footer">
-        <div>Frame Compare v{REPORT_VERSION}</div>
-        <div>Use arrow keys to navigate • S/O/D/B to change mode</div>
-    </footer>
-
-    <script type="application/json" id="report-data">{json_str}</script>
+def _render_scripts(json_str: str) -> str:
+    return f"""    <script type="application/json" id="report-data">{json_str}</script>
     <script>{get_js()}</script>"""
 
 
@@ -753,7 +867,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         left_clip_index=left_clip_index,
         right_clip_index=right_clip_index,
     )
-    footer_html = _render_footer(json_str)
+    scripts_html = _render_scripts(json_str)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -773,6 +887,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
 {modal_html}
 {info_modal_html}
 {bottom_panel}
-{footer_html}
+{scripts_html}
 </body>
 </html>"""

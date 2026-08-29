@@ -8,8 +8,8 @@ from typing import Literal
 
 from rich.console import Console
 from rich.markup import escape
-from rich.table import Table
 
+from frame_compare.cli.output import format_display_path
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.errors import (
@@ -121,6 +121,7 @@ class DryRunPlan:
     outputs: DryRunOutputs
     publishing: DryRunPublishing
     runtime_facts: DryRunRuntimeFacts
+    workspace_root: Path
     checks_not_performed: tuple[str, ...] = CHECKS_NOT_PERFORMED
 
 
@@ -174,14 +175,10 @@ def build_dry_run_plan(
         )
         if active
     )
-    run_folder_fact = (
-        DryRunRuntimeFact(
-            status="unknown",
-            value=None,
-            reason="resolved during run-folder reservation",
-        )
-        if config.paths.use_run_folders
-        else DryRunRuntimeFact(status="known", value=None, reason=None)
+    run_folder_fact = DryRunRuntimeFact(
+        status="unknown",
+        value=None,
+        reason="resolved during run-folder reservation",
     )
 
     return DryRunPlan(
@@ -206,7 +203,7 @@ def build_dry_run_plan(
         ),
         outputs=DryRunOutputs(
             screenshots=True,
-            run_folders=config.paths.use_run_folders,
+            run_folders=True,
             report=config.report.enable,
             report_auto_open_configured=config.report.auto_open,
         ),
@@ -236,6 +233,7 @@ def build_dry_run_plan(
                 reason="requires media probing and render planning",
             ),
         ),
+        workspace_root=root,
     )
 
 
@@ -286,80 +284,204 @@ def dry_run_plan_json(plan: DryRunPlan) -> dict[str, object]:
     }
 
 
-def print_dry_run_plan(console: Console, plan: DryRunPlan, *, quiet: bool) -> None:
+def print_dry_run_plan(
+    console: Console,
+    plan: DryRunPlan,
+    *,
+    quiet: bool,
+) -> None:
     """Render the typed plan for a human without performing planned actions."""
     if quiet:
+        source_label = "source file" if len(plan.input.source_filenames) == 1 else "source files"
         console.print(
-            f"Dry run: {len(plan.input.source_filenames)} source files; no side effects performed."
+            f"Dry run: {len(plan.input.source_filenames)} {source_label}; "
+            "no side effects performed."
         )
         return
 
-    table = Table(title="Dry-run plan", show_header=False)
-    table.add_column("Field", style="cyan")
-    table.add_column("Value")
-    table.add_row("input", escape(str(plan.input.resolved_directory)))
-    table.add_row("sources", escape(", ".join(plan.input.source_filenames)))
-    table.add_row(
-        "reference",
-        escape(f"{plan.reference.configured_selector} -> {plan.reference.resolved_filename}"),
+    console.print(
+        "[bold]No side effects:[/] this dry run validates configuration and input "
+        "filenames only; it does not write, render, upload, or open anything."
     )
-    table.add_row("selection", ", ".join(plan.selection.strategy))
-    table.add_row(
-        "requested user frames",
-        ", ".join(str(frame) for frame in plan.selection.requested_user_frames) or "none",
-    )
-    table.add_row(
-        "selection counts",
+    _print_section(
+        console,
+        "Will use",
         (
-            f"user={len(plan.selection.requested_user_frames)}, "
-            f"random={plan.selection.random_frame_count}, "
-            f"dark={plan.selection.dark_frame_count}, "
-            f"bright={plan.selection.bright_frame_count}, "
-            f"motion={plan.selection.motion_frame_count}"
+            (
+                "Workspace",
+                str(plan.workspace_root),
+            ),
+            (
+                "Input directory",
+                format_display_path(
+                    plan.input.resolved_directory,
+                    root=plan.workspace_root,
+                ),
+            ),
+            (
+                f"Sources ({len(plan.input.source_filenames)})",
+                ", ".join(plan.input.source_filenames),
+            ),
+            (
+                "Reference",
+                f"{plan.reference.configured_selector} -> {plan.reference.resolved_filename}",
+            ),
+            (
+                "Frame selection",
+                ", ".join(_selection_label(name) for name in plan.selection.strategy)
+                or "configured defaults",
+            ),
+            (
+                "Specific frames",
+                ", ".join(str(frame) for frame in plan.selection.requested_user_frames) or "none",
+            ),
+            (
+                "Frame counts",
+                (
+                    f"specific={len(plan.selection.requested_user_frames)}, "
+                    f"random={plan.selection.random_frame_count}, "
+                    f"dark={plan.selection.dark_frame_count}, "
+                    f"bright={plan.selection.bright_frame_count}, "
+                    f"motion={plan.selection.motion_frame_count}"
+                ),
+            ),
+            (
+                "Analysis",
+                f"{plan.selection.analysis_performance_mode} mode; "
+                f"metrics {'required' if plan.selection.analysis_metrics_required else 'not required'}; "
+                f"random seed {plan.selection.random_seed}",
+            ),
         ),
     )
-    table.add_row("random seed", str(plan.selection.random_seed))
-    table.add_row("analysis mode", plan.selection.analysis_performance_mode)
-    table.add_row(
-        "analysis metrics required",
-        "yes" if plan.selection.analysis_metrics_required else "no",
-    )
-    table.add_row(
-        "outputs",
+    _print_section(
+        console,
+        "Would create in a real run",
         (
-            f"screenshots=yes, run folders={'yes' if plan.outputs.run_folders else 'no'}, "
-            f"report={'yes' if plan.outputs.report else 'no'}, "
-            "report auto-open configured="
-            f"{'yes' if plan.outputs.report_auto_open_configured else 'no'}"
+            ("Screenshots", _yes_no(plan.outputs.screenshots)),
+            ("Run folder", _yes_no(plan.outputs.run_folders)),
+            ("Offline report", _yes_no(plan.outputs.report)),
+            (
+                "Open report after success",
+                _configured_when_enabled(
+                    parent_enabled=plan.outputs.report,
+                    configured=plan.outputs.report_auto_open_configured,
+                ),
+            ),
         ),
     )
-    table.add_row(
-        "publishing",
+    _print_section(
+        console,
+        "Publishing after success",
         (
-            f"slow.pics={'yes' if plan.publishing.slowpics_upload else 'no'}, "
-            f"visibility={plan.publishing.slowpics_visibility}, "
-            "configured after upload: "
-            f"clipboard={'yes' if plan.publishing.copy_url_to_clipboard_configured else 'no'}, "
-            f"browser={'yes' if plan.publishing.open_in_browser_configured else 'no'}, "
-            f"shortcut={'yes' if plan.publishing.create_url_shortcut_configured else 'no'}, "
-            f"webhook={'yes' if plan.publishing.webhook_configured else 'no'}"
+            (
+                "slow.pics upload",
+                f"{_enabled_disabled(plan.publishing.slowpics_upload)}; "
+                f"visibility {plan.publishing.slowpics_visibility}",
+            ),
+            (
+                "Copy URL to clipboard",
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.copy_url_to_clipboard_configured,
+                ),
+            ),
+            (
+                "Open the published URL",
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.open_in_browser_configured,
+                ),
+            ),
+            (
+                "Create a URL shortcut",
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.create_url_shortcut_configured,
+                ),
+            ),
+            (
+                "Send a webhook notification",
+                _configured_when_enabled(
+                    parent_enabled=plan.publishing.slowpics_upload,
+                    configured=plan.publishing.webhook_configured,
+                ),
+            ),
         ),
     )
-    table.add_row(
-        "run folder name",
-        _runtime_fact_human(plan.runtime_facts.run_folder_name),
+    _print_section(
+        console,
+        "Unknown until execution",
+        (
+            ("Run folder name", _runtime_fact_human(plan.runtime_facts.run_folder_name)),
+            (
+                "Final selected frames",
+                _runtime_fact_human(plan.runtime_facts.final_selected_frames),
+            ),
+            ("Clip metadata", _runtime_fact_human(plan.runtime_facts.clip_metadata)),
+            (
+                "Output dimensions",
+                _runtime_fact_human(plan.runtime_facts.output_dimensions),
+            ),
+        ),
     )
-    table.add_row(
-        "final selected frames",
-        _runtime_fact_human(plan.runtime_facts.final_selected_frames),
-    )
-    table.add_row("clip metadata", _runtime_fact_human(plan.runtime_facts.clip_metadata))
-    table.add_row(
-        "output dimensions",
-        _runtime_fact_human(plan.runtime_facts.output_dimensions),
-    )
-    table.add_row("checks not performed", ", ".join(plan.checks_not_performed))
-    console.print(table)
+    console.print()
+    console.print("[bold]Not performed by dry-run[/]")
+    for check in plan.checks_not_performed:
+        console.print(f"  - {_human_check(check)}")
+
+
+def _print_section(
+    console: Console,
+    title: str,
+    rows: tuple[tuple[str, str], ...],
+) -> None:
+    console.print()
+    console.print(f"[bold]{title}[/]")
+    for label, value in rows:
+        console.print(f"  {label}: {escape(value)}")
+
+
+def _selection_label(name: str) -> str:
+    return {
+        "user": "specific frames",
+        "random": "random frames",
+        "dark": "dark frames",
+        "bright": "bright frames",
+        "motion": "motion frames",
+    }.get(name, name.replace("_", " "))
+
+
+def _human_check(name: str) -> str:
+    return {
+        "doctor": "runtime readiness checks",
+        "ffprobe_or_ffmpeg": "FFmpeg and ffprobe checks",
+        "media_probe": "media probing",
+        "analysis": "frame analysis",
+        "alignment": "audio alignment",
+        "cache_reads_or_writes": "cache reads and writes",
+        "run_folder_reservation_or_metadata_writes": "run-folder reservation and metadata writes",
+        "render_or_report_generation": "screenshot rendering and report generation",
+        "network_publishing_or_metadata": "network metadata lookup and publishing",
+        "browser_clipboard_or_vspreview": "browser, clipboard, and VSPreview actions",
+    }.get(name, name.replace("_", " "))
+
+
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _enabled_disabled(value: bool) -> str:
+    return "enabled" if value else "disabled"
+
+
+def _configured(value: bool) -> str:
+    return "configured" if value else "not configured"
+
+
+def _configured_when_enabled(*, parent_enabled: bool, configured: bool) -> str:
+    if not parent_enabled:
+        return "not applicable"
+    return _configured(configured)
 
 
 def _runtime_fact_json(fact: DryRunRuntimeFact) -> dict[str, object]:
@@ -374,5 +496,7 @@ def _runtime_fact_human(fact: DryRunRuntimeFact) -> str:
     if fact.status == "known":
         return "known: none" if fact.value is None else f"known: {fact.value}"
     if fact.reason is None:
-        return "unknown"
-    return f"unknown ({fact.reason})"
+        return "not available yet"
+    if fact.reason.startswith("requires "):
+        return f"not available before {fact.reason.removeprefix('requires ')}"
+    return f"not available yet ({fact.reason})"

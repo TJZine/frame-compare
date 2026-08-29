@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from frame_compare.render.geometry import GeometryMargins, GeometryRect, RenderGeometryPlan
@@ -60,7 +61,14 @@ def build_extract_frame_argv(
     """Build the canonical FFmpeg argv for single-frame extraction."""
     if frame_num < 0:
         raise ValueError("frame_num must be non-negative")
-    filters = [f"select=eq(n\\,{frame_num})", *_geometry_filters(geometry_plan)]
+    # showinfo must inspect the selected source frame before any geometry filter.
+    # Keeping it in this extraction process means the diagnostic fact and image
+    # share the same decode/selection operation.
+    filters = [
+        f"select=eq(n\\,{frame_num})",
+        "showinfo=checksum=0",
+        *_geometry_filters(geometry_plan),
+    ]
 
     argv = ["ffmpeg"]
     if overwrite:
@@ -76,6 +84,54 @@ def build_extract_frame_argv(
             "-q:v",
             "1",
             str(output),
+        ]
+    )
+    return argv
+
+
+def build_extract_frames_argv(
+    *,
+    video: Path,
+    frame_nums: Sequence[int],
+    output_pattern: Path,
+    overwrite: bool,
+    geometry_plan: RenderGeometryPlan | None = None,
+) -> list[str]:
+    """Build FFmpeg argv for one-pass extraction of ordered exact frames."""
+    if not frame_nums:
+        raise ValueError("frame_nums must not be empty")
+    if any(frame_num < 0 for frame_num in frame_nums):
+        raise ValueError("frame_nums must be non-negative")
+    if any(
+        current >= following for current, following in zip(frame_nums, frame_nums[1:], strict=False)
+    ):
+        raise ValueError("frame_nums must be strictly increasing")
+
+    selector = "+".join(f"eq(n\\,{frame_num})" for frame_num in frame_nums)
+    filters = [
+        f"select={selector}",
+        "showinfo=checksum=0",
+        *_geometry_filters(geometry_plan),
+    ]
+
+    argv = ["ffmpeg"]
+    if overwrite:
+        argv.append("-y")
+    argv.extend(
+        [
+            "-i",
+            str(video),
+            "-vf",
+            ",".join(filters),
+            "-fps_mode",
+            "passthrough",
+            "-frames:v",
+            str(len(frame_nums)),
+            "-q:v",
+            "1",
+            "-start_number",
+            "0",
+            str(output_pattern),
         ]
     )
     return argv

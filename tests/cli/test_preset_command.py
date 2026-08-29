@@ -8,11 +8,13 @@ from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
 from frame_compare.config.errors import ConfigNotFoundError
 
-from .cli_helpers import MINIMAL_CONFIG, _write_minimal_config, runner
+from .cli_helpers import MINIMAL_CONFIG, _write_minimal_config, isolated_cli_filesystem, runner
 
 
-def test_preset_apply_missing_preset_exits_with_error_code() -> None:
-    with runner.isolated_filesystem():
+def test_preset_apply_missing_preset_exits_with_error_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path(".")
         config_path = _write_minimal_config(root)
         result = runner.invoke(
@@ -32,8 +34,10 @@ def test_preset_apply_missing_preset_exits_with_error_code() -> None:
         assert "FC-1004" in result.stderr
 
 
-def test_preset_apply_invalid_name_exits_with_error_code() -> None:
-    with runner.isolated_filesystem():
+def test_preset_apply_invalid_name_exits_with_error_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path(".")
         config_path = _write_minimal_config(root)
         result = runner.invoke(
@@ -53,8 +57,8 @@ def test_preset_apply_invalid_name_exits_with_error_code() -> None:
         assert "FC-1006" in result.stderr
 
 
-def test_preset_list_stub():
-    with runner.isolated_filesystem():
+def test_preset_list_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
@@ -67,8 +71,8 @@ def test_preset_list_stub():
         assert result.stderr == ""
 
 
-def test_preset_apply_stub():
-    with runner.isolated_filesystem():
+def test_preset_apply_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,8 +95,8 @@ def test_preset_apply_stub():
         assert data["analysis"]["random_frame_count"] == 12
 
 
-def test_preset_save_stub():
-    with runner.isolated_filesystem():
+def test_preset_save_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +117,7 @@ def test_preset_save_stub():
 def test_preset_config_writes_reject_external_config_before_load_or_write(
     operation: str,
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _unexpected(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("external config must be rejected before load or write")
@@ -122,7 +127,7 @@ def test_preset_config_writes_reject_external_config_before_load_or_write(
     monkeypatch.setattr("frame_compare.cli.entry.apply_preset", _unexpected)
     monkeypatch.setattr("frame_compare.cli.entry.save_preset", _unexpected)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         root.mkdir()
         external_config = (Path("outside") / "config.toml").resolve()
@@ -149,8 +154,9 @@ def test_preset_config_writes_reject_external_config_before_load_or_write(
 def test_preset_config_writes_allow_exact_windows_portable_state_config(
     operation: str,
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         root.mkdir()
         portable_config = Path("portable-state") / "config.toml"
@@ -191,14 +197,15 @@ def test_preset_config_writes_allow_exact_windows_portable_state_config(
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])
-def test_preset_config_writes_preserve_relative_report_output(operation: str) -> None:
-    with runner.isolated_filesystem():
+def test_preset_config_rejects_removed_report_output_directory(
+    operation: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            MINIMAL_CONFIG + '\n[report]\noutput_dir = "reports/custom"\n',
-            encoding="utf-8",
+            MINIMAL_CONFIG + '\n[report]\noutput_dir = "reports/custom"\n', encoding="utf-8"
         )
         if operation == "apply":
             presets_dir = root / "config" / "presets"
@@ -221,17 +228,16 @@ def test_preset_config_writes_preserve_relative_report_output(operation: str) ->
             ],
         )
 
-        assert result.exit_code == 0
-        persisted_path = (
-            config_path if operation == "apply" else root / "config" / "presets" / "demo.toml"
-        )
-        persisted = tomllib.loads(persisted_path.read_text(encoding="utf-8"))
-        assert persisted["report"]["output_dir"] == "reports/custom"
+        assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+        assert result.stdout == ""
+        assert "Extra inputs are not permitted" in result.stderr
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])
-def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
-    with runner.isolated_filesystem():
+def test_preset_config_writes_preserve_external_generated_root(
+    operation: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +245,12 @@ def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
             MINIMAL_CONFIG.replace('generated_dir = "generated"', 'generated_dir = "../../out"'),
             encoding="utf-8",
         )
+        if operation == "apply":
+            (root / "config" / "presets").mkdir(parents=True, exist_ok=True)
+            (root / "config" / "presets" / "demo.toml").write_text(
+                "[analysis]\nrandom_frame_count = 10\n",
+                encoding="utf-8",
+            )
         result = runner.invoke(
             app,
             [
@@ -252,16 +264,20 @@ def test_preset_config_writes_reject_loaded_path_escape(operation: str) -> None:
             ],
         )
 
-        assert result.exit_code == int(ExitCode.INPUT_ERROR)
-        assert "FC-3009" in result.stderr
-        assert not (root / "config" / "presets" / "demo.toml").exists()
+        assert result.exit_code == 0
+        persisted_path = (
+            config_path if operation == "apply" else root / "config" / "presets" / "demo.toml"
+        )
+        persisted = tomllib.loads(persisted_path.read_text(encoding="utf-8"))
+        assert persisted["paths"]["generated_dir"] == "../../out"
 
 
-def test_preset_apply_rejects_path_escape_added_by_preset_before_config_write() -> None:
-    with runner.isolated_filesystem():
+def test_preset_apply_preserves_external_generated_root_added_by_preset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
-        original = config_path.read_text(encoding="utf-8")
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
         (presets_dir / "escape.toml").write_text(
@@ -282,13 +298,15 @@ def test_preset_apply_rejects_path_escape_added_by_preset_before_config_write() 
             ],
         )
 
-        assert result.exit_code == int(ExitCode.INPUT_ERROR)
-        assert "FC-3009" in result.stderr
-        assert config_path.read_text(encoding="utf-8") == original
+        assert result.exit_code == 0
+        persisted = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert persisted["paths"]["generated_dir"] == "../../out"
 
 
-def test_preset_list_prints_names_sorted_case_insensitive() -> None:
-    with runner.isolated_filesystem():
+def test_preset_list_prints_names_sorted_case_insensitive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         presets_dir = root / "config" / "presets"
         presets_dir.mkdir(parents=True, exist_ok=True)
@@ -302,8 +320,10 @@ def test_preset_list_prints_names_sorted_case_insensitive() -> None:
         assert result.stderr == ""
 
 
-def test_preset_list_uses_root_presets_even_when_config_path_is_nondefault() -> None:
-    with runner.isolated_filesystem():
+def test_preset_list_uses_root_presets_even_when_config_path_is_nondefault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -374,13 +394,14 @@ def test_preset_list_error_uses_default_terminal_color_policy(
 
 def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv(
         "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
         "https://discord.com/api/webhooks/env-id/env-secret",
     )
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,13 +429,14 @@ def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
 
 def test_preset_save_write_error_uses_cli_error_contract(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
         raise PermissionError("permission denied")
 
     monkeypatch.setattr("frame_compare.config.presets.write_text_atomic", _write_text_atomic)
 
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "config" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -434,13 +456,14 @@ def test_preset_save_write_error_uses_cli_error_contract(
 
 def test_preset_apply_updates_config_and_strips_webhook_secret(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setenv(
         "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
         "https://discord.com/api/webhooks/env-id/env-secret",
     )
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = root / "configs" / "config.toml"
         config_path.parent.mkdir(parents=True, exist_ok=True)

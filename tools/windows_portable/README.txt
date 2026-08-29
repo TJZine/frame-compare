@@ -24,6 +24,13 @@ NOTES:
     When .\config\config.toml exists in the bundle, the installed `frame-compare`
     command uses it before the AppData fallback config. Source clips can go under
     .\comparison_videos\.
+  - The default generated-data location is .\generated\. Use the wizard's
+    "Generated data location" prompt to select a normal folder outside the bundle
+    when reports, screenshots, run state, and caches must survive bundle replacement.
+    Run diagnostics, execution, and history use the same selected location. The
+    installed updater, rollback, reinstall, and uninstall never manage that
+    external data. A moved bundle can change cache identity for source clips moved
+    with it because their source paths changed.
   - For source builds (`tools\windows_portable\install-from-source.cmd`), use:
       .\dist\frame-compare-portable-win-x64\
     as the bundle root (not the repository root).
@@ -107,6 +114,9 @@ RELEASE SIGNING (Maintainers):
         WINDOWS_UPDATE_SIGNING_KEY_XML repository secret contains the private key XML.
 
   Unsigned zips are for local/dev only and require unsafe confirmation in the updater.
+  That confirmation never bypasses the media-runtime fingerprint boundary: a
+  code-only update with a missing, legacy, malformed, or different native runtime
+  fingerprint is refused and requires a complete portable bundle reinstall.
 
 THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:

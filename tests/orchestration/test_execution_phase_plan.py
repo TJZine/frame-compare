@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
-from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
+from frame_compare.analysis.types import (
+    FrameMetrics,
+    MetricsMetadata,
+    SelectionBreakdown,
+    SelectionDetail,
+)
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration.context import RunContext
@@ -15,13 +21,13 @@ from frame_compare.orchestration.execution import (
 )
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
+    AnalyzePhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
-    RenderArtifacts,
     RenderPhaseOutput,
     RunArtifacts,
 )
@@ -30,6 +36,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
+from .phase_task_helpers import _render_artifacts
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
@@ -38,6 +45,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -46,6 +54,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     )
 
     config = ConfigSchema()
+    config.slowpics.confirm_upload_after_report = False
     config.analysis = config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 1}
     )
@@ -97,6 +106,7 @@ def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_up
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -144,6 +154,7 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -209,6 +220,7 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -246,12 +258,68 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
     assert ctx.selection_details_by_source_frame == details
 
 
+def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    state = ExecutionState(artifacts=RunArtifacts(warnings=["preflight warning"]))
+    stale_warning = "frame selection: dropped user frame(s) outside trims/windowing: 4"
+
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=FramePlanPhaseOutput(selected_frames=[20], warnings=[stale_warning]),
+    )
+    apply_phase_output(
+        ctx=ctx,
+        state=state,
+        output=AnalyzePhaseOutput(
+            selected_frames=[4, 20],
+            selection_breakdown=SelectionBreakdown(user=[4], random=[20]),
+            metrics_cache_hit=False,
+            analysis_metrics=FrameMetrics(
+                luminance=[0.5],
+                motion=[0.0],
+                metadata=MetricsMetadata(
+                    frame_count=1,
+                    fps=Fraction(24, 1),
+                    config_fingerprint="test",
+                    clips=[],
+                ),
+            ),
+            warnings=["accepted override warning"],
+            replaces_frame_plan_selection=True,
+        ),
+    )
+
+    assert state.selected_frames == [4, 20]
+    assert state.warnings == ["preflight warning", "accepted override warning"]
+    assert state.frame_plan_warnings == []
+
+
 def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
     from frame_compare.orchestration.execution_types import ReportPhaseOutput
 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -284,6 +352,7 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -334,6 +403,7 @@ def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -370,6 +440,7 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -386,11 +457,11 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
         screenshot_dir=tmp_path / "screenshots",
-        warnings=["Screenshot geometry alignment skipped: using native geometry."],
     )
+    render.warnings.append("Screenshot geometry alignment skipped: using native geometry.")
 
     apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
 
@@ -405,6 +476,7 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
@@ -452,6 +524,7 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",

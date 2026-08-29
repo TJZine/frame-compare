@@ -24,7 +24,7 @@ _SAFE_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
 _SLOWPICS_COMPARISON_PATH = re.compile(r"^/c/[A-Za-z0-9_-]+$")
 
 type RunStatus = Literal["completed", "completed_with_warnings", "failed"]
-type HistoryStatus = RunStatus | Literal["unknown", "unavailable"]
+type HistoryStatus = RunStatus | Literal["unavailable"]
 type FailureCategory = Literal[
     "configuration", "dependency", "input", "processing", "network", "internal"
 ]
@@ -177,13 +177,13 @@ def _nonnegative_float(value: object, field: str) -> float:
 
 def _relative_path(value: object, field: str) -> str:
     if not isinstance(value, str) or not value or "\\" in value:
-        raise ValueError(f"{field} must be a workspace-relative POSIX path")
+        raise ValueError(f"{field} must be a run-folder-relative POSIX path")
+    if any(segment in ("", ".", "..") for segment in value.split("/")):
+        raise ValueError(f"{field} contains an unsafe path segment")
     path = Path(value)
     windows = PureWindowsPath(value)
     if path.is_absolute() or windows.is_absolute() or windows.drive:
         raise ValueError(f"{field} must be relative")
-    if any(part in ("", ".", "..") for part in path.parts):
-        raise ValueError(f"{field} contains an unsafe path segment")
     return path.as_posix()
 
 
@@ -207,12 +207,16 @@ def _slowpics_url(value: object) -> str:
     return value
 
 
-def _safe_relative_path(path: Path | None, root: Path) -> str | None:
-    if path is None:
+def _safe_relative_path(path: Path | None, run_dir: Path | None) -> str | None:
+    """Return a safe artifact path relative to its owning run folder."""
+    if path is None or run_dir is None:
         return None
     try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
-    except (OSError, ValueError):
+        relative = path.resolve().relative_to(run_dir.resolve())
+        if not relative.parts:
+            return None
+        return _relative_path(relative.as_posix(), "artifact_path")
+    except (OSError, RuntimeError, ValueError):
         return None
 
 
@@ -281,8 +285,8 @@ def completed_record(
         started_at=utc_started_at,
         completed_at=utc_completed_at,
         duration_seconds=duration,
-        report_path=_safe_relative_path(facts.report_path, workspace.root),
-        screenshot_dir=_safe_relative_path(facts.screenshot_dir, workspace.root),
+        report_path=_safe_relative_path(facts.report_path, workspace.run_dir),
+        screenshot_dir=_safe_relative_path(facts.screenshot_dir, workspace.run_dir),
         clip_count=max(0, facts.clip_count),
         selected_frame_count=max(0, facts.selected_frame_count),
         warning_count=warning_count,
@@ -326,12 +330,12 @@ def failed_record(
         phase_timings={key: max(0.0, value) for key, value in sorted(timings.items())},
         slowpics_outcome="uploaded" if safe_url is not None else "not_uploaded",
         report_path=(
-            _safe_relative_path(effective_facts.report_path, workspace.root)
+            _safe_relative_path(effective_facts.report_path, workspace.run_dir)
             if workspace is not None
             else None
         ),
         screenshot_dir=(
-            _safe_relative_path(effective_facts.screenshot_dir, workspace.root)
+            _safe_relative_path(effective_facts.screenshot_dir, workspace.run_dir)
             if workspace is not None
             else None
         ),
@@ -519,10 +523,41 @@ def read_run_result(path: Path) -> RunResultRecord:
         return parse_run_result(tomllib.load(handle))
 
 
-def _report_path(record: RunResultRecord, workspace_root: Path) -> Path | None:
+def _report_path(record: RunResultRecord, run_dir: Path) -> Path | None:
     if record.report_path is None:
         return None
-    return workspace_root.resolve() / record.report_path
+    if record.report_path != "report.html":
+        return None
+    return _contained_regular_file(run_dir / record.report_path, run_dir)
+
+
+_HISTORY_ROOT_HINT = (
+    "Reconnect the selected generated-data location, correct its permissions, or "
+    "choose another paths.generated_dir."
+)
+
+
+def _history_root_unavailable(root: Path) -> HistoryAccessError:
+    """Build the actionable error for an unavailable selected history root."""
+    return HistoryAccessError(
+        f"Configured generated-data history root is unavailable: {root}",
+        _HISTORY_ROOT_HINT,
+    )
+
+
+def _require_history_root(generated_root: Path) -> Path:
+    """Resolve and verify the configured history root without creating it."""
+    try:
+        root = generated_root.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise _history_root_unavailable(generated_root) from exc
+    try:
+        root.stat()
+        if not root.is_dir():
+            raise NotADirectoryError(root)
+    except (OSError, RuntimeError) as exc:
+        raise _history_root_unavailable(root) from exc
+    return root
 
 
 def _contained_regular_file(path: Path, owner_dir: Path) -> Path:
@@ -536,33 +571,14 @@ def _contained_regular_file(path: Path, owner_dir: Path) -> Path:
     return resolved
 
 
-def _legacy_started_at(run_dir: Path) -> datetime | None:
-    try:
-        path = _contained_regular_file(run_dir / "run_info.toml", run_dir)
-        with path.open("rb") as handle:
-            payload = tomllib.load(handle)
-        return _parse_utc(cast(dict[str, object], payload).get("created_at"), "created_at")
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
-        return None
-
-
 def _history_entry(
     run_dir: Path,
-    workspace_root: Path,
-    generated_root: Path,
-) -> HistoryEntry:
+) -> HistoryEntry | None:
     record_path = run_dir / RUN_RESULT_FILENAME
     try:
         record_path.lstat()
     except FileNotFoundError:
-        return HistoryEntry(
-            run_dir.name,
-            "unknown",
-            _legacy_started_at(run_dir),
-            None,
-            None,
-            False,
-        )
+        return None
     except OSError:
         return HistoryEntry(
             run_dir.name,
@@ -575,16 +591,15 @@ def _history_entry(
         )
     try:
         record = read_run_result(_contained_regular_file(record_path, run_dir))
-        report = _report_path(record, workspace_root)
+        report = None
+        if record.report_path is not None:
+            try:
+                report = _report_path(record, run_dir)
+            except (OSError, RuntimeError, ValueError):
+                report = None
         available = False
         if report is not None:
-            try:
-                resolved_report = report.resolve(strict=True)
-                available = (
-                    resolved_report.is_relative_to(generated_root) and resolved_report.is_file()
-                )
-            except (OSError, RuntimeError):
-                available = False
+            available = True
         return HistoryEntry(
             run_dir.name,
             record.status,
@@ -606,29 +621,18 @@ def _history_entry(
         )
 
 
-def list_history(workspace_root: Path, generated_root: Path) -> list[HistoryEntry]:
+def list_history(generated_root: Path) -> list[HistoryEntry]:
     """List contained immediate run-folder children newest first."""
-    root = generated_root.resolve()
-    try:
-        root.stat()
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise HistoryAccessError(
-            "Run history could not be accessed.",
-            "Check permissions for the configured generated directory.",
-        ) from exc
+    root = _require_history_root(generated_root)
     try:
         children = list(root.iterdir())
-    except OSError as exc:
-        raise HistoryAccessError(
-            "Run history could not be listed.",
-            "Check permissions for the configured generated directory.",
-        ) from exc
+    except (OSError, RuntimeError) as exc:
+        raise _history_root_unavailable(root) from exc
     entries: list[HistoryEntry] = []
     for child in children:
         if (
             child.is_symlink()
+            or child.is_junction()
             or child.name == "cache"
             or any(ord(character) < 32 or ord(character) == 127 for character in child.name)
         ):
@@ -651,7 +655,9 @@ def list_history(workspace_root: Path, generated_root: Path) -> list[HistoryEntr
                     )
                 )
             continue
-        entries.append(_history_entry(resolved, workspace_root, root))
+        entry = _history_entry(resolved)
+        if entry is not None:
+            entries.append(entry)
     entries.sort(key=lambda entry: entry.name)
     entries.sort(
         key=lambda entry: (
@@ -678,16 +684,18 @@ def resolve_run_directory(generated_root: Path, run_name: str) -> Path:
         raise HistoryAccessError(
             "Run name is invalid.", "Use an exact folder name shown by 'history list'."
         )
-    root = generated_root.resolve()
+    root = _require_history_root(generated_root)
     candidate = root / run_name
     try:
-        if candidate.is_symlink():
+        if candidate.is_symlink() or candidate.is_junction():
             raise ValueError("symlinked run directories are not history entries")
         resolved = candidate.resolve(strict=True)
-    except OSError as exc:
+    except FileNotFoundError as exc:
         raise HistoryAccessError(
             "Run was not found.", "Use an exact folder name shown by 'history list'."
         ) from exc
+    except OSError as exc:
+        raise _history_root_unavailable(root) from exc
     except ValueError as exc:
         raise HistoryAccessError(
             "Run is outside the configured history directory.",
@@ -706,7 +714,7 @@ def resolve_run_directory(generated_root: Path, run_name: str) -> Path:
     return resolved
 
 
-def resolve_history_report(workspace_root: Path, generated_root: Path, run_name: str) -> Path:
+def resolve_history_report(generated_root: Path, run_name: str) -> Path:
     """Resolve a valid record's report and enforce generated-root containment."""
     run_dir = resolve_run_directory(generated_root, run_name)
     try:
@@ -724,14 +732,20 @@ def resolve_history_report(workspace_root: Path, generated_root: Path, run_name:
         raise HistoryOpenError(
             "This run has no recorded report.", "Enable report generation for a future run."
         )
-    root = generated_root.resolve()
     try:
-        report = (workspace_root.resolve() / record.report_path).resolve(strict=True)
+        report = _report_path(record, run_dir)
+        if report is None:
+            raise ValueError("recorded report is not the canonical run-root report")
     except (OSError, RuntimeError) as exc:
         raise HistoryOpenError(
             "The recorded report is missing.", "Check whether generated files were moved."
         ) from exc
-    if not report.is_relative_to(root) or not report.is_file():
+    except ValueError as exc:
+        raise HistoryOpenError(
+            "The recorded report is outside the configured history directory.",
+            "Open that report directly only if you trust its location.",
+        ) from exc
+    if not report.is_file():
         raise HistoryOpenError(
             "The recorded report is outside the configured history directory.",
             "Open that report directly only if you trust its location.",

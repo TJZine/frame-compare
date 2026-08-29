@@ -3,6 +3,24 @@ from frame_compare.services.metadata import parse_filename
 from frame_compare.services.types import ParsedMetadata
 
 
+def test_guessit_dependency_parses_supported_episode_filename() -> None:
+    result = metadata_parsing.parse_filename(
+        "Example.Show.S02E03.Episode.Title.1080p.WEB-DL-GROUP.mkv",
+        parser_priority="guessit",
+        alternate_policy="fallback",
+    )
+
+    assert result == ParsedMetadata(
+        title="Example Show",
+        season=2,
+        episode=3,
+        episode_title="Episode Title",
+        release_group="GROUP",
+        source="Web",
+        resolution="1080p",
+    )
+
+
 def test_metadata_parsing_direct_module_merges_guessit_and_anitopy_fallback(mocker) -> None:
     """Direct parser module keeps primary fields while filling missing alternate fields."""
     mocker.patch(
@@ -164,7 +182,7 @@ def test_metadata_parsing_fallback_policy_rejects_malformed_primary_fields(mocke
         return {
             "anime_title": {"unexpected": "mapping"},
             "anime_episode": True,
-            "release_group": ["unexpected"],
+            "release_group": {"unexpected": "mapping"},
         }
 
     def fake_guessit(_filename: str) -> dict[str, object]:

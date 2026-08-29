@@ -1,122 +1,31 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "bundle": {
     "platform": "windows",
     "arch": "x64",
-    "vs_ref": "R76",
-    "python_version": "3.13.13",
+    "vs_ref": "R79",
+    "python_version": "3.13.15",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins plus VAPOURSYNTH_EXTRA_PLUGIN_PATH",
-    "notes": "Baseline bundle pins for deterministic Windows portable distribution. Users may BYO newer deps best-effort. BtbN retains end-of-month builds for 2 years and daily builds for only 14 days; always pin FFmpeg to an end-of-month autobuild tag."
+    "notes": "Deterministic Windows media runtime contract. Native media components are not present in code-only update ZIPs; installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
+    "runtime_fingerprints": {
+      "analysis": "312f6703ff00e5f518f6c768d74bbe30c17fd07ee5f7079b71aec0f78e7ca039",
+      "probe": "2165b8dd875be09a5631f612a683c32106b65f74398db6eec68e37839e471c77",
+      "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
+      "index": "56c451f754fda35c6f39c1ec4d698e596b580660ca08c6cf40f45114d15a7e1c",
+      "full": "2c043dabb96a4ad68d51fa46eff7504f9200fe781fe2705a6cbb384d13c18974"
+    }
   },
   "artifacts": [
     {
-      "id": "python-embed-amd64",
-      "name": "Python embeddable package (amd64)",
-      "version": "3.13.13",
-      "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
-      "source_url": "https://www.python.org/ftp/python/3.13.13/Python-3.13.13.tgz",
-      "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55",
-      "bytes": 10950201,
-      "license": {
-        "spdx": "Python-2.0",
-        "url": "https://docs.python.org/3/license.html"
-      },
-      "install": {
-        "type": "extract",
-        "destination": "python"
-      }
-    },
-    {
-      "id": "vapoursynth-portable-r76",
-      "name": "VapourSynth 64-bit portable",
-      "version": "R76",
-      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R76/VapourSynth64-Portable-R76.zip",
-      "source_url": "https://github.com/vapoursynth/vapoursynth/archive/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7.tar.gz",
-      "sha256": "db41537f3eb3f92fe1ff92ae59b4728129199e2afe3ba3b93d8527b46a7ba30c",
-      "bytes": 15000063,
-      "license": {
-        "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER",
-        "files": [
-          {
-            "path": "licenses/common/LGPL-2.1.txt",
-            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER"
-          }
-        ]
-      },
-      "install": {
-        "type": "extract",
-        "destination": "vs/core"
-      },
-      "notes": "Archive carries the R76 Windows wheel used by the builder; plugin installation follows the R74+ wheel plugin directory and VAPOURSYNTH_EXTRA_PLUGIN_PATH model."
-    },
-    {
-      "id": "vs-plugin-lsmas-1282",
-      "name": "L-SMASH Works (VapourSynth plugin)",
-      "version": "1282.0.0.0",
-      "url": "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/download/1282/L-SMASH-Works-r1282.0.0.0.7z",
-      "source_url": "https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/archive/0079a06ee384061ecdadd0de03df4e0493dd56ab.tar.gz",
-      "sha256": "704b97db3d74667d13d4fa2a5cd94e36f885cd0158366efa1b8e43bf9e426bd7",
-      "bytes": 29754280,
-      "license": {
-        "spdx": "ISC AND LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/LICENSE",
-        "files": [
-          {
-            "path": "licenses/lsmash-works/VapourSynth-LICENSE.txt",
-            "sha256": "2e1252454a8fcc24144ce94173d6cf90cc7a10954007efd4a2a0f58eec4c73cb",
-            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/0079a06ee384061ecdadd0de03df4e0493dd56ab/VapourSynth/LICENSE"
-          },
-          {
-            "path": "licenses/common/LGPL-2.1.txt",
-            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/aa7e83a0aaf87477b5e0fc13c5b97c5aa15a06b7/COPYING.LESSER"
-          }
-        ]
-      },
-      "install": {
-        "type": "copy_file",
-        "source_path": "x64/LSMASHSource.dll",
-        "destination": "vs/extra-plugins/lsmas/libvslsmashsource.dll",
-        "manifest": "libvslsmashsource"
-      },
-      "notes": "Installed into VAPOURSYNTH_EXTRA_PLUGIN_PATH with manifest.vs so R75+ optimized plugin loading can stop recursive DLL probing."
-    },
-    {
-      "id": "vs-plugin-vs-placebo-2.0.2-win-amd64-wheel",
-      "name": "vs-placebo (VapourSynth plugin wheel)",
-      "version": "2.0.2",
-      "url": "https://files.pythonhosted.org/packages/a2/50/db34253e55e082ca7d0632b264fc042b6afb7474ed4b936b3a297f190749/vs_placebo-2.0.2-py3-none-win_amd64.whl",
-      "source_url": "https://github.com/Lypheo/vs-placebo/archive/ccb4beac9080510f2eb830d948449392e2e5c34a.tar.gz",
-      "sha256": "5a08511dc9feaa48a76373e5e8869bef0d4a6c2096607f92364e6a72ce975f94",
-      "bytes": 6136385,
-      "license": {
-        "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/ccb4beac9080510f2eb830d948449392e2e5c34a/COPYING",
-        "files": [
-          {
-            "path": "licenses/common/LGPL-2.1.txt",
-            "sha256": "6f702d94a2ee265b2b80d9b1215dbdbad34a89c04532aec1088a2831018737dd",
-            "source_url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/ccb4beac9080510f2eb830d948449392e2e5c34a/COPYING"
-          }
-        ]
-      },
-      "install": {
-        "type": "python_wheel"
-      },
-      "notes": "PyPI wheel installs libvs_placebo.dll under site-packages/vapoursynth/plugins, matching the R74+ package layout."
-    },
-    {
-      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-05-31",
+      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-07-31",
       "name": "FFmpeg (BtbN build, win64, LGPL-only)",
-      "version": "n8.1.1-9-g58d4114d36 (autobuild-2026-05-31-13-22)",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-05-31-13-22/ffmpeg-n8.1.1-9-g58d4114d36-win64-lgpl-8.1.zip",
-      "source_url": "https://github.com/FFmpeg/FFmpeg/archive/58d4114d36f22118c94f3e402c5c658d1790a5ee.tar.gz",
-      "build_source_url": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-05-31-13-22",
-      "sha256": "e6008e7d50417513f127c1204b08a5fb8657cfb1d2732dbf0917fb47a9f980cd",
-      "bytes": 198645412,
+      "version": "n8.1.2-34-g9b6c8969e0 (autobuild-2026-07-31-14-10)",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-8.1.zip",
+      "source_url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
+      "build_source_url": "https://codeload.github.com/BtbN/FFmpeg-Builds/tar.gz/a99e8230eae00d1cee38f23076a7a1f55cd984e2",
+      "sha256": "089e4169e93b2b3f3acbfced3c0704d24276a225641bdda04d796d28b07a2a38",
+      "bytes": 145349121,
       "license": {
         "spdx": "LGPL-2.1-or-later",
         "url": "https://ffmpeg.org/legal.html",
@@ -125,17 +34,493 @@
       "install": {
         "type": "extract",
         "destination": "ffmpeg",
-        "strip_prefix": "ffmpeg-n8.1.1-9-g58d4114d36-win64-lgpl-8.1/"
-      }
+        "strip_prefix": "ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-8.1/"
+      },
+      "release_date": "2026-07-31",
+      "source_kind": "release",
+      "source_ref": "autobuild-2026-07-31-14-10",
+      "source_sha256": "7e779215eae16ad7e93ddad59bd82822bd3d34e4dc61f9996f9481b2c0605bc3",
+      "source_bytes": 16903934,
+      "build_source_commit": "a99e8230eae00d1cee38f23076a7a1f55cd984e2",
+      "build_source_sha256": "7deac4a5190b2be84d4d548db2885d05152f9e3d77069d0e34841a46efd95e2b",
+      "build_source_bytes": 101671,
+      "notes": "Retained end-of-month BtbN Windows x64 LGPL-only artifact from FFmpeg's stable 8.1 release branch; no GPL or nonfree profile is permitted.",
+      "source_commit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
+    },
+    {
+      "id": "python-embed-amd64",
+      "name": "Python embeddable package (amd64)",
+      "version": "3.13.15",
+      "url": "https://www.python.org/ftp/python/3.13.15/python-3.13.15-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.13.15/Python-3.13.15.tgz",
+      "sha256": "d1f04d990aee1253d8569e8e5104e30fa9f5fa830899f14843448872d936a2cf",
+      "bytes": 11009825,
+      "license": {
+        "spdx": "Python-2.0",
+        "url": "https://docs.python.org/3/license.html"
+      },
+      "install": {
+        "type": "extract",
+        "destination": "python"
+      },
+      "release_date": "2026-08-05",
+      "source_kind": "release",
+      "source_ref": "3.13.15",
+      "source_sha256": "c28d9d213c09b5b5ab2c29812950e12f746999e099b82894231be954b26baed9",
+      "source_bytes": 30106468
+    },
+    {
+      "id": "vapoursynth-portable-r79",
+      "name": "VapourSynth 64-bit portable",
+      "version": "R79",
+      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R79/VapourSynth64-Portable-R79.zip",
+      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/acabf605b2205b32d65859bb2736405719d2fafd",
+      "sha256": "625b3410d903943107291592e90d6f521f829ebb8291d952ee91b8d674bbb153",
+      "bytes": 23160674,
+      "license": {
+        "spdx": "LGPL-2.1-or-later",
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
+          }
+        ]
+      },
+      "install": {
+        "type": "extract",
+        "destination": "vs/core"
+      },
+      "notes": "R79 stable portable runtime with cache-cycle improvements, vspipe MKV output, and the zimg API-check fix. The selected Python wheel remains CPython 3.12 ABI3 and supports CPython 3.13; native builds require a C++20 compiler.",
+      "release_date": "2026-08-07",
+      "source_kind": "release",
+      "source_ref": "R79",
+      "source_sha256": "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7",
+      "source_bytes": 657976,
+      "source_commit": "acabf605b2205b32d65859bb2736405719d2fafd"
+    },
+    {
+      "id": "vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel",
+      "name": "L-SMASH-Works (official VapourSynth plugin wheel)",
+      "version": "1310.0.0.0",
+      "url": "https://files.pythonhosted.org/packages/a2/4f/f5804dbeb6563486e1d72ce3e72cb9ae2c7201c6660112447f2e1c6f85ec/vapoursynth_lsmas-1310.0.0.0-py3-none-win_amd64.whl",
+      "source_url": "https://files.pythonhosted.org/packages/bd/cb/780219eb9597b3d063a862bc004ba4b324d060076210605bc8c50859cbc2/vapoursynth_lsmas-1310.0.0.0.tar.gz",
+      "sha256": "8197e2c901ff7b9ac651a66819986bfd993767a0b656a8d11c8f5b53829d2f6b",
+      "bytes": 11530241,
+      "license": {
+        "spdx": "ISC AND LGPL-2.1-or-later AND Zlib AND BSD-2-Clause AND MIT AND BSD-3-Clause",
+        "url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67/VapourSynth/LICENSE",
+        "files": [
+          {
+            "path": "licenses/lsmash-works/VapourSynth-LICENSE.txt",
+            "sha256": "2e1252454a8fcc24144ce94173d6cf90cc7a10954007efd4a2a0f58eec4c73cb",
+            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67/VapourSynth/LICENSE"
+          },
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
+            "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
+            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/FFmpeg/39c24f36247f370864ce86ebdf2aa936151f4bfc/COPYING.LGPLv2.1"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/L-SMASH-LICENSE.txt",
+            "sha256": "f778761540555e63528418e75784c0ed7bf2b89ab11f5ddbfd4bec7aa540e79d",
+            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/l-smash/d186eb95388710a7a91f6fd353169b457ebbb9db/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/obuparse-LICENSE.txt",
+            "sha256": "c2a92a24f409940e3d510ba5e8c520141dc103748d7d0d23798364cc160bd074",
+            "source_url": "https://raw.githubusercontent.com/HomeOfAviSynthPlusEvolution/obuparse/a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/zlib-LICENSE.txt",
+            "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+            "source_url": "https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/dav1d-COPYING.txt",
+            "sha256": "dd92c3c2247c5651606fc23a5e2d6a1ebc5ace9a3e49cbde0e12f05ad1cb1ee5",
+            "source_url": "https://code.videolan.org/videolan/dav1d/-/raw/1.5.3/COPYING"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/libxml2-Copyright.txt",
+            "sha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626",
+            "source_url": "https://gitlab.gnome.org/GNOME/libxml2/-/raw/v2.15.3/Copyright"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/nv-codec-headers-MIT-notice.txt",
+            "sha256": "72b60be67644d841bfd54a042875b5846294d357040dd7ac8e38bde20d9e8f97",
+            "source_url": "https://raw.githubusercontent.com/FFmpeg/nv-codec-headers/n13.0.19.0/include/ffnvcodec/nvEncodeAPI.h"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/xxHash-LICENSE.txt",
+            "sha256": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a",
+            "source_url": "https://raw.githubusercontent.com/Cyan4973/xxHash/v0.8.3/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/mfx-dispatch-LICENSE.txt",
+            "sha256": "f03bff2bd2f916104d12d50caeaab41875086943ea8b88983eafa5d84890593c",
+            "source_url": "https://raw.githubusercontent.com/lu-zero/mfx_dispatch/f6aac4576826ed821c81231fdfb0d24047158e7d/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/libvpx-LICENSE.txt",
+            "sha256": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615",
+            "source_url": "https://chromium.googlesource.com/webm/libvpx/+/refs/tags/v1.16.0/LICENSE"
+          },
+          {
+            "path": "licenses/lsmash-works/dependencies/libvpx-PATENTS.txt",
+            "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+            "source_url": "https://raw.githubusercontent.com/webmproject/libvpx/v1.16.0/PATENTS"
+          }
+        ],
+        "notes": "The upstream 1310 Windows wheel DLL statically incorporates the release-declared media libraries below. The bundle preserves each corresponding source and license notice; PE import validation permits only Windows/UCRT system DLL dependencies."
+      },
+      "install": {
+        "type": "copy_file",
+        "source_path": "vapoursynth/plugins/LSMASHSource.dll",
+        "destination": "vs/extra-plugins/lsmas/libvslsmashsource.dll",
+        "manifest": "libvslsmashsource"
+      },
+      "notes": "Official non-yanked 1310.0.0.0 Windows wheel from the 1310 native release lineage. Its plugin DLL statically incorporates the release-declared media libraries and imports only Windows/UCRT system libraries; unlike the 1310 release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. Installed into the deterministic extra-plugin directory; FFMS2 remains excluded from Windows.",
+      "release_date": "2026-08-23",
+      "source_kind": "release",
+      "source_ref": "1310.0.0.0",
+      "source_sha256": "d529128e2d13763cbb56c21f0fd534191380530de6042907cbdae366b23ba2e5",
+      "source_bytes": 19063403,
+      "source_commit": "7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67"
+    },
+    {
+      "id": "vs-plugin-vs-placebo-2.0.4-win-amd64-wheel",
+      "name": "vs-placebo (VapourSynth plugin wheel)",
+      "version": "2.0.4",
+      "url": "https://files.pythonhosted.org/packages/12/ee/74abc0bad6ebc107e6182749837cb2e2ddcf70617a72a23aa245bb46888d/vs_placebo-2.0.4-py3-none-win_amd64.whl",
+      "source_url": "https://github.com/Lypheo/vs-placebo/archive/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579.tar.gz",
+      "sha256": "3715ee44db698a52334a9a4be61ef29bd6d06d3d491eb905b2af7a4193d27411",
+      "bytes": 6274904,
+      "license": {
+        "spdx": "LGPL-2.1-only AND LGPL-2.1-or-later AND MIT",
+        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579/COPYING",
+        "files": [
+          {
+            "path": "licenses/vs-placebo/COPYING.txt",
+            "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+            "source_url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579/COPYING"
+          },
+          {
+            "path": "licenses/vs-placebo/libplacebo-LICENSE.txt",
+            "sha256": "b3aa400aca6d2ba1f0bd03bd98d03d1fe7489a3bbb26969d72016360af8a5c9d",
+            "source_url": "https://raw.githubusercontent.com/haasn/libplacebo/a7a18af88ff0a17c04840dcb3246047bb6b46df3/LICENSE"
+          },
+          {
+            "path": "licenses/vs-placebo/libdovi-LICENSE.txt",
+            "sha256": "f35d4515dd8d81c7996af2b20e9605561d1af0c21bc12ba7cc4fa4c60aed2178",
+            "source_url": "https://raw.githubusercontent.com/quietvoid/dovi_tool/4fd2b2235c9f93582dd4a00e65ee34a07800afd7/LICENSE"
+          }
+        ],
+        "notes": "The wheel bundles the selected libplacebo and libdovi lineages; all three upstream notices are included."
+      },
+      "install": {
+        "type": "python_wheel"
+      },
+      "notes": "Latest non-yanked stable wheel. Requires Python 3.12+ and VapourSynth R74+; bundles the selected libplacebo and libdovi lineages.",
+      "release_date": "2026-07-14",
+      "source_kind": "tag",
+      "source_ref": "2.0.4",
+      "source_sha256": "b1c3e6eab7e7c722aa1e5706aef70b5365f4a4c881b4573a6121e4c9572a8fbe",
+      "source_bytes": 37902,
+      "source_commit": "3cfd23f257ecb62b0cbd81eaaca092e18ae8e579"
+    },
+    {
+      "id": "vs-plugin-akarin-1.5.0-win-amd64-wheel",
+      "name": "Akarin (VapourSynth plugin wheel)",
+      "version": "1.5.0",
+      "url": "https://files.pythonhosted.org/packages/0d/31/95658c029a7ee3bbfc1359f9fa623a13f0a3ff0d940ba9e204421dd7a0ca/vapoursynth_akarin-1.5.0-py3-none-win_amd64.whl",
+      "source_url": "https://files.pythonhosted.org/packages/8b/d6/575de29784daf717ccb026e33d35e82ccb6e4d328e9c977379899c839e91/vapoursynth_akarin-1.5.0.tar.gz",
+      "sha256": "66ba011c36f2c0a630c6a6662a40ca62d992b266ea36a0c1bf3c988e1738d7ae",
+      "bytes": 25910614,
+      "license": {
+        "spdx": "LGPL-3.0-only AND BSD-3-Clause",
+        "url": "https://raw.githubusercontent.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin/a72584a969972b4cfd1b1fd11a4b0e3350f83432/COPYING.LESSER",
+        "notes": "The wheel includes Akarin's COPYING.LESSER in its distribution metadata and the exact MSYS2 zstd license is copied from the repository-owned notice.",
+        "files": [
+          {
+            "path": "licenses/akarin/zstd-LICENSE.txt",
+            "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+            "source_url": "https://raw.githubusercontent.com/facebook/zstd/f8745da6ff1ad1e7bab384bd1f9d742439278e99/LICENSE"
+          }
+        ]
+      },
+      "install": {
+        "type": "python_wheel"
+      },
+      "notes": "Official Windows x64 wheel containing the Akarin native plugin and its bundled zstd runtime.",
+      "release_date": "2026-08-27",
+      "source_kind": "tag",
+      "source_ref": "v1.5.0",
+      "source_sha256": "68720c5163163fa59624eb72054564fef3375438ca266efe455a7882f1a07849",
+      "source_bytes": 538666,
+      "source_commit": "a72584a969972b4cfd1b1fd11a4b0e3350f83432",
+      "bundled_dependencies": [
+        {
+          "name": "zstd",
+          "version": "1.5.7-2",
+          "selection_kind": "MSYS2 CLANG64 package",
+          "package_url": "https://repo.msys2.org/mingw/clang64/mingw-w64-clang-x86_64-zstd-1.5.7-2-any.pkg.tar.zst",
+          "package_sha256": "2d75c4ddf8f4f7b76fe33e3f1eea16450f9b3aede14285c886462d72f0ffd87d",
+          "package_bytes": 597342,
+          "binary_path": "vapoursynth/plugins/akarin/libzstd.dll",
+          "binary_sha256": "a4a29141c6dc489c59c260b5d4f781c195cea11ed231ee0cbfc6d3803b0708b7",
+          "binary_bytes": 1030144,
+          "source_ref": "v1.5.7",
+          "source_commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+          "source_tree_sha256": "a6c6917af705c7273f41a2842ace369ba411cc800950e042cd24471f80f49a2a",
+          "license": "BSD-3-Clause"
+        }
+      ]
+    },
+    {
+      "id": "vs-plugin-vszip-22.1.0-win-amd64-wheel",
+      "name": "VSZip (VapourSynth plugin wheel)",
+      "version": "22.1.0",
+      "url": "https://files.pythonhosted.org/packages/ed/6a/2657a08533f279db5e225fc0d4de81bd9d8d0504d670135001dbe8c78196/vapoursynth_vszip-22.1.0-py3-none-win_amd64.whl",
+      "source_url": "https://files.pythonhosted.org/packages/3e/5e/3823f1c3ce492c3f0acca288501e67cbd1de4be317c436c71d5fdfdd81c9/vapoursynth_vszip-22.1.0.tar.gz",
+      "sha256": "1f5e6aa39ea72e610c1146c2d27f157bea507895555398c60347a65ee1745273",
+      "bytes": 3849505,
+      "license": {
+        "spdx": "MIT AND LGPL-2.1-only",
+        "url": "https://raw.githubusercontent.com/dnjulek/vapoursynth-zip/beb7a0ab0e4166580b76560ae3f7c7f5e376ac90/LICENSE",
+        "notes": "The wheel includes VSZip's LICENSE in its distribution metadata; repository-owned notices cover its statically compiled vapoursynth-zig and zigimg inputs.",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-2.1.txt",
+            "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
+          },
+          {
+            "path": "licenses/vszip/zigimg-LICENSE.txt",
+            "sha256": "ecb31752377434e47282f3b35c21e18a992a86a1667fcd29fc8749222aa85bbb",
+            "source_url": "https://raw.githubusercontent.com/zigimg/zigimg/0bbe201a5591219177f2444371c2897746b47774/LICENSE"
+          }
+        ]
+      },
+      "install": {
+        "type": "python_wheel"
+      },
+      "notes": "Official Windows x64 wheel containing baseline, AVX2, and Zen 4 native plugin variants selected by manifest.vs.",
+      "release_date": "2026-07-16",
+      "source_kind": "tag",
+      "source_ref": "22.1.0",
+      "source_sha256": "93c1aaf5867ad43e1f21b77418fa89b0b1ed2191d0c4bfb03a65c958826ed8c9",
+      "source_bytes": 218865,
+      "source_commit": "beb7a0ab0e4166580b76560ae3f7c7f5e376ac90",
+      "bundled_dependencies": [
+        {
+          "name": "vapoursynth-zig",
+          "version": "4.0.0",
+          "selection_kind": "commit",
+          "source_ref": "b87ff61ce680fa5a4cf7d44a9cb4b605c5037432",
+          "source_commit": "b87ff61ce680fa5a4cf7d44a9cb4b605c5037432",
+          "source_tree_sha256": "d54db13419ef61e5f9a7ef3d357c41972bdf59e71536f2787fdddc38736c3f50",
+          "license": "LGPL-2.1-only"
+        },
+        {
+          "name": "zigimg",
+          "version": "0.1.0",
+          "selection_kind": "commit",
+          "source_ref": "0bbe201a5591219177f2444371c2897746b47774",
+          "source_commit": "0bbe201a5591219177f2444371c2897746b47774",
+          "source_tree_sha256": "5e6162fe73af4df0e1faba425dd7ff7e15a3ffe5449aebea63c45723899f034a",
+          "license": "MIT"
+        }
+      ]
     }
   ],
   "corresponding_sources": [
     {
+      "name": "dav1d",
+      "version": "1.5.3",
+      "selection_kind": "tag",
+      "source_ref": "1.5.3",
+      "license": "BSD-2-Clause",
+      "source_url": "https://code.videolan.org/videolan/dav1d/-/archive/1.5.3/dav1d-1.5.3.tar.gz",
+      "sha256": "cbe212b02faf8c6eed5b6d55ef8a6e363aaab83f15112e960701a9c3df813686",
+      "bytes": 1713950
+    },
+    {
+      "name": "FFmpeg (L-SMASH-Works 1310 build)",
+      "version": "commit 39c24f36247f370864ce86ebdf2aa936151f4bfc",
+      "selection_kind": "commit",
+      "source_ref": "39c24f36247f370864ce86ebdf2aa936151f4bfc",
+      "license": "LGPL-2.1-or-later",
+      "source_url": "https://codeload.github.com/HomeOfAviSynthPlusEvolution/FFmpeg/tar.gz/39c24f36247f370864ce86ebdf2aa936151f4bfc",
+      "sha256": "e3298a272e0adc1bde78f703a1f7916e7cb25d05b6239931af95db1b4cbcf4d1",
+      "bytes": 17385590,
+      "source_commit": "39c24f36247f370864ce86ebdf2aa936151f4bfc",
+      "notes": "Exact FFmpeg fork revision declared by the upstream L-SMASH-Works 1310 Windows release; distinct from Frame Compare\u2019s standalone BtbN FFmpeg artifact."
+    },
+    {
+      "name": "L-SMASH",
+      "version": "commit d186eb95388710a7a91f6fd353169b457ebbb9db",
+      "selection_kind": "commit",
+      "source_ref": "d186eb95388710a7a91f6fd353169b457ebbb9db",
+      "release_date": "2026-07-28",
+      "license": "ISC",
+      "source_url": "https://codeload.github.com/HomeOfAviSynthPlusEvolution/l-smash/tar.gz/d186eb95388710a7a91f6fd353169b457ebbb9db",
+      "sha256": "a58cf7fb8314d8422257b9f0a4cabe117aa2fb8a8488b4e9a31f4b6d05c8e00c",
+      "bytes": 503436,
+      "notes": "Exact maintainer-fork L-SMASH revision tested by L-SMASH-Works 1310; not a formal L-SMASH release.",
+      "source_commit": "d186eb95388710a7a91f6fd353169b457ebbb9db"
+    },
+    {
+      "name": "libdovi",
+      "version": "3.3.2",
+      "selection_kind": "tag",
+      "source_ref": "libdovi-3.3.2",
+      "license": "MIT",
+      "source_url": "https://codeload.github.com/quietvoid/dovi_tool/tar.gz/refs/tags/libdovi-3.3.2",
+      "notes": "Tag libdovi-3.3.2 at commit 4fd2b2235c9f93582dd4a00e65ee34a07800afd7, selected by the vs-placebo 2.0.4 build metadata.",
+      "release_date": "2025-06-04",
+      "sha256": "8ccb1922d7dbb57bc4f2c15c10b90c462f7a5f292efe317c116db923728dd3f1",
+      "bytes": 489628,
+      "source_commit": "4fd2b2235c9f93582dd4a00e65ee34a07800afd7"
+    },
+    {
+      "name": "libplacebo",
+      "version": "commit a7a18af88ff0a17c04840dcb3246047bb6b46df3",
+      "selection_kind": "commit",
+      "source_ref": "a7a18af88ff0a17c04840dcb3246047bb6b46df3",
+      "license": "LGPL-2.1-or-later",
+      "source_url": "https://codeload.github.com/haasn/libplacebo/tar.gz/a7a18af88ff0a17c04840dcb3246047bb6b46df3",
+      "sha256": "ba0c8c011c19cb74bcee26646d2d6070447151da89a9abdd01c9034e768de8b2",
+      "bytes": 873993,
+      "notes": "Revision selected by the vs-placebo 2.0.4 build metadata.",
+      "source_commit": "a7a18af88ff0a17c04840dcb3246047bb6b46df3",
+      "release_date": "2026-07-08"
+    },
+    {
+      "name": "libvpx",
+      "version": "1.16.0",
+      "selection_kind": "tag",
+      "source_ref": "v1.16.0",
+      "license": "BSD-3-Clause",
+      "source_url": "https://chromium.googlesource.com/webm/libvpx/+archive/refs/tags/v1.16.0.tar.gz",
+      "sha256": "3530f4132c98c80cce7f788c0acacab4129c3caafeca8318d8569130c191f6fa",
+      "bytes": 5683826
+    },
+    {
+      "name": "libxml2",
+      "version": "2.15.3",
+      "selection_kind": "tag",
+      "source_ref": "v2.15.3",
+      "license": "MIT",
+      "source_url": "https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.15.3/libxml2-v2.15.3.tar.gz",
+      "sha256": "0da50c1415f4ec0364569d2119b1436ba837b31df44af28569d234272c23cf1f",
+      "bytes": 2964045
+    },
+    {
+      "name": "mfx_dispatch",
+      "version": "commit f6aac4576826ed821c81231fdfb0d24047158e7d",
+      "selection_kind": "commit",
+      "source_ref": "f6aac4576826ed821c81231fdfb0d24047158e7d",
+      "license": "BSD-3-Clause",
+      "source_url": "https://codeload.github.com/lu-zero/mfx_dispatch/tar.gz/f6aac4576826ed821c81231fdfb0d24047158e7d",
+      "sha256": "7eb5b07f997862ae33c952d5e530400bfd6491f3a23842f3770868389451f9f3",
+      "bytes": 155917,
+      "source_commit": "f6aac4576826ed821c81231fdfb0d24047158e7d"
+    },
+    {
+      "name": "nv-codec-headers",
+      "version": "13.0.19.0",
+      "selection_kind": "tag",
+      "source_ref": "n13.0.19.0",
+      "license": "MIT",
+      "source_url": "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n13.0.19.0.tar.gz",
+      "sha256": "86d15d1a7c0ac73a0eafdfc57bebfeba7da8264595bf531cf4d8db1c22940116",
+      "bytes": 83385,
+      "notes": "Header-only build input; upstream publishes the MIT grant in each API header rather than a root LICENSE file."
+    },
+    {
+      "name": "obuparse",
+      "version": "commit a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8",
+      "selection_kind": "commit",
+      "source_ref": "a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8",
+      "license": "ISC",
+      "source_url": "https://codeload.github.com/HomeOfAviSynthPlusEvolution/obuparse/tar.gz/a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8",
+      "sha256": "904af4d87212363b9aa9ea7471a1d33aa5dc53afba6eead245817f8ffab27e3f",
+      "bytes": 32016,
+      "source_commit": "a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8"
+    },
+    {
       "name": "Qt",
       "version": "6.10.2",
+      "selection_kind": "release",
+      "source_ref": "6.10.2",
       "license": "LGPL-3.0-only",
-      "source_url": "https://download.qt.io/official_releases/qt/6.10/6.10.2/single/qt-everywhere-src-6.10.2.tar.xz"
+      "source_url": "https://download.qt.io/official_releases/qt/6.10/6.10.2/single/qt-everywhere-src-6.10.2.tar.xz",
+      "sha256": "c3df0f0e421130cc52ed81cb712358804471ce9bd2a41d97828f9f5b1bf7fed2",
+      "bytes": 1315359412
+    },
+    {
+      "name": "vapoursynth-zig",
+      "version": "4.0.0",
+      "selection_kind": "commit",
+      "source_ref": "b87ff61ce680fa5a4cf7d44a9cb4b605c5037432",
+      "license": "LGPL-2.1-only",
+      "source_url": "https://codeload.github.com/dnjulek/vapoursynth-zig/tar.gz/b87ff61ce680fa5a4cf7d44a9cb4b605c5037432",
+      "sha256": "2d5c6104d9b11183eebc65298c36adff60f8dd82128bbcdc76611452d68c5c0c",
+      "bytes": 46999,
+      "source_commit": "b87ff61ce680fa5a4cf7d44a9cb4b605c5037432",
+      "notes": "Exact statically compiled dependency selected by VSZip 22.1.0 build.zig.zon."
+    },
+    {
+      "name": "xxHash",
+      "version": "0.8.3",
+      "selection_kind": "tag",
+      "source_ref": "v0.8.3",
+      "license": "BSD-2-Clause",
+      "source_url": "https://github.com/Cyan4973/xxHash/archive/refs/tags/v0.8.3.tar.gz",
+      "sha256": "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80",
+      "bytes": 1147630
+    },
+    {
+      "name": "zigimg",
+      "version": "0.1.0",
+      "selection_kind": "commit",
+      "source_ref": "0bbe201a5591219177f2444371c2897746b47774",
+      "license": "MIT",
+      "source_url": "https://codeload.github.com/zigimg/zigimg/tar.gz/0bbe201a5591219177f2444371c2897746b47774",
+      "sha256": "4f145109a4c4eab3deeb49b1847be9a5826c1c3967a586e879d40e6943c4009c",
+      "bytes": 222570,
+      "source_commit": "0bbe201a5591219177f2444371c2897746b47774",
+      "notes": "Exact statically compiled dependency selected by VSZip 22.1.0 build.zig.zon."
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "selection_kind": "tag",
+      "source_ref": "v1.3.2",
+      "license": "Zlib",
+      "source_url": "https://github.com/madler/zlib/archive/refs/tags/v1.3.2.tar.gz",
+      "sha256": "b99a0b86c0ba9360ec7e78c4f1e43b1cbdf1e6936c8fa0f6835c0cd694a495a1",
+      "bytes": 1566911
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7-2",
+      "selection_kind": "tag",
+      "source_ref": "v1.5.7",
+      "license": "BSD-3-Clause",
+      "source_url": "https://codeload.github.com/facebook/zstd/tar.gz/f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+      "sha256": "4b0bd1f0cfb25e61b9103c35f27395530ff5b4c0d2513a00fd745849e85ea52c",
+      "bytes": 2453329,
+      "source_commit": "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
+      "notes": "Exact upstream source for the MSYS2 CLANG64 zstd 1.5.7-2 package whose libzstd.dll hash matches the binary bundled in the Akarin 1.5.0 Windows wheel."
     }
   ],
-  "notes": "Deliberately excludes ffms2 from the baseline bundle: it is not required by the current loader path (lsmas is required), and adding it to Windows remains a loader-policy/licensing decision requiring explicit approval."
+  "notes": "Windows FFMS2 remains deliberately excluded. Native media artifacts require a full bundle refresh when the media-runtime fingerprint changes; code-only updates are limited to installations already carrying the same fingerprint."
 }

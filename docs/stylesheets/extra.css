@@ -1,0 +1,110 @@
+/*
+ * Frame Compare documentation presentation layer.
+ *
+ * Keep this deliberately small and based on theme variables. Brand colors and the
+ * permanent logo will be selected in a separate design pass.
+ */
+
+:root {
+  --fc-radius: 0.65rem;
+  --fc-space: 1rem;
+}
+
+.md-typeset .fc-hero {
+  margin: 0 0 2rem;
+  padding: clamp(1.35rem, 3vw, 2.5rem);
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: var(--fc-radius);
+  background:
+    radial-gradient(circle at top right, var(--md-accent-fg-color--transparent, transparent), transparent 45%),
+    var(--md-code-bg-color);
+}
+
+.md-typeset .fc-hero h1 {
+  max-width: 18ch;
+  margin-top: 0.2rem;
+  margin-bottom: 0.65rem;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+
+.md-typeset .fc-hero > p:not(.fc-kicker) {
+  max-width: 70ch;
+  font-size: 1.05rem;
+}
+
+.md-typeset .fc-kicker {
+  margin: 0;
+  color: var(--md-accent-fg-color);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.md-typeset .fc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.md-typeset .fc-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--fc-space);
+  margin: 1rem 0 1.5rem;
+}
+
+.md-typeset .fc-card {
+  min-width: 0;
+  padding: 1rem 1.05rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: var(--fc-radius);
+  background: var(--md-default-bg-color);
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 4%);
+}
+
+.md-typeset .fc-card > :first-child {
+  margin-top: 0;
+}
+
+.md-typeset .fc-card > :last-child {
+  margin-bottom: 0;
+}
+
+.md-typeset figure.fc-doc-figure {
+  margin: 1.5rem 0 2rem;
+}
+
+.md-typeset figure.fc-doc-figure img {
+  width: 100%;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: var(--fc-radius);
+  box-shadow: 0 0.4rem 1.5rem rgb(0 0 0 / 12%);
+}
+
+.md-typeset figure.fc-doc-figure figcaption {
+  max-width: 72ch;
+  margin: 0.6rem auto 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+
+.md-typeset kbd {
+  white-space: nowrap;
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-typeset .fc-hero {
+    padding: 1.2rem;
+  }
+
+  .md-typeset .fc-actions .md-button {
+    width: 100%;
+    text-align: center;
+  }
+}

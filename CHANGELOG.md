@@ -5,6 +5,133 @@ All notable user-facing changes to Frame Compare are documented in this file.
 Frame Compare follows Conventional Commits, and Release Please turns the
 `Unreleased` section into versioned release notes.
 
+## Unreleased
+
+## [0.5.0]
+
+### Added
+
+- Add a consent-gated, run-only full-window retry when configured lead/trail
+  exclusions leave too little eligible media; authored configuration remains
+  unchanged.
+- Add report payload v1.2 with release-aware source identities, distinct
+  comparison/source-frame domains, exact picture type and Dolby Vision RPU facts
+  when observable, file-size context, rendering disclosures, and expanded
+  Inspector, review, and viewport behavior.
+- Add a durable shared TMDB response cache with privacy-safe request identities,
+  separate expiry for successful and empty responses, bounded disk usage, atomic
+  writes, and safe fallback to the normal network path when cache state is unusable.
+- Add code-owned media-runtime identities and scoped fingerprints for analysis,
+  probing, alignment, source indexing, cache invalidation, Docker, Windows portable,
+  and code-only update compatibility.
+- Bundle Inter Regular under the SIL Open Font License 1.1 for deterministic overlay
+  typography.
+
+### Changed
+
+- Bump Frame Compare to 0.5.0, classify the project as beta, and refresh the managed
+  stack to Python 3.13.15, uv 0.12.7, VapourSynth R79/API R4.2,
+  L-SMASH-Works 1310, vs-placebo 2.0.4, Akarin 1.5.0, VSZip 22.1.0, and
+  VSPreview 0.20.1. Windows portable uses the LGPL FFmpeg
+  `n8.1.2-34-g9b6c8969e0` build. Docker uses Debian FFmpeg 7.1.5 and includes
+  FFMS2 5.0; Windows portable intentionally excludes FFMS2.
+- Unify screenshots, reports, run records, and reusable caches under one configured
+  generated-data root, which may be a normal external directory. Every
+  output-producing run receives a self-contained artifact folder, while shared
+  caches remain outside individual run folders for reuse and history discovery.
+- Batch compatible FFmpeg frame requests through one ordered decode pass and render
+  independent source batches concurrently while preserving deterministic output
+  order, exact per-frame facts, failure behavior, and progress reporting.
+- Make random, dark, bright, and motion frame selection deterministic and temporally
+  stratified, and derive the preferred automatic separation from the effective
+  reference FPS as `ceil(FPS / 2)` for an approximately half-second target. Preserve
+  exact user frames, global `User`/`Dark`/`Bright`/`Motion`/`Random` precedence,
+  seed reproducibility, sparse source coordinates, and category counts while
+  progressively relaxing automatic spacing down to one-frame uniqueness when needed.
+  Propagate the reference-domain FPS through initial random selection, metric
+  selection, post-alignment reselection, and alignment fallback, and skip unattainable
+  gap thresholds so fallback cost does not scale with numeric FPS.
+- Classify alignment stability and harden the existing `disabled`, `prompt`, and
+  `always` previous-offset reuse policies with source/runtime identity, provenance,
+  schema validation, interactive evidence, and clearer presentation.
+- Use prepared release identities for collision-safe compact live progress labels,
+  full slow.pics column labels, and constrained report controls while preserving
+  explicit labels and exact filenames on the appropriate review surfaces.
+- Improve CLI help, wizard, side-effect-free dry-run planning, chronological human
+  progress output on stderr, JSON output contracts, warnings, and success summaries.
+- Improve offline viewer keyboard navigation, focus management, radio-group and
+  filmstrip behavior, source-role labels, and accessible names without changing the
+  self-contained report model.
+- Make `doctor` validate observable managed-runtime versions and required plugin
+  surfaces for VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg, and ffprobe
+  rather than checking only component presence. L-SMASH-Works' native version is
+  reported explicitly as unobservable while its required source functions are
+  verified.
+- Carry canonical exact-frame, signal, presentation, geometry, and tonemap facts
+  through rendering, overlays, slow.pics upload planning, and reports.
+- Strengthen Frame Compare-owned L-SMASH index naming, managed-runtime isolation,
+  reuse, invalid-index recovery, and cache-free fallback behavior.
+- Expand deterministic Docker and Windows portable runtime, packaging, installer,
+  updater, rollback, provenance, license, and extracted-bundle verification.
+- Strengthen the guarded immutable release workflow with exact version, tag, channel,
+  and SHA validation; collision checks; draft and asset verification; remote digest
+  checks; provenance attestations; and final publication-state verification.
+- Reorganize the user documentation into route-based onboarding and focused guides
+  for sources, analysis, alignment, HDR, reports, generated data, configuration, and
+  troubleshooting, with current screenshots for the first run, VSPreview, report
+  modes, HDR diagnostics, and Windows installation.
+
+### Fixed
+
+- Correct computed audio-alignment offsets to use the documented
+  `reference - comparison` sign convention. Published v0.1.0 cache entries miss under
+  the new runtime-aware source-set identity; caches created by intermediate v0.5.0
+  pre-release builds should be cleared before final validation.
+- Merge FFprobe HDR color metadata field-by-field only when VapourSynth frame
+  properties are missing, malformed, or H.273-unspecified.
+- Capture FFmpeg picture type from the same exact-frame extraction process used to
+  produce the screenshot.
+- Improve recoverable selection failures, source-frame range handling, and
+  post-retry fatal error behavior.
+- Reject incomplete or malformed analysis-cache metadata that omits its required
+  schema version instead of accepting it as the current format.
+- Harden VSPreview startup compatibility checks, reuse valid Frame Compare-owned
+  indexes, recover without cache when index construction is unusable, and redact
+  inherited credential values from surfaced startup diagnostics.
+- Clarify VSPreview matching-frame confirmation and replace duplicate or malformed
+  preview frame-property warnings with Frame Compare's styled assumption details.
+- Improve HDR tone-mapping failure messages and runtime diagnostics so unsupported or
+  mismatched managed components fail with actionable evidence.
+
+### Security
+
+- Require signed Windows code-only updates to match both dependency and
+  media-runtime fingerprints before replacement, with file-hash verification,
+  backups, and rollback.
+- Verify pinned source commits with complete tracked-tree SHA-256 digests and
+  preserve native-library, plugin-manifest, license, and corresponding-source
+  provenance.
+- Validate ZIP path safety, case collisions, required bundle contents, bounded
+  process evidence, release asset checksums, remote digests, and publication state
+  before release.
+
+### Upgrade notes
+
+- Windows v0.1.0 portable installations require the complete v0.5.0 bundle because
+  the managed media-runtime fingerprint changed; the code-only updater refuses
+  incompatible runtimes.
+- Existing v0.1.0 configurations must remove `paths.screenshots_dir`,
+  `paths.use_run_folders`, and `report.output_dir` or be regenerated. Generated
+  artifacts now follow the sole configured `paths.generated_dir` layout, which may
+  point to a normal external directory. The former top-level `[diagnostics]` section
+  is no longer a supported config surface and is ignored.
+- Analysis, probe, alignment, and source-index caches include updated runtime
+  identities and may be invalidated or rebuilt.
+- Clear any shared alignment reuse cache produced by an intermediate v0.5.0 build
+  before validating the final candidate after the offset-sign correction.
+- Existing v1.1 reports remain self-contained; regenerated v1.2 reports start with
+  fresh browser-local viewer and review state.
+
 ## [0.1.0]
 
 This is the first public alpha release of Frame Compare.

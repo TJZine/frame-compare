@@ -24,6 +24,7 @@ def test_vs_render_creates_valid_png(tmp_path: Path):
     output_path = tmp_path / "vs_frame_00000.png"
     request = RenderRequest(
         clip=clip,
+        diagnostic_source=clip,
         frame_number=0,
         output_path=output_path,
         overlay=None,
@@ -56,6 +57,7 @@ def test_vs_render_converts_rgbs_to_png(tmp_path: Path):
     output_path = tmp_path / "vs_frame_rgbs.png"
     request = RenderRequest(
         clip=clip,
+        diagnostic_source=clip,
         frame_number=0,
         output_path=output_path,
         overlay=None,

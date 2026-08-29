@@ -384,6 +384,29 @@ def test_windows_portable_update_manifest_schema_disallows_empty_from_app_versio
     )
 
 
+def test_windows_portable_update_contract_requires_media_runtime_identity(
+    repo_root: Path,
+) -> None:
+    update_schema = json.loads(
+        _read_text_or_fail(repo_root / "tools" / "windows_portable" / "update_manifest.schema.json")
+    )
+    bundle_schema = json.loads(
+        _read_text_or_fail(repo_root / "tools" / "windows_portable" / "bundle_info.schema.json")
+    )
+
+    assert update_schema["properties"]["schema_version"]["const"] == 2
+    assert "expected_media_runtime_fingerprint" in update_schema["required"]
+    assert update_schema["properties"]["signature_algorithm"]["const"] == ("rsa-sha256-pkcs1")
+    file_schema = update_schema["properties"]["files"]["items"]
+    assert "bytes" in file_schema["required"]
+
+    assert bundle_schema["properties"]["schema_version"]["const"] == 2
+    assert bundle_schema["properties"]["bundle_kind"]["const"] == "full"
+    assert bundle_schema["properties"]["manifest_version"]["const"] == 2
+    assert "media_runtime_fingerprint" in bundle_schema["required"]
+    assert "media_runtime_fingerprints" in bundle_schema["required"]
+
+
 def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
@@ -531,9 +554,11 @@ def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Pa
 
 
 @pytest.mark.integration
-def test_windows_portable_build_update_preserves_relative_paths_and_excludes_caches(
+@pytest.mark.parametrize("runtime_fingerprint", ["b" * 64, None, "invalid", "B" * 64])
+def test_windows_portable_build_update_validates_runtime_metadata_at_process_boundary(
     tmp_path: Path,
     repo_root: Path,
+    runtime_fingerprint: str | None,
 ) -> None:
     exe = _powershell_exe()
     if exe is None:
@@ -550,32 +575,58 @@ def test_windows_portable_build_update_preserves_relative_paths_and_excludes_cac
 
     bundle = tmp_path / "bundle"
     bundle.mkdir()
-    (bundle / "bundle_info.json").write_text(
-        json.dumps({"requirements_lock_sha256": "a" * 64}),
-        encoding="utf-8",
-    )
-    update_zip = tmp_path / "update.zip"
+    bundle_info: dict[str, object] = {
+        "schema_version": 2,
+        "bundle_kind": "full",
+        "app_version": "1.2.3",
+        "requirements_lock_sha256": "a" * 64,
+        "manifest_version": 2,
+        "platform": "windows-x64",
+        "media_runtime_fingerprints": {
+            "analysis": "c" * 64,
+            "probe": "d" * 64,
+            "alignment": "e" * 64,
+            "index": "f" * 64,
+            "full": "b" * 64,
+        },
+    }
+    if runtime_fingerprint is not None:
+        bundle_info["media_runtime_fingerprint"] = runtime_fingerprint
+    (bundle / "bundle_info.json").write_text(json.dumps(bundle_info), encoding="utf-8")
+    provider_root = tmp_path / "provider-root"
+    process_root = tmp_path / "process-root"
+    provider_root.mkdir()
+    process_root.mkdir()
+    update_zip = provider_root / "update.zip"
     build_script = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    environment = os.environ | {
+        "FRAME_COMPARE_TEST_BUILD_UPDATE": str(build_script),
+        "FRAME_COMPARE_TEST_BUNDLE": str(bundle),
+        "FRAME_COMPARE_TEST_PROVIDER_ROOT": str(provider_root),
+        "FRAME_COMPARE_TEST_REPO": str(fake_repo),
+    }
+    command = """
+Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
+& $env:FRAME_COMPARE_TEST_BUILD_UPDATE `
+  -BundleDir $env:FRAME_COMPARE_TEST_BUNDLE `
+  -RepoRoot $env:FRAME_COMPARE_TEST_REPO `
+  -OutFile update.zip
+"""
     result = subprocess.run(
-        [
-            exe,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(build_script),
-            "-BundleDir",
-            str(bundle),
-            "-RepoRoot",
-            str(fake_repo),
-            "-OutFile",
-            str(update_zip),
-        ],
+        [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        cwd=process_root,
+        env=environment,
         check=False,
         capture_output=True,
         text=True,
         timeout=30.0,
     )
+    if runtime_fingerprint != "b" * 64:
+        assert result.returncode != 0
+        assert "media_runtime_fingerprint is missing or invalid" in result.stderr
+        assert not update_zip.exists()
+        return
+
     assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
 
     with zipfile.ZipFile(update_zip) as archive:
@@ -590,6 +641,11 @@ def test_windows_portable_build_update_preserves_relative_paths_and_excludes_cac
         "app/src/frame_compare/__init__.py",
         "app/src/frame_compare/render/module.py",
     ]
+    assert manifest["schema_version"] == 2
+    assert manifest["expected_requirements_lock_sha256"] == "a" * 64
+    assert manifest["expected_media_runtime_fingerprint"] == "b" * 64
+    assert manifest["signature_algorithm"] == "rsa-sha256-pkcs1"
+    assert all(entry["bytes"] > 0 for entry in manifest["files"])
 
 
 def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:

@@ -1,43 +1,117 @@
 """Progress reporting utilities for Frame Compare."""
 
+import sys
+from dataclasses import dataclass
 from threading import RLock
+from time import monotonic
+from typing import TextIO
 
 import structlog
 from rich.console import Console, RenderableType
 from rich.progress import (
     BarColumn,
+    MofNCompleteColumn,
     Progress,
     ProgressColumn,
     SpinnerColumn,
     Task,
     TaskID,
-    TaskProgressColumn,
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.table import Column
 from rich.text import Text
 
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
 
+_MIN_DURABLE_PHASE_SECONDS = 10.0
+_DURABLE_STATUS_MARKERS = {
+    ProgressPhaseStatus.COMPLETED: "[OK]",
+    ProgressPhaseStatus.SKIPPED: "[SKIP]",
+    ProgressPhaseStatus.WARNED: "[WARN]",
+    ProgressPhaseStatus.FAILED: "[FAIL]",
+}
+_STATUS_STYLES = {
+    "[RUN]": "bright_cyan",
+    "[OK]": "green",
+    "[WAIT]": "magenta",
+    "[WARN]": "yellow",
+    "[SKIP]": "dim yellow",
+    "[FAIL]": "red",
+}
+
+
+def _format_elapsed(seconds: float) -> str:
+    whole_seconds = int(max(0.0, seconds))
+    hours, remainder = divmod(whole_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {seconds:02d}s"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
 __all__ = [
     "LogProgressReporter",
     "NullProgressReporter",
+    "PlainProgressReporter",
     "ProgressReporter",
     "RichProgressReporter",
 ]
 
 
-class _SpinnerAwareColumn(ProgressColumn):
-    def __init__(self, column: ProgressColumn) -> None:
-        super().__init__()
+@dataclass(frozen=True)
+class _PlainTask:
+    label: str
+    started_at: float
+
+
+class _TaskPresentationColumn(ProgressColumn):
+    def __init__(self, column: ProgressColumn, *presentations: str) -> None:
+        super().__init__(table_column=column.get_table_column())
         self._column = column
+        self._presentations = presentations
 
     def render(self, task: Task) -> RenderableType:
-        if task.fields.get("spinner_only"):
+        if task.fields.get("presentation") not in self._presentations:
             return Text("")
         return self._column.render(task)
+
+
+class _ActiveDescriptionColumn(ProgressColumn):
+    """Render the active marker separately from the unstyled description."""
+
+    def __init__(self) -> None:
+        super().__init__(table_column=Column(ratio=1, overflow="ellipsis", no_wrap=True))
+
+    def render(self, task: Task) -> RenderableType:
+        return Text.assemble(
+            "  ",
+            Text("[RUN]", style=_STATUS_STYLES["[RUN]"]),
+            " ",
+            task.description,
+        )
+
+
+def _status_line(marker: str, text: str) -> Text:
+    return Text.assemble("  ", Text(marker, style=_STATUS_STYLES[marker]), " ", text)
+
+
+class _EstimatedTimeRemainingColumn(ProgressColumn):
+    """Render the ETA label and value only after Rich has an estimate."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._remaining = TimeRemainingColumn(compact=True)
+
+    def render(self, task: Task) -> RenderableType:
+        if task.time_remaining is None:
+            return Text("")
+        value = self._remaining.render(task)
+        return Text.assemble("ETA ", value)
 
 
 class NullProgressReporter:
@@ -58,8 +132,10 @@ class NullProgressReporter:
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
-        del self, status
+        del self, status, retain
 
     def suspend(self) -> None:
         del self
@@ -68,25 +144,89 @@ class NullProgressReporter:
         del self
 
 
+class PlainProgressReporter:
+    """Chronological ASCII progress for redirected human output."""
+
+    def __init__(self, stream: TextIO | None = None) -> None:
+        self._stream = stream
+        self._task: _PlainTask | None = None
+        self._task_stack: list[_PlainTask] = []
+        self._lock = RLock()
+
+    def start_phase(self, name: str, total: int) -> None:
+        del total
+        with self._lock:
+            if self._task is not None:
+                self._task_stack.append(self._task)
+            self._task = _PlainTask(name, monotonic())
+
+    def start_indeterminate(self, name: str) -> None:
+        self.start_phase(name, total=0)
+
+    def advance(self, amount: int = 1) -> None:
+        del amount
+
+    def set_description(self, desc: str) -> None:
+        del desc
+
+    def complete_phase(
+        self,
+        status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
+    ) -> None:
+        del retain
+        with self._lock:
+            if self._task is None:
+                return
+            task = self._task
+            nested = bool(self._task_stack)
+            if not nested or status in {
+                ProgressPhaseStatus.WARNED,
+                ProgressPhaseStatus.FAILED,
+            }:
+                detail = (
+                    f"  Completed in {_format_elapsed(monotonic() - task.started_at)}"
+                    if status == ProgressPhaseStatus.COMPLETED
+                    else ""
+                )
+                line = f"{_DURABLE_STATUS_MARKERS[status]} {task.label}{detail}"
+                stream = self._stream if self._stream is not None else sys.stderr
+                print(line.encode("ascii", "backslashreplace").decode("ascii"), file=stream)
+            self._task = self._task_stack.pop() if self._task_stack else None
+
+    def suspend(self) -> None:
+        return
+
+    def resume(self) -> None:
+        return
+
+
 class RichProgressReporter:
     """Progress reporter using the rich library for CLI display."""
 
     def __init__(self, *, no_color: bool = False) -> None:
         self._progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            _SpinnerAwareColumn(BarColumn()),
-            _SpinnerAwareColumn(TaskProgressColumn()),
-            _SpinnerAwareColumn(TimeRemainingColumn()),
+            _ActiveDescriptionColumn(),
+            _TaskPresentationColumn(TextColumn(" "), "measurable", "indeterminate"),
+            _TaskPresentationColumn(
+                BarColumn(bar_width=None, table_column=Column(min_width=20, ratio=1)),
+                "measurable",
+            ),
+            _TaskPresentationColumn(MofNCompleteColumn(), "measurable"),
+            _TaskPresentationColumn(_EstimatedTimeRemainingColumn(), "measurable"),
+            _TaskPresentationColumn(SpinnerColumn(spinner_name="line"), "indeterminate"),
             transient=True,
             auto_refresh=False,
             redirect_stdout=False,
             redirect_stderr=False,
+            expand=True,
             console=Console(stderr=True, no_color=no_color),
         )
         self._task_id: TaskID | None = None
         self._task_stack: list[TaskID] = []
         self._task_totals: dict[TaskID, int] = {}
+        self._task_started_at: dict[TaskID, float] = {}
         self._suspend_depth = 0
         self._lock = RLock()
 
@@ -102,20 +242,23 @@ class RichProgressReporter:
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
-        self._start_task(name, total=total, spinner_only=False)
+        presentation = "measurable" if total > 1 else "simple"
+        self._start_task(name, total=total, presentation=presentation)
 
     def start_indeterminate(self, name: str) -> None:
         """Start a new phase with spinner-only activity."""
-        self._start_task(name, total=None, spinner_only=True)
+        self._start_task(name, total=None, presentation="indeterminate")
 
     def _start_task(
         self,
         name: str,
         *,
         total: int | None,
-        spinner_only: bool,
+        presentation: str,
     ) -> None:
         with self._lock:
+            if presentation == "measurable":
+                self._progress.console.print()
             if not self._progress.live.is_started:
                 self._progress.start()
             if self._task_id is not None:
@@ -124,10 +267,14 @@ class RichProgressReporter:
             self._task_id = self._progress.add_task(
                 name,
                 total=total,
-                spinner_only=spinner_only,
+                presentation=presentation,
+                phase_label=name,
             )
+            task_id = self._task_id
+            self._task_started_at[task_id] = monotonic()
             if total is not None:
-                self._task_totals[self._task_id] = total
+                self._task_totals[task_id] = total
+            self._progress.refresh()
 
     def advance(self, amount: int = 1) -> None:
         """Advance the rich progress bar."""
@@ -145,25 +292,56 @@ class RichProgressReporter:
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
         """Complete the current phase and stop progress if all tasks done."""
         with self._lock:
             if self._task_id is not None:
-                total = self._task_totals.get(self._task_id)
+                task_id = self._task_id
+                total = self._task_totals.get(task_id)
+                started_at = self._task_started_at.get(task_id)
+                if started_at is None:
+                    started_at = monotonic()
+                duration = max(0.0, monotonic() - started_at)
+                task = next(
+                    (candidate for candidate in self._progress.tasks if candidate.id == task_id),
+                    None,
+                )
                 if status == ProgressPhaseStatus.SKIPPED:
-                    self._progress.update(self._task_id, description="Skipped", refresh=True)
+                    self._progress.update(task_id, description="Skipped", refresh=True)
                 elif status == ProgressPhaseStatus.WARNED:
-                    self._progress.update(self._task_id, description="Warning", refresh=True)
+                    self._progress.update(task_id, description="Warning", refresh=True)
                 elif status == ProgressPhaseStatus.FAILED:
-                    self._progress.update(self._task_id, description="Failed", refresh=True)
+                    self._progress.update(task_id, description="Failed", refresh=True)
 
                 if total is not None and status in {
                     ProgressPhaseStatus.COMPLETED,
                     ProgressPhaseStatus.SKIPPED,
                 }:
-                    self._progress.update(self._task_id, completed=total, refresh=True)
-                self._progress.remove_task(self._task_id)
-                self._task_totals.pop(self._task_id, None)
+                    self._progress.update(task_id, completed=total, refresh=True)
+
+                nested = bool(self._task_stack)
+                should_retain = status != ProgressPhaseStatus.COMPLETED
+                if status == ProgressPhaseStatus.COMPLETED and retain is not False:
+                    should_retain = retain is True or (
+                        not nested and duration >= _MIN_DURABLE_PHASE_SECONDS
+                    )
+                if should_retain and task is not None:
+                    label = task.fields.get("phase_label", task.description)
+                    if not isinstance(label, str):
+                        label = task.description
+                    detail = (
+                        f"  Completed in {_format_elapsed(duration)}"
+                        if status == ProgressPhaseStatus.COMPLETED
+                        else ""
+                    )
+                    marker = _DURABLE_STATUS_MARKERS[status]
+                    self._progress.console.print(_status_line(marker, f"{label}{detail}"))
+
+                self._progress.remove_task(task_id)
+                self._task_totals.pop(task_id, None)
+                self._task_started_at.pop(task_id, None)
                 self._task_id = None
 
             if self._task_stack:
@@ -247,8 +425,11 @@ class LogProgressReporter:
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
         """Log phase completion."""
+        del retain
         log.info("phase_completed", phase=self._name, status=status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (

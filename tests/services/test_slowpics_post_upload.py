@@ -27,6 +27,7 @@ def _workspace(
     return WorkspacePaths(
         root=root,
         input_dir=root / "comparison_videos",
+        generated_root=generated_dir or root / "generated",
         run_dir=run_dir,
         screenshots_dir=screenshots_dir or root / "screenshots",
         generated_dir=generated_dir or root / "generated",
@@ -59,7 +60,7 @@ def _request(
 async def test_run_slowpics_post_upload_actions_writes_shortcut_when_enabled(
     tmp_path: Path,
 ) -> None:
-    run_dir = tmp_path / "workspace" / "runs" / "Collateral"
+    run_dir = tmp_path / "workspace" / "generated" / "Collateral"
     request = _request(
         tmp_path,
         run_dir=run_dir,
@@ -96,7 +97,7 @@ async def test_run_slowpics_post_upload_actions_returns_no_actions_when_disabled
 async def test_run_slowpics_post_upload_actions_returns_shortcut_then_webhook(
     tmp_path: Path, monkeypatch
 ) -> None:
-    run_dir = tmp_path / "workspace" / "runs" / "Collateral"
+    run_dir = tmp_path / "workspace" / "generated" / "Collateral"
     request = _request(
         tmp_path,
         run_dir=run_dir,

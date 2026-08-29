@@ -9,36 +9,22 @@ search:
 > current product contracts. Update or remove an item when its work is completed,
 > rejected, or promoted into an active plan.
 
-- Bundle a permissively-licensed font (OFL) and pin overlay font selection for deterministic appearance + golden-image tests.
 - Consider adding a dedicated packaging/release workflow skill if Python packaging, Docker, Windows portable, or updater/signing work becomes frequent.
 
+## VSPreview Upstream Compatibility
+
+- Track an upstream VSPreview release that supports VSJetPack 2.x without the
+  removed `vs_object`, `set_output`, and `DitherType.is_fmtc` APIs. When one is
+  available and the dependency update is approved, remove
+  `prepare_vspreview_compatibility()` and its compatibility tests only after the
+  frozen deep import, native Windows GUI flow, and extracted Windows portable
+  runtime proof all pass without the shim.
+
+## Release Identity Presentation Follow-Ups
+
+- Consider dedicated release-identity display fields for the HTML report/HUD, baked
+  screenshot overlays, wizard/dry-run exact-file presentation, and warnings where
+  useful. Exclude run-folder/history names, the slow.pics collection title, and all
+  internal identities.
+
 ---
-
-## CLI Output Follow-Ups
-
-### Optional Phase Section Headers
-
-**Context**: Current interactive progress now uses concise product phase labels
-inside the Rich progress task. It does not emit durable section headers around
-phase boundaries.
-
-**What**: If users still need more visible workflow landmarks after the progress
-label pass, evaluate lightweight phase section headers around runtime progress
-without duplicating the existing progress task labels.
-
-**Risk**: Touches orchestration hotspot files (`execution.py`, `coordinator.py`)
-and user-visible CLI output. Requires a focused plan and full verification.
-
-### Post-Probe Clip Metadata Summary
-
-**Context**: The legacy project shows per-clip metadata (resolution, fps, frame
-count, duration timecode) in a `[DISCOVER]` section.
-
-**What**: Surface clip probe data (resolution, fps, frames, duration) through
-`RunResult` or a post-probe callback and render it as a styled clip table.
-
-**Config gating**: Should be gated behind `--verbose` or a config flag (e.g.
-`diagnostics.show_clip_metadata`).
-
-**Risk**: Same as the frame plan breakdown — requires expanding `RunResult` and
-the orchestration data flow.

@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
-import json
+import re
+from collections.abc import Sequence
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
-from typing import TYPE_CHECKING, Protocol, cast
+from subprocess import CalledProcessError, CompletedProcess, TimeoutExpired
+from typing import TYPE_CHECKING, Protocol
 
-from frame_compare.render.backend._ffmpeg_frame import build_extract_frame_argv
+from frame_compare.render.backend._ffmpeg_frame import (
+    build_extract_frame_argv,
+    build_extract_frames_argv,
+)
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
+from frame_compare.utils.media_facts import PictureType, RenderedFrameFacts, normalize_picture_type
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.vs.hdr_probe import probe_hdr_metadata
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
     from frame_compare.render.geometry import RenderGeometryPlan
+
+
+_H273_UNSPECIFIED = 2
 
 
 class FFmpegRunner(Protocol):
@@ -26,8 +35,8 @@ class FFmpegRunner(Protocol):
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
-    ) -> None:
-        """Extract a single frame from the given video into the output path."""
+    ) -> RenderedFrameFacts:
+        """Extract a frame and return facts from that same exact-frame process."""
         ...
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
@@ -45,7 +54,6 @@ class FFmpegRunner(Protocol):
 class DefaultFFmpegRunner:
     """Default FFmpeg runner for dependency injection in orchestration."""
 
-    _FFPROBE_TIMEOUT_SECONDS = 15.0
     _FFMPEG_TIMEOUT_SECONDS = 30.0
 
     def __init__(self, extraction_timeout_seconds: float = _FFMPEG_TIMEOUT_SECONDS) -> None:
@@ -58,7 +66,7 @@ class DefaultFFmpegRunner:
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
-    ) -> None:
+    ) -> RenderedFrameFacts:
         output.parent.mkdir(parents=True, exist_ok=True)
         argv = build_extract_frame_argv(
             video=video,
@@ -67,72 +75,118 @@ class DefaultFFmpegRunner:
             overwrite=True,
             geometry_plan=geometry_plan,
         )
+        completed = self._run_extraction(
+            argv,
+            timeout_message="ffmpeg timed out while extracting frame",
+        )
+        return RenderedFrameFacts(
+            source_frame=frame_num,
+            picture_type=parse_showinfo_picture_type(completed.stderr),
+        )
+
+    def extract_frames(
+        self,
+        video: Path,
+        frame_nums: Sequence[int],
+        output_dir: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> list[RenderedFrameFacts]:
+        """Extract ordered frames in one decode pass into numbered staging files."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        argv = build_extract_frames_argv(
+            video=video,
+            frame_nums=frame_nums,
+            output_pattern=output_dir / "%09d.png",
+            overwrite=True,
+            geometry_plan=geometry_plan,
+        )
+        completed = self._run_extraction(
+            argv,
+            timeout_message="ffmpeg timed out while extracting frames",
+        )
+        picture_types = parse_showinfo_picture_types(completed.stderr, len(frame_nums))
+        return [
+            RenderedFrameFacts(source_frame=frame_num, picture_type=picture_type)
+            for frame_num, picture_type in zip(frame_nums, picture_types, strict=True)
+        ]
+
+    def _run_extraction(
+        self,
+        argv: list[str],
+        *,
+        timeout_message: str,
+    ) -> CompletedProcess[bytes]:
         try:
-            run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
+            return run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
         except TimeoutExpired as exc:
-            raise FFmpegError("ffmpeg timed out while extracting frame", 124) from exc
+            raise FFmpegError(timeout_message, 124) from exc
         except CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
+            stderr = exc.stderr.decode(errors="replace")
+            raise FFmpegError(stderr, exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        argv = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=color_transfer,color_primaries,color_space",
-            "-of",
-            "json",
-            str(video),
-        ]
-        try:
-            proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
-        except FileNotFoundError as exc:
-            raise FFmpegNotFoundError() from exc
-        except TimeoutExpired as exc:
-            raise FFmpegError("ffprobe timed out while probing hdr", 124) from exc
-        except CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
-
-        try:
-            payload = cast(
-                dict[str, object], json.loads(proc.stdout.decode("utf-8", errors="replace"))
-            )
-        except json.JSONDecodeError as exc:
-            raise FFmpegError("ffprobe returned invalid json", proc.returncode) from exc
-
-        streams_obj = payload.get("streams")
-        if not isinstance(streams_obj, list) or not streams_obj:
+        metadata = probe_hdr_metadata(video)
+        if (
+            metadata is None
+            or metadata.transfer == _H273_UNSPECIFIED
+            or metadata.color_primaries == _H273_UNSPECIFIED
+        ):
             return None
-        streams = cast(list[object], streams_obj)
-        stream_obj = streams[0]
-        if not isinstance(stream_obj, dict):
-            return None
-        stream = cast(dict[str, object], stream_obj)
+        return metadata
 
-        transfer_raw = str(stream.get("color_transfer", "")).lower().strip()
-        primaries_raw = str(stream.get("color_primaries", "")).lower().strip()
-        matrix_raw = str(stream.get("color_space", "")).lower().strip()
-        primaries_map = {"bt709": 1, "bt2020": 9}
-        transfer_map = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
-        matrix_map = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
 
-        color_primaries = primaries_map.get(primaries_raw, 2)
-        transfer = transfer_map.get(transfer_raw, 2)
-        matrix = matrix_map.get(matrix_raw, 2)
+_SHOWINFO_TYPE_RE = re.compile(rb"\[Parsed_showinfo_[^]]+\].*?\btype\s*[:=]\s*([^\s,\]]+)")
+_SHOWINFO_INDEXED_TYPE_RE = re.compile(
+    rb"\[Parsed_showinfo_[^]]+\][^\r\n]*?\bn\s*[:=]\s*(\d+)"
+    rb"[^\r\n]*?\btype\s*[:=]\s*([^\s,\]]+)"
+)
 
-        if not transfer_raw or not primaries_raw or color_primaries == 2 or transfer == 2:
-            return None
 
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=color_primaries,
-            transfer=transfer,
-            matrix=matrix,
-        )
+def _resolve_picture_type_tokens(tokens: Sequence[bytes]) -> PictureType | None:
+    values: set[PictureType] = set()
+    saw_unknown = False
+    saw_invalid = False
+    for raw_token in tokens:
+        token = raw_token.rstrip(b".;")
+        if token == b"?":
+            saw_unknown = True
+            continue
+        normalized = normalize_picture_type(token)
+        if normalized is not None:
+            values.add(normalized)
+        else:
+            saw_invalid = True
+    if saw_unknown or saw_invalid or len(values) != 1:
+        return None
+    return values.pop()
+
+
+def parse_showinfo_picture_type(stderr: bytes | str) -> PictureType | None:
+    """Return one unambiguous picture type from selected-frame ``showinfo`` output.
+
+    ``showinfo`` is intentionally parsed only on its own ``Parsed_showinfo_*``
+    diagnostics. Duplicate identical records are harmless; a missing, unknown,
+    or contradictory value is represented as ``None``.
+    """
+    raw = stderr.encode() if isinstance(stderr, str) else stderr
+    return _resolve_picture_type_tokens(
+        [match.group(1) for match in _SHOWINFO_TYPE_RE.finditer(raw)]
+    )
+
+
+def parse_showinfo_picture_types(
+    stderr: bytes | str, expected_count: int
+) -> list[PictureType | None]:
+    """Return picture types keyed by selected-frame output index."""
+    if expected_count < 0:
+        raise ValueError("expected_count must be non-negative")
+    raw = stderr.encode() if isinstance(stderr, str) else stderr
+    tokens_by_index: list[list[bytes]] = [[] for _ in range(expected_count)]
+    for match in _SHOWINFO_INDEXED_TYPE_RE.finditer(raw):
+        index = int(match.group(1))
+        if index < expected_count:
+            tokens_by_index[index].append(match.group(2))
+    return [_resolve_picture_type_tokens(tokens) for tokens in tokens_by_index]

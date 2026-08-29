@@ -14,6 +14,8 @@ the task needs it:
 Always-on defaults:
 
 - Bootstrap with `uv sync --group dev --frozen` if `.venv/bin/*` is missing.
+- Use Codanna for unknown owners, callers, and impact when available; confirm
+  important results in source and use `rg`/direct reads for exact queries.
 - Use the smallest matching repo-local skill set. Prefer one process skill plus only
   the boundary skills required by the changed surface.
 - Keep code-health scanner state and optional local code-health skills untracked; do not add a repo-local `desloppify` skill unless the task explicitly targets desloppify workflow and the maintainer approves tracking it.

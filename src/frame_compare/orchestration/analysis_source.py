@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.errors import FastestAnalysisSourceError
+from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.source_selection import resolve_source_selector
 
 if TYPE_CHECKING:
@@ -47,11 +48,13 @@ def resolve_analysis_source(
     if selector == "reference":
         return AnalysisSourceSelection(clip=clips[0], reason="reference")
     if selector == "fastest":
-        selected = _select_fastest_clip(clips=clips, vs_loader=vs_loader)
+        selected_index, selected = _select_fastest_clip(clips=clips, vs_loader=vs_loader)
         return AnalysisSourceSelection(
             clip=selected,
             reason="fastest",
-            warning=f"Analysis source: {selected.path.name} (fastest)",
+            warning=(
+                f"Analysis source: {clip_role(selected_index)} | selected by fastest-source policy"
+            ),
         )
 
     paths = [clip.path for clip in clips]
@@ -61,17 +64,19 @@ def resolve_analysis_source(
         paths=paths,
         role="sources.analysis_source",
     )
-    for clip in clips:
+    for index, clip in enumerate(clips):
         if clip.path == selected_path:
             return AnalysisSourceSelection(
                 clip=clip,
                 reason="configured",
-                warning=f"Analysis source: {clip.path.name} (configured)",
+                warning=(f"Analysis source: {clip_role(index)} | selected by configured policy"),
             )
     raise FastestAnalysisSourceError()
 
 
-def _select_fastest_clip(*, clips: list[ClipState], vs_loader: VSLoader | None) -> ClipState:
+def _select_fastest_clip(
+    *, clips: list[ClipState], vs_loader: VSLoader | None
+) -> tuple[int, ClipState]:
     if vs_loader is None:
         raise FastestAnalysisSourceError()
 
@@ -84,7 +89,8 @@ def _select_fastest_clip(*, clips: list[ClipState], vs_loader: VSLoader | None) 
 
     if not timings:
         raise FastestAnalysisSourceError()
-    return min(timings, key=lambda item: (item[0], item[1]))[2]
+    winner = min(timings, key=lambda item: (item[0], item[1]))
+    return winner[1], winner[2]
 
 
 def _benchmark_clip(*, clip: ClipState, vs_loader: VSLoader) -> float | None:

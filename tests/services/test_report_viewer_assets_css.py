@@ -37,3 +37,40 @@ def test_viewer_css_preserves_accessible_input_modes() -> None:
         target = css_block(coarse, selector)
         assert "min-width: 44px;" in target, selector
         assert "min-height: 44px;" in target, selector
+
+
+def test_viewer_css_anchors_toolbar_and_shares_responsive_inspector_width() -> None:
+    css = get_css()
+
+    root = css_block(css, ":root")
+    assert "--rv-inspector-width: clamp(28rem, 30vw, 42rem);" in root
+
+    toolbar = css_block(css, ".rv-primary-controls")
+    assert "display: grid;" in toolbar
+    assert "grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);" in toolbar
+    assert 'grid-template-areas: "frame mode context";' in toolbar
+
+    inspector = css_block(css, ".rv-inspector")
+    assert "width: min(var(--rv-inspector-width), calc(100vw - 2rem));" in inspector
+    assert "overflow-x: hidden;" in inspector
+    stage = css_block(css, "body.rv-inspector-open .rv-viewer-stage")
+    assert "margin-right: min(var(--rv-inspector-width), calc(100vw - 2rem));" in stage
+
+    panel = css_block(css, ".rv-inspector-panel")
+    assert "overflow-x: hidden;" in panel
+    metadata = css_block(css, ".rv-inspector-list")
+    assert "grid-template-columns: minmax(5.5rem, max-content) minmax(0, 1fr);" in metadata
+
+
+def test_viewer_css_keeps_report_information_wide_and_wrappable() -> None:
+    css = get_css()
+
+    modal = css_block(css, ".rv-modal-content--wide")
+    assert "width: min(56rem, calc(100vw - 2rem));" in modal
+    assert "max-width: none;" in modal
+    info_grid = css_block(css, ".rv-info-grid")
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in info_grid
+    clip_heading = css_block(css, ".rv-clip-meta-heading span:first-child")
+    assert "overflow-wrap: anywhere;" in clip_heading
+    assert "white-space: nowrap;" not in clip_heading
+    assert "text-overflow: ellipsis;" not in clip_heading

@@ -3,6 +3,7 @@
 # pyright: reportPrivateUsage=false
 
 import tomllib
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -11,7 +12,7 @@ import numpy as np
 import pytest
 import tomli_w
 
-from frame_compare.services.alignment import align_clips, align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
@@ -27,14 +28,41 @@ from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
     AlignmentResult,
+    AlignmentStabilitySummary,
     ReusableAlignmentEntry,
 )
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
     AlignmentClipRequest,
     AlignmentRequest,
 )
+
+_DEFAULT_STABILITY = AlignmentStabilitySummary(
+    classification="insufficient_evidence",
+    valid_windows=0,
+    offset_min_frames=None,
+    offset_max_frames=None,
+    first_offset_frames=None,
+    last_offset_frames=None,
+    largest_adjacent_jump_frames=None,
+    change_position_seconds=None,
+)
+
+
+def _accepted_consensus(sample_offset: int = 0) -> AlignmentConsensus:
+    return AlignmentConsensus(
+        sample_offset=sample_offset,
+        score=0.99,
+        applied=True,
+        diagnostic="accepted",
+        valid_windows=1,
+        consensus_windows=1,
+        consensus_ratio=1.0,
+        ambiguity_ratio=None,
+        stability=_DEFAULT_STABILITY,
+    )
 
 
 def _request_clip(path: Path, *, label: str | None = None) -> AlignmentClipRequest:
@@ -92,6 +120,122 @@ def _alignment_request(
     )
 
 
+def test_typed_alignment_progress_uses_prepared_comparison_presentation(
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference-raw-name.mkv"
+    comparison = tmp_path / "very-long-raw-comparison-name.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = _alignment_request(
+        tmp_path,
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                presentation_name="2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            )
+        ],
+    )
+    progress = Mock(spec=ProgressReporter)
+
+    with (
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ),
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ),
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=_accepted_consensus(),
+        ),
+    ):
+        align_clips_from_request(
+            request,
+            config,
+            progress=progress,
+            reference_fps=Fraction(24, 1),
+        )
+
+    descriptions = [call.args[0] for call in progress.set_description.call_args_list]
+    assert descriptions[0] == "ALIGN | Checking saved offsets"
+    assert "ALIGN | Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune" in descriptions
+    assert not any("very-long-raw-comparison-name.mkv" in value for value in descriptions)
+    progress.start_indeterminate.assert_not_called()
+
+
+def test_typed_alignment_passes_presentation_names_without_changing_vspreview_keys(
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "raw-reference-stem.mkv"
+    comparison = tmp_path / "raw-comparison-stem.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = _alignment_request(
+        tmp_path,
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+    )
+    request = replace(
+        request,
+        reference=replace(
+            request.reference,
+            presentation_name="PMTP WEB-DL | DV HDR10+ | Kitsune",
+        ),
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                presentation_name="ATV WEB-DL | DV HDR10+ | Kitsune",
+            )
+        ],
+    )
+
+    with (
+        patch(
+            "frame_compare.services.alignment._extract_reference_audio",
+            return_value=(np.ones(10, dtype=np.float32), object()),
+        ),
+        patch(
+            "frame_compare.services.alignment._extract_matching_audio",
+            return_value=np.ones(10, dtype=np.float32),
+        ),
+        patch(
+            "frame_compare.services.alignment._estimate_consensus_offset",
+            return_value=_accepted_consensus(),
+        ),
+        patch(
+            "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
+            return_value=None,
+        ) as launch,
+    ):
+        results = align_clips_from_request(
+            request,
+            config,
+            reference_fps=Fraction(24, 1),
+        )
+
+    assert launch.call_args.kwargs["offsets_by_key"] == {
+        "raw-reference-stem:raw-comparison-stem": 0
+    }
+    assert launch.call_args.kwargs["presentation_names_by_stem"] == {
+        "raw-reference-stem": "PMTP WEB-DL | DV HDR10+ | Kitsune",
+        "raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
+    }
+    assert results[0].reference_clip == reference.name
+    assert results[0].comparison_clip == comparison.name
+
+
 def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -131,7 +275,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
     ):
         results = align_clips_from_request(request, config)
@@ -168,6 +312,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         correlation_score=0.87,
         algorithm="cross_correlation",
         source="computed",
+        stability=_DEFAULT_STABILITY,
     )
     save_reusable_offsets(
         request,
@@ -518,7 +663,7 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
@@ -602,7 +747,7 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview", return_value=None
@@ -653,6 +798,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     correlation_score=0.91,
                     algorithm="cross_correlation",
                     source="computed",
+                    stability=_DEFAULT_STABILITY,
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
                 provenance="computed_this_run",
@@ -666,6 +812,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     correlation_score=0.93,
                     algorithm="cross_correlation",
                     source="computed",
+                    stability=_DEFAULT_STABILITY,
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[1]),
                 provenance="computed_this_run",
@@ -750,7 +897,7 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
@@ -774,6 +921,7 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     assert entry["frame_offset"] == 0
     assert entry["time_offset_seconds"] == 0.0
     assert entry["correlation_score"] == pytest.approx(0.99)
+    assert entry["stability"]["classification"] == "insufficient_evidence"
 
 
 def test_align_clips_from_request_does_not_attempt_shared_write_for_preexisting_manual_override(
@@ -866,7 +1014,7 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
@@ -923,7 +1071,7 @@ def test_align_clips_from_request_vspreview_confirmed_entry_keeps_computed_fallb
         ),
         patch(
             "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=AlignmentConsensus(4000, 0.99, True, "accepted", 1, 1, 1.0, None),
+            return_value=_accepted_consensus(4000),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vspreview",
@@ -974,23 +1122,3 @@ def test_align_clips_from_request_rejects_invalid_previous_offset_policy_combina
 
     with pytest.raises(AudioAlignmentError, match=error_match):
         align_clips_from_request(request, config)
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        AlignmentConfig(cache_results=False, previous_offsets="prompt"),
-        AlignmentConfig(force_interactive=True, previous_offsets="always"),
-    ],
-)
-def test_align_clips_rejects_invalid_previous_offset_policy_combinations(
-    tmp_path: Path,
-    config: AlignmentConfig,
-) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-
-    with pytest.raises(AudioAlignmentError, match="previous_offsets|force_interactive"):
-        align_clips(ref, [comp], config, tmp_path)

@@ -38,6 +38,8 @@ documents that promise elsewhere.
 
 - `src/frame_compare/cli/entry.py` is the implementation owner for CLI command routing,
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
+- `src/frame_compare/cli/output.py` owns the human run plan, result hierarchy,
+  warning presentation, and path formatting; it does not own JSON serialization.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
   - `tests/cli/test_help_and_import.py` for command registration, help text, and
@@ -92,6 +94,12 @@ help states their workspace-relative resolution, while runtime-only flags descri
 their one-run or early-exit behavior. These descriptions do not change option
 defaults, parsing, persistence, streams, or exit codes.
 
+Root help describes the repeatable comparison outcome and includes concise examples
+for first setup, a dry-run preview, and a local-only comparison. `run --help` groups
+options under Workspace and configuration, Sources and frame selection, Rendering
+and alignment, Reports and publishing, Planning and diagnostics, and Output modes.
+Help uses the current terminal width; it does not impose a routine 200-column width.
+
 ## Shared Path Resolution Rules
 
 These commands share the same root/config path resolution rules:
@@ -109,15 +117,16 @@ For those commands:
 - `--config` selects the config file path. Relative paths resolve from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
-The selected config file and configured `paths.config_dir`,
-`paths.screenshots_dir`, `paths.generated_dir`, and non-null
-`report.output_dir` must resolve beneath the fully resolved workspace root.
-Containment follows symlinks and expands environment variables in config path
-values, so absolute paths, `..` traversal, or symlinks that escape the root fail
-with `PathEscapesRootError` / `FC-3009`. `run`, `wizard`, `preset apply`,
+The selected config file and configured `paths.config_dir` must resolve beneath the
+fully resolved workspace root. The sole `paths.generated_dir` value is resolved
+once and may name a normal external directory; empty or whitespace-only values,
+including values that become empty after environment expansion, are invalid. Its
+managed descendants remain contained beneath that resolved generated-data root.
+Containment follows symlinks and expands environment variables in config path values,
+so invalid config paths fail through the standard typed path error. `run`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
-destination before config reads or writes; `run` also validates configured
-contained paths before diagnostics, config writes, or runtime entry. `preset list`
+destination before config reads or writes; `run` also validates generated-data
+root structure before diagnostics, config writes, or runtime entry. `preset list`
 remains root-only and ignores its accepted `--config` value.
 
 Media input is a read boundary, not a write boundary. Configured
@@ -125,10 +134,12 @@ Media input is a read boundary, not a write boundary. Configured
 environment-expanded, or symlinked to a directory outside the workspace. This
 does not permit generated state to follow media outside the root.
 
-History commands resolve, load, and validate the selected config and contained
-configured `paths.generated_dir` using these same `--root/-r` and `--config/-c`
-rules, but they do not require the configured input directory or current video
-files to exist. This keeps recorded outcomes readable after media moves.
+History commands resolve, load, and validate the selected config and configured
+`paths.generated_dir` using these same `--root/-r` and `--config/-c` rules. The
+resolved generated-data root may be outside the workspace; history requires its
+managed run, record, and report descendants to remain beneath that resolved root.
+History does not require the configured input directory or current video files to
+exist, keeping recorded outcomes readable after media moves.
 
 For the installed Windows portable shim, the shim runs the bundle launcher from the
 bundle root and injects a default `--config` for `run`, `wizard`, supported
@@ -211,10 +222,15 @@ Explicit labels are trimmed and control-free. Derived labels replace control
 characters with spaces and collapse whitespace. Duplicate explicit labels fail
 before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
-then stable source order. Resolved labels drive overlays, progress, reports,
-alignment display, render artifact keys, and slow.pics column names, but do not
-change source/cache/alignment identity or physical PNG filenames. Orchestrated
-rendering continues to use the source stem as `filename_label`.
+then stable source order. Resolved labels drive overlays, reports, alignment display,
+and render artifact keys, but do not change source/cache/alignment identity or physical
+PNG filenames. Live render progress uses exact explicit labels or unique role-prefixed
+micro release descriptors. slow.pics columns use exact explicit labels or unique full
+release descriptors, with the canonical resolved label as the uninformative-parser
+fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
+absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
+physical filename retains a readable source-stem prefix and adds a deterministic
+digest suffix so local `file://` reports remain loadable without identity collisions.
 
 When analysis is skipped because effective `[analysis]` requests only
 `user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
@@ -234,18 +250,22 @@ unchanged.
 - History is read-only. Stage 1 provides only `list`, `list --json`, and exact-name
   `open`; it does not migrate, replay, delete, rename, search, paginate, or fuzzy
   match runs.
-- Discovery inspects contained immediate child directories of the configured
-  workspace-level generated root. Symlinked run directories are ignored, and a
-  result or legacy identity file is trusted only when its final regular-file target
-  remains inside that run directory. The shared `cache` directory is not a run
-  entry.
+- Discovery inspects contained real immediate-child directories of the configured
+  generated-data root. Folders without a supported `run_result.toml` are omitted;
+  they are not interpreted through `run_info.toml` or reported as compatibility
+  history. Symlinked run directories are ignored, and a result record is trusted
+  only when its final regular-file target remains inside that run directory. The
+  shared `cache` directory is not a run entry.
 - Valid V1 `run_result.toml` entries report `completed`,
-  `completed_with_warnings`, or `failed`. Legacy folders without a result record
-  report `unknown` and are never modified. Malformed or unsupported records report
+  `completed_with_warnings`, or `failed`. Malformed or unsupported records report
   `unavailable`; each warning goes to stderr and does not hide other entries.
 - Entries sort newest first using persisted UTC completion/start time, with an
-  exact folder-name tie-break. Legacy entries use valid persisted
-  `run_info.toml` creation time when available.
+  exact folder-name tie-break. Unavailable records without valid lifecycle times
+  sort after valid records.
+- If the selected generated-data root is missing, disconnected, unreadable, or not
+  a directory, history fails with `FC-3016` and an actionable reconnect/permissions
+  hint. History does not create the root, return a JSON success document, or fall
+  back to the workspace or portable bundle.
 - Human `history list` output goes to stdout and exposes the exact run name,
   status, persisted time, and report availability. Diagnostics and warnings use
   stderr.
@@ -256,13 +276,11 @@ unchanged.
 - `history open RUN_NAME` accepts one exact child folder name only. Empty names,
   dot segments, separators, absolute/drive/UNC forms, traversal, missing or
   non-directory entries, and symlinked run directories fail through the typed CLI error
-  path. The command reads the report path only from a valid V1 record, resolves
-  its workspace-relative path, and requires the final existing file to remain
-  beneath the configured generated root after symlink resolution.
-- A configured report elsewhere beneath the workspace root may be recorded, but
-  history intentionally refuses to open it because it is outside the generated
-  history boundary. Browser refusal or browser integration failure is a typed
-  actionable failure and never produces a success claim.
+  path. The command reads run-relative artifact facts from a valid V1 record,
+  resolves the canonical `report.html` from that run folder, and requires the final
+  existing file to remain beneath the configured generated root after symlink
+  resolution. Browser refusal or browser integration failure is a typed actionable
+  failure and never produces a success claim.
 
 ## `version` Command Contract
 
@@ -285,10 +303,14 @@ unchanged.
 - `--dry-run` is incompatible with `--write-config` and `--diagnose-paths`. It
   preserves the effective future run's existing `--json`, `--quiet`, interactive,
   frame-selection, source-selector, and cache-option compatibility validation.
-- Human dry-run output renders the same typed plan as JSON. Normal human mode shows
-  the detailed plan; `--quiet` emits only a minimal source-count/no-side-effects
-  summary. `--dry-run --json` writes exactly one JSON document to stdout, and typed
-  errors retain the standard JSON error schema and stream placement.
+- Human dry-run output renders the same typed plan as JSON. Normal human mode starts
+  with an explicit no-side-effects statement and groups the decision facts under
+  `Will use`, `Would create in a real run`, `Publishing after success`, `Unknown
+  until execution`, and `Not performed by dry-run`. Contained input paths are shown
+  relative to the workspace root, while external input paths remain absolute.
+  `--quiet` emits only a minimal source-count/no-side-effects summary.
+  `--dry-run --json` writes exactly one JSON document to stdout, and typed errors
+  retain the standard JSON error schema and stream placement.
 - Successful dry-run JSON has exactly these top-level keys:
   `checks_not_performed`, `dry_run`, `input`, `outputs`, `publishing`, `reference`,
   `runtime_facts`, and `selection`. Their exact nested fields are:
@@ -308,15 +330,33 @@ unchanged.
   `media_probe`, `analysis`, `alignment`, `cache_reads_or_writes`,
   `run_folder_reservation_or_metadata_writes`, `render_or_report_generation`,
   `network_publishing_or_metadata`, and `browser_clipboard_or_vspreview`.
-- The plan never dumps effective config. The resolved input directory is its only
+- The JSON plan never dumps effective config. The resolved input directory is its only
   deliberately reported absolute path. Source entries are filenames only. API keys,
   webhook URLs, tokens, and other secret values are excluded; only
   `webhook_configured` may reveal that a webhook-backed action is configured. The
   five `*_configured` action fields report effective configuration only; they do
   not claim that JSON, quiet, non-TTY, upload-result, or other runtime eligibility
   gates will permit the action. Runtime-only facts remain `unknown` with null
-  values until their existing runtime owners could determine them. When run folders
-  are disabled, `run_folder_name` is the one known null fact.
+  values until their existing runtime owners could determine them. The
+  `run_folder_name` fact is always unknown until reservation.
+- Human dry-run output renders report auto-open as `not applicable` when report
+  generation is disabled, and renders all slow.pics post-upload actions as
+  `not applicable` when slow.pics upload is disabled. This presentation rule does
+  not alter the JSON fields, which continue to report effective configuration.
+- Normal non-quiet runs begin with a `Run plan` decision checklist containing
+  `Workspace`, `Frame selection`, `Rendering`, `Alignment`, `Review`, and
+  `Publishing` groups. It retains the renderer policy (`ffmpeg` when forced,
+  otherwise `auto` with VapourSynth preferred), overlay, geometry,
+  active-picture policy, tone mapping, frame-selection counts and seed, analysis
+  source/mode, nonzero lead/trail exclusions, alignment/reuse/manual-review policy,
+  report intent, slow.pics visibility/confirmation/actions, and local deletion
+  behavior. Configured webhook values are represented only as configured/not
+  configured; the URL itself is never displayed.
+- Human run-plan paths show the resolved workspace root once as an absolute anchor.
+  Contained config, input, generated-data, and result paths are shown relative to
+  that root; external paths remain absolute. Rich folds long paths at narrow
+  terminal widths without replacing path text with an ellipsis. `--verbose` may add
+  the absolute form beside a contained relative path.
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -337,7 +377,8 @@ unchanged.
   and `slowpics.confirm_upload_after_report = true`, the CLI rejects `--json`
   before entering the runtime pipeline with the standard config-error JSON
   payload on stdout.
-- `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
+- `--quiet` suppresses the Run plan and retains the existing minimal success summary
+  byte/semantic contract.
 - `--quiet` is incompatible with `audio_alignment.previous_offsets = "prompt"`
   and is rejected before entering the runtime pipeline. It is compatible with
   `previous_offsets = "always"`.
@@ -346,9 +387,39 @@ unchanged.
 - Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
   the alignment phase when accepted or rejected frame alignment changes need
   explanation. The diagnostic reports normalized source-frame row 0, final trim
-  ranges, offsets, selected aligned frames, and rejected alignment warning context
-  for comparisons with material alignment information. It is suppressed by
+  ranges, offsets, selected aligned frames, and alignment warning context
+  for comparisons with material alignment information. Material non-constant offset
+  evidence adds one concise stability row and one bounded warning stating that the
+  applied constant offset was retained and should be verified. Stable or insufficient
+  evidence does not warn. Verbose mode may also show stable evidence and valid-window
+  counts; individual diagnostic windows are never printed.
+  It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
+- After sources load, normal human output uses one `[OK] Sources — N loaded`
+  panel heading. Its rows use `Reference` and `Comparison N` roles, factor one
+  reliable common content identity, and show each source's filename-claimed release
+  descriptor and exact filename separately. Explicit labels remain primary. Parsed
+  release claims remain distinct from probed resolution, source frame count, HDR/SDR
+  signal, source/effective FPS when they differ, complete container file size in
+  IEC units, and an input-relative path when the source is beneath the configured
+  input directory when nested. External sources remain absolute. Sizes use one
+  decimal place. The displayed size comes
+  from the probed fingerprint's `size_bytes`; it is not bitrate or a quality
+  signal, and it is not added to successful `run --json`.
+- After alignment, normal human output emits one `[OK] Frame rates match: X` line
+  only when every effective FPS is equal and no source FPS was adjusted. Any
+  adjustment or effective-FPS divergence instead keeps a compact evidence table
+  with the source-to-effective transition and status. Normal post-alignment FPS
+  output omits repeated paths; `--verbose` retains the detailed rows and full
+  absolute paths. JSON-mode FPS diagnostics retain their existing structured
+  stderr event and do not add fields to the successful stdout payload.
+- Material `Frame Alignment` output puts comparison, offset, source, trim, and
+  warning evidence before verbose provenance details. Verbose mode also retains
+  canonical labels, row-zero source frames, selected aligned frames, and absolute
+  source paths; normal mode uses compact release identities.
+  Source/FPS, alignment, and previous-offset prompt panels honor the actual
+  terminal width up to their existing maximum and do not impose a 100-column
+  minimum; status meaning remains visible in no-color output at narrow widths.
 - Verbose human runs emit a concise `Final Selection` summary to stderr immediately
   after alignment. It reports the final aligned frame count and each non-empty
   `SelectionBreakdown` category in `User`, `Dark`, `Bright`, `Motion`, `Random`
@@ -356,47 +427,169 @@ unchanged.
   domain. If the breakdown is unavailable, the aligned count is still reported with
   an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
   and it does not add a JSON field or log event.
-- Human-readable non-quiet successful runs group final warnings by source in a
-  `Warnings` panel. Existing runtime warning strings and slow.pics post-upload
-  action warnings are bridged into presentation rows with source, severity,
-  message, and optional detail/action context, then de-duplicated for display.
-  The visible warning cap remains eight rows; truncated output includes the
-  number of hidden rows and counts by hidden source.
+- Human-readable non-quiet successful runs use `[OK] Comparison completed`
+  or `[WARN] Comparison completed with N warning(s)` as the result panel title,
+  using a de-duplicated warning presentation count. The panel contains concise run
+  facts, then a `Review` group with the report before screenshots, a separate
+  `Publishing` group, and a
+  separate `Follow-up actions` group for successful post-upload actions. Durations
+  use human units and the source/cache facts are labeled `sources` and `Cache`.
+- Final warnings are grouped by source in a `Warnings` panel. Existing runtime
+  warning strings and slow.pics post-upload action warnings are bridged into
+  presentation rows with source, severity, message, and optional action context,
+  then de-duplicated for display. A `because ...` reason is shown once as detail.
+  Normal output shows at most eight warning rows and summarizes hidden rows by
+  source; `--verbose` shows every warning. Status text uses ASCII `[OK]`, `[WARN]`,
+  `[SKIP]`, `[FAIL]`, and `[WAIT]` markers, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
-- When the at-a-glance summary reports optional VSPreview probe failures, it uses a
+- When the Run plan reports optional VSPreview probe failures, it uses a
   sanitized summary rather than raw probe exception text.
-- The at-a-glance summary uses user-facing row labels such as `run folders`,
-  `FFmpeg audio`, `previous offsets`, `interactive alignment`,
-  `force interactive`, and `VSPreview` while preserving the same effective
-  configuration facts. The `previous offsets` row reports only the effective
-  config mode: `disabled`, `prompt`, or `always`.
-- The `analysis mode` row reports the effective `analysis.performance_mode`:
-  `quality` or `performance`.
-- The at-a-glance workspace paths are resolved base paths. When
-  `paths.use_run_folders = true`, the `screenshots` and `generated` rows describe the
-  configured base paths rather than the fresh per-run subdirectories reserved later in
-  execution.
+- The Run plan uses neutral configuration rows such as `Mode`, `Offsets`, `Review`,
+  and `VSPreview`; status tokens are reserved for actual capability checks and
+  runtime outcomes. The `Offsets` row reports `Do not reuse previous offsets`,
+  `Ask before reusing previous offsets`, or `Reuse previous offsets when valid`.
+- The `Analysis` row reports the effective `analysis.performance_mode` as
+  `Quality` or `Performance` and appends a space followed by
+  `(skipped for this run)` when `--skip-analysis` is active.
+- The Run plan workspace paths show `root`, `config`, `input`, and the resolved
+  `generated` data root. The constant run-folder policy and derived screenshot path
+  are not configuration rows.
 - Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
   `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
   Internal phase names in logs and `phase_timings` remain the runtime keys such
   as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Non-TTY human runs use those product phase labels in chronological ASCII
+  progress lines on stderr. Each top-level phase emits once when it completes;
+  successful lines include elapsed time, skips preserve their detail, and failed
+  phases emit `[FAIL]` before the existing typed error presentation. Successful
+  nested work and percentage milestones remain silent. Warned or failed nested
+  work may emit one line when needed to preserve a material outcome. Expected
+  warn-only phase failures do not add a console traceback or duplicate warning
+  event; JSON progress retains the structured `phase_warned` exception evidence.
+- Interactive Rich runs place those runtime phases and their diagnostics inside a
+  lightweight `Execution` rule band after the Sources panel and before the Result
+  panel. Loose live and durable runtime lines use a consistent two-space inset;
+  evidence and blocking-decision panels remain panels, with nested decision
+  questions using a four-space inset immediately below their panel. JSON, quiet,
+  and non-TTY output do not gain the band or inset.
+- Every Rich phase remains live while active with an ASCII `[RUN]` marker. Meaningful
+  measurable tasks use a Rich progress bar separated from preceding
+  durable output by one blank line and report completed/total work with a labeled
+  `ETA` once Rich has an estimate; before then, only completed/total work is shown.
+  Indeterminate activity uses an ASCII spinner after its description, while
+  one-step phases remain simple activity lines without a bar. The nested screenshot
+  bar uses the stable aggregate description `Screenshots` and advances as each
+  screenshot completes; an FFmpeg batch advances together when the batch completes.
+  A successful top-level phase leaves a durable ASCII status line with elapsed time
+  when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
+  while skipped,
+  warned, and failed phases always remain visible. A successful slow.pics upload
+  also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
+  prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
+  generic successful completion line. Progress is suspended around that blocking
+  prompt and restored afterward. Rich status color is confined to the semantic
+  marker: `[RUN]` is bright cyan, `[OK]` green, `[WAIT]` magenta, `[WARN]` yellow,
+  `[SKIP]` subdued yellow, and `[FAIL]` red. The description remains normally styled,
+  and no-color output retains the same literal markers.
+- Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
+  lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
+  comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
+  VSPreview review is labeled `ALIGN | Interactive verification`.
+- Normal interactive VSPreview launch presentation omits generated script and command
+  telemetry. `--verbose` retains those launch facts and bounded startup-failure
+  evidence. When a current-interpreter readiness check detects a missing optional
+  module, normal mode emits one sanitized warning and continues with the computed
+  audio alignment; forced interactive failure remains fatal. A successful VSPreview
+  child continues to inherit its native stdout and stderr diagnostics. One known
+  non-actionable `vstools.enums.color` `SyntaxWarning` is suppressed through the
+  child-only Python warning environment. When Frame Compare reports missing,
+  unspecified, or malformed preview color properties, the generated session applies
+  the same explicit BT.709 preview defaults that VSPreview would otherwise assume;
+  this avoids VSPreview's redundant per-output frame-property warnings. Missing modern
+  `_Range` remains unset and is reported once in Frame Compare's styled assumptions;
+  VSPreview 0.20's malformed empty `<>` duplicate is filtered without changing preview
+  range behavior or suppressing warnings that name actual properties.
+- The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
+  normal TTY runs because the product progress stream already represents the same
+  lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
+  normal warning events.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
-  modes still suppress Rich progress, and non-TTY runs still use log progress.
+  modes still suppress Rich progress, and non-TTY human runs use plain progress.
+  Consolidated FPS diagnostics retain their existing log presentation rather than
+  Rich FPS panels.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
-  `output`, and `root`, then exits without invoking the runtime pipeline.
-  The `cache` value is the resolved configured `paths.generated_dir`; the shared
-  analysis cache lives below it at `cache/analysis`, and shared alignment reuse
-  entries live below it at `cache/alignment`. `--diagnose-paths` does not report
-  the shared alignment cache path separately.
+  `output`, and `root`, then exits without invoking the runtime pipeline. The
+  `output` value is the resolved generated-data root and `cache` is its
+  `<root>/cache` directory; shared analysis and alignment reuse entries live below
+  that cache root. `--diagnose-paths` does not report the shared alignment cache
+  path separately.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
+### Run-Only Full-Window Selection Recovery
+
+- Recovery is eligible only when effective `analysis.ignore_lead_seconds` or
+  `analysis.ignore_trail_seconds` is nonzero and the existing frame-selection owner
+  raises its typed insufficient-candidates outcome from the exclusion-constrained
+  shared domain. Valid selection windows, zero-margin configurations, skipped
+  analysis, and unrelated metric/runtime failures retain their existing behavior.
+- In an interactive human run, the CLI asks exactly once on stderr, defaulting to No:
+
+  ```text
+  Configured lead/trail exclusions leave too little media to satisfy the
+  requested frame selection. Analyze the full shared clip for this run? [y/N]
+  ```
+
+- Yes creates a run-scoped effective config copy with only the effective lead and
+  trail exclusions set to `0.0`. It recomputes the normal shared selection window,
+  analysis domain, metric range, cache lookup/write identity, selection metadata,
+  and downstream normalization inputs while retaining source trims, alignment
+  limits, and all other shared-window semantics. The excluded-window and full-window
+  metric requests cannot satisfy each other's cache identity.
+- The authored config object and selected TOML file are not mutated or rewritten.
+  The accepted override is recorded as a run warning, including the human success
+  warning surface and the existing `run_result.toml` warning metadata. A report is
+  not enabled or created solely to record this recovery.
+- The retry runs at most once. If the full-window attempt cannot satisfy selection
+  or otherwise fails, the run exits through typed `FC-4012` selection failure with
+  guidance to reduce selector counts, use a longer clip, or reduce exclusions. It
+  does not prompt again, substitute the deterministic uniform fallback, render,
+  report success, publish, or upload.
+- No, default No, EOF, interruption, and prompt failure all fail through typed
+  `FC-4012` without retry or downstream success side effects. The hint directs users
+  to reduce `analysis.ignore_lead_seconds` / `analysis.ignore_trail_seconds` or use a
+  clip-specific config.
+- `--json`, `--quiet`, redirected/non-TTY stdin, `--from-cache-only`, and
+  `--skip-analysis` never receive this confirmation callback. If the constrained
+  selection fails, they fail closed through the same typed error: no automatic
+  relaxation, no retry, and no uniform substitution. JSON stdout remains the single
+  standard structured error object; human diagnostics remain on stderr.
+- Persistent short-clip behavior requires a separate config with
+  `ignore_lead_seconds = 0.0` and `ignore_trail_seconds = 0.0`, selected explicitly
+  with `frame-compare run --config <clip-config>`.
+
 ### Cache Mode Semantics
 
+- Analysis, probe, and alignment reuse caches use a performance-first source
+  freshness policy: path, byte size, and modification time identify source content;
+  media bytes are not hashed. A same-path, same-size, same-mtime replacement is
+  intentionally eligible to reuse cached data. Workflows that replace media while
+  preserving those fields must advance the mtime or remove the relevant shared
+  cache entry. This bounded stale-data risk is accepted to avoid reading potentially
+  multi-gigabyte media solely for cache lookup.
+- Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
+  guaranteed for the managed Windows portable and Debian/Docker profiles, whose
+  identities include their selected packaged runtime lineages. Unmanaged Windows,
+  Linux, and native macOS fingerprints intentionally encode only the selected Frame
+Compare contract and operating-system class; replacing native decoder or FFmpeg
+binaries outside those packaged profiles requires clearing generated caches and
+Frame Compare-owned indexes before reuse. See
+[Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
+recovery requirement.
 - Analysis cache entries live under `<resolved paths.generated_dir>/cache/analysis`
   using labeled full-fingerprint filenames:
   `<safe-human-label>__<full-fingerprint>.compframes`.
@@ -414,8 +607,11 @@ unchanged.
   with the compact luminance and motion arrays. Quality uses the implicit
   contiguous range; performance records its deterministic sparse samples.
   Different selected references, selected analysis sources, selection domains,
-  performance modes, metric algorithm identities, or active-rect metric domains
-  from the same input set do not satisfy each other. When
+  performance modes, metric algorithm identities, scoped media-runtime analysis
+  fingerprints, or active-rect metric domains from the same input set do not
+  satisfy each other. For the managed Windows portable and Debian/Docker profiles,
+  selected decoder changes therefore invalidate metric arrays; tone-mapping-only
+  and standalone FFmpeg-only changes do not. When
   `sources.analysis_source = "reference"`, `analysis_source_path` is the selected
   reference path. Prepared full-frame active rectangles represent no crop;
   explicit, metadata, dimension-derived, aspect-ratio-derived, or
@@ -434,25 +630,71 @@ unchanged.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
+- Probe-cache files remain on-disk format version 1, but key schema 2 includes the
+  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
+  Windows portable and Debian/Docker profiles, a cache created by another selected
+  decoder or FFmpeg/ffprobe lineage is a normal miss, including under
+  `--from-cache-only` validation.
+- Shared alignment reuse source-set identity includes the scoped standalone-FFmpeg
+  fingerprint. In the managed Windows portable and Debian/Docker profiles, a
+  selected supported FFmpeg lineage change cannot reuse an offset computed under the
+  previous tool build.
+- Successful low-level TMDB search and alternative-title responses are reused from
+  `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
+  is cached rather than the final ranked match, so current resolver policy always
+  reruns. Opaque request keys exclude the API key and do not store plain query text;
+  cached response values can still reveal media-title history. Positive entries
+  expire after 30 days, valid empty entries after 24 hours, and deterministic
+  oldest-first eviction limits the file to 2,000 entries and 5 MiB. Authentication,
+  rate-limit, timeout, transport, HTTP, JSON, and malformed-response failures are not
+  cached. Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked
+  cache state produces a sanitized warning and continues through the network path.
+  Deleting this file clears durable TMDB history and forces fresh successful lookups.
+- Frame Compare-owned L-SMASH-Works indexes use
+  `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
+  profile scoped (currently `lsw1310-56c451f754fd` on managed/portable Windows,
+  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
+  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
+  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
+  changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
+  corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
+  a warning and an unusable index location retries source loading without an index.
+  Generated VSPreview sessions pass this same owned, runtime-versioned path as the
+  `cachefile` for the reference and every comparison; a missing index may be created
+  there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
+  rejects that index location during preview loading, the external preview child does
+  not remove or rebuild the parent-owned index; it retries that source cache-free and
+  preserves the original construction error if the fallback also fails.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
-  user/random frames. With `paths.use_run_folders = true`, runs that proceed reserve
-  a fresh run folder beneath the contained resolved `paths.generated_dir`, never
-  beneath `paths.input_dir`; existing run folders are not reused to satisfy analysis
-  cache hits. Screenshots, run-local generated state, and fallback reports remain
-  beneath that reserved folder even when media input is external.
-- In run-folder mode, folder names are capped at 64 characters and do not
-  include exact timestamps. The first successful reservation uses the title-first base
-  name, and collisions use compact numeric suffixes such as `_2` and `_3`.
+  user/random frames. Every run that proceeds reserves a fresh run folder beneath
+  the resolved `paths.generated_dir`, never beneath `paths.input_dir`; existing run
+  folders are not reused to satisfy analysis cache hits. Screenshots, run-local
+  generated state, and the canonical report remain beneath that reserved folder
+  even when media input is external.
+- Run-folder names are capped at 64 characters and do not include exact timestamps.
+  The first successful reservation uses the title-first base name, and collisions use
+  compact numeric suffixes such as `_2` and `_3`.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
-  or rendering. This file stores `version`, UTC `created_at` with a `Z` suffix,
+  or rendering. Version 2 stores `version`, UTC `created_at` with a `Z` suffix,
   final `folder_name`, `naming_source`, `source_filenames`,
-  `frame_compare_version`, and optional `[tmdb]` prefetch facts with absent
+  `frame_compare_version`, the complete `[media_runtime]` supported component
+  contract and scoped fingerprints, and optional `[tmdb]` prefetch facts with absent
   optional values omitted rather than serialized as null. It is not a final
   outcome manifest and does not include report URL, timings, or success/failure
-  state. If `run_info.toml` cannot be written, the run fails immediately and
+  state. Version 1 is intentionally unsupported: `run_info.toml` is write-only
+  provenance rather than an input or migration surface, and V1 predates the
+  coordinated media-runtime identity. If `run_info.toml` cannot be written, the run
+  fails immediately and
   best-effort cleanup removes the empty reserved run folder when possible.
+- If run-folder reservation cannot create or resolve a candidate beneath the
+  generated-data root, including permission errors or symlink-loop resolution
+  failures, the run fails with `FC-3018`. Reconnect the selected location, repair
+  its permissions or link/junction, or choose a different `paths.generated_dir`.
+  This reservation error is distinct from a later `run_info.toml` write failure;
+  reservation wraps the original cause, while the metadata write re-raises its
+  original error. Both attempt best-effort cleanup.
 - A separate atomically written `<run-folder>/run_result.toml` V1 record captures
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and use `completed` or
@@ -470,12 +712,15 @@ unchanged.
   metric algorithm identity, and analysis settings before continuing. It does
   not clear unrelated shared analysis entries and does not delete shared
   previous-offset reuse entries under
-  `<resolved paths.generated_dir>/cache/alignment/`.
+  `<resolved paths.generated_dir>/cache/alignment/` or the shared TMDB response file.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
   the matching shared analysis cache entry for the exact current performance mode
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
   run folder.
+- `--from-cache-only` does not require or prohibit TMDB network access after analysis
+  cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
+  key perform no TMDB cache reads or writes.
 - When the exact all-source selection-domain token requires probe data and the
   probe cache is missing, `--from-cache-only` fails before metadata prefetch and
   before run-folder reservation rather than validating a weaker fingerprint.
@@ -514,7 +759,58 @@ Report-confirmed slow.pics upload is the exception to that precedence rule. In
 that opted-in workflow, the CLI presents the local report before prompting for
 upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
-opened. If it is not opened, the CLI prints the report path before prompting.
+opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
+if the report was not opened, its path exactly once before the visibility-specific
+default-No question. The confirmation seam receives the literal
+four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</code>, where
+`<visibility>` is `public` or `unlisted`, with `default=False`.
+
+### Report And Overlay Metadata Contract
+
+- Newly generated standalone reports use payload version `1.2`. Each clip carries a
+  presentation-only `display` object with full primary identity, release descriptor,
+  ordinary-control label, constrained micro label, and exact filename. These strings
+  are assembled once from prepared release identity and explicit-label state. They do
+  not change canonical clip labels, report image/geometry mappings, review JSON keys,
+  or semantic report identity. The top-level frame
+  number is the common comparison-domain frame; every image separately records its
+  mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
+  Vision RPU presence when available.
+- Existing payload v1.1 HTML reports remain self-contained and viewable as generated;
+  Frame Compare does not rewrite or migrate them. Because the payload version
+  participates in report ID generation, a newly generated v1.2 report may use a new
+  browser-local viewer/review storage key. Review JSON is valid only for the exact report
+  ID and payload version; there is no cross-version review-state migration or import.
+- The existing Frame inspector follows the images visible in Single, Slider, Diff,
+  Blink, and Grid modes. The serialized/config viewer-mode value `overlay` is presented
+  as the user-facing `Single` mode and shows only the active source. The existing Clips
+  inspector uses a responsive desktop drawer and a narrow-screen overlay. Its stable
+  Reference/Comparison headings keep the dynamic viewer role separate, show primary
+  and informative release identity, retain the complete wrapping filename, and wrap
+  compact source signal, presentation, file-size, and non-full active-picture facts
+  without horizontal panel scrolling. Report Information owns the Rendering
+  disclosure, including resolved tonemap settings when tonemapping ran.
+- The primary report toolbar keeps frame navigation, view modes, and mode-specific
+  context/alignment in three stable CSS-owned zones on wide screens. It becomes a
+  two-row layout at medium widths and a stacked layout at narrow widths without
+  changing DOM order, native controls, keyboard behavior, or ARIA semantics.
+- Report identity includes output-affecting overlay, geometry, tonemap, presentation,
+  signal, and per-image provenance facts. It excludes absolute paths, image bytes or
+  `src` values, timestamps, transient browser state, and clip display strings.
+- `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
+  `minimal` carries source identity plus compact frame/type/size context; `standard`
+  adds selection and source/output context; `diagnostic` adds only observed signal,
+  applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
+- Picture type is collected from the exact selected original source frame. Its absence
+  is nonfatal and is omitted from baked text rather than inferred from keyframe status.
+- Selected-frame Dolby Vision RPU presence is collected from that same original
+  VapourSynth frame and shown in the Frame inspector. It is omitted when the active
+  renderer cannot prove it; decoded L1/L2/L6 values are not inferred from clip-level or
+  frame-0 metadata.
+- Displayed file size is the complete container storage cost in IEC units. It is not a
+  bitrate, quality, efficiency, or winner metric. The existing value appears in visible
+  Single, Slider, Diff, Blink, and Grid HUD source labels when positive and available;
+  hiding the HUD hides the size, and the report payload remains version `1.2`.
 
 ### slow.pics Upload Behavior
 
@@ -536,6 +832,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 - Upload membership comes from the explicit current-render upload plan, not from
   scanning the screenshot directory. The plan is built from selected frames,
   current render artifacts, and clip order.
+- Remote image/column names use exact explicit source labels when configured;
+  otherwise they use unique release descriptors with a canonical-label fallback.
+  Collection titles, row names, membership, and ordering are independent and unchanged.
 - The normal non-confirmed phase order remains:
   `frame_plan -> analyze -> align -> render -> metadata -> publish -> report -> post_report_cleanup`.
 - Report-confirmed upload changes only the opted-in interactive path:
@@ -611,13 +910,9 @@ opened. If it is not opened, the CLI prints the report path before prompting.
 - The shortcut is a Windows InternetShortcut-compatible `.url` file containing
   the uploaded slow.pics comparison URL.
 - The shortcut output directory is deterministic:
-  - the current run folder when run folders are enabled
-  - otherwise the safe common parent of the resolved screenshots and generated
-    output directories
-- Without a run folder, the common parent must be under the resolved workspace
-  root and must not be a drive root, filesystem anchor, UNC/share root, or the
-  user home directory. Paths on different drives or anchors have no safe common
-  parent.
+  - the current reserved run folder
+- A run-folder reservation is required before shortcut creation; escaped or
+  symlinked run aliases are rejected rather than redirected elsewhere.
 - The filename is derived from the same final collection title sent to
   slow.pics, with a stable fallback from the slow.pics URL key.
 - Repeated writes overwrite the same deterministic shortcut path.
@@ -750,6 +1045,19 @@ per-clip selectable window within clip bounds, preferring to extend the end
 first and then shift the start earlier. If a shared selectable intersection
 cannot be formed, the run fails with the standard typed selection error.
 
+Each automatic category distributes its requested count across deterministic
+integer-coordinate temporal strata before globally backfilling. Random uses the
+configured stable seed-derived order; dark, bright, and motion retain their metric
+rankings, including sparse performance-mode source coordinates. Automatic choices
+prefer a half-second separation from all higher-precedence evidence, represented by
+`ceil(selection-domain effective FPS / 2)` frames. The selection-domain FPS is the
+effective reference FPS, not necessarily the source used to calculate metric arrays.
+When that preferred gap cannot fill a category, the required gap is reduced by one frame
+at a time until one-frame uniqueness permits the requested distinct frames. Uniqueness
+and the precedence `User`, `Dark`, `Bright`, `Motion`, `Random` are never relaxed. Exact
+automatic frame choices may therefore differ from releases that predate temporal
+stratification.
+
 ## Config-Only slow.pics Surface
 
 These eighteen fields are the full current public `[slowpics]` config surface:
@@ -856,28 +1164,48 @@ toggles or tags.
 VSPreview parent telemetry, generated Frame Compare session diagnostics,
 preview assumptions, ready text, and terminal confirmation prompts use stderr as
 the single human diagnostic stream. The VSPreview child process is launched with
-inherited stdout, and its stderr is passed through. Frame Compare-owned generated
-script diagnostics are written to stderr.
+inherited stdout and stderr so native carriage-return progress (including L-SMASH
+index creation) refreshes in place. Frame Compare-owned generated script diagnostics
+are written to stderr.
 
 When interactive alignment launches a generated VSPreview session, the
 diagnostic order is:
 
 1. parent `VSPreview Session` telemetry
-2. generated `VSPreview Bootstrap`
-3. generated reference and loaded comparison rows
-4. generated `VSPreview Assumptions`, only when assumptions exist
-5. generated output slot rows
-6. generated `VSPreview Ready`
-7. parent `VSPreview Confirmation` prompt text
+2. generated `[RUN] VSPreview Bootstrap` and prepared reference identity, before the
+   first source load can emit native indexing diagnostics
+3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
+   paired truthful output-slot mappings
+4. generated `[WARN] VSPreview Display Assumptions`, only when assumptions exist
+5. generated `[OK] VSPreview Ready` with a directly nested operator action
+6. parent `[WAIT] VSPreview Confirmation` with nested instructions and prompts
 
-Generated VSPreview assumptions are preview-only diagnostics derived from
+Normal VSPreview labels reuse the release-aware presentation identities prepared by
+the typed alignment request. Paths and stems remain the internal source, suggested
+offset, confirmation, manual-override, and alignment-result identities. Confirmation
+asks the operator to find the same visible moment, then enter its untrimmed reference
+and comparison source-frame indices in that order. The prompt shows the audio-derived
+matching pair and which source it would trim; `skip` leaves the current audio result
+unchanged when one is available.
+Confirmation calculates the offset as reference minus comparison. Generated and parent
+no-color output retain the literal lifecycle markers. Native source/index diagnostics
+remain inherited without buffering; the known non-actionable `vstools.enums.color`
+`SyntaxWarning` is suppressed in the child.
+
+Generated VSPreview display assumptions are preview-only diagnostics derived from
 Frame Compare's existing clip probe metadata and serialized into the generated
 session script. Missing, unspecified, malformed, or unparseable `_Matrix`,
 `_Transfer`, or `_Primaries` frame properties are collected and shown in the
-`VSPreview Assumptions` section before output rows and before `VSPreview Ready`.
-The generated session does not decode source frames just to collect these
-assumptions. These assumptions do not change render, report, analysis, or
-alignment semantics.
+styled assumptions section after output rows and before `VSPreview Ready`. Normal
+output identifies the source and describes the preview behavior without exposing raw
+frame-property names.
+For those properties only, the generated session sets explicit BT.709 values on the
+preview clip so VSPreview does not repeat its equivalent warning for every output.
+Missing modern `_Range` is reported separately but remains unset so VSPreview retains
+its native range inference and display behavior.
+The generated session does not decode source frames just to collect these assumptions.
+These preview-only defaults do not change render, report, analysis, or alignment
+semantics.
 
 ## Config-Only Screenshot Surface
 
@@ -971,10 +1299,18 @@ now fail nested validation:
 
 - Remove `analysis.save_frames_data`; it never controlled persisted frame data
   and has no replacement.
-- Replace `screenshots.directory_name` with `paths.screenshots_dir`, which owns
-  the screenshot destination.
+- `screenshots.directory_name`, `paths.screenshots_dir`, `paths.use_run_folders`,
+  and `report.output_dir` are removed fields and fail ordinary nested-table
+  validation. Screenshots are derived from the reserved run folder and report
+  placement is always the canonical run-root `report.html`.
 - Remove `logging.file`; Frame Compare does not support config-driven file
   logging.
+
+The former root `[diagnostics]` table and `DiagnosticsConfig` owner no longer exist.
+Because unknown root sections are deliberately ignored, a stale `[diagnostics]` table
+is inert; remove it. There is no `per_frame_nits` replacement: selection scores are not
+luminance measurements, and tonemap targets describe an applied transform rather than
+observed source-frame brightness.
 
 ## Config-Only Audio Alignment Surface
 
@@ -982,6 +1318,11 @@ The following `[audio_alignment]` fields are config-only public surfaces for the
 audio-alignment accuracy workstream. There are no dedicated `run` flags for them.
 These fields affect current computed alignment behavior when audio alignment is
 enabled.
+
+All computed, confirmed, and reused signed offsets use `reference source frame -
+comparison source frame`. A positive offset trims that many frames from the reference;
+a negative offset trims the absolute value from the comparison. Correlation lag is
+converted to this sign convention before consensus evidence, hints, caching, and trims.
 
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared VSPreview-confirmed offsets. It is config-only, has no `run` flag, and
@@ -993,7 +1334,7 @@ enabled.
   VSPreview-confirmed results still write to the shared reuse cache when
   `cache_results = true`. `prompt` shows a Rich stderr table for a complete
   valid VSPreview-confirmed offset set and asks
-  `Reuse previous preview-confirmed alignment offsets? [y/N]`; default, EOF,
+  <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
   result that produced the preview suggestion, declining the prompt reuses that
@@ -1006,20 +1347,30 @@ enabled.
   stdin is not a TTY, or EOF occurs while prompting, the CLI emits
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
-- The previous-offset reuse table displays reference and comparison labels,
-  signed frame offset, time offset seconds, source label `confirmed`, the shared
-  cache path, and each entry's persisted `accepted_at` timestamp. It does not
-  derive freshness from file mtime or index mtime.
+- The nested `Alignment reuse` decision panel consumes primitive presentation strings
+  prepared by orchestration; it never reparses source paths. It factors reliable
+  common content, uses compact release identities or canonical filename fallbacks,
+  displays the
+  signed frame offset and time offset, humanizes evidence as `Computed` or
+  `Preview-confirmed`, and renders valid timestamps in UTC while preserving invalid
+  values verbatim. The shared cache path remains the final evidence row;
+  legacy/fallback prompt inputs also retain exact filename and path evidence. It does
+  not derive freshness from file mtime or index mtime.
 - Shared previous-offset entries live under
-  `<resolved paths.generated_dir>/cache/alignment/`. This is shared
-  workspace-level cache state even when `paths.use_run_folders = true`; it does
-  not live inside a fresh run folder.
+  `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
+  cache state and does not live inside a fresh run folder.
 - `previous_offsets = "prompt"` and `previous_offsets = "always"` require
   `cache_results = true`. `previous_offsets = "disabled"` remains compatible
   with `cache_results = false`.
 - `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
   and `previous_offsets = "always"` because reuse can skip VSPreview.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
+- Cached computed stability summaries are diagnostic-only scalar evidence. The current
+  alignment reuse cache schema is v1. It requires summaries for computed entries and
+  embedded computed results and uses the reference-minus-comparison sign convention.
+  Other schema versions and entries missing required summaries are ignored; there is no
+  cache migration or compatibility path. Summaries do not affect cache identity,
+  selected offsets, or trims.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
 - `preprocessing_mode = "none" | "standard"` selects signal preprocessing before
@@ -1054,10 +1405,10 @@ enabled.
 above. That means the flags in the previous section are persistent when combined with
 `--write-config`.
 
-Contained path values are validated before persistence. A non-null relative
-`report.output_dir` is normalized to an absolute workspace-root-based path for
-runtime use, while `run --write-config`, `preset apply`, and `preset save`
-persist the original relative value so saved configurations remain portable.
+Contained config paths and the generated-data root structure are validated before
+persistence. `run --write-config`, `preset apply`, and `preset save` preserve the
+authored relative or absolute `paths.generated_dir` string; runtime resolution does
+not rewrite the saved value.
 
 Before writing, `run --write-config` rejects effective configs that combine
 `audio_alignment.previous_offsets = "prompt"` or `"always"` with
@@ -1100,22 +1451,35 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 ## `wizard` Command Contract
 
-- `wizard` is an interactive, goal-oriented editor for input, reference, and frame
-  selection configuration. It does not run comparisons or probe media. It requires
-  both stdin and stdout to be TTYs; otherwise it fails through `FC-3017` with input
-  exit code 4 before reading config, prompting, or writing.
+- `wizard` is an interactive, goal-oriented editor for input, generated-data location,
+  reference, and frame selection configuration. It does not run comparisons or probe
+  media. It requires both stdin and stdout to be TTYs; otherwise it fails through
+  `FC-3017` with input exit code 4 before reading config, prompting, or writing.
+- After the input-directory prompt, the wizard asks for `Generated data location`
+  before reference or frame-selection prompts. It explains that this directory owns
+  durable comparison folders and reusable caches. The prompt defaults to the
+  authored `paths.generated_dir` value, or `generated` on first use, accepts relative,
+  environment-expanded, and normal absolute directory values, and persists the exact
+  authored string after confirmation. The wizard does not check availability,
+  writability, create, or probe this location while saving configuration.
 - Its goals are `Random spot check` (10 seeded random frames, no metrics scan),
-  `Dark, bright, and motion coverage` (4 random plus 2 each dark, bright, and motion
-  frames in full-resolution `quality` mode), and `Specific frame numbers` (1–100
-  sorted unique non-negative frame numbers, no metrics scan). Existing configs also
-  offer a default `Keep current frame selection` no-op.
+  `Visual coverage` (4 random plus 2 each dark, bright, and motion frames in
+  full-resolution `quality` mode), and `Specific frame numbers` (1–100 sorted unique
+  non-negative frame numbers, no metrics scan). Existing configs also offer a default
+  `Keep current frame selection` no-op. The initial choices are concise; after choosing
+  visual coverage, the wizard explains that its quality scan is slower and may take
+  longer.
 - It discovers supported filenames through the canonical deterministic discovery and
   source-selection owners without reading, hashing, opening, or probing media. The
-  input directory may be external. Zero files preserve reference selection; duplicate
-  stems fail before the reference prompt; automatic reference removes an explicit
-  reference key; explicit filename selection is canonically revalidated.
+  input directory may be external. Small source sets may be shown inline; larger sets
+  report their count before the reference choices without a duplicate filename dump.
+  The reference menu remains a simple numbered list without paging, search, or fuzzy
+  selection. Zero files preserve reference selection; duplicate stems fail before the
+  reference prompt; automatic reference removes an explicit reference key; explicit
+  filename selection is canonically revalidated.
 - First use starts from schema defaults and writes only the confirmed partial payload,
-  including `slowpics.auto_upload = false`. Environment values still have higher
+  including the authored `paths.generated_dir` value and
+  `slowpics.auto_upload = false`. Environment values still have higher
   precedence during a later run, so the review states that the environment may
   override this file baseline.
 - Existing TOML is parsed and validated without environment precedence, then used as
@@ -1126,8 +1490,10 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   config-persistence policy; a true no-op leaves the original file byte-for-byte.
   Environment-only values are neither displayed nor persisted. Wizard validation
   errors redact every raw Pydantic input.
-- Before writing, the wizard validates the complete candidate and shows a semantic
-  review containing changed/new input, reference, and frame-selection facts, the
+- Before writing, the wizard validates the complete candidate through the shared
+  config/preflight path policy and shows a semantic review grouped into `Changes`,
+  `Runtime impact`, `Privacy`, and `Preserved settings`. It includes changed/new
+  input, generated-data location, reference, and frame-selection facts, the
   metrics-scan consequence, and privacy/preservation statements, including explicit
   notice when a persisted webhook URL will be removed. It never displays secret
   values or environment presence.
@@ -1152,21 +1518,43 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
+- Python compatibility remains enforced by package metadata, runtime manifests, and build
+  validation; `doctor` does not emit a separate Python-version check.
+- `doctor.baseline_version` is the supported VapourSynth release (`R79`).
+  `doctor.media_runtime` contains the code-owned component contract, scoped
+  fingerprints, and index token. `doctor.runtime_environment` reports the
+  deployment kind, expected and declared full fingerprints, declaration syntax,
+  match state, and whether the current runtime declares FFMS2 mandatory.
+- Media checks report public observable state only: VapourSynth release/API fields;
+  L-SMASH-Works `core.lsmas` namespace and required functions (its native version is
+  not exposed by the plugin API and is reported as unverifiable at runtime); vs-placebo
+  distribution version and `placebo.Tonemap`; FFMS2 policy and `ffms2.Source`; and
+  resolved FFmpeg/ffprobe paths plus their first `-version` lines. Managed Windows
+  portable and Docker runtimes require both FFmpeg tools to match the selected
+  runtime identity. FFMS2 must be absent from Windows portable and present at the
+  selected version in Docker; either policy violation fails the check. On those
+  managed profiles, failed FFMS2 or FFmpeg policy checks are critical failures even
+  though their JSON `category` remains `optional`: `success` is false and `doctor`
+  exits with the dependency error code. On unmanaged profiles, FFMS2 and FFmpeg
+  availability failures remain noncritical.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.
 - Human-mode typed top-level failures honor the `NO_COLOR` environment variable
   and do not suggest unsupported `--verbose` usage.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
-- Human output uses a neutral status marker for optional unavailable checks such as
-  VSPreview, so optional availability gaps are visually distinct from critical
-  dependency failures. This does not change `doctor --json` status values.
-- Human output uses a warning marker, rather than the critical-failure marker, for
-  failed non-core checks such as network reachability or missing optional integration
-  configuration. It ends with a deterministic readiness summary that distinguishes a
-  blocked core runtime, a ready core runtime with noncritical warnings, and a fully
-  passing check set. These presentation changes do not alter JSON fields, JSON status
-  values, or exit-code behavior.
+- Human output starts with one readiness outcome: `[FAIL] Runtime is not ready for
+  comparisons.`, `[WARN] Ready for local comparisons; optional or network checks
+  need attention.`, or `[OK] Runtime is ready for comparisons.` It then groups checks
+  under `Required`, `Optional`, and `Network and credentials`, in their existing
+  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSPreview`, and
+  `TMDB API key`.
+- Human check status markers are `[FAIL]` for critical failures, `[SKIP]` for
+  passed optional checks whose capability is unavailable, `[WARN]` for failed
+  noncritical checks, and `[OK]` for passed checks. Hints remain directly beneath
+  the affected check. There is no duplicate trailing readiness summary. These
+  presentation changes do not alter JSON fields, JSON status values, or exit-code
+  behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
@@ -1174,6 +1562,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   configuration/credential classes without guessing a package-manager command or
   install mode; when setup mode is unknown, they point to the repository's current
   setup documentation.
+- If an unexpected check function raises, the generic fallback uses stable failure
+  wording and may expose only the exception type in JSON `details`; raw exception
+  messages are not emitted in human or JSON doctor output.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
 - Optional VSPreview probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.
@@ -1188,7 +1579,8 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 
 - Resolves the presets directory under `<root>/config/presets`.
 - Accepts `--config` for interface consistency, but current behavior ignores the resolved
-  config path and uses `--root` only when locating presets.
+  config path and uses `--root` only when locating presets. Help describes this value
+  as accepted for consistency and ignored by `preset list`.
 - Prints preset names one per line to stdout.
 - Emits no success confirmation.
 

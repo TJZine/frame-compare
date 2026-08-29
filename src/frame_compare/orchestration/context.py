@@ -12,12 +12,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.services.types import AlignmentSource
+from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
     from frame_compare.analysis.types import FrameMetrics, SelectionBreakdown, SelectionDetail
     from frame_compare.config.schema import ConfigSchema
+    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+    from frame_compare.orchestration.types import FullWindowRetryConfirmationFn
+    from frame_compare.services.release_identity import ReleaseIdentity
     from frame_compare.utils.progress_protocol import ProgressReporter
     from frame_compare.utils.types import WorkspacePaths
 
@@ -39,7 +42,9 @@ ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resol
 class ClipFingerprint:
     """Stable fingerprint for cache invalidation.
 
-    This is intentionally simple to compute without opening VS.
+    This is intentionally simple to compute without opening VS or hashing media
+    contents. Same-path, same-size, same-mtime replacements retain identity by the
+    repository's performance-first cache policy.
     """
 
     path: Path
@@ -91,6 +96,7 @@ class ClipAlignmentState:
     comparison_stem: str
     relative_offset_frames: int
     source: AlignmentSource
+    stability: AlignmentStabilitySummary | None = None
 
 
 @dataclass(frozen=True)
@@ -116,14 +122,15 @@ class ClipState:
 
     # FPS hierarchy:
     # - source_fps: from probe
-    # - forced_fps: user override (optional; may be added later)
-    # - effective_fps: forced if set else source_fps
+    # - effective_fps: configured override when present, otherwise source_fps
     source_fps: Fraction
     effective_fps: Fraction
 
     trim: ClipTrimState = field(default_factory=ClipTrimState)
     alignment: ClipAlignmentState | None = None
     active_rect: ClipActiveRect | None = None
+    release_identity: ReleaseIdentity | None = None
+    label_is_explicit: bool = False
 
     def effective_num_frames(self) -> int:
         """Return effective frame count after applied trims.
@@ -175,4 +182,8 @@ class RunContext:
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
     analysis_metrics: FrameMetrics | None = None
+    confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
+    full_window_retry_override: FullWindowRetryOverride | None = None
+    run_warnings: list[str] | None = None
+    preflight_warnings: list[str] | None = None
     no_color: bool = False

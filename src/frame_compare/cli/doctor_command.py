@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import typer
 from rich.console import Console
@@ -18,13 +18,21 @@ if TYPE_CHECKING:
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
     from frame_compare.utils.progress_protocol import ProgressReporter
 
-# Status icons matching legacy doctor output style.
-_STATUS_ICONS = {
-    True: "\u2705",  # ✅
-    False: "\u274c",  # ❌
+_DOCTOR_DISPLAY_LABELS = {
+    "vapoursynth": "VapourSynth",
+    "lsmas": "L-SMASH-Works",
+    "vs_placebo": "vs-placebo",
+    "ffms2": "FFMS2",
+    "ffmpeg": "FFmpeg",
+    "vspreview": "VSPreview",
+    "slowpics": "slow.pics",
+    "tmdb_api_key": "TMDB API key",
 }
-_OPTIONAL_STATUS_ICON = "-"
-_WARNING_STATUS_ICON = "\u26a0"  # ⚠
+_DOCTOR_GROUPS = (
+    ("core", "Required"),
+    ("optional", "Optional"),
+    ("network", "Network and credentials"),
+)
 
 
 class RunDoctorFn(Protocol):
@@ -70,6 +78,14 @@ def handle_doctor(
 
 def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
     """Convert DoctorReport to JSON payload per schema."""
+    # Keep media-runtime imports on the doctor execution path. Importing the
+    # root CLI must remain side-effect-free for dry-run and help commands.
+    from frame_compare.vs.runtime_contract import (
+        VAPOURSYNTH_RELEASE,
+        runtime_environment_report,
+        supported_media_runtime_report,
+    )
+
     checks_payload: list[JSONValue] = []
     for check, result in report.checks:
         entry: dict[str, JSONValue] = {
@@ -85,7 +101,9 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
         checks_payload.append(entry)
 
     doctor_payload: dict[str, JSONValue] = {
-        "baseline_version": "R76",
+        "baseline_version": VAPOURSYNTH_RELEASE,
+        "media_runtime": cast(JSONValue, supported_media_runtime_report()),
+        "runtime_environment": runtime_environment_report(),
         "checks": checks_payload,
     }
     payload: dict[str, JSONValue] = {
@@ -96,43 +114,58 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
 
 
 def print_doctor_report(report: DoctorReport) -> None:
-    """Print human-readable doctor results with styled icons and aligned labels."""
+    """Print the readiness outcome and grouped human-readable doctor results."""
     console = Console()
-    if not report.checks:
-        return
-
-    label_width = max(len(check.name) for check, _result in report.checks)
     critical_failures = set(report.critical_failures)
-    for check, result in report.checks:
-        icon = _doctor_status_icon(
-            check_name=check.name,
-            category=check.category,
-            passed=result.passed,
-            available=result.available,
-            critical_failures=critical_failures,
-        )
-        padded_name = check.name.ljust(label_width)
-        console.print(f"{icon} {escape(padded_name)} \u2014 {escape(result.message)}")
-        if result.hint:
-            console.print(f"   {''.ljust(label_width)}   [dim]Hint: {escape(result.hint)}[/]")
-
-    noncritical_failures = [
-        check.name
+    needs_attention = any(
+        check.name not in critical_failures
+        and (not result.passed or (check.category == "optional" and result.available is False))
         for check, result in report.checks
-        if not result.passed and check.name not in critical_failures
-    ]
-    console.print()
+    )
     if critical_failures:
-        console.print("[red]Core runtime is not ready; resolve required checks above.[/]")
-    elif noncritical_failures:
-        console.print(
-            "[yellow]Core runtime checks passed; optional or network checks need attention.[/]"
+        readiness_status = "FAIL"
+        readiness_message = "Runtime is not ready for comparisons."
+    elif needs_attention:
+        readiness_status = "WARN"
+        readiness_message = (
+            "Ready for local comparisons; optional or network checks need attention."
         )
     else:
-        console.print("[green]Core runtime checks passed.[/]")
+        readiness_status = "OK"
+        readiness_message = "Runtime is ready for comparisons."
+
+    console.print(f"{_doctor_status_marker(readiness_status)} {readiness_message}")
+
+    for category, heading in _DOCTOR_GROUPS:
+        grouped_checks = [
+            (check, result) for check, result in report.checks if check.category == category
+        ]
+        if not grouped_checks:
+            continue
+
+        console.print()
+        console.print(escape(heading))
+        for check, result in grouped_checks:
+            status = _doctor_status(
+                check_name=check.name,
+                category=check.category,
+                passed=result.passed,
+                available=result.available,
+                critical_failures=critical_failures,
+            )
+            label = _doctor_display_label(check.name)
+            console.print(
+                f"  {_doctor_status_marker(status)} {escape(label)} — {escape(result.message)}"
+            )
+            if result.hint:
+                console.print(f"    Hint: {escape(result.hint)}")
 
 
-def _doctor_status_icon(
+def _doctor_display_label(check_name: str) -> str:
+    return _DOCTOR_DISPLAY_LABELS.get(check_name, check_name.replace("_", " "))
+
+
+def _doctor_status(
     *,
     check_name: str,
     category: str,
@@ -141,26 +174,13 @@ def _doctor_status_icon(
     critical_failures: set[str],
 ) -> str:
     if check_name in critical_failures:
-        return _STATUS_ICONS[False]
-    if _is_optional_unavailable_status(
-        check_name=check_name,
-        category=category,
-        available=available,
-    ):
-        return _OPTIONAL_STATUS_ICON
+        return "FAIL"
     if not passed:
-        return _OPTIONAL_STATUS_ICON if category == "optional" else _WARNING_STATUS_ICON
-    return _STATUS_ICONS.get(passed, "\u2022")
+        return "WARN"
+    if category == "optional" and available is False:
+        return "SKIP"
+    return "OK"
 
 
-def _is_optional_unavailable_status(
-    *,
-    check_name: str,
-    category: str,
-    available: bool | None,
-) -> bool:
-    if category != "optional":
-        return False
-    if check_name != "vspreview":
-        return False
-    return available is not True
+def _doctor_status_marker(status: str) -> str:
+    return escape(f"[{status}]")

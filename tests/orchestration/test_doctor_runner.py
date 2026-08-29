@@ -39,7 +39,7 @@ class TestRunDoctor:
     def test_run_doctor_core_failure(self) -> None:
         """Given core check fails → DoctorReport(all_passed=False, critical_failures=[name])."""
         failing_check = DoctorCheck(
-            name="python_version",
+            name="vapoursynth",
             category="core",
             check_fn=lambda: CheckResult(passed=False, message="Failed"),
         )
@@ -47,7 +47,7 @@ class TestRunDoctor:
         report = run_doctor(checks=[failing_check])
 
         assert report.all_passed is False
-        assert "python_version" in report.critical_failures
+        assert "vapoursynth" in report.critical_failures
 
     def test_run_doctor_optional_failure_not_critical(self) -> None:
         """Given optional check fails but core passes → all_passed=False, critical_failures=[]."""
@@ -85,7 +85,7 @@ class TestRunDoctor:
 
 def test_run_doctor_survives_raising_check() -> None:
     def _boom() -> CheckResult:
-        raise RuntimeError("boom")
+        raise RuntimeError("secret path /private/boom")
 
     checks = [DoctorCheck(name="boom", category="optional", check_fn=_boom)]
 
@@ -94,8 +94,9 @@ def test_run_doctor_survives_raising_check() -> None:
     assert len(report.checks) == 1
     _, result = report.checks[0]
     assert result.passed is False
-    assert "boom check raised" in result.message
-    assert result.details["exception_type"] == "RuntimeError"
+    assert result.message == "boom check failed"
+    assert "secret path" not in result.message
+    assert result.details == {"exception_type": "RuntimeError"}
 
 
 class TestCollectChecks:
@@ -112,9 +113,10 @@ class TestCollectChecks:
 
         # Verify exact count and order for the current doctor contract.
         assert [check.name for check in checks] == [
-            "python_version",
             "vapoursynth",
             "lsmas",
+            "vs_placebo",
+            "ffms2",
             "ffmpeg",
             "vspreview",
             "slowpics",

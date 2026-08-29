@@ -26,8 +26,12 @@ Tag: py3-none-any
 """
 
 
-def _record_row(name: str, value: str) -> str:
-    data = value.encode()
+_FONT_ASSET_DIR = Path(__file__).resolve().parents[2] / "src/frame_compare/assets/fonts"
+_BUNDLED_FONT_BYTES = (_FONT_ASSET_DIR / "Inter-Regular.ttf").read_bytes()
+_BUNDLED_FONT_LICENSE = (_FONT_ASSET_DIR / "Inter-OFL.txt").read_text(encoding="utf-8").encode()
+
+
+def _record_row(name: str, data: bytes) -> str:
     digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
     return f"{name},sha256={digest},{len(data)}"
 
@@ -41,22 +45,31 @@ def _write_wheel(
     wheel_dist_info: str = "frame_compare-0.1.0.dist-info",
     record_dist_info: str = "frame_compare-0.1.0.dist-info",
     license_dist_info: str = "frame_compare-0.1.0.dist-info",
+    include_bundled_font: bool = True,
+    include_bundled_license: bool = True,
+    bundled_font_bytes: bytes | None = None,
     duplicate_member: str | None = None,
 ) -> None:
     wheel = dist_dir / "frame_compare-0.1.0-py3-none-any.whl"
-    contents = {
-        "frame_compare/__init__.py": '__version__ = "0.1.0"\n',
-        f"{metadata_dist_info}/METADATA": METADATA,
-        f"{license_dist_info}/licenses/LICENSE": "GPL text",
+    contents: dict[str, bytes] = {
+        "frame_compare/__init__.py": b'__version__ = "0.1.0"\n',
+        f"{metadata_dist_info}/METADATA": METADATA.encode(),
+        f"{license_dist_info}/licenses/LICENSE": b"GPL text",
     }
     if include_wheel:
-        contents[f"{wheel_dist_info}/WHEEL"] = WHEEL
+        contents[f"{wheel_dist_info}/WHEEL"] = WHEEL.encode()
+    if include_bundled_font:
+        contents["frame_compare/assets/fonts/Inter-Regular.ttf"] = (
+            _BUNDLED_FONT_BYTES if bundled_font_bytes is None else bundled_font_bytes
+        )
+    if include_bundled_license:
+        contents["frame_compare/assets/fonts/Inter-OFL.txt"] = _BUNDLED_FONT_LICENSE
     if include_record:
         record_name = f"{record_dist_info}/RECORD"
         record = "\n".join(
-            [*(_record_row(name, value) for name, value in contents.items()), f"{record_name},,"]
+            [*(_record_row(name, data) for name, data in contents.items()), f"{record_name},,"]
         )
-        contents[record_name] = f"{record}\n"
+        contents[record_name] = f"{record}\n".encode()
 
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, value in contents.items():
@@ -80,11 +93,14 @@ def _read_wheel_member(wheel: Path, member_name: str) -> str:
         return archive.read(member_name).decode()
 
 
-def _add_tar_text(archive: tarfile.TarFile, name: str, value: str) -> None:
-    data = value.encode()
+def _add_tar_bytes(archive: tarfile.TarFile, name: str, data: bytes) -> None:
     member = tarfile.TarInfo(name)
     member.size = len(data)
     archive.addfile(member, io.BytesIO(data))
+
+
+def _add_tar_text(archive: tarfile.TarFile, name: str, value: str) -> None:
+    _add_tar_bytes(archive, name, value.encode())
 
 
 def _write_sdist(
@@ -92,9 +108,14 @@ def _write_sdist(
     *,
     extra_name: str | None = None,
     extra_member_type: bytes | None = None,
+    include_bundled_font: bool = True,
+    include_bundled_license: bool = True,
+    bundled_font_bytes: bytes | None = None,
+    bundled_asset_root: str | None = None,
 ) -> None:
     sdist = dist_dir / "frame_compare-0.1.0.tar.gz"
     root = "frame_compare-0.1.0"
+    asset_root = root if bundled_asset_root is None else bundled_asset_root
     with tarfile.open(sdist, "w:gz") as archive:
         root_directory = tarfile.TarInfo(root)
         root_directory.type = tarfile.DIRTYPE
@@ -104,6 +125,18 @@ def _write_sdist(
         _add_tar_text(archive, f"{root}/README.md", "# Frame Compare")
         _add_tar_text(archive, f"{root}/pyproject.toml", "[project]")
         _add_tar_text(archive, f"{root}/src/frame_compare/__init__.py", "")
+        if include_bundled_font:
+            _add_tar_bytes(
+                archive,
+                f"{asset_root}/src/frame_compare/assets/fonts/Inter-Regular.ttf",
+                _BUNDLED_FONT_BYTES if bundled_font_bytes is None else bundled_font_bytes,
+            )
+        if include_bundled_license:
+            _add_tar_bytes(
+                archive,
+                f"{asset_root}/src/frame_compare/assets/fonts/Inter-OFL.txt",
+                _BUNDLED_FONT_LICENSE,
+            )
         if extra_name is not None:
             _add_tar_text(archive, f"{root}/{extra_name}", "unexpected")
         if extra_member_type is not None:
@@ -133,6 +166,77 @@ def test_distribution_verifier_accepts_expected_artifacts(tmp_path: Path, repo_r
     assert result.returncode == 0
     assert "distribution verification passed: version=0.1.0" in result.stdout
     assert result.stderr == ""
+
+
+def test_distribution_verifier_rejects_wheel_missing_bundled_font(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path, include_bundled_font=False)
+    _write_sdist(tmp_path)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "must contain exactly one bundled Inter font file" in result.stderr
+
+
+def test_distribution_verifier_rejects_sdist_missing_bundled_license(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path, include_bundled_license=False)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "must contain exactly one bundled Inter OFL notice file" in result.stderr
+
+
+def test_distribution_verifier_rejects_bundled_assets_outside_sdist_root(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path, bundled_asset_root="other")
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "must contain exactly one bundled Inter font file" in result.stderr
+
+
+def test_distribution_verifier_rejects_corrupted_bundled_font(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path, bundled_font_bytes=b"corrupted font")
+    _write_sdist(tmp_path)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "bundled Inter font SHA-256 mismatch" in result.stderr
+
+
+def test_distribution_verifier_rejects_truncated_bundled_license(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path)
+    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
+    _replace_wheel_member(
+        wheel,
+        "frame_compare/assets/fonts/Inter-OFL.txt",
+        "SIL OPEN FONT LICENSE Version 1.1\n",
+    )
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert "bundled Inter OFL notice is invalid" in result.stderr
 
 
 def test_distribution_verifier_rejects_payload_modified_after_record_generation(

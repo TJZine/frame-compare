@@ -2,20 +2,40 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from fractions import Fraction
+from hashlib import file_digest
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
-from frame_compare.vs.props import detect_hdr
+from frame_compare.vs.hdr_probe import probe_hdr_metadata
+from frame_compare.vs.props import detect_hdr, hdr_signal_is_unspecified
+from frame_compare.vs.runtime_contract import index_cache_token
 from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
     import vapoursynth as vs
 
-_INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
+
+log = logging.getLogger(__name__)
+
+
+class _LWLibavSourcePlugin(Protocol):
+    def LWLibavSource(
+        self,
+        path: str,
+        **kwargs: int | str,
+    ) -> vs.VideoNode: ...
+
+
+class _VideoNodeWithFps(Protocol):
+    fps: Fraction
+
+
+INDEX_CONSTRUCTION_FAILURE_MARKER = "failed to construct index"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,13 +79,7 @@ def load_source(
         # Propagates PluginNotFoundError (FC-2003) if lsmas missing
         require_plugin(core, "lsmas")
 
-        # Loader selection:
-        # Check for LWLibavSource on the namespace, not just namespace existence
-        if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
-            loader = core.lsmas
-        else:
-            # require_plugin passed, so core.lw.LWLibavSource must exist
-            loader = core.lw
+        loader = _resolve_lwlibav_loader(core)
 
         loader_kwargs: dict[str, int | str] = {}
         if decoder_options is not None:
@@ -75,25 +89,19 @@ def load_source(
                 loader_kwargs["ff_options"] = decoder_options.ff_options
             if decoder_options.prefer_hw is not None:
                 loader_kwargs["prefer_hw"] = decoder_options.prefer_hw
-        adjacent_index_path = Path(f"{path}.lwi")
-        try:
-            clip = loader.LWLibavSource(str(path), **loader_kwargs)
-        except Exception as original_error:
-            # L-SMASH may leave or encounter an unusable adjacent index and then
-            # fail while trying to rebuild it in place. Retry without writing a
-            # cache so callers do not have to delete generated index files.
-            if not _is_adjacent_index_construction_failure(
-                original_error,
-                index_path=adjacent_index_path,
-            ):
-                raise
-            try:
-                clip = loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
-            except Exception as retry_error:
-                raise original_error from retry_error
+        clip = _load_lwlibav_source(
+            loader,
+            path=Path(path),
+            loader_kwargs=loader_kwargs,
+        )
         frame = clip.get_frame(0)
-        fps = Fraction(clip.fps.numerator, clip.fps.denominator)
-        is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
+        clip_fps = cast(_VideoNodeWithFps, clip).fps
+        fps = Fraction(clip_fps.numerator, clip_fps.denominator)
+        frame_props = dict(frame.props)
+        probed_metadata = None
+        if hdr_signal_is_unspecified(frame_props):
+            probed_metadata = probe_hdr_metadata(Path(path))
+        is_hdr, hdr_metadata = detect_hdr(frame_props, probed_metadata)
     except PluginNotFoundError:
         raise
     except Exception as e:
@@ -106,19 +114,112 @@ def load_source(
         num_frames=clip.num_frames,
         fps=fps,
         format=clip.format,
-        frame_props=dict(frame.props),
+        frame_props=frame_props,
         is_hdr=is_hdr,
         hdr_metadata=hdr_metadata,
     )
 
 
-def _is_adjacent_index_construction_failure(
-    error: Exception,
+def source_index_path(path: Path) -> Path:
+    """Return the Frame Compare-owned L-SMASH-Works index path for ``path``."""
+    return Path(f"{path}.frame-compare-{index_cache_token()}.lwi")
+
+
+def validate_source_index(path: Path, core: vs.Core | None = None) -> None:
+    """Fail unless the existing owned index opens the source without being rebuilt."""
+    source_path = Path(path)
+    index_path = source_index_path(source_path)
+    try:
+        before = _file_sha256(index_path)
+    except OSError as error:
+        raise SourceLoadError(source_path, f"Warm source index is unavailable: {error}") from error
+
+    if core is None:
+        core = ensure_vs_environment()
+
+    try:
+        require_plugin(core, "lsmas")
+        loader = _resolve_lwlibav_loader(core)
+        clip = loader.LWLibavSource(str(source_path), cachefile=str(index_path))
+        clip.get_frame(0)
+        after = _file_sha256(index_path)
+    except PluginNotFoundError:
+        raise
+    except Exception as error:
+        raise SourceLoadError(
+            source_path, f"Warm source index validation failed: {error}"
+        ) from error
+
+    if after != before:
+        raise SourceLoadError(
+            source_path,
+            "Warm source index changed during validation; regenerate it before benchmarking",
+        )
+
+
+def _resolve_lwlibav_loader(core: vs.Core) -> _LWLibavSourcePlugin:
+    if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
+        return cast(_LWLibavSourcePlugin, core.lsmas)
+    raise PluginNotFoundError("lsmas")
+
+
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as file:
+        return file_digest(file, "sha256").hexdigest()
+
+
+def _load_lwlibav_source(
+    loader: _LWLibavSourcePlugin,
     *,
-    index_path: Path,
-) -> bool:
-    """Return whether an L-SMASH construction failure can use cache-free recovery."""
-    return index_path.is_file() and _INDEX_CONSTRUCTION_FAILURE_MARKER in str(error).casefold()
+    path: Path,
+    loader_kwargs: dict[str, int | str],
+) -> vs.VideoNode:
+    index_path = source_index_path(path)
+    indexed_kwargs: dict[str, int | str] = {
+        "cachefile": str(index_path),
+        **loader_kwargs,
+    }
+    try:
+        return loader.LWLibavSource(str(path), **indexed_kwargs)
+    except Exception as original_error:
+        if not _is_index_construction_failure(original_error):
+            raise
+
+        if index_path.is_file():
+            try:
+                index_path.unlink()
+            except OSError as error:
+                log.warning(
+                    "Could not remove rejected L-SMASH index %s; retrying without an index cache: %s",
+                    index_path,
+                    error,
+                )
+            else:
+                try:
+                    return loader.LWLibavSource(str(path), **indexed_kwargs)
+                except Exception as retry_error:
+                    # A cache-free retry remains the last recovery path for an
+                    # unwritable or runtime-rejected index location.
+                    log.warning(
+                        "L-SMASH index rebuild failed for %s; retrying without an index cache: %s",
+                        path,
+                        retry_error,
+                    )
+
+        log.warning(
+            "Loading %s without an L-SMASH index cache after index construction failed",
+            path,
+        )
+
+        try:
+            return loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
+        except Exception as retry_error:
+            raise original_error from retry_error
+
+
+def _is_index_construction_failure(error: Exception) -> bool:
+    """Return whether L-SMASH-Works reported an index-construction failure."""
+    return INDEX_CONSTRUCTION_FAILURE_MARKER in str(error).casefold()
 
 
 def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.VideoNode:

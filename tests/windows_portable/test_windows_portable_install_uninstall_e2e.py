@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ._helpers import powershell_exe as _powershell_exe
+from ._helpers import snapshot_bytes as _snapshot_bytes
 
 windows_install_uninstall_e2e = pytest.mark.skipif(
     sys.platform != "win32",
@@ -98,6 +99,20 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         (shim_dir / filename).write_bytes(f"managed-{index}\r\n".encode("ascii"))
     (config_dir / "config.toml").write_bytes(b'[paths]\r\ninput_dir = "initial"\r\n')
 
+    # Keep the generated-data sentinel outside every install, bundle, state, and
+    # backup subtree so lifecycle checks cannot pass by merely preserving an
+    # in-bundle path.
+    external_generated_root = tmp_path / "external-generated-root"
+    sentinel_run = external_generated_root / "Movie (2026)"
+    sentinel_screenshot = sentinel_run / "screenshots" / "frame.png"
+    sentinel_cache = external_generated_root / "cache" / "analysis" / "clip.compframes"
+    sentinel_screenshot.parent.mkdir(parents=True)
+    sentinel_cache.parent.mkdir(parents=True)
+    sentinel_run.joinpath("report.html").write_bytes(b"<html>sentinel</html>\x00")
+    sentinel_screenshot.write_bytes(b"PNG-SENTINEL\x00")
+    sentinel_cache.write_bytes(b"CACHE-SENTINEL\x00")
+    external_snapshot = _snapshot_bytes(external_generated_root)
+
     local_app_data = tmp_path / "local-app-data"
     env = os.environ.copy()
     env["LOCALAPPDATA"] = str(local_app_data)
@@ -108,7 +123,10 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
 
     original_user_path = _get_user_path(exe)
     controlled_user_path = r"C:\FrameCompare-E2E\preserve-me"
-    edited_config = b'\xef\xbb\xbf[paths]\r\ninput_dir = "edited-\xe2\x9c\x93"\r\n'
+    authored_generated = str(external_generated_root).replace("\\", "/")
+    edited_config = (
+        f'\ufeff[paths]\r\ninput_dir = "edited-✓"\r\ngenerated_dir = "{authored_generated}"\r\n'
+    ).encode()
     unknown_files = {
         install_root / "root-user.bin": b"root-user-data\x00",
         bin_dir / "bin-user.bin": b"bin-user-data\x00",
@@ -140,8 +158,15 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
             assert not (bin_dir / filename).exists()
         assert not (state_dir / "config.json").exists()
         assert _get_user_path(exe) == controlled_user_path
+        assert _snapshot_bytes(external_generated_root) == external_snapshot
 
-        reinstalled = _run_script(exe=exe, script=install_script, env=env)
+        replacement_bundle = tmp_path / "bundle-replacement"
+        shutil.copytree(bundle_dir, replacement_bundle)
+        reinstalled = _run_script(
+            exe=exe,
+            script=replacement_bundle / "install.ps1",
+            env=env,
+        )
         assert reinstalled.returncode == 0, (
             f"stdout:\n{reinstalled.stdout}\n\nstderr:\n{reinstalled.stderr}"
         )
@@ -156,5 +181,8 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
             controlled_user_path,
             expected_bin_path,
         ]
+        config_json = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
+        assert config_json["bundle_path"] == str(replacement_bundle)
+        assert _snapshot_bytes(external_generated_root) == external_snapshot
     finally:
         _set_user_path(exe, original_user_path)

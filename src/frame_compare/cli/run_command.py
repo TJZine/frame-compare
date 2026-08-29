@@ -3,41 +3,60 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+import structlog
 import typer
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markup import escape
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.table import Table
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
-    PostUploadActionPresentationResult,
-    PostUploadActionPresentationResults,
     print_at_a_glance,
     print_result_summary,
 )
 from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import cli_config_overrides_from
-from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
-from frame_compare.errors import FrameCompareError, JSONValue
-from frame_compare.orchestration.analysis_policy import (
-    validate_skip_analysis_frame_selection_contract as validate_skip_analysis_policy,
+from frame_compare.config.schema import (
+    ConfigSchema,
+    OverlayMode,
+    ToneCurve,
+    TonemapPreset,
+    Visibility,
 )
+from frame_compare.errors import FrameCompareError
 from frame_compare.orchestration.preflight import (
     resolve_selected_config_path,
     validate_and_normalize_config_paths,
 )
+from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
+from .run_contracts import (
+    report_confirmed_slowpics_enabled,
+    validate_dry_run_cache_contract,
+    validate_dry_run_mode_contract,
+    validate_run_contracts,
+    validate_write_config_contracts,
+)
+
+log = structlog.get_logger()
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.types import (
+        FullWindowRetryConfirmationDecision,
+        FullWindowRetryConfirmationFn,
+        FullWindowRetryConfirmationRequest,
         SlowpicsUploadConfirmationDecision,
         SlowpicsUploadConfirmationFn,
         SlowpicsUploadConfirmationRequest,
@@ -60,12 +79,6 @@ class ConfigureLoggingFn(Protocol):
     def __call__(self, *, level: str, log_format: str) -> None: ...
 
 
-class RunContractFailure(Enum):
-    JSON_INTERACTIVE_ALIGNMENT = "json_interactive_alignment"
-    PREVIOUS_OFFSETS = "previous_offsets"
-    REPORT_CONFIRMED_SLOWPICS = "report_confirmed_slowpics"
-
-
 @dataclass(frozen=True)
 class RunCommandDeps:
     runner: RunnerLike
@@ -78,6 +91,7 @@ class RunCommandDeps:
     copy_to_clipboard: CopyToClipboardFn
     open_url: OpenUrlFn
     confirm_upload: ConfirmUploadPromptFn
+    confirm_full_window_retry: ConfirmFullWindowRetryPromptFn
     stdout_is_tty: bool
     stdin_is_tty: bool
     no_color_env_present: bool
@@ -97,6 +111,22 @@ class OpenUrlFn(Protocol):
 
 class ConfirmUploadPromptFn(Protocol):
     def __call__(self, text: str, *, default: bool) -> bool: ...
+
+
+class ConfirmFullWindowRetryPromptFn(Protocol):
+    def __call__(self, text: str) -> bool: ...
+
+
+def confirm_full_window_retry_on_stderr(text: str) -> bool:
+    """Read one default-No response without allowing Click to reprompt."""
+    typer.echo(text, nl=False, err=True)
+    try:
+        response = sys.stdin.readline()
+    except KeyboardInterrupt:
+        raise typer.Abort() from None
+    if response == "":
+        raise typer.Abort()
+    return response.strip().lower() in {"y", "yes"}
 
 
 def coerce_cli_choice[CliChoiceT: Enum](
@@ -301,6 +331,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         result=result,
         quiet=args.quiet,
         post_upload_actions=post_upload_actions,
+        root=args.resolved_root,
+        verbose=args.verbose,
     )
     maybe_open_run_report(
         result,
@@ -322,23 +354,65 @@ def build_runner_dependencies(
     console: Console,
     resolve_effective_config: EffectiveConfigLoader,
 ) -> RunDependencies | None:
-    if not report_confirmed_slowpics_enabled(config):
+    confirm_slowpics_upload = (
+        build_confirm_slowpics_upload_callback(
+            args=args,
+            deps=deps,
+            console=console,
+            resolve_effective_config=resolve_effective_config,
+            visibility=config.slowpics.visibility,
+        )
+        if report_confirmed_slowpics_enabled(config)
+        else None
+    )
+    confirm_full_window_retry = (
+        build_confirm_full_window_retry_callback(deps=deps)
+        if full_window_retry_prompt_is_legal(args=args, deps=deps, config=config)
+        else None
+    )
+    if confirm_slowpics_upload is None and confirm_full_window_retry is None:
         return None
 
     from frame_compare.orchestration.coordinator import RunDependencies
 
     return RunDependencies(
-        confirm_slowpics_upload=build_confirm_slowpics_upload_callback(
-            args=args,
-            deps=deps,
-            console=console,
-            resolve_effective_config=resolve_effective_config,
-        )
+        confirm_slowpics_upload=confirm_slowpics_upload,
+        confirm_full_window_retry=confirm_full_window_retry,
     )
 
 
-def report_confirmed_slowpics_enabled(config: ConfigSchema) -> bool:
-    return config.slowpics.auto_upload and config.slowpics.confirm_upload_after_report
+def full_window_retry_prompt_is_legal(
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    config: ConfigSchema,
+) -> bool:
+    analysis = config.analysis
+    return (
+        (analysis.ignore_lead_seconds > 0.0 or analysis.ignore_trail_seconds > 0.0)
+        and not args.json_output
+        and not args.quiet
+        and deps.stdin_is_tty
+        and not args.from_cache_only
+        and not args.skip_analysis
+    )
+
+
+def build_confirm_full_window_retry_callback(
+    *,
+    deps: RunCommandDeps,
+) -> FullWindowRetryConfirmationFn:
+    def _confirm_full_window_retry(
+        request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision:
+        del request
+        confirmed = deps.confirm_full_window_retry(
+            "Configured lead/trail exclusions leave too little media to satisfy the\n"
+            "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+        )
+        return "confirmed" if confirmed else "declined"
+
+    return _confirm_full_window_retry
 
 
 def build_confirm_slowpics_upload_callback(
@@ -347,7 +421,10 @@ def build_confirm_slowpics_upload_callback(
     deps: RunCommandDeps,
     console: Console,
     resolve_effective_config: EffectiveConfigLoader,
+    visibility: Visibility,
 ) -> SlowpicsUploadConfirmationFn:
+    visibility_text = visibility.value
+
     def _confirm_slowpics_upload(
         request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision:
@@ -357,12 +434,29 @@ def build_confirm_slowpics_upload_callback(
             deps=deps,
             resolve_effective_config=resolve_effective_config,
         )
+        details = Table.grid(padding=(0, 2))
+        details.add_column(style="grey70", no_wrap=True)
+        details.add_column(overflow="fold")
+        details.add_row("Visibility", escape(visibility_text.title()))
         if not opened:
-            console.print(f"Report: {escape(str(request.report_path))}", soft_wrap=True)
-        if deps.confirm_upload(
-            "Review the local report, then upload this comparison to slow.pics?",
+            details.add_row("Report", escape(str(request.report_path)))
+        console.print()
+        console.print(
+            Padding(
+                Panel.fit(
+                    Group("[dim]Review the local report before publishing.[/]", details),
+                    title="[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]",
+                    border_style="cyan",
+                ),
+                (0, 0, 0, 2),
+            )
+        )
+        confirmed = deps.confirm_upload(
+            f"    Upload to {visibility_text} slow.pics?",
             default=False,
-        ):
+        )
+        console.print()
+        if confirmed:
             return "confirmed"
         return "declined"
 
@@ -521,62 +615,6 @@ def build_effective_config_loaders(
     return _resolve_effective_config, _load_effective_config
 
 
-def validate_dry_run_mode_contract(args: RunCliRawArgs) -> None:
-    """Reject dry-run combinations with other early-exit modes."""
-    if not args.dry_run:
-        return
-    validation_errors: list[dict[str, JSONValue]] = []
-    if args.write_config:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["cli", "write_config"],
-                "msg": "--dry-run cannot be combined with --write-config.",
-                "input": True,
-            }
-        )
-    if args.diagnose_paths:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["cli", "diagnose_paths"],
-                "msg": "--dry-run cannot be combined with --diagnose-paths.",
-                "input": True,
-            }
-        )
-    if not validation_errors:
-        return
-    raise ConfigValidationError(
-        validation_errors,
-        message="--dry-run is incompatible with another early-exit mode",
-        hint="Use --dry-run, --write-config, or --diagnose-paths separately",
-    )
-
-
-def validate_dry_run_cache_contract(args: RunCliRawArgs) -> None:
-    """Validate cache flags without touching cache state."""
-    if not args.no_cache or not args.from_cache_only:
-        return
-    raise ConfigValidationError(
-        [
-            {
-                "type": "value_error",
-                "loc": ["cli", "no_cache"],
-                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
-                "input": True,
-            },
-            {
-                "type": "value_error",
-                "loc": ["cli", "from_cache_only"],
-                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
-                "input": True,
-            },
-        ],
-        message="Cache mode flags are mutually exclusive",
-        hint="Use either --no-cache or --from-cache-only, not both",
-    )
-
-
 def handle_dry_run(args: RunCliRawArgs, config: ConfigSchema, console: Console) -> None:
     """Build and render the CLI-owned plan before runtime request construction."""
     from frame_compare.cli.dry_run import (
@@ -596,291 +634,6 @@ def handle_dry_run(args: RunCliRawArgs, config: ConfigSchema, console: Console) 
     print_dry_run_plan(console, plan, quiet=args.quiet)
 
 
-def validate_run_contracts(args: RunCliRawArgs, deps: RunCommandDeps, config: ConfigSchema) -> None:
-    """Enforce public CLI mode combinations before entering the runtime pipeline."""
-    validate_skip_analysis_frame_selection_contract(args, config)
-    validation_errors: list[dict[str, JSONValue]] = []
-    failures: set[RunContractFailure] = set()
-
-    interactive_errors = json_interactive_alignment_contract_errors(args, config)
-    if interactive_errors:
-        failures.add(RunContractFailure.JSON_INTERACTIVE_ALIGNMENT)
-        validation_errors.extend(interactive_errors)
-
-    previous_offset_errors = previous_offset_reuse_contract_errors(args, config)
-    if previous_offset_errors:
-        failures.add(RunContractFailure.PREVIOUS_OFFSETS)
-        validation_errors.extend(previous_offset_errors)
-
-    report_confirmed_slowpics_errors = report_confirmed_slowpics_contract_errors(
-        args,
-        deps,
-        config,
-    )
-    if report_confirmed_slowpics_errors:
-        failures.add(RunContractFailure.REPORT_CONFIRMED_SLOWPICS)
-        validation_errors.extend(report_confirmed_slowpics_errors)
-
-    if not validation_errors:
-        return
-
-    raise ConfigValidationError(
-        validation_errors,
-        message=validation_error_message(frozenset(failures)),
-        hint=validation_error_hint(frozenset(failures)),
-    )
-
-
-def validate_write_config_contracts(config: ConfigSchema) -> None:
-    """Reject persisted effective configs that normal runs would not accept."""
-    validation_errors = previous_offset_reuse_persisted_contract_errors(config)
-    if not validation_errors:
-        return
-    raise ConfigValidationError(
-        validation_errors,
-        message="Previous offset reuse is not supported with this run configuration",
-        hint=(
-            "Set audio_alignment.previous_offsets to disabled, enable "
-            "audio_alignment.cache_results, or disable force interactive alignment"
-        ),
-    )
-
-
-def validate_skip_analysis_frame_selection_contract(
-    args: RunCliRawArgs,
-    config: ConfigSchema,
-) -> None:
-    validate_skip_analysis_policy(
-        skip_analysis=args.skip_analysis,
-        config=config.analysis,
-    )
-
-
-def validate_json_interactive_alignment_contract(
-    args: RunCliRawArgs,
-    config: ConfigSchema,
-) -> None:
-    validation_errors = json_interactive_alignment_contract_errors(args, config)
-    if not validation_errors:
-        return
-    raise ConfigValidationError(
-        validation_errors,
-        message="Interactive alignment is not supported with --json",
-        hint=(
-            "Disable audio_alignment.use_vspreview and "
-            "audio_alignment.force_interactive, or run without --json"
-        ),
-    )
-
-
-def json_interactive_alignment_contract_errors(
-    args: RunCliRawArgs,
-    config: ConfigSchema,
-) -> list[dict[str, JSONValue]]:
-    if not args.json_output:
-        return []
-
-    interactive_fields: list[tuple[str, str]] = []
-    if config.audio_alignment.use_vspreview:
-        interactive_fields.append(("audio_alignment", "use_vspreview"))
-    if config.audio_alignment.force_interactive:
-        interactive_fields.append(("audio_alignment", "force_interactive"))
-    if not interactive_fields:
-        return []
-
-    return [
-        {
-            "type": "value_error",
-            "loc": list(loc),
-            "msg": "Interactive alignment is not supported with --json.",
-            "input": True,
-        }
-        for loc in interactive_fields
-    ]
-
-
-def previous_offset_reuse_contract_errors(
-    args: RunCliRawArgs,
-    config: ConfigSchema,
-) -> list[dict[str, JSONValue]]:
-    previous_offsets = config.audio_alignment.previous_offsets
-    if previous_offsets == "disabled":
-        return []
-
-    validation_errors: list[dict[str, JSONValue]] = []
-    if args.json_output and previous_offsets == "prompt":
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["audio_alignment", "previous_offsets"],
-                "msg": "Previous offset prompt mode is not supported with --json.",
-                "input": previous_offsets,
-            }
-        )
-    if args.quiet and previous_offsets == "prompt":
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["cli", "quiet"],
-                "msg": "Previous offset prompt mode is not supported with --quiet.",
-                "input": previous_offsets,
-            }
-        )
-    validation_errors.extend(previous_offset_reuse_persisted_contract_errors(config))
-    return validation_errors
-
-
-def previous_offset_reuse_persisted_contract_errors(
-    config: ConfigSchema,
-) -> list[dict[str, JSONValue]]:
-    previous_offsets = config.audio_alignment.previous_offsets
-    if previous_offsets == "disabled":
-        return []
-
-    validation_errors: list[dict[str, JSONValue]] = []
-    if config.audio_alignment.force_interactive:
-        validation_errors.extend(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ["audio_alignment", "force_interactive"],
-                    "msg": "Previous offset reuse is not supported with force interactive alignment.",
-                    "input": True,
-                },
-                {
-                    "type": "value_error",
-                    "loc": ["audio_alignment", "previous_offsets"],
-                    "msg": "Previous offset reuse is not supported with force interactive alignment.",
-                    "input": previous_offsets,
-                },
-            ]
-        )
-    if not config.audio_alignment.cache_results:
-        validation_errors.extend(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ["audio_alignment", "cache_results"],
-                    "msg": "Previous offset reuse requires audio_alignment.cache_results = true.",
-                    "input": False,
-                },
-                {
-                    "type": "value_error",
-                    "loc": ["audio_alignment", "previous_offsets"],
-                    "msg": "Previous offset reuse requires audio_alignment.cache_results = true.",
-                    "input": previous_offsets,
-                },
-            ]
-        )
-    return validation_errors
-
-
-def validate_report_confirmed_slowpics_contract(
-    args: RunCliRawArgs,
-    deps: RunCommandDeps,
-    config: ConfigSchema,
-) -> None:
-    validation_errors = report_confirmed_slowpics_contract_errors(args, deps, config)
-    if not validation_errors:
-        return
-
-    raise ConfigValidationError(
-        validation_errors,
-        message="Report-confirmed slow.pics upload requires an interactive report-enabled run",
-        hint=(
-            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
-            "enable reports, or run from an interactive terminal without --json/--quiet"
-        ),
-    )
-
-
-def report_confirmed_slowpics_contract_errors(
-    args: RunCliRawArgs,
-    deps: RunCommandDeps,
-    config: ConfigSchema,
-) -> list[dict[str, JSONValue]]:
-    if not report_confirmed_slowpics_enabled(config):
-        return []
-
-    validation_errors: list[dict[str, JSONValue]] = []
-    if args.json_output:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["cli", "json"],
-                "msg": "Report-confirmed slow.pics upload is not supported with --json.",
-                "input": True,
-            }
-        )
-    if args.quiet:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["cli", "quiet"],
-                "msg": "Report-confirmed slow.pics upload is not supported with --quiet.",
-                "input": True,
-            }
-        )
-    if not deps.stdin_is_tty:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["stdin"],
-                "msg": "Report-confirmed slow.pics upload requires stdin to be attached to a TTY.",
-                "input": False,
-            }
-        )
-    if not deps.stdout_is_tty:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["stdout"],
-                "msg": "Report-confirmed slow.pics upload requires stdout to be attached to a TTY.",
-                "input": False,
-            }
-        )
-    if not config.report.enable:
-        validation_errors.append(
-            {
-                "type": "value_error",
-                "loc": ["report", "enable"],
-                "msg": "Report-confirmed slow.pics upload requires report.enable = true.",
-                "input": False,
-            }
-        )
-    return validation_errors
-
-
-def validation_error_message(failures: frozenset[RunContractFailure]) -> str:
-    if RunContractFailure.JSON_INTERACTIVE_ALIGNMENT in failures:
-        return "Interactive alignment is not supported with --json"
-    if RunContractFailure.PREVIOUS_OFFSETS in failures:
-        return "Previous offset reuse is not supported with this run configuration"
-    if RunContractFailure.REPORT_CONFIRMED_SLOWPICS in failures:
-        return "Report-confirmed slow.pics upload requires an interactive report-enabled run"
-    return "Run configuration is invalid"
-
-
-def validation_error_hint(failures: frozenset[RunContractFailure]) -> str:
-    if RunContractFailure.JSON_INTERACTIVE_ALIGNMENT in failures:
-        return (
-            "Disable audio_alignment.use_vspreview and "
-            "audio_alignment.force_interactive, or run without --json"
-        )
-    if RunContractFailure.PREVIOUS_OFFSETS in failures:
-        return (
-            "Set audio_alignment.previous_offsets to disabled, enable "
-            "audio_alignment.cache_results, disable force interactive alignment, "
-            "or run without --json/--quiet prompt mode"
-        )
-    if RunContractFailure.REPORT_CONFIRMED_SLOWPICS in failures:
-        return (
-            "Disable slowpics.confirm_upload_after_report, disable slowpics.auto_upload, "
-            "enable reports, or run from an interactive terminal without --json/--quiet"
-        )
-    return "Review the validation errors and update the run configuration"
-
-
 def print_run_preview(
     console: Console,
     args: RunCliRawArgs,
@@ -893,6 +646,7 @@ def print_run_preview(
         config=load_effective_config(),
         root=args.resolved_root,
         config_path=args.config_path,
+        verbose=args.verbose,
     )
 
 
@@ -957,13 +711,13 @@ def collect_interactive_slowpics_actions(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     config: ConfigSchema,
-) -> PostUploadActionPresentationResults:
+) -> PostUploadActionResults:
     """Run enabled interactive slow.pics URL actions and collect presentation state."""
     url = result.slowpics_url
     if url is None or args.json_output or args.quiet or not deps.stdout_is_tty:
         return ()
 
-    actions: list[PostUploadActionPresentationResult] = []
+    actions: list[PostUploadActionResult] = []
     if config.slowpics.copy_url_to_clipboard:
         actions.append(_copy_slowpics_url(url, copy_to_clipboard=deps.copy_to_clipboard))
     if config.slowpics.open_in_browser:
@@ -975,16 +729,21 @@ def _copy_slowpics_url(
     url: str,
     *,
     copy_to_clipboard: CopyToClipboardFn,
-) -> PostUploadActionPresentationResult:
+) -> PostUploadActionResult:
     try:
         copy_to_clipboard(url)
     except Exception as exc:
-        return PostUploadActionPresentationResult(
+        log.debug(
+            "slowpics_clipboard_copy_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
+        return PostUploadActionResult(
             kind="clipboard",
             success=False,
-            warning=f"slow.pics clipboard: failed to copy URL: {exc}",
+            warning="slow.pics clipboard: failed to copy URL",
         )
-    return PostUploadActionPresentationResult(
+    return PostUploadActionResult(
         kind="clipboard",
         success=True,
         detail="slow.pics URL copied to clipboard",
@@ -995,22 +754,27 @@ def _open_slowpics_url(
     url: str,
     *,
     open_url: OpenUrlFn,
-) -> PostUploadActionPresentationResult:
+) -> PostUploadActionResult:
     try:
         opened = open_url(url)
     except Exception as exc:
-        return PostUploadActionPresentationResult(
+        log.debug(
+            "slowpics_browser_open_failed",
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
+        return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning=f"slow.pics browser: failed to open URL: {exc}",
+            warning="slow.pics browser: failed to open URL",
         )
     if not opened:
-        return PostUploadActionPresentationResult(
+        return PostUploadActionResult(
             kind="browser",
             success=False,
             warning="slow.pics browser: failed to open URL: no browser accepted the request",
         )
-    return PostUploadActionPresentationResult(
+    return PostUploadActionResult(
         kind="browser",
         success=True,
         detail="slow.pics URL opened in browser",
@@ -1018,7 +782,7 @@ def _open_slowpics_url(
 
 
 def slowpics_browser_open_attempted(
-    actions: PostUploadActionPresentationResults,
+    actions: PostUploadActionResults,
 ) -> bool:
     return any(action.kind == "browser" for action in actions)
 
@@ -1031,8 +795,8 @@ def handle_diagnose_paths(resolved_root: Path, config_path: Path, config: Config
         "root": str(resolved_root),
         "config": str(config_path),
         "input": str(workspace.input_dir),
-        "output": str(workspace.screenshots_dir),
-        "cache": str(workspace.generated_dir),
+        "output": str(workspace.generated_root),
+        "cache": str(workspace.generated_root / "cache"),
     }
     typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 

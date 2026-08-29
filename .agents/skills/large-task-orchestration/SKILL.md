@@ -17,8 +17,10 @@ Before any write delegation, the controller must establish:
 - goal, non-goals, risk, public contracts, and final proof;
 - an ownership map and dependency order for the work units;
 - shared files, symbols, and invariants that permit only one writer at a time;
-- for each unit: objective, exact files in scope, dependencies, invariants,
-  verification, output format, effort budget, and stop conditions.
+- for each unit: objective, owner/write boundary, dependencies, invariants,
+  acceptance criteria, verification, output format, effort budget, and stop
+  conditions. Require exact files only for parallel writers or sensitive shared
+  surfaces.
 
 Bounded read-only discovery may precede this freeze when ownership is unclear. Its
 packet still needs a specific objective, read scope, output, effort budget, and stop
@@ -39,11 +41,13 @@ Route work deliberately:
 
 - use read-only explorers, documentation researchers, test/log analysts, and
   monitors for independent evidence or waits;
-- use the normal Sol worker for bounded implementation that still needs judgment;
-- use `worker_sol_low` for a decision-complete unit with frozen ownership and
-  contracts that still needs repository comprehension or local coding judgment;
-- use `worker_luna` only through `bounded-worker-execution` for an exact,
-  Sol-planned, low-ambiguity, cheap-to-verify unit;
+- use `worker_luna` through `bounded-worker-execution` for bounded implementation
+  with clear outcomes, owner seams, contracts, and direct proof, including work
+  that needs repository comprehension and routine local coding judgment;
+- use the normal Sol worker when a settled bounded unit needs material local design
+  judgment, cross-boundary comprehension, complex diagnosis, or proof
+  interpretation; return unresolved product, ownership, public-contract,
+  architecture, or proof decisions to planning;
 - use a fresh read-only reviewer for the final independent review when the work is
   high risk, novel, broad, or supported by weak verification evidence.
 
@@ -95,8 +99,8 @@ the verification tier.
 Give each worker a packet with these fields:
 
 ```text
-UNIT | ROLE | OBJECTIVE | FILES | DEPENDENCIES
-INVARIANTS | VERIFICATION | OUTPUT | EFFORT BUDGET | STOP CONDITIONS
+UNIT | ROLE | OBJECTIVE | OWNER/WRITE BOUNDARY | DEPENDENCIES
+INVARIANTS | ACCEPTANCE | VERIFICATION | OUTPUT | EFFORT BUDGET | STOP CONDITIONS
 ```
 
 Require this concise return:

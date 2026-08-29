@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import os
 import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -20,13 +22,21 @@ from frame_compare.services.alignment_reuse_cache import (
     save_reusable_offsets,
     source_set_cache_key,
 )
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.services.types import (
+    AlignmentProvenance,
+    AlignmentResult,
+    AlignmentStabilitySummary,
+)
 from frame_compare.utils.file_lock import FileLockTimeoutError
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
     AlignmentClipRequest,
     AlignmentRequest,
+)
+
+_DEFAULT_STABILITY = AlignmentStabilitySummary(
+    "insufficient_evidence", 0, None, None, None, None, None, None
 )
 
 
@@ -104,6 +114,7 @@ def _result(
         correlation_score=correlation_score,
         algorithm="cross_correlation",
         source=source,  # type: ignore[arg-type]
+        stability=_DEFAULT_STABILITY,
     )
 
 
@@ -156,6 +167,183 @@ def _first_entry(data: dict[str, object]) -> dict[str, object]:
     entry = next(iter(entries.values()))
     assert isinstance(entry, dict)
     return entry
+
+
+def test_stability_summary_round_trips_in_current_cache_schema(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    summary = AlignmentStabilitySummary(
+        classification="possible_discontinuity",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=202,
+        first_offset_frames=178,
+        last_offset_frames=202,
+        largest_adjacent_jump_frames=24,
+        change_position_seconds=2832.0,
+    )
+    result = replace(_result(request), stability=summary)
+
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+    loaded = load_reusable_offset_entries(request)
+
+    assert loaded is not None
+    assert loaded[comparison_cache_key(request.comparisons[0])].result.stability == summary
+    assert _cache_data(request)["version"] == CACHE_VERSION
+
+
+@pytest.mark.parametrize("embedded", [False, True], ids=["computed-entry", "computed-result"])
+def test_computed_cache_evidence_without_stability_warns_and_misses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    embedded: bool,
+) -> None:
+    request = _request(tmp_path)
+    computed = _result(request)
+    if embedded:
+        confirmed = replace(
+            computed,
+            frame_offset=47,
+            time_offset_seconds=1.96,
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+            stability=None,
+        )
+        provenance = _provenance(
+            request,
+            result=confirmed,
+            provenance="vspreview_confirmed_this_run",
+            computed_result=computed,
+        )
+    else:
+        provenance = _provenance(request, result=computed)
+    save_reusable_offsets(request, [provenance])
+    data = _cache_data(request)
+    container = _first_entry(data)
+    if embedded:
+        computed_result = container["computed_result"]
+        assert isinstance(computed_result, dict)
+        container = computed_result
+    removed = container.pop("stability")
+    assert isinstance(removed, dict)
+    _persist_cache_data(request, data)
+    warnings: list[str] = []
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_invalid_entry"]
+
+
+@pytest.mark.parametrize("embedded", [False, True], ids=["computed-entry", "computed-result"])
+def test_negative_largest_adjacent_jump_warns_and_misses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    embedded: bool,
+) -> None:
+    request = _request(tmp_path)
+    computed = _result(request)
+    if embedded:
+        confirmed = replace(
+            computed,
+            frame_offset=47,
+            time_offset_seconds=1.96,
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+            stability=None,
+        )
+        provenance = _provenance(
+            request,
+            result=confirmed,
+            provenance="vspreview_confirmed_this_run",
+            computed_result=computed,
+        )
+    else:
+        provenance = _provenance(request, result=computed)
+    save_reusable_offsets(request, [provenance])
+    data = _cache_data(request)
+    container = _first_entry(data)
+    if embedded:
+        computed_result = container["computed_result"]
+        assert isinstance(computed_result, dict)
+        container = computed_result
+    stability = container["stability"]
+    assert isinstance(stability, dict)
+    stability["largest_adjacent_jump_frames"] = -1
+    _persist_cache_data(request, data)
+    warnings: list[str] = []
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_invalid_entry"]
+
+
+def test_shared_reuse_cache_does_not_write_computed_entry_without_stability(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    result = replace(_result(request), stability=None)
+
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+
+    assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
+
+
+def test_source_set_cache_key_changes_with_media_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    original = source_set_cache_key(request)
+
+    observed_scopes: list[str] = []
+
+    def fingerprint(scope: str) -> str:
+        observed_scopes.append(scope)
+        return "a" * 64
+
+    monkeypatch.setattr(
+        reuse_cache,
+        "media_runtime_fingerprint",
+        fingerprint,
+    )
+
+    assert source_set_cache_key(request) != original
+    assert observed_scopes == ["alignment"]
+
+
+def test_alignment_cache_keys_intentionally_reuse_same_stat_identity(tmp_path: Path) -> None:
+    """Content hashing is deliberately excluded from performance-first keys."""
+    request = _request(tmp_path)
+    original_source_set_key = source_set_cache_key(request)
+    original_comparison_key = comparison_cache_key(request.comparisons[0])
+
+    reference_path = request.reference.path
+    reference_mtime_ns = request.reference.identity.mtime_ns
+    reference_path.write_bytes(b"replaceme")
+    os.utime(reference_path, ns=(reference_mtime_ns, reference_mtime_ns))
+
+    comparison_path = request.comparisons[0].path
+    comparison_mtime_ns = request.comparisons[0].identity.mtime_ns
+    comparison_path.write_bytes(b"substitute")
+    os.utime(comparison_path, ns=(comparison_mtime_ns, comparison_mtime_ns))
+
+    replaced = replace(
+        request,
+        reference=_clip(reference_path, label="Reference", stream=0),
+        comparisons=[_clip(comparison_path, label="Encode", stream=1)],
+    )
+
+    assert source_set_cache_key(replaced) == original_source_set_key
+    assert comparison_cache_key(replaced.comparisons[0]) == original_comparison_key
 
 
 def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
@@ -237,7 +425,10 @@ def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
-    computed = _result(request, frame_offset=42, correlation_score=0.876)
+    summary = AlignmentStabilitySummary("possible_drift", 4, 40, 42, 40, 42, 1, None)
+    computed = replace(
+        _result(request, frame_offset=42, correlation_score=0.876), stability=summary
+    )
     confirmed = AlignmentResult(
         reference_clip=request.reference.path.name,
         comparison_clip=request.comparisons[0].path.name,
@@ -266,10 +457,12 @@ def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
     entry = next(iter(entries.values()))
     assert entry.origin == "vspreview_confirmed"
     assert entry.result.frame_offset == 47
+    assert entry.result.stability == summary
     assert entry.computed_result is not None
     assert entry.computed_result.frame_offset == 42
     assert entry.computed_result.algorithm == "cross_correlation"
     assert entry.computed_result.correlation_score == pytest.approx(0.876)
+    assert entry.computed_result.stability == summary
 
 
 def test_shared_reuse_cache_requires_complete_source_set(tmp_path: Path) -> None:
@@ -479,7 +672,7 @@ def test_shared_reuse_cache_version_mismatch_warns_and_misses(
     request = _request(tmp_path)
     cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
     cache_file.parent.mkdir(parents=True)
-    cache_file.write_text('version = "999"', encoding="utf-8")
+    cache_file.write_text('version = "2"', encoding="utf-8")
     warnings: list[str] = []
 
     def _warning(event: str, **_kwargs: object) -> None:
@@ -748,6 +941,88 @@ def test_shared_reuse_cache_boolean_numeric_fields_warn_and_miss(
     data = _cache_data(request)
     entry = _first_entry(data)
     entry[field_name] = field_value
+    _persist_cache_data(request, data)
+    warnings: list[str] = []
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_invalid_entry"]
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 10**400])
+@pytest.mark.parametrize(
+    ("container_name", "field_name"),
+    [
+        ("entry", "time_offset_seconds"),
+        ("entry", "correlation_score"),
+        ("computed_result", "time_offset_seconds"),
+        ("computed_result", "correlation_score"),
+        ("stability", "change_position_seconds"),
+        ("computed_stability", "change_position_seconds"),
+    ],
+)
+def test_shared_reuse_cache_invalid_float_fields_warn_and_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    container_name: str,
+    field_name: str,
+    value: float,
+) -> None:
+    request = _request(tmp_path)
+    summary = AlignmentStabilitySummary(
+        classification="possible_discontinuity",
+        valid_windows=4,
+        offset_min_frames=178,
+        offset_max_frames=202,
+        first_offset_frames=178,
+        last_offset_frames=202,
+        largest_adjacent_jump_frames=24,
+        change_position_seconds=2832.0,
+    )
+    result = replace(_result(request), stability=summary)
+    if container_name.startswith("computed"):
+        confirmed = replace(
+            result,
+            frame_offset=47,
+            time_offset_seconds=1.96,
+            correlation_score=1.0,
+            algorithm=None,
+            source="manual",
+        )
+        provenance = _provenance(
+            request,
+            result=confirmed,
+            provenance="vspreview_confirmed_this_run",
+            computed_result=result,
+        )
+    else:
+        provenance = _provenance(request, result=result)
+    save_reusable_offsets(request, [provenance])
+    data = _cache_data(request)
+    entry = _first_entry(data)
+
+    container: dict[str, object]
+    if container_name == "entry":
+        container = entry
+    elif container_name == "computed_result":
+        computed = entry["computed_result"]
+        assert isinstance(computed, dict)
+        container = computed
+    elif container_name == "stability":
+        stability = entry["stability"]
+        assert isinstance(stability, dict)
+        container = stability
+    else:
+        computed = entry["computed_result"]
+        assert isinstance(computed, dict)
+        stability = computed["stability"]
+        assert isinstance(stability, dict)
+        container = stability
+    container[field_name] = value
     _persist_cache_data(request, data)
     warnings: list[str] = []
 

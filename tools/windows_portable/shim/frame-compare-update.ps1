@@ -296,20 +296,43 @@ function Release-UpdateLock([object]$LockInfo) {
   }
 }
 
-function Get-InstalledRequirementsFingerprint([string]$BundlePath) {
+function Get-InstalledBundleCompatibilityContract([string]$BundlePath) {
   $bundleInfoPath = Join-Path $BundlePath "bundle_info.json"
-  if (Test-Path -LiteralPath $bundleInfoPath) {
+  if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
+    throw "Installed media runtime identity is unavailable. Install the complete portable bundle before using code-only updates."
+  }
+
+  try {
     $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw | ConvertFrom-Json
-    $prop = $bundleInfo.PSObject.Properties["requirements_lock_sha256"]
-    if ($null -ne $prop -and $null -ne $prop.Value) {
-      return [string]$prop.Value
-    }
+  } catch {
+    throw "Installed bundle_info.json is invalid. Reinstall the complete portable bundle before using code-only updates."
   }
-  $requirementsLock = Join-Path $BundlePath "requirements.lock.txt"
-  if (!(Test-Path -LiteralPath $requirementsLock)) {
-    throw "Installed requirements.lock.txt not found: $requirementsLock"
+
+  $schemaVersionRaw = Get-OptionalStringProperty -Object $bundleInfo -Name "schema_version"
+  $schemaVersion = 0
+  if (-not [int]::TryParse($schemaVersionRaw, [ref]$schemaVersion) -or $schemaVersion -ne 2) {
+    throw "Installed bundle predates the media-runtime compatibility contract. A complete portable reinstall is required; code-only update refused."
   }
-  return Get-Sha256HexForFile -Path $requirementsLock
+
+  $bundleKind = Get-RequiredStringProperty -Object $bundleInfo -Name "bundle_kind" -Context "bundle_info"
+  $platform = Get-RequiredStringProperty -Object $bundleInfo -Name "platform" -Context "bundle_info"
+  if ($bundleKind -ne "full" -or $platform -ne "windows-x64") {
+    throw "Installed bundle identity is not a supported full windows-x64 bundle. A complete portable reinstall is required."
+  }
+
+  $requirementsFingerprint = Get-RequiredStringProperty -Object $bundleInfo -Name "requirements_lock_sha256" -Context "bundle_info"
+  $runtimeFingerprint = Get-RequiredStringProperty -Object $bundleInfo -Name "media_runtime_fingerprint" -Context "bundle_info"
+  if ($requirementsFingerprint -cnotmatch '^[a-f0-9]{64}$') {
+    throw "Installed requirements fingerprint is invalid in bundle_info.json."
+  }
+  if ($runtimeFingerprint -cnotmatch '^[a-f0-9]{64}$') {
+    throw "Installed media-runtime fingerprint is invalid. A complete portable reinstall is required."
+  }
+
+  return [ordered]@{
+    requirements_lock_sha256 = $requirementsFingerprint.ToLowerInvariant()
+    media_runtime_fingerprint = $runtimeFingerprint.ToLowerInvariant()
+  }
 }
 
 function Get-BackupRoot([string]$BundlePath) {
@@ -568,12 +591,26 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $manifest = $manifestText | ConvertFrom-Json
 
     $schemaVersion = [int](Get-RequiredStringProperty -Object $manifest -Name "schema_version" -Context "manifest")
-    if ($schemaVersion -ne 1) {
+    if ($schemaVersion -ne 2) {
       throw "Unsupported manifest schema_version '$schemaVersion'"
     }
     $platform = Get-RequiredStringProperty -Object $manifest -Name "target_platform" -Context "manifest"
     if ($platform -ne "windows-x64") {
       throw "Unsupported update target_platform '$platform'"
+    }
+
+    $expectedRuntimeFingerprint = Get-RequiredStringProperty -Object $manifest -Name "expected_media_runtime_fingerprint" -Context "manifest"
+    if ($expectedRuntimeFingerprint -cnotmatch '^[a-f0-9]{64}$') {
+      throw "Manifest expected_media_runtime_fingerprint is invalid."
+    }
+    $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
+    $installedRuntimeFingerprint = [string]$installedCompatibility["media_runtime_fingerprint"]
+    if ($installedRuntimeFingerprint -ne $expectedRuntimeFingerprint.ToLowerInvariant()) {
+      throw (
+        "Media runtime fingerprint mismatch. Installed=$installedRuntimeFingerprint " +
+        "Expected=$expectedRuntimeFingerprint. This code-only update does not replace VapourSynth, " +
+        "native source plugins, vs-placebo, or FFmpeg. Install the complete portable bundle for this release."
+      )
     }
     $payloadRoot = Get-RequiredStringProperty -Object $manifest -Name "payload_root" -Context "manifest"
     Assert-SafeRelativePath -PathValue $payloadRoot -Context "payload_root"
@@ -685,7 +722,7 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     }
 
     $expectedFingerprint = Get-RequiredStringProperty -Object $manifest -Name "expected_requirements_lock_sha256" -Context "manifest"
-    $installedFingerprint = Get-InstalledRequirementsFingerprint -BundlePath $BundlePath
+    $installedFingerprint = [string]$installedCompatibility["requirements_lock_sha256"]
     if ($installedFingerprint -ne $expectedFingerprint.ToLowerInvariant()) {
       $promptRequiresUnsigned = -not $signatureValid
       if (-not $interactive) {

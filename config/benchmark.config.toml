@@ -3,10 +3,8 @@
 
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screens"
 generated_dir = "generated"
 config_dir = "config"
-use_run_folders = true
 
 [sources]
 # The benchmark command supplies inputs in reference/comparison order.

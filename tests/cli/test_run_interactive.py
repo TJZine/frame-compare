@@ -5,11 +5,16 @@ from pathlib import Path
 import pytest
 import typer
 from rich.console import Console
+from structlog.testing import capture_logs
+from typer.testing import CliRunner
 
 from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import (
+    build_confirm_full_window_retry_callback,
     build_confirm_slowpics_upload_callback,
+    build_runner_dependencies,
     collect_interactive_slowpics_actions,
+    confirm_full_window_retry_on_stderr,
     handle_run,
     maybe_open_run_report,
     slowpics_browser_open_attempted,
@@ -19,10 +24,15 @@ from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     ConfigSchema,
     ReportConfig,
+    Visibility,
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
-from frame_compare.orchestration.types import SlowpicsUploadConfirmationRequest
+from frame_compare.orchestration.types import (
+    FullWindowRetryConfirmationRequest,
+    SlowpicsUploadConfirmationRequest,
+)
 
+from .cli_helpers import _normalize_cli_output
 from .run_command_test_support import (
     DepsOptions,
     RecordingRunner,
@@ -177,13 +187,25 @@ def test_handle_run_injects_confirmation_dependency_only_for_prompt_required_pat
     assert normal_runner.dependencies == [None]
 
 
-def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline() -> None:
+@pytest.mark.parametrize(
+    ("visibility", "expected_prompt"),
+    [
+        (Visibility.PUBLIC, "    Upload to public slow.pics?"),
+        (Visibility.UNLISTED, "    Upload to unlisted slow.pics?"),
+    ],
+)
+def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
+    visibility: Visibility,
+    expected_prompt: str,
+) -> None:
     opened: list[Path] = []
+    output = StringIO()
 
     def _confirm_upload(text: str, *, default: bool) -> bool:
         assert opened == [Path("report.html")]
-        assert text == "Review the local report, then upload this comparison to slow.pics?"
+        assert text == expected_prompt
         assert default is False
+        output.write(f"{text} yes\n")
         return True
 
     callback = build_confirm_slowpics_upload_callback(
@@ -195,13 +217,144 @@ def test_confirmation_callback_opens_report_before_prompt_and_defaults_decline()
             ),
             opened,
         ),
-        console=Console(file=StringIO(), no_color=True),
+        console=Console(file=output, no_color=True),
         resolve_effective_config=get_default_config,
+        visibility=visibility,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "confirmed"
     )
+    rendered = output.getvalue()
+    assert rendered.index("[WAIT] Publishing confirmation") < rendered.index(expected_prompt)
+    assert rendered.endswith(f"{expected_prompt} yes\n\n")
+    panel_line = next(
+        line for line in rendered.splitlines() if "[WAIT] Publishing confirmation" in line
+    )
+    assert panel_line.startswith("  ")
+    assert not panel_line.startswith("   ")
+    output.write("  [OK] PUBLISH  Completed in 20s\n")
+    transcript = output.getvalue()
+    assert (
+        transcript.index("[WAIT] Publishing confirmation")
+        < transcript.index(expected_prompt)
+        < transcript.index("  [OK] PUBLISH")
+    )
+
+
+def test_full_window_retry_callback_uses_exact_default_no_stderr_prompt() -> None:
+    calls: list[str] = []
+
+    def _confirm(text: str) -> bool:
+        calls.append(text)
+        return True
+
+    callback = build_confirm_full_window_retry_callback(
+        deps=_deps(DepsOptions(confirm_full_window_retry=_confirm))
+    )
+
+    decision = callback(
+        FullWindowRetryConfirmationRequest(
+            requested_frame_count=8,
+            eligible_frame_count=4,
+            ignore_lead_seconds=240.0,
+            ignore_trail_seconds=240.0,
+        )
+    )
+
+    assert decision == "confirmed"
+    assert calls == [
+        "Configured lead/trail exclusions leave too little media to satisfy the\n"
+        "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+    ]
+
+
+@pytest.mark.parametrize(
+    ("prompt_input", "expected_exit_code", "stderr_suffix"),
+    [("\n", 0, " "), ("maybe\nn\n", 0, " "), ("", 1, " Aborted.\n")],
+)
+def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
+    prompt_input: str,
+    expected_exit_code: int,
+    stderr_suffix: str,
+) -> None:
+    app = typer.Typer()
+
+    @app.command()
+    def confirm() -> None:
+        callback = build_confirm_full_window_retry_callback(
+            deps=_deps(DepsOptions(confirm_full_window_retry=confirm_full_window_retry_on_stderr))
+        )
+        callback(
+            FullWindowRetryConfirmationRequest(
+                requested_frame_count=8,
+                eligible_frame_count=4,
+                ignore_lead_seconds=240.0,
+                ignore_trail_seconds=240.0,
+            )
+        )
+
+    result = CliRunner().invoke(app, input=prompt_input)
+
+    expected_prompt = (
+        "Configured lead/trail exclusions leave too little media to satisfy the\n"
+        "requested frame selection. Analyze the full shared clip for this run? [y/N]"
+    )
+    assert result.exit_code == expected_exit_code
+    assert result.stdout == ""
+    assert _normalize_cli_output(result.stderr) == expected_prompt + stderr_suffix
+
+
+@pytest.mark.parametrize(
+    "args_update,deps_update",
+    [
+        ({"json_output": True}, {"stdin_is_tty": True}),
+        ({"quiet": True}, {"stdin_is_tty": True}),
+        ({"quiet": False}, {"stdin_is_tty": False}),
+        ({"quiet": False, "from_cache_only": True}, {"stdin_is_tty": True}),
+        ({"quiet": False, "skip_analysis": True}, {"stdin_is_tty": True}),
+    ],
+)
+def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
+    args_update: dict[str, object],
+    deps_update: dict[str, object],
+) -> None:
+    config = get_default_config()
+    config.analysis.ignore_lead_seconds = 240.0
+    dependencies = build_runner_dependencies(
+        args=replace(_base_args(), **args_update),
+        deps=_deps(DepsOptions(**deps_update)),
+        config=config,
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=lambda: config,
+    )
+
+    assert dependencies is None
+
+
+def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive_config() -> None:
+    interactive_deps = _deps(DepsOptions(stdin_is_tty=True))
+    config = get_default_config()
+    config.analysis.ignore_trail_seconds = 240.0
+
+    dependencies = build_runner_dependencies(
+        args=replace(_base_args(), quiet=False),
+        deps=interactive_deps,
+        config=config,
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=lambda: config,
+    )
+    zero_margin_dependencies = build_runner_dependencies(
+        args=replace(_base_args(), quiet=False),
+        deps=interactive_deps,
+        config=get_default_config(),
+        console=Console(file=StringIO(), no_color=True),
+        resolve_effective_config=get_default_config,
+    )
+
+    assert dependencies is not None
+    assert dependencies.confirm_full_window_retry is not None
+    assert zero_margin_dependencies is None
 
 
 def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> None:
@@ -219,12 +372,17 @@ def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> N
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         resolve_effective_config=lambda: disabled_auto_open,
+        visibility=Visibility.PUBLIC,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "declined"
     )
-    assert "Report: report.html" in output.getvalue()
+    rendered = output.getvalue()
+    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Visibility  Public" in rendered
+    assert rendered.count("report.html") == 1
+    assert "Report: report.html" not in rendered
 
 
 def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails() -> None:
@@ -241,12 +399,53 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         resolve_effective_config=get_default_config,
+        visibility=Visibility.PUBLIC,
     )
 
     assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
         "declined"
     )
-    assert "Report: report.html" in output.getvalue()
+    rendered = output.getvalue()
+    assert "[WAIT] Publishing confirmation" in rendered
+    assert rendered.count("report.html") == 1
+
+
+@pytest.mark.parametrize("width", [60, 80])
+def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
+    config = get_default_config()
+    config.report.auto_open = False
+    output = StringIO()
+    callback = build_confirm_slowpics_upload_callback(
+        args=replace(_base_args(), quiet=False),
+        deps=_deps(
+            DepsOptions(
+                stdout_is_tty=True,
+                confirm_upload=lambda _text, *, default: False,
+            )
+        ),
+        console=Console(
+            file=output,
+            width=width,
+            no_color=True,
+            force_terminal=False,
+        ),
+        resolve_effective_config=lambda: config,
+        visibility=Visibility.UNLISTED,
+    )
+
+    assert (
+        callback(
+            SlowpicsUploadConfirmationRequest(
+                report_path=Path("generated/a-long-comparison-name/report.html")
+            )
+        )
+        == "declined"
+    )
+    rendered = output.getvalue()
+    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Visibility  Unlisted" in rendered
+    assert "\x1b[" not in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= width
 
 
 def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:
@@ -433,27 +632,66 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
     deps = _deps(
         DepsOptions(
             stdout_is_tty=True,
-            copy_to_clipboard=lambda _url: (_ for _ in ()).throw(RuntimeError("clipboard denied")),
+            copy_to_clipboard=lambda _url: (_ for _ in ()).throw(
+                RuntimeError("clipboard secret sentinel")
+            ),
             open_url=lambda _url: False,
         )
     )
 
-    actions = collect_interactive_slowpics_actions(
-        RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
-        args=replace(_base_args(), quiet=False),
-        deps=deps,
-        config=get_default_config(),
-    )
+    with capture_logs() as captured_logs:
+        actions = collect_interactive_slowpics_actions(
+            RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
+            args=replace(_base_args(), quiet=False),
+            deps=deps,
+            config=get_default_config(),
+        )
 
     assert [(action.kind, action.success) for action in actions] == [
         ("clipboard", False),
         ("browser", False),
     ]
-    assert actions[0].warning == "slow.pics clipboard: failed to copy URL: clipboard denied"
+    assert actions[0].warning == "slow.pics clipboard: failed to copy URL"
+    assert "clipboard secret sentinel" not in str(actions[0].warning)
     assert actions[1].warning == (
         "slow.pics browser: failed to open URL: no browser accepted the request"
     )
     assert slowpics_browser_open_attempted(actions) is True
+    clipboard_record = next(
+        item for item in captured_logs if item["event"] == "slowpics_clipboard_copy_failed"
+    )
+    assert clipboard_record["event"] == "slowpics_clipboard_copy_failed"
+    assert clipboard_record["exception_type"] == "RuntimeError"
+    assert clipboard_record["exc_info"] is True
+    assert clipboard_record["log_level"] == "debug"
+
+
+def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
+    deps = _deps(
+        DepsOptions(
+            stdout_is_tty=True,
+            open_url=lambda _url: (_ for _ in ()).throw(RuntimeError("browser secret sentinel")),
+        )
+    )
+
+    with capture_logs() as captured_logs:
+        actions = collect_interactive_slowpics_actions(
+            RunResult(success=True, slowpics_url="https://slow.pics/c/example"),
+            args=replace(_base_args(), quiet=False),
+            deps=deps,
+            config=get_default_config(),
+        )
+
+    browser_action = next(action for action in actions if action.kind == "browser")
+    assert browser_action.warning == "slow.pics browser: failed to open URL"
+    assert "browser secret sentinel" not in str(browser_action.warning)
+    browser_record = next(
+        item for item in captured_logs if item["event"] == "slowpics_browser_open_failed"
+    )
+    assert browser_record["event"] == "slowpics_browser_open_failed"
+    assert browser_record["exception_type"] == "RuntimeError"
+    assert browser_record["exc_info"] is True
+    assert browser_record["log_level"] == "debug"
 
 
 def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> None:

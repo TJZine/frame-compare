@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shutil
 import subprocess
@@ -12,21 +13,45 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.config.schema import ReportConfig
+from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
+from frame_compare.render.overlay_text import format_file_size
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ClipInfo, ReportData
+from frame_compare.services.report.payload import (
+    ClipInfo,
+    ReportClipDisplayInfo,
+    ReportData,
+    ReportImageInfo,
+    ReportRenderingInfo,
+)
+from frame_compare.utils.media_facts import (
+    ActivePictureFacts,
+    PresentationState,
+    RenderedFrameFacts,
+    RenderedGeometryFacts,
+    SourceSignalFacts,
+)
+from frame_compare.vs.types import TonemapSettings
 
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 )
 _BROWSER_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 _MAC_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+_REFERENCE_LABEL = "Movie.Title.2026.2160p.WEB-DL.Service-GROUP.with-an-extremely-long-source-name-that-must-stay-on-the-left"
+_COMPARISON_LABEL = "Movie.Title.2026.1080p.WEB-DL.Service-ENCODE.with-an-equally-long-source-name-that-must-stay-on-the-right"
+_REFERENCE_PRIMARY = "Movie Title (2026) | 2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
+_REFERENCE_RELEASE = "2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
+_COMPARISON_PRIMARY = "Encode A"
+_COMPARISON_RELEASE = "1080p | ATV WEB-DL | HDR10 | ENCODE"
+_FIXTURE_SIZE_BYTES = 17 * 1024**3
+_FIXTURE_SIZE_LABEL = format_file_size(_FIXTURE_SIZE_BYTES)
 
 
 class _InitializedViewerParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
+        self.document_attributes: dict[str, str | None] | None = None
         self.stage_attributes: dict[str, str | None] | None = None
         self.mode_attributes: dict[str, dict[str, str | None]] = {}
 
@@ -36,6 +61,8 @@ class _InitializedViewerParser(HTMLParser):
         attrs: list[tuple[str, str | None]],
     ) -> None:
         attributes = dict(attrs)
+        if tag == "html":
+            self.document_attributes = attributes
         classes = (attributes.get("class") or "").split()
         if tag == "div" and "rv-viewer-stage" in classes:
             self.stage_attributes = attributes
@@ -57,10 +84,129 @@ def _browser_executable() -> str | None:
     return None
 
 
-def _generated_report(tmp_path: Path) -> Path:
+def _run_browser_dump(
+    browser: str,
+    report_path: Path,
+    *,
+    width: int,
+    height: int,
+    scale: float = 1.0,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        browser,
+        "--headless=new",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-gpu",
+        "--no-first-run",
+        "--virtual-time-budget=10000",
+        f"--window-size={width},{height}",
+        f"--force-device-scale-factor={scale}",
+        "--dump-dom",
+        report_path.as_uri(),
+    ]
+    for attempt in range(2):
+        try:
+            return subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                raise
+    raise AssertionError("unreachable")
+
+
+def test_browser_dump_retries_one_transient_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("<html></html>", encoding="utf-8")
+    completed = subprocess.CompletedProcess(["chrome"], 0, stdout="<html></html>", stderr="")
+    outcomes: list[subprocess.CompletedProcess[str] | subprocess.TimeoutExpired] = [
+        subprocess.TimeoutExpired(["chrome"], 30),
+        completed,
+    ]
+
+    def run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, subprocess.TimeoutExpired):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert _run_browser_dump("chrome", report_path, width=375, height=240) is completed
+    assert outcomes == []
+
+
+def test_browser_dump_stops_after_second_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def time_out(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired(["chrome"], 30)
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_browser_dump("chrome", tmp_path / "report.html", width=375, height=240)
+    assert calls == 2
+
+
+def test_browser_dump_does_not_retry_non_timeout_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fail(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        calls += 1
+        raise subprocess.CalledProcessError(1, ["chrome"])
+
+    monkeypatch.setattr(subprocess, "run", fail)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_browser_dump("chrome", tmp_path / "report.html", width=375, height=240)
+    assert calls == 1
+
+
+def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     clips: list[ClipInfo] = []
-    for name, label in (("reference", "REF"), ("encode", "ENC")):
-        screenshot = tmp_path / name / "10.png"
+    geometry_by_name = {
+        "reference": RenderedGeometryFacts(
+            source_size=(1920, 1080),
+            active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),
+            cropped_size=(1920, 1080),
+            scaled_size=(1920, 1080),
+            final_canvas_size=(1920, 1080),
+            is_noop=True,
+        ),
+        "encode": RenderedGeometryFacts(
+            source_size=(1920, 1080),
+            active_picture=ActivePictureFacts(0, 276, 1920, 804, "explicit", False),
+            cropped_size=(1920, 804),
+            scaled_size=(1920, 804),
+            final_canvas_size=(1920, 804),
+            is_noop=False,
+        ),
+    }
+    for name, label in (
+        ("reference", _REFERENCE_LABEL),
+        ("encode", _COMPARISON_LABEL),
+    ):
+        geometry = geometry_by_name[name]
+        screenshot = tmp_path / "screenshots" / name / "10.png"
         screenshot.parent.mkdir(parents=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
@@ -69,51 +215,754 @@ def _generated_report(tmp_path: Path) -> Path:
                 label=label,
                 path=tmp_path / f"{name}.mkv",
                 frame_count=20,
-                resolution=(1, 1),
+                resolution=(1920, 1080),
                 fps=24.0,
-                hdr=False,
-                screenshots=[screenshot],
+                size_bytes=_FIXTURE_SIZE_BYTES,
+                signal=SourceSignalFacts(
+                    is_hdr=tonemapped,
+                    primaries=9 if tonemapped else 1,
+                    transfer=16 if tonemapped else 1,
+                    matrix=10,
+                    color_range="limited",
+                ),
+                presentation_state=(
+                    PresentationState.HDR_TONEMAPPED if tonemapped else PresentationState.SDR
+                ),
+                tonemap_settings=TonemapSettings() if tonemapped else None,
+                active_picture=geometry.active_picture,
+                images=[
+                    ReportImageInfo(
+                        screenshot,
+                        10 if name == "reference" else 12,
+                        RenderedFrameFacts(10 if name == "reference" else 12, "B"),
+                    )
+                ],
+                display=ReportClipDisplayInfo(
+                    primary=(_REFERENCE_PRIMARY if name == "reference" else _COMPARISON_PRIMARY),
+                    release=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
+                    control=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
+                    micro="PMTP DV" if name == "reference" else "ATV HDR10",
+                    filename=f"{label}.mkv",
+                ),
             )
         )
 
     return generate_report(
-        ReportData(clips=[replace(clip) for clip in clips], frames=[10]),
+        ReportData(
+            clips=[replace(clip) for clip in clips],
+            frames=[10],
+            rendering=ReportRenderingInfo(
+                overlay_mode=OverlayMode.DIAGNOSTIC,
+                include_frame_number=True,
+                tonemap_settings=TonemapSettings() if tonemapped else None,
+                geometry_by_label={
+                    clip.label or clip.name: geometry_by_name[clip.name] for clip in clips
+                },
+            ),
+        ),
         ReportConfig(
             default_mode=ViewerMode.DIFF,
-            embed_images=True,
+            embed_images=False,
             auto_open=False,
         ),
         output_path=tmp_path / "report.html",
     )
 
 
+def _append_screenshot_load_probe(report_path: Path) -> None:
+    """Add a test-only DOM marker that proves a sibling file actually loaded."""
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<img id="sibling-screenshot-probe" src="screenshots/reference/10.png" alt="" hidden>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const probeHud = () => {
+        const frameHud = document.querySelector('.rv-stage-overlay-info');
+        const label = document.getElementById('label-left');
+        const rightLabel = document.getElementById('label-right');
+        const stage = document.querySelector('.rv-viewer-stage');
+        const stageLabels = document.querySelector('.rv-stage-labels');
+        const palette = document.querySelector('.rv-viewport-palette');
+        const rectanglesIntersect = (first, second) => !(
+            first.right <= second.left
+            || second.right <= first.left
+            || first.bottom <= second.top
+            || second.bottom <= first.top
+        );
+        const ariaLabelHasSizeOnce = element => {
+            const accessibleName = element?.getAttribute('aria-label');
+            return typeof accessibleName === 'string'
+                && accessibleName.split(__FIXTURE_SIZE_LABEL__).length - 1 === 1;
+        };
+        const ariaLabelOmitsSize = element => {
+            const accessibleName = element?.getAttribute('aria-label');
+            return typeof accessibleName === 'string'
+                && !accessibleName.includes(__FIXTURE_SIZE_LABEL__);
+        };
+        ReportViewer.setMode('slider');
+        ReportViewer.setMode('diff');
+        document.documentElement.dataset.diffSourceHudVisible = String(
+            window.getComputedStyle(label).display !== 'none'
+            && window.getComputedStyle(rightLabel).display !== 'none'
+            && label.textContent.startsWith('BASE:')
+            && rightLabel.textContent.startsWith('COMPARE:')
+        );
+        document.documentElement.dataset.diffHudsSeparate = String(
+            !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
+        );
+        const expectedStageHudPrefixes = {
+            overlay: [__REFERENCE_HUD_LABEL__],
+            slider: [
+                `LEFT: ${__REFERENCE_HUD_LABEL__}`,
+                `RIGHT: ${__COMPARISON_HUD_LABEL__}`,
+            ],
+            diff: [
+                `BASE: ${__REFERENCE_HUD_LABEL__}`,
+                `COMPARE: ${__COMPARISON_HUD_LABEL__}`,
+            ],
+            blink: [
+                `FIRST: ${__REFERENCE_HUD_LABEL__}`,
+                `SECOND: ${__COMPARISON_HUD_LABEL__}`,
+            ],
+        };
+        const stageHudAccessible = Object.entries(expectedStageHudPrefixes).every(
+            ([mode, expectedPrefixes]) => {
+                ReportViewer.setMode(mode);
+                const visibleLabels = [label, rightLabel].filter(
+                    item => item.textContent.length > 0
+                );
+                return stageLabels.getAttribute('aria-hidden') === null
+                    && visibleLabels.length === expectedPrefixes.length
+                    && visibleLabels.every((item, index) => (
+                        item.textContent.startsWith(expectedPrefixes[index])
+                        && item.textContent.split(__FIXTURE_SIZE_LABEL__).length - 1 === 1
+                    ));
+            }
+        );
+        ReportViewer.setMode('diff');
+        const sourceHudStyle = window.getComputedStyle(label);
+        document.documentElement.dataset.hudStylesAligned = String(
+            label.getBoundingClientRect().top === rightLabel.getBoundingClientRect().top
+            && sourceHudStyle.borderRadius === window.getComputedStyle(rightLabel).borderRadius
+        );
+        label.style.transition = 'none';
+        rightLabel.style.transition = 'none';
+        frameHud.style.transition = 'none';
+        ReportViewer.setOverlaysHidden(true, { save: false });
+        document.documentElement.dataset.hudToggleHidesBoth = String(
+            ReportViewer.dom.stage.classList.contains('rv-overlays-hidden')
+            && frameHud !== null
+            && window.getComputedStyle(label).visibility === 'hidden'
+            && window.getComputedStyle(rightLabel).visibility === 'hidden'
+        );
+        ReportViewer.setOverlaysHidden(false, { save: false });
+
+        ReportViewer.setMode('slider');
+        const sliderLabelsSeparate = [0, 50, 100].every(revealPercent => {
+            ReportViewer.state.revealPercent = revealPercent;
+            ReportViewer.viewport.updateSlider();
+            ReportViewer.dom.canvas.style.setProperty('--zoom-level', '2');
+            ReportViewer.dom.canvas.style.setProperty('--pan-x', '120px');
+            ReportViewer.dom.canvas.style.setProperty('--pan-y', '80px');
+            const leftSliderLabel = document.getElementById('label-left').getBoundingClientRect();
+            const rightSliderLabel = document.getElementById('label-right').getBoundingClientRect();
+            return !rectanglesIntersect(leftSliderLabel, rightSliderLabel);
+        });
+        document.documentElement.dataset.sliderLabelsSeparate = String(sliderLabelsSeparate);
+        const stageRect = stage.getBoundingClientRect();
+        const paletteRect = palette.getBoundingClientRect();
+        const leftSliderLabel = document.getElementById('label-left').getBoundingClientRect();
+        const rightSliderLabel = document.getElementById('label-right').getBoundingClientRect();
+        const paletteInset = window.innerWidth <= 768 ? 8 : (window.innerWidth <= 992 ? 12 : 16);
+        const labelInset = window.innerWidth <= 768 ? 8 : 12;
+        const approximately = (first, second) => Math.abs(first - second) <= 1;
+        const primaryControls = document.querySelector('.rv-primary-controls');
+        const frameControls = document.querySelector('.rv-frame-controls');
+        const modeControls = document.querySelector('.rv-mode-controls');
+        const contextZone = document.querySelector('.rv-context-zone');
+        const modeGeometry = ['slider', 'overlay', 'diff', 'blink', 'grid'].map(mode => {
+            ReportViewer.setMode(mode);
+            const primaryRect = primaryControls.getBoundingClientRect();
+            const frameRect = frameControls.getBoundingClientRect();
+            const modeRect = modeControls.getBoundingClientRect();
+            const contextRect = contextZone.getBoundingClientRect();
+            const visibleContext = contextZone.querySelector('.rv-context-controls:not([hidden])');
+            const alignment = document.getElementById('alignment-status');
+            const visibleContextRect = visibleContext?.getBoundingClientRect();
+            const alignmentRect = alignment.getBoundingClientRect();
+            return {
+                mode,
+                center: modeRect.left + (modeRect.width / 2),
+                primary: primaryRect.toJSON(),
+                frame: frameRect.toJSON(),
+                modeRect: modeRect.toJSON(),
+                context: contextRect.toJSON(),
+                childrenSeparate: !visibleContextRect
+                    || !rectanglesIntersect(visibleContextRect, alignmentRect),
+                zonesSeparate: !rectanglesIntersect(frameRect, modeRect)
+                    && !rectanglesIntersect(frameRect, contextRect)
+                    && !rectanglesIntersect(modeRect, contextRect),
+            };
+        });
+        const modeCenters = modeGeometry.map(entry => entry.center);
+        const firstGeometry = modeGeometry[0];
+        document.documentElement.dataset.toolbarGeometry = JSON.stringify(modeGeometry);
+        document.documentElement.dataset.modeCenterStable = String(
+            Math.max(...modeCenters) - Math.min(...modeCenters) <= 1
+        );
+        document.documentElement.dataset.toolbarHeightStable = String(
+            modeGeometry.every(entry => (
+                approximately(entry.primary.top, firstGeometry.primary.top)
+                && approximately(entry.primary.height, firstGeometry.primary.height)
+            ))
+        );
+        document.documentElement.dataset.toolbarZonesSeparate = String(
+            modeGeometry.every(entry => entry.zonesSeparate && entry.childrenSeparate)
+        );
+        document.documentElement.dataset.toolbarAnchors = String(
+            modeGeometry.every(entry => {
+                if (window.innerWidth > 1120) {
+                    return approximately(entry.frame.left, entry.primary.left)
+                        && approximately(entry.context.right, entry.primary.right)
+                        && approximately(
+                            entry.center,
+                            entry.primary.left + (entry.primary.width / 2)
+                        );
+                }
+                if (window.innerWidth > 768) {
+                    return approximately(entry.frame.left, entry.primary.left)
+                        && approximately(entry.modeRect.right, entry.primary.right)
+                        && approximately(entry.context.left, entry.primary.left)
+                        && approximately(entry.context.right, entry.primary.right);
+                }
+                return approximately(entry.frame.left, entry.primary.left)
+                    && approximately(entry.frame.right, entry.primary.right)
+                    && approximately(entry.context.left, entry.primary.left)
+                    && approximately(entry.context.right, entry.primary.right);
+            })
+        );
+        ReportViewer.setMode('slider');
+        document.documentElement.dataset.paletteBottomAnchored = String(
+            stageRect.height > 0
+            && paletteRect.top >= stageRect.top
+            && approximately(paletteRect.bottom, stageRect.bottom - paletteInset)
+        );
+        document.documentElement.dataset.bottomHudsSeparate = String(
+            window.getComputedStyle(frameHud).display === 'none'
+            || !rectanglesIntersect(paletteRect, frameHud.getBoundingClientRect())
+        );
+        document.documentElement.dataset.sliderLabelsTopAnchored = String(
+            approximately(leftSliderLabel.top, stageRect.top + labelInset)
+            && approximately(rightSliderLabel.top, stageRect.top + labelInset)
+            && approximately(leftSliderLabel.left, stageRect.left + labelInset)
+            && approximately(rightSliderLabel.right, stageRect.right - labelInset)
+        );
+        document.documentElement.dataset.sliderLabelsContained = String(
+            leftSliderLabel.left >= stageRect.left
+            && leftSliderLabel.right <= stageRect.left + (stageRect.width / 2)
+            && rightSliderLabel.left >= stageRect.left + (stageRect.width / 2)
+            && rightSliderLabel.right <= stageRect.right
+        );
+        document.documentElement.dataset.sliderLabelGeometry = JSON.stringify({
+            stage: stageRect.toJSON(),
+            left: leftSliderLabel.toJSON(),
+            right: rightSliderLabel.toJSON(),
+            labelInset,
+        });
+
+        stage.style.transition = 'none';
+        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
+        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.updateInspectorData();
+        const inspectorStageRect = stage.getBoundingClientRect();
+        const inspectorPaletteRect = palette.getBoundingClientRect();
+        const inspector = document.getElementById('rv-inspector');
+        const activeInspectorPanel = document.querySelector('.rv-inspector-panel:not([hidden])');
+        const expectedInspectorWidth = window.innerWidth <= 992
+            ? Math.min(448, window.innerWidth * 0.92)
+            : Math.min(Math.max(448, window.innerWidth * 0.30), 672, window.innerWidth - 32);
+        const inspectorCards = Array.from(document.querySelectorAll('.rv-inspector-clip'));
+        const inspectorText = inspector?.textContent || '';
+        const inspectorPanelsSafe = Array.from(
+            document.querySelectorAll('.rv-inspector-panel')
+        ).every(panel => {
+            const wasHidden = panel.hidden;
+            panel.hidden = false;
+            const safe = panel.scrollWidth <= panel.clientWidth;
+            panel.hidden = wasHidden;
+            return safe;
+        });
+        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.updateInspectorData();
+        document.documentElement.dataset.inspectorWidthPolicy = String(
+            approximately(inspector.getBoundingClientRect().width, expectedInspectorWidth)
+            && (window.innerWidth <= 992
+                ? approximately(inspectorStageRect.right, stageRect.right)
+                : approximately(
+                    stageRect.right - inspectorStageRect.right,
+                    inspector.getBoundingClientRect().width
+                ))
+        );
+        document.documentElement.dataset.inspectorOverflowSafe = String(
+            inspector.scrollWidth <= inspector.clientWidth
+            && activeInspectorPanel.scrollWidth <= activeInspectorPanel.clientWidth
+            && inspectorCards.every(card => card.scrollWidth <= card.clientWidth)
+            && inspectorPanelsSafe
+        );
+        document.documentElement.dataset.inspectorIdentityComplete = String(
+            inspectorText.includes('Reference')
+            && inspectorText.includes('Comparison 1')
+            && inspectorText.includes('View role')
+            && inspectorText.includes(__REFERENCE_FILENAME__)
+            && inspectorText.includes(__REFERENCE_PRIMARY__)
+            && inspectorText.includes(__REFERENCE_RELEASE__)
+            && inspectorText.includes('1920×1080')
+            && ['2160p', 'PMTP', 'WEB-DL', 'DV HDR10+', 'REPACK', 'Kitsune']
+                .every(fact => inspectorText.includes(fact))
+            && inspectorCards.every(card => {
+                const primary = card.querySelector('.rv-inspector-clip-primary');
+                const style = window.getComputedStyle(primary);
+                return style.whiteSpace !== 'nowrap' && style.textOverflow !== 'ellipsis';
+            })
+        );
+        document.documentElement.dataset.inspectorHudAnchored = String(
+            inspectorStageRect.height > 0
+            && inspectorPaletteRect.top >= inspectorStageRect.top
+            && approximately(inspectorPaletteRect.bottom, inspectorStageRect.bottom - paletteInset)
+            && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
+        );
+        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        const infoButton = document.getElementById('btn-info');
+        infoButton?.focus();
+        infoButton?.click();
+        const infoModal = document.getElementById('info-modal');
+        const infoContent = infoModal?.querySelector('.rv-modal-content');
+        const infoText = infoContent?.textContent || '';
+        const infoClipHeadings = Array.from(
+            infoContent?.querySelectorAll('.rv-clip-meta-heading span:first-child') || []
+        );
+        document.documentElement.dataset.infoModalOverflowSafe = String(
+            infoModal.scrollWidth <= infoModal.clientWidth
+            && infoContent.scrollWidth <= infoContent.clientWidth
+            && document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        );
+        const infoCards = Array.from(infoContent?.querySelectorAll('.rv-clip-meta-item') || []);
+        document.documentElement.dataset.infoModalIdentityComplete = String(
+            infoText.includes(__REFERENCE_FILENAME__)
+            && infoText.includes(__COMPARISON_FILENAME__)
+            && infoText.includes(__REFERENCE_PRIMARY__)
+            && infoText.includes(__COMPARISON_PRIMARY__)
+            && infoText.includes(__REFERENCE_RELEASE__)
+            && infoText.includes(__COMPARISON_RELEASE__)
+            && infoCards.length === 2
+            && infoCards[0].textContent.includes(__REFERENCE_FILENAME__)
+            && infoCards[0].textContent.includes(__REFERENCE_RELEASE__)
+            && infoCards[1].textContent.includes(__COMPARISON_FILENAME__)
+            && infoCards[1].textContent.includes(__COMPARISON_PRIMARY__)
+            && infoCards[1].textContent.includes(__COMPARISON_RELEASE__)
+            && infoClipHeadings.every(heading => {
+                const style = window.getComputedStyle(heading);
+                return style.whiteSpace !== 'nowrap' && style.textOverflow !== 'ellipsis';
+            })
+        );
+        document.documentElement.dataset.infoModalWidthPolicy = String(
+            approximately(
+                infoContent.getBoundingClientRect().width,
+                Math.min(896, window.innerWidth - 32)
+            )
+        );
+        ReportViewer.closeInfoModal();
+        document.documentElement.dataset.infoModalFocusRestored = String(
+            document.activeElement === infoButton
+        );
+        const inspectorButton = document.getElementById('btn-inspector');
+        const infoBefore = {
+            label: infoButton?.getAttribute('aria-label'),
+            title: infoButton?.getAttribute('title'),
+            pressed: infoButton?.getAttribute('aria-pressed'),
+        };
+        const infoAfter = {
+            label: infoButton?.getAttribute('aria-label'),
+            title: infoButton?.getAttribute('title'),
+            pressed: infoButton?.getAttribute('aria-pressed'),
+        };
+        const inspectorInitiallyClosed = inspectorButton?.getAttribute('aria-expanded') === 'false';
+        inspectorButton?.focus();
+        inspectorButton?.click();
+        const inspectorOpened = (
+            inspector?.classList.contains('open')
+            && inspector?.getAttribute('aria-hidden') === 'false'
+            && inspectorButton?.getAttribute('aria-expanded') === 'true'
+        );
+        inspectorButton?.click();
+        document.documentElement.dataset.infoInspectorSemanticsStable = String(
+            infoBefore.label === 'Report information'
+            && infoBefore.title === 'Report Info'
+            && infoBefore.pressed === null
+            && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
+        );
+        document.documentElement.dataset.visibleInspectorBehavior = String(
+            inspectorButton?.getAttribute('type') === 'button'
+            && inspectorButton?.getAttribute('aria-controls') === 'rv-inspector'
+            && inspectorButton?.getAttribute('aria-label') === 'Open Inspector'
+            && inspectorButton?.getAttribute('title') === 'Inspector (I)'
+            && inspectorInitiallyClosed
+            && inspectorOpened
+            && inspector?.getAttribute('aria-hidden') === 'true'
+            && inspectorButton?.getAttribute('aria-expanded') === 'false'
+            && document.activeElement === inspectorButton
+        );
+
+        const filmstripAnchored = [false, true].every(collapsed => {
+            ReportViewer.setFilmstripCollapsed(collapsed, { save: false });
+            const currentStageRect = stage.getBoundingClientRect();
+            const currentPaletteRect = palette.getBoundingClientRect();
+            return currentStageRect.height > 0
+                && approximately(currentPaletteRect.bottom, currentStageRect.bottom - paletteInset);
+        });
+        ReportViewer.setFilmstripCollapsed(false, { save: false });
+        document.documentElement.dataset.filmstripHudAnchored = String(filmstripAnchored);
+
+        ReportViewer.setPaletteOrientation('vertical', { save: false });
+        const firstPaletteGroup = palette.querySelector('.rv-palette-group');
+        const zoomRange = document.getElementById('zoom-range');
+        document.documentElement.dataset.narrowPaletteHorizontal = String(
+            window.innerWidth > 768
+            || (
+                window.getComputedStyle(palette).flexDirection === 'row'
+                && window.getComputedStyle(firstPaletteGroup).flexDirection === 'row'
+                && window.getComputedStyle(zoomRange).writingMode === 'horizontal-tb'
+                && window.getComputedStyle(document.getElementById('btn-palette-orientation')).display === 'none'
+            )
+        );
+        ReportViewer.setPaletteOrientation('horizontal', { save: false });
+
+        ReportViewer.setMode('grid');
+        const gridStageRect = stage.getBoundingClientRect();
+        const gridPaletteRect = palette.getBoundingClientRect();
+        const gridLabels = Array.from(document.querySelectorAll('.rv-grid-label-text'));
+        const gridCells = Array.from(document.querySelectorAll('.rv-grid-cell'));
+        const expectedGridLabelCount = window.matchMedia('(max-width: 768px)').matches ? 1 : 2;
+        document.documentElement.dataset.gridHudAnchored = String(
+            window.getComputedStyle(document.querySelector('.rv-stage-labels')).display === 'none'
+            && gridLabels.length === expectedGridLabelCount
+            && gridLabels.every(gridLabel => gridLabel.textContent.trim().length > 0)
+            && approximately(gridPaletteRect.bottom, gridStageRect.bottom - paletteInset)
+        );
+        const gridHudAccessible = gridCells.every(ariaLabelHasSizeOnce);
+        gridLabels.forEach(gridLabel => {
+            gridLabel.closest('.rv-grid-label').style.transition = 'none';
+        });
+        ReportViewer.setOverlaysHidden(true, { save: false });
+        const gridHudHidden = gridLabels.every(gridLabel => (
+            window.getComputedStyle(gridLabel.closest('.rv-grid-label')).visibility === 'hidden'
+        )) && gridCells.every(ariaLabelOmitsSize);
+        ReportViewer.setOverlaysHidden(false, { save: false });
+        const gridHudRestored = gridCells.every(ariaLabelHasSizeOnce);
+        document.documentElement.dataset.stageHudAccessible = String(stageHudAccessible);
+        document.documentElement.dataset.gridHudAccessible = String(gridHudAccessible);
+        document.documentElement.dataset.gridHudHidden = String(gridHudHidden);
+        document.documentElement.dataset.gridHudRestored = String(gridHudRestored);
+        document.documentElement.dataset.sourceHudAccessible = String(
+            stageHudAccessible && gridHudAccessible && gridHudHidden && gridHudRestored
+        );
+
+        ReportViewer.setMode('overlay');
+        const before = label.getBoundingClientRect();
+        ReportViewer.dom.canvas.style.setProperty('--zoom-level', '2');
+        ReportViewer.dom.canvas.style.setProperty('--pan-x', '120px');
+        ReportViewer.dom.canvas.style.setProperty('--pan-y', '80px');
+        const after = label.getBoundingClientRect();
+        document.documentElement.dataset.sourceHudViewportStable = String(
+            before.left === after.left && before.top === after.top
+        );
+        document.documentElement.dataset.sourceHudText = label.textContent;
+        document.documentElement.dataset.sourceHudWraps = String(
+            sourceHudStyle.whiteSpace === 'normal'
+            && sourceHudStyle.textOverflow !== 'ellipsis'
+        );
+        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
+        const sourceRowsByMode = {};
+        ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
+            ReportViewer.setMode(mode);
+            ReportViewer.setInspectorTab('frame');
+            ReportViewer.updateInspectorData();
+            sourceRowsByMode[mode] = Array.from(
+                document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
+            ).map(row => row.textContent.trim());
+        });
+        document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
+        ReportViewer.setInspectorTab('clips');
+        ReportViewer.updateInspectorData();
+        document.documentElement.dataset.clipsMetadata = String(
+            document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
+            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Signal')
+            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
+            && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
+        );
+        let reviewTabUsable = false;
+        try {
+            ReportViewer.setInspectorTab('review', { save: false });
+            const bookmark = document.querySelector('[data-review-bookmark]');
+            const note = document.querySelector('[data-review-note]');
+            bookmark.checked = true;
+            bookmark.dispatchEvent(new Event('change', { bubbles: true }));
+            note.value = 'Browser integration proof';
+            note.dispatchEvent(new Event('input', { bubbles: true }));
+            reviewTabUsable = Boolean(
+                ReportViewer.reviewController
+                && bookmark.checked
+                && note.value === 'Browser integration proof'
+                && document.querySelector('[data-review-status]')?.textContent.includes(
+                    'saved locally'
+                )
+            );
+        } catch (error) {
+            document.documentElement.dataset.reviewTabError = String(error);
+        }
+        document.documentElement.dataset.reviewTabUsable = String(reviewTabUsable);
+        ReportViewer.setInspectorTab('clips', { save: false });
+        document.documentElement.dataset.renderingDisclosure = String(
+            document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
+            && !document.querySelector('[data-rendering-details]')
+        );
+        document.documentElement.dataset.noHorizontalOverflow = String(
+            document.documentElement.scrollWidth <= window.innerWidth
+            && document.body.scrollWidth <= window.innerWidth
+        );
+        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.setMode('diff');
+    };
+    probeHud();
+    const mark = () => {
+        const image = document.getElementById('sibling-screenshot-probe');
+        const loaded = image && image.complete && image.naturalWidth > 0;
+        if (loaded || !document.documentElement.dataset.siblingScreenshotLoaded) {
+            document.documentElement.dataset.siblingScreenshotLoaded = loaded ? 'true' : 'false';
+        }
+    };
+    document.getElementById('sibling-screenshot-probe').addEventListener('load', mark);
+    const interval = window.setInterval(mark, 100);
+    window.setTimeout(() => window.clearInterval(interval), 5000);
+});
+</script>
+"""
+    probe = probe.replace("__REFERENCE_FILENAME__", json.dumps(f"{_REFERENCE_LABEL}.mkv"))
+    probe = probe.replace("__COMPARISON_FILENAME__", json.dumps(f"{_COMPARISON_LABEL}.mkv"))
+    probe = probe.replace("__REFERENCE_PRIMARY__", json.dumps(_REFERENCE_PRIMARY))
+    probe = probe.replace("__COMPARISON_PRIMARY__", json.dumps(_COMPARISON_PRIMARY))
+    probe = probe.replace("__REFERENCE_RELEASE__", json.dumps(_REFERENCE_RELEASE))
+    probe = probe.replace("__COMPARISON_RELEASE__", json.dumps(_COMPARISON_RELEASE))
+    probe = probe.replace("__FIXTURE_SIZE_LABEL__", json.dumps(_FIXTURE_SIZE_LABEL))
+    probe = probe.replace("__REFERENCE_HUD_LABEL__", json.dumps(_REFERENCE_RELEASE))
+    probe = probe.replace("__COMPARISON_HUD_LABEL__", json.dumps(_COMPARISON_RELEASE))
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+def _append_tonemap_disclosure_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const disclosure = document.querySelector('[data-rendering-details]');
+    const summary = disclosure?.querySelector('summary');
+    const settings = disclosure?.querySelector('dl');
+    const advancedLabels = [
+        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
+        'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
+        'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
+        'Metadata mode', 'Dolby Vision metadata use',
+    ];
+    document.getElementById('btn-info')?.click();
+    const infoContent = document.querySelector('#info-modal .rv-modal-content');
+    const infoContentStyle = infoContent ? window.getComputedStyle(infoContent) : null;
+    document.documentElement.dataset.infoModalScrollable = String(
+        Boolean(
+            infoContent
+            && infoContentStyle?.overflowY === 'auto'
+            && infoContentStyle?.overscrollBehaviorY === 'contain'
+            && infoContent.scrollHeight > infoContent.clientHeight
+        )
+    );
+    document.documentElement.dataset.tonemapSummary = String(
+        document.querySelector('[data-rendering-tonemap-summary]')?.textContent
+        === 'Reference · BT.2390 · 100 nits'
+    );
+    document.documentElement.dataset.tonemapDisclosureInitial = String(
+        Boolean(
+            ReportViewer.isInfoModalOpen()
+            && disclosure
+            && summary
+            && !disclosure.open
+            && settings
+        )
+    );
+    document.documentElement.dataset.tonemapAdvancedRows = String(
+        Boolean(settings)
+        && advancedLabels.every(label => settings.textContent.includes(label))
+        && settings.textContent.includes('On')
+        && settings.textContent.includes('Off')
+        && settings.textContent.includes('Auto')
+    );
+    let enterReceived = false;
+    summary?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') enterReceived = true;
+    });
+    const pressEnter = () => {
+        summary?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        // Chrome does not run default actions for synthetic keyboard events in dump-dom.
+        if (summary) summary.click();
+        summary?.focus();
+    };
+    summary?.focus();
+    pressEnter();
+    document.documentElement.dataset.tonemapOpenState = String(Boolean(disclosure?.open));
+    document.documentElement.dataset.tonemapFocusState = String(document.activeElement === summary);
+    document.documentElement.dataset.tonemapDisclosureOpened = String(
+        Boolean(enterReceived && disclosure?.open && document.activeElement === summary)
+    );
+    pressEnter();
+    document.documentElement.dataset.tonemapDisclosureClosed = String(
+        Boolean(disclosure && !disclosure.open && document.activeElement === summary)
+    );
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
 @pytest.mark.integration
-def test_generated_report_initializes_observable_mode_and_aria_state(tmp_path: Path) -> None:
+def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
+    tmp_path: Path,
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path, tonemapped=True)
+    _append_tonemap_disclosure_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=375, height=240)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    for attribute in (
+        "data-tonemap-summary",
+        "data-tonemap-disclosure-initial",
+        "data-tonemap-advanced-rows",
+        "data-tonemap-open-state",
+        "data-tonemap-focus-state",
+        "data-tonemap-disclosure-opened",
+        "data-tonemap-disclosure-closed",
+        "data-info-modal-scrollable",
+    ):
+        assert parser.document_attributes[attribute] == "true", (
+            attribute,
+            parser.document_attributes[attribute],
+            parser.document_attributes,
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("width", "height", "scale"),
+    [
+        (375, 800, 1.0),
+        (768, 720, 1.0),
+        (900, 720, 1.0),
+        (1024, 768, 1.0),
+        (1366, 768, 1.0),
+        (1920, 1080, 1.0),
+        (3440, 1440, 1.0),
+        (1920, 1080, 1.25),
+        (1920, 1080, 1.5),
+    ],
+)
+def test_generated_report_initializes_observable_mode_and_aria_state(
+    tmp_path: Path,
+    width: int,
+    height: int,
+    scale: float,
+) -> None:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
 
     report_path = _generated_report(tmp_path)
-    completed = subprocess.run(
-        [
-            browser,
-            "--headless=new",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-gpu",
-            "--no-first-run",
-            "--dump-dom",
-            report_path.as_uri(),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    _append_screenshot_load_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=width, height=height, scale=scale)
 
     parser = _InitializedViewerParser()
     parser.feed(completed.stdout)
 
+    assert 'src="screenshots/reference/10.png"' in completed.stdout
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
+    assert parser.document_attributes["data-source-hud-viewport-stable"] == "true"
+    assert parser.document_attributes["data-source-hud-wraps"] == "true"
+    assert parser.document_attributes["data-diff-source-hud-visible"] == "true"
+    assert parser.document_attributes["data-diff-huds-separate"] == "true"
+    assert parser.document_attributes["data-hud-styles-aligned"] == "true"
+    assert parser.document_attributes["data-hud-toggle-hides-both"] == "true"
+    hud_accessibility = {
+        name: parser.document_attributes[f"data-{name.replace('_', '-')}"]
+        for name in (
+            "stage_hud_accessible",
+            "grid_hud_accessible",
+            "grid_hud_hidden",
+            "grid_hud_restored",
+        )
+    }
+    assert parser.document_attributes["data-source-hud-accessible"] == "true", hud_accessibility
+    assert parser.document_attributes["data-slider-labels-separate"] == "true"
+    assert parser.document_attributes["data-palette-bottom-anchored"] == "true"
+    assert parser.document_attributes["data-bottom-huds-separate"] == "true"
+    assert parser.document_attributes["data-slider-labels-top-anchored"] == "true", (
+        parser.document_attributes["data-slider-label-geometry"]
+    )
+    assert parser.document_attributes["data-slider-labels-contained"] == "true"
+    assert parser.document_attributes["data-mode-center-stable"] == "true", (
+        parser.document_attributes["data-toolbar-geometry"]
+    )
+    assert parser.document_attributes["data-toolbar-height-stable"] == "true", (
+        parser.document_attributes["data-toolbar-geometry"]
+    )
+    assert parser.document_attributes["data-toolbar-zones-separate"] == "true", (
+        parser.document_attributes["data-toolbar-geometry"]
+    )
+    assert parser.document_attributes["data-toolbar-anchors"] == "true", parser.document_attributes[
+        "data-toolbar-geometry"
+    ]
+    assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
+    assert parser.document_attributes["data-inspector-width-policy"] == "true"
+    assert parser.document_attributes["data-inspector-overflow-safe"] == "true"
+    assert parser.document_attributes["data-inspector-identity-complete"] == "true"
+    assert parser.document_attributes["data-info-modal-overflow-safe"] == "true"
+    assert parser.document_attributes["data-info-modal-identity-complete"] == "true"
+    assert parser.document_attributes["data-info-modal-width-policy"] == "true"
+    assert parser.document_attributes["data-info-modal-focus-restored"] == "true"
+    assert parser.document_attributes["data-info-inspector-semantics-stable"] == "true"
+    assert parser.document_attributes["data-visible-inspector-behavior"] == "true"
+    assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
+    assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
+    assert parser.document_attributes["data-grid-hud-anchored"] == "true"
+    assert parser.document_attributes["data-source-hud-text"] == (
+        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • {_FIXTURE_SIZE_LABEL}"
+    )
+    assert parser.document_attributes["data-clips-metadata"] == "true"
+    assert parser.document_attributes["data-review-tab-usable"] == "true", (
+        parser.document_attributes.get("data-review-tab-error")
+    )
+    assert parser.document_attributes["data-rendering-disclosure"] == "true"
+    assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
+    source_rows = json.loads(parser.document_attributes["data-frame-source-rows"] or "{}")
+    assert source_rows["overlay"] == [f"{_REFERENCE_RELEASE} — 10 / 20 · B-frame"]
+    assert source_rows["slider"] == [
+        f"{_REFERENCE_RELEASE} — 10 / 20 · B-frame",
+        f"{_COMPARISON_RELEASE} — 12 / 20 · B-frame",
+    ]
+    assert source_rows["diff"] == source_rows["slider"]
+    assert source_rows["blink"] == source_rows["slider"]
+    expected_grid_rows = source_rows["slider"][:1] if width <= 768 else source_rows["slider"]
+    assert source_rows["grid"] == expected_grid_rows
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()
     assert "rv-mode-diff" in stage_classes

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from frame_compare.analysis.types import (
     FrameMetrics,
     SelectionBreakdown,
+    SelectionDetail,
     SelectionDetailsByFrame,
 )
 from frame_compare.analysis.window import SelectionWindow
@@ -19,34 +20,36 @@ from frame_compare.orchestration.types import (
     PostUploadActionResults,
     SlowpicsUploadConfirmationStatus,
 )
+from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
+    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
     from frame_compare.orchestration.phases import Phase
-
-
-def _empty_str_list() -> list[str]:
-    return []
-
-
-def _empty_phase_timings() -> dict[str, float]:
-    return {}
-
-
-def _empty_frame_list() -> list[int]:
-    return []
-
-
-def _empty_selection_details_by_source_frame() -> SelectionDetailsByFrame:
-    return {}
 
 
 @dataclass
 class RenderArtifacts:
     screenshots_by_label: dict[str, list[Path]]
+    frame_facts_by_label: dict[str, list[RenderedFrameFacts]]
+    clip_facts_by_label: dict[str, RenderedClipFacts]
     screenshot_dir: Path | None
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
+
+    def __post_init__(self) -> None:
+        labels = set(self.screenshots_by_label)
+        if labels != set(self.frame_facts_by_label) or labels != set(self.clip_facts_by_label):
+            raise ValueError("render artifact mappings must have identical label sets")
+        for label in labels:
+            paths = self.screenshots_by_label[label]
+            facts = self.frame_facts_by_label[label]
+            if len(paths) != len(facts):
+                raise ValueError(
+                    f"render artifact path/fact count mismatch for {label!r}: "
+                    f"{len(paths)} != {len(facts)}"
+                )
 
 
 @dataclass(frozen=True)
@@ -54,9 +57,9 @@ class FramePlanPhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown = field(default_factory=SelectionBreakdown)
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
-        default_factory=_empty_selection_details_by_source_frame
+        default_factory=dict[int, SelectionDetail]
     )
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -66,8 +69,10 @@ class AnalyzePhaseOutput:
     metrics_cache_hit: bool
     analysis_metrics: FrameMetrics
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
-        default_factory=_empty_selection_details_by_source_frame
+        default_factory=dict[int, SelectionDetail]
     )
+    warnings: list[str] = field(default_factory=list[str])
+    replaces_frame_plan_selection: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,7 +82,7 @@ class AlignPhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
@@ -106,12 +111,12 @@ class ReportPhaseOutput:
 @dataclass(frozen=True)
 class ConfirmSlowpicsUploadPhaseOutput:
     status: SlowpicsUploadConfirmationStatus
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)
 class PostReportCleanupPhaseOutput:
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=list[str])
 
 
 type PhaseOutput = (
@@ -176,8 +181,9 @@ class ExecutionState:
     """Mutable execution state shared explicitly by phase construction."""
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
-    selected_frames: list[int] = field(default_factory=_empty_frame_list)
-    phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
+    selected_frames: list[int] = field(default_factory=list[int])
+    frame_plan_warnings: list[str] = field(default_factory=list[str])
+    phase_timings: dict[str, float] = field(default_factory=dict[str, float])
 
     @property
     def warnings(self) -> list[str]:
@@ -204,7 +210,8 @@ class PrepState:
     analysis_selection_domain: str
     selection_window: SelectionWindow
     analysis_clip: ClipState | None = None
-    load_source_diagnostics: list[str] = field(default_factory=_empty_str_list)
+    full_window_retry_override: FullWindowRetryOverride | None = None
+    load_source_diagnostics: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True)

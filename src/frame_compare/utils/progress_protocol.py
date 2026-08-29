@@ -42,8 +42,16 @@ class ProgressReporter(Protocol):
     def complete_phase(
         self,
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        *,
+        retain: bool | None = None,
     ) -> None:
-        """Mark the current phase as complete."""
+        """Mark the current phase as complete.
+
+        ``retain`` is only a human TTY presentation hint. ``None`` applies the
+        reporter's normal retention policy, ``True`` forces a durable line, and
+        ``False`` suppresses a successful completion line. Non-interactive
+        reporters may ignore the hint.
+        """
         ...
 
     def suspend(self) -> None:

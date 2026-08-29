@@ -19,17 +19,20 @@ description = "Planning-focused writer for bounded discovery, execution-ready pl
 config_file = "agents/planner.toml"
 
 [agents.worker]
-description = "Implementation-focused role for narrow, disjoint write scopes once the task is understood."
+description = "Sol escalation implementer for bounded units with settled decisions that still need material local design judgment, cross-boundary comprehension, complex diagnosis, or proof interpretation."
 config_file = "agents/worker.toml"
 
-[agents.worker_sol_low]
-description = "Token-efficient Sol implementation role for bounded units that still require repository comprehension and coding judgment."
-config_file = "agents/worker-sol-low.toml"
-
 [agents.worker_luna]
-description = "Lower-cost implementation role for a Sol-planned, bounded, exact, cheap-to-verify write unit."
+description = "Cost-efficient autonomous implementer for bounded units with clear outcomes, established owner seams and contracts, and direct verification."
 config_file = "agents/worker-luna.toml"
 
 [agents.monitor]
 description = "Long-running command and polling role for status checks, verification waits, and runtime/release gate monitoring."
 config_file = "agents/monitor.toml"
+
+[mcp_servers.codanna]
+url = "http://127.0.0.1:8081/mcp"
+http_headers = { Authorization = "Bearer mcp-access-token-dummy" }
+enabled = true
+required = false
+default_tools_approval_mode = "approve"

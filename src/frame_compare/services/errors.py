@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from frame_compare.errors import (
     ErrorContext,
+    ErrorDetails,
     InputError,
     NetworkError,
     ProcessingError,
@@ -34,6 +37,29 @@ class HistoryOpenError(ProcessingError):
                 name="HISTORY_OPEN_ERROR",
                 message=message,
                 hint=hint,
+            )
+        )
+
+
+class GeneratedDataReservationError(InputError):
+    """The configured generated-data root cannot reserve a run folder (FC-3018)."""
+
+    def __init__(self, path: Path, cause: OSError | RuntimeError) -> None:
+        details: ErrorDetails = {
+            "path": str(path),
+            "error": str(cause),
+        }
+        super().__init__(
+            ErrorContext(
+                code="FC-3018",
+                name="GENERATED_DATA_RESERVATION_ERROR",
+                message=f"Unable to reserve a run folder under generated-data location: {path}",
+                hint=(
+                    "Reconnect the selected location, repair its permissions or "
+                    "link/junction, or choose another paths.generated_dir"
+                ),
+                details=details,
+                cause=cause,
             )
         )
 

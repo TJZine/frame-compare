@@ -1,16 +1,39 @@
 # pyright: reportUnusedFunction=false
 
+import contextlib
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
-from click.testing import Result
-from typer.testing import CliRunner
+import pytest
+from typer.testing import CliRunner, Result
 
 from frame_compare.cli.entry import app
 
 runner = CliRunner()
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 RICH_BOX_DRAWING_RE = re.compile(r"[\u2500-\u257f]")
+
+
+@contextlib.contextmanager
+def isolated_cli_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Path]:
+    """Run one CLI test block in a pytest-owned temporary working directory."""
+    index = 0
+    while True:
+        working_directory = tmp_path / f"cli-cwd-{index}"
+        try:
+            working_directory.mkdir()
+        except FileExistsError:
+            index += 1
+            continue
+        break
+
+    with monkeypatch.context() as scoped_monkeypatch:
+        scoped_monkeypatch.chdir(working_directory)
+        yield working_directory
 
 
 def _normalize_cli_output(text: str) -> str:
@@ -27,7 +50,6 @@ def _normalize_cli_help(text: str) -> str:
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 """
@@ -44,11 +66,13 @@ def _write_minimal_config(root: Path) -> Path:
 def _invoke_run_with_minimal_workspace(
     args: list[str],
     *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     color: bool = False,
     terminal_width: int | None = None,
     env: dict[str, str] | None = None,
 ) -> Result:
-    with runner.isolated_filesystem():
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         return runner.invoke(

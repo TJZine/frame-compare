@@ -32,10 +32,12 @@ from frame_compare.cli.preset_command import (
 from frame_compare.cli.run_command import (
     RunCliRawArgs,
     RunCommandDeps,
+    confirm_full_window_retry_on_stderr,
     handle_run,
 )
 from frame_compare.cli.wizard_command import (
     handle_wizard,
+    prompt_generated_dir,
     prompt_input_dir,
     write_wizard_config_payload,
 )
@@ -75,7 +77,19 @@ def run_doctor(
 
 app = typer.Typer(
     name="frame-compare",
-    help="Video frame comparison tool with tonemapping and slow.pics integration.",
+    help=(
+        "Reproducible video comparisons with deterministic frame selection, audio "
+        "alignment, HDR-aware rendering, and offline review reports.\n\n"
+        "Turn two or more local video sources into a repeatable comparison: discover "
+        "and validate clips, select representative frames, align edits, render "
+        "labeled screenshots, and build an offline HTML report."
+    ),
+    epilog=(
+        "Examples:\n"
+        "  First setup: frame-compare wizard\n"
+        "  Preview a run: frame-compare run --dry-run\n"
+        "  Compare locally: frame-compare run --no-upload"
+    ),
     no_args_is_help=False,
     cls=FrameCompareTyperGroup,
 )
@@ -86,6 +100,7 @@ _resolve_root_and_config = resolve_root_and_config
 _copy_text_to_clipboard = copy_text_to_clipboard
 _open_url_in_browser = open_url_in_browser
 _prompt_input_dir = prompt_input_dir
+_prompt_generated_dir = prompt_generated_dir
 
 
 def _sys_stream_isatty(name: str) -> bool:
@@ -136,105 +151,165 @@ def version() -> None:
 @app.command()
 def run(
     root: Path = _path_option(
-        ".", "--root", "-r", help="Workspace root containing config and output directories."
+        ".",
+        "--root",
+        "-r",
+        help="Workspace root containing configuration, input, and generated output.",
+        rich_help_panel="Workspace and configuration",
     ),
     config: Path | None = _option(
-        None, "--config", "-c", help="Config file; relative paths resolve from --root."
+        None,
+        "--config",
+        "-c",
+        help="Config file; relative paths resolve from --root.",
+        rich_help_panel="Workspace and configuration",
     ),
     input_dir: Path | None = _option(
         None,
         "--input",
         "-i",
-        help="Override the source-video directory; persists with --write-config.",
+        help="Use this source-video directory; persists with --write-config.",
+        rich_help_panel="Sources and frame selection",
     ),
-    no_cache: bool = _option(
-        False, "--no-cache", help="Disable analysis cache reads and writes for this run."
+    frames: str | None = _option(
+        None,
+        "--frames",
+        help="Select comma-separated reference source-frame numbers; persists with --write-config.",
+        rich_help_panel="Sources and frame selection",
     ),
-    from_cache_only: bool = _option(
-        False,
-        "--from-cache-only",
-        help="Require valid cached analysis; never recompute missing metrics.",
+    random_frame_count: str | None = _option(
+        None,
+        "--random-frame-count",
+        help="Set the random frame count; persists with --write-config.",
+        rich_help_panel="Sources and frame selection",
     ),
-    no_upload: bool = _option(
-        False,
-        "--no-upload",
-        help="Disable slow.pics upload; persists with --write-config.",
+    dark_frame_count: str | None = _option(
+        None,
+        "--dark-frame-count",
+        help="Set the dark-frame count; requires analysis and persists.",
+        rich_help_panel="Sources and frame selection",
+    ),
+    bright_frame_count: str | None = _option(
+        None,
+        "--bright-frame-count",
+        help="Set the bright-frame count; requires analysis and persists.",
+        rich_help_panel="Sources and frame selection",
+    ),
+    motion_frame_count: str | None = _option(
+        None,
+        "--motion-frame-count",
+        help="Set the motion-frame count; requires analysis and persists.",
+        rich_help_panel="Sources and frame selection",
+    ),
+    seed: int | None = _option(
+        None,
+        "--seed",
+        help="Set the frame-selection seed; persists with --write-config.",
+        rich_help_panel="Sources and frame selection",
     ),
     tm_preset: str | None = _option(
-        None, "--tm-preset", help="Override the tonemap preset; persists with --write-config."
+        None,
+        "--tm-preset",
+        help="Override the tonemap preset; persists with --write-config.",
+        rich_help_panel="Rendering and alignment",
     ),
     tm_target: int | None = _option(
         None,
         "--tm-target",
         help="Override tonemap target nits; persists with --write-config.",
+        rich_help_panel="Rendering and alignment",
     ),
     tm_curve: str | None = _option(
-        None, "--tm-curve", help="Override the tonemap curve; persists with --write-config."
-    ),
-    frames: str | None = _option(
         None,
-        "--frames",
-        help="Comma-separated reference source-frame numbers; persists with --write-config.",
-    ),
-    random_frame_count: str | None = _option(
-        None,
-        "--random-frame-count",
-        help="Override the random frame count; persists with --write-config.",
-    ),
-    dark_frame_count: str | None = _option(
-        None,
-        "--dark-frame-count",
-        help="Override the dark-frame count; requires analysis and persists.",
-    ),
-    bright_frame_count: str | None = _option(
-        None,
-        "--bright-frame-count",
-        help="Override the bright-frame count; requires analysis and persists.",
-    ),
-    motion_frame_count: str | None = _option(
-        None,
-        "--motion-frame-count",
-        help="Override the motion-frame count; requires analysis and persists.",
-    ),
-    seed: int | None = _option(
-        None, "--seed", help="Override the frame-selection seed; persists with --write-config."
+        "--tm-curve",
+        help="Override the tonemap curve; persists with --write-config.",
+        rich_help_panel="Rendering and alignment",
     ),
     overlay: str | None = _option(
-        None, "--overlay", help="Override screenshot overlay mode; persists with --write-config."
-    ),
-    skip_analysis: bool = _option(
-        False,
-        "--skip-analysis",
-        help="Skip metric analysis; dark, bright, and motion counts must be zero.",
-    ),
-    skip_metadata: bool = _option(
-        False, "--skip-metadata", help="Skip TMDB metadata lookup for this run."
+        None,
+        "--overlay",
+        help="Override screenshot overlay mode; persists with --write-config.",
+        rich_help_panel="Rendering and alignment",
     ),
     force_interactive_alignment: bool = _option(
         False,
         "--force-interactive-alignment",
         help="Force VSPreview alignment; persists with --write-config.",
+        rich_help_panel="Rendering and alignment",
     ),
-    json_output: bool = _option(
-        False, "--json", help="Emit machine-readable JSON instead of human summaries."
+    no_upload: bool = _option(
+        False,
+        "--no-upload",
+        help="Do not publish to slow.pics; persists with --write-config.",
+        rich_help_panel="Reports and publishing",
     ),
-    no_color: bool = _option(False, "--no-color", help="Disable colored output."),
+    skip_analysis: bool = _option(
+        False,
+        "--skip-analysis",
+        help="Skip metric analysis; dark, bright, and motion counts must be zero.",
+        rich_help_panel="Planning and diagnostics",
+    ),
+    skip_metadata: bool = _option(
+        False,
+        "--skip-metadata",
+        help="Skip TMDB metadata lookup for this run.",
+        rich_help_panel="Planning and diagnostics",
+    ),
+    no_cache: bool = _option(
+        False,
+        "--no-cache",
+        help="Disable analysis cache reads and writes for this run.",
+        rich_help_panel="Planning and diagnostics",
+    ),
+    from_cache_only: bool = _option(
+        False,
+        "--from-cache-only",
+        help="Require valid cached analysis; never recompute missing metrics.",
+        rich_help_panel="Planning and diagnostics",
+    ),
     dry_run: bool = _option(
         False,
         "--dry-run",
-        help="Plan without probing, rendering, writing outputs, or publishing.",
+        help="Preview what a run would use and create without probing or side effects.",
+        rich_help_panel="Planning and diagnostics",
     ),
     write_config: bool = _option(
-        False, "--write-config", help="Write the effective config, then exit without running."
+        False,
+        "--write-config",
+        help="Write the effective config, then exit without running.",
+        rich_help_panel="Planning and diagnostics",
     ),
     diagnose_paths: bool = _option(
-        False, "--diagnose-paths", help="Print resolved workspace paths as JSON, then exit."
+        False,
+        "--diagnose-paths",
+        help="Print resolved workspace paths as JSON, then exit.",
+        rich_help_panel="Planning and diagnostics",
+    ),
+    json_output: bool = _option(
+        False,
+        "--json",
+        help="Emit machine-readable JSON instead of human summaries.",
+        rich_help_panel="Output modes",
+    ),
+    no_color: bool = _option(
+        False,
+        "--no-color",
+        help="Disable colored output.",
+        rich_help_panel="Output modes",
     ),
     quiet: bool = _option(
-        False, "--quiet", "-q", help="Suppress progress and detailed human summaries."
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress progress and detailed human summaries.",
+        rich_help_panel="Output modes",
     ),
     verbose: bool = _option(
-        False, "--verbose", "-v", help="Enable debug logging and verbose error details."
+        False,
+        "--verbose",
+        "-v",
+        help="Enable debug logging and verbose error details.",
+        rich_help_panel="Output modes",
     ),
 ) -> None:
     """Compare video sources and generate screenshots and an optional report."""
@@ -278,6 +353,7 @@ def run(
         copy_to_clipboard=_copy_text_to_clipboard,
         open_url=_open_url_in_browser,
         confirm_upload=typer.confirm,
+        confirm_full_window_retry=confirm_full_window_retry_on_stderr,
         stdout_is_tty=_sys_stream_isatty("stdout"),
         stdin_is_tty=_sys_stream_isatty("stdin"),
         no_color_env_present=no_color_requested(),
@@ -301,6 +377,7 @@ def wizard(
         resolved_root,
         config_path,
         prompt_input_dir=_prompt_input_dir,
+        prompt_generated_dir=_prompt_generated_dir,
         prompt=_prompt_text,
         confirm=typer.confirm,
         write_payload=_write_wizard_config_payload,
@@ -376,7 +453,10 @@ def preset_list(
         ".", "--root", "-r", help="Workspace root containing configuration presets."
     ),
     config: Path | None = _option(
-        None, "--config", "-c", help="Accepted for consistency; preset list uses --root."
+        None,
+        "--config",
+        "-c",
+        help="Accepted for consistency; ignored here. Presets are located under --root.",
     ),
 ) -> None:
     """List available configuration presets."""

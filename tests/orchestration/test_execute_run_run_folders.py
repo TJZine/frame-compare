@@ -26,6 +26,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import AnalysisConfig
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
@@ -106,8 +107,8 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     monkeypatch.setattr(
         preparation,
         "reserve_run_folder",
-        lambda input_dir, **_kwargs: RunFolderReservation(
-            path=input_dir / run_name,
+        lambda generated_root, **_kwargs: RunFolderReservation(
+            path=generated_root / run_name,
             folder_name=run_name,
             base_name=run_name,
             naming_source="parsed_metadata",
@@ -258,6 +259,168 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
     assert [path for path in external_input.iterdir() if path.is_dir()] == []
 
 
+def test_execute_prep_creates_missing_generated_root_only_during_reservation(
+    tmp_path: Path,
+) -> None:
+    create_config(
+        tmp_path,
+        content=RUN_FOLDERS_CONFIG.replace(
+            'generated_dir = "generated"',
+            'generated_dir = "nested/generated-data"',
+        ),
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    generated_root = tmp_path / "nested" / "generated-data"
+    assert not generated_root.exists()
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+
+    assert prep.workspace.generated_root == generated_root.resolve()
+    assert prep.workspace.run_dir is not None
+    assert prep.workspace.run_dir.parent == generated_root.resolve()
+    assert (prep.workspace.run_dir / "run_info.toml").is_file()
+
+
+def test_execute_prep_external_generated_root_owns_run_and_shared_state(
+    tmp_path: Path,
+) -> None:
+    external_generated_root = tmp_path / "external-generated-data"
+    create_config(
+        tmp_path,
+        content=RUN_FOLDERS_CONFIG.replace(
+            'generated_dir = "generated"',
+            f'generated_dir = "{external_generated_root.as_posix()}"',
+        ),
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+
+    run_dir = prep.workspace.run_dir
+    assert run_dir is not None
+    assert run_dir.parent == external_generated_root.resolve()
+    assert run_dir.is_dir()
+    assert (run_dir / "run_info.toml").is_file()
+    assert prep.workspace.screenshots_dir == run_dir / "screenshots"
+    assert prep.workspace.generated_dir == run_dir / "generated"
+    assert prep.workspace.screenshots_dir.is_relative_to(run_dir)
+    assert prep.workspace.generated_dir.is_relative_to(run_dir)
+    assert prep.workspace.shared_analysis_cache_dir == (
+        external_generated_root / "cache" / "analysis"
+    )
+    assert prep.workspace.shared_alignment_cache_dir == (
+        external_generated_root / "cache" / "alignment"
+    )
+    assert prep.workspace.generated_root / "clip_probe.toml" == (
+        external_generated_root / "clip_probe.toml"
+    )
+    assert prep.workspace.shared_analysis_cache_dir.is_relative_to(external_generated_root)
+    assert prep.workspace.shared_alignment_cache_dir.is_relative_to(external_generated_root)
+    assert (external_generated_root / "clip_probe.toml").is_file()
+    assert [path for path in external_generated_root.iterdir() if path.is_dir()] == [run_dir]
+    assert not (tmp_path / "generated").exists()
+
+
+def test_execute_prep_reserves_under_resolved_generated_root_symlink(
+    tmp_path: Path,
+) -> None:
+    external_generated_root = tmp_path / "external-generated-data"
+    external_generated_root.mkdir()
+    generated_root_link = tmp_path / "generated-link"
+    try:
+        generated_root_link.symlink_to(external_generated_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation is unavailable on this platform")
+    create_config(
+        tmp_path,
+        content=RUN_FOLDERS_CONFIG.replace(
+            'generated_dir = "generated"',
+            f'generated_dir = "{generated_root_link.as_posix()}"',
+        ),
+    )
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                no_upload=True,
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+
+    run_dir = prep.workspace.run_dir
+    assert run_dir is not None
+    assert prep.workspace.generated_root == external_generated_root.resolve()
+    assert run_dir.parent == external_generated_root.resolve()
+    assert run_dir.is_dir()
+    assert generated_root_link.is_symlink()
+
+
+def test_execute_prep_rejects_junctioned_reserved_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    generated_root = tmp_path / "generated"
+    run_dir = generated_root / "source"
+
+    def _reserve_junction(generated_root: Path, **_kwargs: object) -> RunFolderReservation:
+        reserved_path = generated_root / "source"
+        reserved_path.mkdir(parents=True)
+        return RunFolderReservation(
+            path=reserved_path,
+            folder_name="source",
+            base_name="source",
+            naming_source="filename_stems",
+        )
+
+    monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_junction)
+    monkeypatch.setattr(Path, "is_junction", lambda path: path == run_dir)
+
+    with pytest.raises(PathEscapesRootError):
+        asyncio.run(
+            preparation.execute_prep(
+                RunRequest(
+                    root=tmp_path,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
+            )
+        )
+
+    assert not run_dir.exists()
+
+
 def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -265,10 +428,8 @@ def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cac
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "custom_generated"
 config_dir = "config"
-use_run_folders = true
 
 [analysis]
 random_frame_count = 0

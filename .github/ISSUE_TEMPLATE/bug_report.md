@@ -1,53 +1,74 @@
 ---
-name: 🐛 Bug Report
-about: Report a bug or unexpected behavior
+name: Bug report
+about: Report reproducible incorrect or unexpected behavior
 title: "[Bug]: "
 labels: ["bug", "triage"]
 assignees: ''
 ---
 
-## Description
+## Summary
 
-A clear and concise description of the bug.
+Describe the observed problem and its impact.
 
 ## Environment
 
-- **OS**: [e.g., Ubuntu 22.04, Windows 11, macOS 14]
-- **Python Version**: [e.g., 3.13.1]
-- **Frame Compare Version**: [e.g., 0.1.0]
-- **Installation Method**: [Windows portable / Docker / native uv / native pip]
-- **VapourSynth Version** (if applicable): [e.g., R76]
+- **Operating system and version**:
+- **Frame Compare version**:
+- **Installation route**: Windows portable / Docker / native uv / native pip
+- **Python version** (native routes):
+- **Relevant media runtime** (native routes):
+- **Command and exit code**:
 
-## Steps to Reproduce
+## Steps to reproduce
 
-1. Run command `...`
-2. With config `...`
-3. See error
+1.
+2.
+3.
 
-## Expected Behavior
+Include the smallest publication-safe fixture or source properties that reproduce the
+problem when possible.
 
-What you expected to happen.
+## Expected behavior
 
-## Actual Behavior
+Describe the result you expected.
 
-What actually happened.
+## Actual behavior
 
-## Logs / Error Output
+Describe what happened instead.
+
+## Diagnostics
+
+Paste sanitized output from the same route used to run the comparison:
 
 ```text
-Paste any relevant error messages or logs here
+frame-compare doctor
+frame-compare run --dry-run
 ```
 
-## Screenshots
+Use `doctor --json` when structured runtime identity is useful. Redact usernames,
+private paths, source names, webhook URLs, API keys, tokens, cookies, and unrelated
+environment values.
 
-If applicable, add screenshots to help explain your problem.
+## Logs or error output
 
-## Additional Context
+```text
+Paste the complete relevant error and warning context here.
+```
 
-Add any other context about the problem here.
+## Screenshots or report evidence
+
+Attach publication-safe screenshots only when they materially clarify the problem. Do
+not upload private media frames without permission.
+
+## Additional context
+
+Include configuration fields relevant to the issue, whether caches were reused, and
+whether the problem reproduces after a dry run or clean generated fixture.
 
 ## Checklist
 
-- [ ] I have searched existing issues to ensure this is not a duplicate
-- [ ] I have included the full error message/traceback
-- [ ] I am using a supported Python version (3.13+)
+- [ ] I searched existing issues for the same problem.
+- [ ] I used a supported installation route or identified the unmanaged native setup.
+- [ ] I included the exact Frame Compare version, command, and exit code.
+- [ ] I included sanitized doctor output and the full relevant error.
+- [ ] I removed secrets and unnecessary private data.

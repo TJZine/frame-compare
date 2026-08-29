@@ -30,10 +30,10 @@ bash tools/verify_docker_integration.sh
 
 | Service | Purpose | Mount policy |
 | --- | --- | --- |
-| `frame-compare-wizard` | One-time or intentional interactive configuration, isolated behind the `setup` profile and started explicitly by the quick-start command | `config/` writable; `comparison_videos/` read-only |
-| `frame-compare-run` | Doctor, dry-run, normal runs, history, and other production-like CLI commands | `config/` and media read-only; `screenshots/` and `generated/` writable |
-| `frame-compare` | Interactive development shell | Runtime workspace mounts with a shell entrypoint |
-| `frame-compare-test` | Real-dependency integration verification | Repository mounted at the image source path |
+| `frame-compare-wizard` | One-time or intentional interactive configuration, isolated behind the `setup` profile and started explicitly by the quick-start command | `config/` and `generated/` writable; `comparison_videos/` read-only |
+| `frame-compare-run` | Doctor, dry-run, normal runs, history, and other production-like CLI commands | `config/` and media read-only; `generated/` writable |
+| `frame-compare` | Interactive development shell | Runtime workspace mounts plus the generated-data mount, with a shell entrypoint |
+| `frame-compare-test` | Real-dependency integration verification | Repository and generated-data mounts |
 
 Use the wizard and run services as a pair so configuration and output paths remain
 consistent. The setup service is the only default user service that deliberately
@@ -160,15 +160,16 @@ python tools/open_docker_host_target.py --print-only "<report_path_from_run_outp
 The helper only translates the default compose output mounts used by
 `docker-compose.yml`:
 
-- `/workspace/screenshots` -> `./screenshots`
 - `/workspace/generated` -> `./generated`
 
-Use the exact `report_path` printed by the run. With the default
-`paths.use_run_folders = true`, screenshots and the report are grouped beneath
-`/workspace/generated/<run>/`. When run folders are disabled,
-`report.output_dir = null` places the report beneath `/workspace/screenshots`.
+Use the exact `report_path` printed by the run. Screenshots and the report are
+always grouped beneath `/workspace/generated/<run>/` and are retained through the
+host `./generated` bind mount. A custom container output path is durable only when
+you explicitly map it to a host-owned directory; the helper intentionally does not
+translate arbitrary mounts.
 
-The helper rejects `/workspace/config`, `/workspace/comparison_videos`,
+The helper rejects `/workspace/config`, `/workspace/comparison_videos`, the removed
+`/workspace/screenshots` output root,
 non-canonical paths, symlink escapes, and non-`https://slow.pics/...` URLs.
 This helper is host-side only; it does not change the existing CLI/browser
 ownership inside the container. It is not a general `docker run` path

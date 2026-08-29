@@ -31,6 +31,7 @@ from frame_compare.orchestration.context import (
     ClipState,
 )
 from frame_compare.orchestration.errors import SourceSelectionError
+from frame_compare.services.release_identity import ReleaseIdentity
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,8 @@ def build_selection_domain_clips_with_diagnostics(
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
     overrides_by_path: dict[Path, SourceOverrideConfig],
     labels_by_path: dict[Path, str],
+    release_identities_by_path: dict[Path, ReleaseIdentity] | None = None,
+    explicit_labels_by_path: dict[Path, bool] | None = None,
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED,
     active_rect_detection: ScreenshotActiveRectDetection = (
         ScreenshotActiveRectDetection.ASPECT_RATIO
@@ -82,6 +85,8 @@ def build_selection_domain_clips_with_diagnostics(
             snapshot=snapshots_by_path[path],
             override=overrides_by_path.get(path),
             label=labels_by_path[path],
+            release_identity=(release_identities_by_path or {}).get(path),
+            label_is_explicit=(explicit_labels_by_path or {}).get(path, False),
         )
         for path in ordered_paths
     ]
@@ -173,6 +178,8 @@ def _build_selection_domain_clip(
     snapshot: ClipProbeSnapshot,
     override: SourceOverrideConfig | None,
     label: str,
+    release_identity: ReleaseIdentity | None,
+    label_is_explicit: bool,
 ) -> ClipState:
     trim_start_frames = override.trim_start_frames if override is not None else 0
     trim_end_frames = override.trim_end_frames if override is not None else 0
@@ -197,6 +204,8 @@ def _build_selection_domain_clip(
         probe=snapshot,
         source_fps=snapshot.fps,
         effective_fps=effective_fps,
+        release_identity=release_identity,
+        label_is_explicit=label_is_explicit,
     ).with_trim(
         trim_start_frames=trim_start_frames,
         trim_end_frame_inclusive=end_inclusive,

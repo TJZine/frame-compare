@@ -8,13 +8,14 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
+from frame_compare.vs.runtime_contract import media_runtime_identity
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
 
 type MetricAlgorithmIdentity = Mapping[str, object]
 
-_ALGORITHM_VERSION = "analysis_metrics_v6"
+_ALGORITHM_VERSION = "analysis_metrics_v7"
 
 
 def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmIdentity:
@@ -54,6 +55,7 @@ def _quality_identity() -> dict[str, object]:
         "algorithm_version": _ALGORITHM_VERSION,
         "backend": "vapoursynth_planestats",
         "performance_mode": "quality",
+        "media_runtime": media_runtime_identity("analysis"),
         "luminance": {
             "temporal": "requested_contiguous_window_frames",
             "spatial": "active_rect_aware_full_resolution_luma",
@@ -72,6 +74,7 @@ def _performance_identity() -> dict[str, object]:
         "algorithm_version": _ALGORITHM_VERSION,
         "backend": "vapoursynth_planestats",
         "performance_mode": "performance",
+        "media_runtime": media_runtime_identity("analysis"),
         "temporal_sampling": {
             "fraction": {"numerator": 1, "denominator": 4},
             "budget_rounding": "ceil",

@@ -370,6 +370,13 @@ def find_all(
     return matches
 
 
+def parse_definition_pairs(element: ParsedElement) -> dict[str, str]:
+    terms = find_all(element, tag="dt")
+    definitions = find_all(element, tag="dd")
+    assert len(terms) == len(definitions)
+    return {term.text: definition.text for term, definition in zip(terms, definitions, strict=True)}
+
+
 def css_block(css: str, selector: str) -> str:
     selector_start = css.index(selector)
     return brace_block(css, css.index("{", selector_start))
@@ -397,7 +404,7 @@ def script_payload(html: str) -> ReportPayload:
 @pytest.fixture
 def report_payload() -> ReportPayload:
     return {
-        "version": "1.0",
+        "version": "1.2",
         "report_id": "report_0123456789abcdef0123456789abcdef",
         "generated_at": "2026-05-22T12:00:00+00:00",
         "title": "Renderer Contract",
@@ -418,7 +425,25 @@ def report_payload() -> ReportPayload:
                 "frame_count": 100,
                 "resolution": (1920, 1080),
                 "fps": 24.0,
-                "hdr": False,
+                "size_bytes": 1048576,
+                "signal": {
+                    "is_hdr": False,
+                    "primaries": 1,
+                    "transfer": 1,
+                    "matrix": 1,
+                    "range": "limited",
+                    "dolby_vision_rpu": False,
+                    "hdr_static": None,
+                },
+                "presentation": {"state": "sdr", "tone_curve": None, "target_nits": None},
+                "active_picture": None,
+                "display": {
+                    "primary": "Reference primary <unsafe>",
+                    "release": "Reference release",
+                    "control": "Reference control",
+                    "micro": "Reference micro",
+                    "filename": "reference exact <unsafe>.mkv",
+                },
             },
             {
                 "name": "encode",
@@ -426,29 +451,81 @@ def report_payload() -> ReportPayload:
                 "frame_count": 100,
                 "resolution": (1920, 1080),
                 "fps": 24.0,
-                "hdr": True,
+                "size_bytes": 2147483648,
+                "signal": {
+                    "is_hdr": True,
+                    "primaries": 9,
+                    "transfer": 16,
+                    "matrix": 10,
+                    "range": "limited",
+                    "dolby_vision_rpu": False,
+                    "hdr_static": None,
+                },
+                "presentation": {
+                    "state": "hdr_tonemap_off",
+                    "tone_curve": None,
+                    "target_nits": None,
+                },
+                "active_picture": None,
+                "display": {
+                    "primary": 'Encode primary "unsafe"',
+                    "release": "Encode release",
+                    "control": "Encode control",
+                    "micro": "Encode micro",
+                    "filename": 'encode exact "unsafe".mkv',
+                },
             },
         ],
         "frames": [
             {
                 "number": 10,
                 "label": "Frame 10",
-                "detail": "Source frame 10",
+                "detail": "Selected comparison frame",
                 "category": "selected",
                 "images": [
-                    {"clip": "reference", "src": "reference/10.png"},
-                    {"clip": "encode", "src": "encode/10.png"},
+                    {
+                        "clip": "reference",
+                        "src": "reference/10.png",
+                        "source_frame": 10,
+                        "picture_type": "I",
+                        "dolby_vision_rpu": True,
+                    },
+                    {
+                        "clip": "encode",
+                        "src": "encode/10.png",
+                        "source_frame": 10,
+                        "picture_type": "P",
+                        "dolby_vision_rpu": False,
+                    },
                 ],
             },
             {
                 "number": 20,
                 "label": "Frame 20",
-                "detail": "Source frame 20",
+                "detail": "Selected comparison frame",
                 "category": "scene-cut",
                 "images": [
-                    {"clip": "reference", "src": "reference/20.png"},
-                    {"clip": "encode", "src": "encode/20.png"},
+                    {
+                        "clip": "reference",
+                        "src": "reference/20.png",
+                        "source_frame": 20,
+                        "picture_type": "B",
+                        "dolby_vision_rpu": False,
+                    },
+                    {
+                        "clip": "encode",
+                        "src": "encode/20.png",
+                        "source_frame": 20,
+                        "picture_type": "B",
+                        "dolby_vision_rpu": None,
+                    },
                 ],
             },
         ],
+        "rendering": {
+            "overlay_mode": "diagnostic",
+            "include_frame_number": True,
+            "tonemap": {"applied": False, "settings": None},
+            "geometry_by_label": {},
+        },
     }

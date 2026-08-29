@@ -10,13 +10,12 @@ import pytest
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
-from frame_compare.orchestration import phase_post_render, phase_tasks
+from frame_compare.orchestration import phase_alignment, phase_post_render
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PublishPhaseOutput,
-    RenderArtifacts,
     RunArtifacts,
 )
 from frame_compare.orchestration.types import (
@@ -33,13 +32,15 @@ from .execute_run_helpers import (
     create_config,
     create_video_files,
 )
+from .phase_task_helpers import _render_artifacts
 
 
 def _workspace(tmp_path: Path) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
-        run_dir=None,
+        generated_root=tmp_path / "generated",
+        run_dir=tmp_path / "run",
         screenshots_dir=tmp_path / "screenshots",
         generated_dir=tmp_path / "generated",
         config_dir=tmp_path / "config",
@@ -53,7 +54,6 @@ def test_execute_run_align_applies_trim_first_frame_mapping(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -76,7 +76,9 @@ enable = false
         progress=None,
         reference_fps=None,
         frame_props_by_stem=None,
+        verbose=False,
     ):
+        assert verbose is False
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path
         assert [comparison.identity.path for comparison in request.comparisons] == [
@@ -103,7 +105,7 @@ enable = false
             ),
         ]
 
-    monkeypatch.setattr(phase_tasks, "align_clips_from_request", _fake_align_clips_from_request)
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
     ffmpeg = FakeFFmpegRunner()
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)
@@ -123,9 +125,9 @@ enable = false
     for video_name, frame_num, _ in ffmpeg.calls:
         by_video.setdefault(video_name, []).append(frame_num)
 
-    assert by_video["a_ref.mkv"] == [5, 50, 97]
-    assert by_video["b_comp1.mkv"] == [4, 49, 96]
-    assert by_video["c_comp2.mkv"] == [6, 51, 98]
+    assert by_video["a_ref.mkv"] == [32, 66, 83]
+    assert by_video["b_comp1.mkv"] == [31, 65, 82]
+    assert by_video["c_comp2.mkv"] == [33, 67, 84]
 
 
 def test_execute_run_report_confirmed_decline_skips_publish(
@@ -134,7 +136,6 @@ def test_execute_run_report_confirmed_decline_skips_publish(
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
 
@@ -302,12 +303,19 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         year=2004,
         media_type="movie",
     )
-    render = RenderArtifacts(
+    render = _render_artifacts(
         screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "Reference_000001.png"],
-            "Encode 1": [tmp_path / "screenshots" / "Encode_1_000001.png"],
+            "Reference": [
+                tmp_path / "screenshots" / "Reference_000007.png",
+                tmp_path / "screenshots" / "Reference_000011.png",
+            ],
+            "Encode 1": [
+                tmp_path / "screenshots" / "Encode_1_000007.png",
+                tmp_path / "screenshots" / "Encode_1_000011.png",
+            ],
         },
         screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [7, 11], "Encode 1": [7, 11]},
     )
     artifacts = RunArtifacts(
         render=render,
@@ -315,12 +323,13 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         slowpics_url="https://slow.pics/c/collateral",
     )
     captured: dict[str, Any] = {}
-    expected_report_path = tmp_path / "report.html"
+    expected_report_path = tmp_path / "run" / "report.html"
 
-    def _fake_generate_report(report_data, report_config):
+    def _fake_generate_report(report_data, report_config, *, output_path: Path):
         captured["report_data"] = report_data
         captured["report_config"] = report_config
-        return expected_report_path
+        assert output_path == expected_report_path
+        return output_path
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
@@ -336,8 +345,12 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
     assert output.report_path == expected_report_path
     assert artifacts.report_path is None
     assert report_data.frames == [7, 11]
-    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
+    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+        "Reference"
+    ]
+    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+        "Encode 1"
+    ]
     assert report_data.metadata == metadata
     assert report_data.slowpics_url == "https://slow.pics/c/collateral"
     assert [(clip.name, clip.frame_count) for clip in report_data.clips] == [

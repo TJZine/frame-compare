@@ -293,14 +293,17 @@ const Lens = (() => {
         }
 
         function clipLabel(index) {
-            return viewer.state.data?.clips?.[index]?.label || `Clip ${index + 1}`;
+            const clip = viewer.state.data?.clips?.[index];
+            return viewer.clipDisplay(clip, 'micro');
         }
 
         function fullSourceIdentity(index) {
             if (!Number.isInteger(index) || index < 0 || index >= clipCount()) {
                 return 'Source unavailable.';
             }
-            return `#${index + 1} · ${clipLabel(index)}`;
+            const clip = viewer.state.data?.clips?.[index];
+            const primary = viewer.clipDisplay(clip, 'primary');
+            return `#${index + 1} · ${primary}`;
         }
 
         function compactSourceIdentity(index, size, context = 'single') {
@@ -437,7 +440,7 @@ const Lens = (() => {
                 return { clipIdx: viewer.state.activeClipIdx, image };
             }
             if (viewer.state.mode === 'slider') {
-                const rect = viewer.sliderCanvasRect?.();
+                const rect = viewer.viewport?.sliderCanvasRect();
                 const divider = rect?.left + rect?.width * (1 - viewer.state.revealPercent / 100);
                 return clientX <= divider
                     ? { clipIdx: viewer.state.leftClipIdx, image: viewer.dom.leftImg }
@@ -464,7 +467,7 @@ const Lens = (() => {
                 return { clipIdx: viewer.state.activeClipIdx, image };
             }
             if (viewer.state.mode === 'slider') {
-                const rect = viewer.sliderCanvasRect?.();
+                const rect = viewer.viewport?.sliderCanvasRect();
                 if (rect && validDimensions(rect.width, rect.height)) {
                     return entryForPointer(
                         rect.left + rect.width / 2,
@@ -905,7 +908,8 @@ const Lens = (() => {
                 .map((clip, index) => {
                     const option = document.createElement('option');
                     option.value = String(index);
-                    option.textContent = clip.label || `Clip ${index + 1}`;
+                    option.textContent = viewer.clipDisplay(clip);
+                    option.title = viewer.clipAccessibleName(clip);
                     option.disabled = index === active;
                     option.selected = index === target;
                     return option;
@@ -927,6 +931,8 @@ const Lens = (() => {
                 button.classList.toggle('active', active);
                 button.setAttribute('aria-checked', active ? 'true' : 'false');
             });
+            viewer.syncRadioGroupTabStops(dom.sizeButtons);
+            viewer.syncRadioGroupTabStops(dom.markerButtons);
             if (dom.comparisonToggle) dom.comparisonToggle.checked = state.report.comparisonEnabled;
             if (dom.comparisonSettings) {
                 const available = viewer.state.mode === 'overlay' && clipCount() > 1;
@@ -1056,9 +1062,14 @@ const Lens = (() => {
             dom.sizeButtons.forEach(button => button.addEventListener('click', () => {
                 setSize(button.dataset.lensSize);
             }));
+            viewer.bindRadioGroup(dom.sizeButtons, button => setSize(button.dataset.lensSize));
             dom.markerButtons.forEach(button => button.addEventListener('click', () => {
                 setMarkerStyle(button.dataset.lensMarker);
             }));
+            viewer.bindRadioGroup(
+                dom.markerButtons,
+                button => setMarkerStyle(button.dataset.lensMarker),
+            );
             dom.comparisonToggle?.addEventListener('change', event => setComparisonEnabled(event.target.checked));
             dom.comparisonTarget?.addEventListener('change', event => setComparisonTarget(event.target.value));
             dom.reset?.addEventListener('click', reset);

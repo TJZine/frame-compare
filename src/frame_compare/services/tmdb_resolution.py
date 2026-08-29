@@ -5,17 +5,17 @@ from __future__ import annotations
 import asyncio
 import re
 import unicodedata
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from functools import lru_cache
-from typing import Literal, cast
+from typing import Literal
 
 import httpx
 import structlog
 
 from frame_compare.services import tmdb_lookup
 from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
+from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 __all__ = ["TmdbResolutionOutcome", "resolve_tmdb_match"]
@@ -25,10 +25,8 @@ log = structlog.get_logger()
 type MediaType = Literal["movie", "tv"]
 type SearchEndpoint = Literal["movie", "tv", "multi"]
 type CandidateKey = tuple[MediaType, int]
-type AltTitlesCallable = Callable[
-    [int, MediaType, MetadataConfig, httpx.AsyncClient],
-    Awaitable[list[str]],
-]
+
+
 type _IndexedSearchResults = tuple[int, list[TmdbMetadata]]
 
 MAX_SEARCH_REQUESTS = 12
@@ -243,16 +241,23 @@ async def _search_request(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    cache: TmdbCache | None,
 ) -> list[TmdbMetadata]:
     request_parsed = _parsed_for_request(parsed, request)
 
     if request.endpoint == "movie":
-        return await tmdb_lookup.search_tmdb_movie(request_parsed, config, client)
+        if cache is None:
+            return await tmdb_lookup.search_tmdb_movie(request_parsed, config, client)
+        return await tmdb_lookup.search_tmdb_movie(request_parsed, config, client, cache=cache)
 
     if request.endpoint == "tv":
-        return await tmdb_lookup.search_tmdb_tv(request_parsed, config, client)
+        if cache is None:
+            return await tmdb_lookup.search_tmdb_tv(request_parsed, config, client)
+        return await tmdb_lookup.search_tmdb_tv(request_parsed, config, client, cache=cache)
 
-    return await tmdb_lookup.search_tmdb(request_parsed, config, client)
+    if cache is None:
+        return await tmdb_lookup.search_tmdb(request_parsed, config, client)
+    return await tmdb_lookup.search_tmdb(request_parsed, config, client, cache=cache)
 
 
 async def _indexed_search_request(
@@ -262,9 +267,10 @@ async def _indexed_search_request(
     config: MetadataConfig,
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
+    cache: TmdbCache | None,
 ) -> _IndexedSearchResults:
     async with semaphore:
-        return request_index, await _search_request(request, parsed, config, client)
+        return request_index, await _search_request(request, parsed, config, client, cache)
 
 
 async def _collect_candidates(
@@ -272,13 +278,22 @@ async def _collect_candidates(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    cache: TmdbCache | None,
 ) -> dict[CandidateKey, _CandidateAggregate]:
     candidates: dict[CandidateKey, _CandidateAggregate] = {}
 
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCH_REQUESTS)
     search_results = await asyncio.gather(
         *(
-            _indexed_search_request(request_index, request, parsed, config, client, semaphore)
+            _indexed_search_request(
+                request_index,
+                request,
+                parsed,
+                config,
+                client,
+                semaphore,
+                cache,
+            )
             for request_index, request in enumerate(plan)
         )
     )
@@ -545,27 +560,30 @@ def _select_alt_title_pool(ranked_candidates: list[_ScoredCandidate]) -> list[_S
     return pool[:MAX_ALT_TITLE_REQUESTS]
 
 
-def _fetch_alt_titles_fn() -> object | None:
-    return getattr(tmdb_lookup, "fetch_tmdb_alternative_titles", None)
-
-
 async def _fetch_candidate_aliases(
     candidate: _ScoredCandidate,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    cache: TmdbCache | None,
 ) -> tuple[CandidateKey, tuple[str, ...]]:
-    fetch_fn = _fetch_alt_titles_fn()
     key: CandidateKey = (candidate.metadata.media_type, candidate.metadata.tmdb_id)
-    if not callable(fetch_fn):
-        return key, ()
 
     try:
-        aliases = await cast(AltTitlesCallable, fetch_fn)(
-            candidate.metadata.tmdb_id,
-            candidate.metadata.media_type,
-            config,
-            client,
-        )
+        if cache is None:
+            aliases = await tmdb_lookup.fetch_tmdb_alternative_titles(
+                candidate.metadata.tmdb_id,
+                candidate.metadata.media_type,
+                config,
+                client,
+            )
+        else:
+            aliases = await tmdb_lookup.fetch_tmdb_alternative_titles(
+                candidate.metadata.tmdb_id,
+                candidate.metadata.media_type,
+                config,
+                client,
+                cache=cache,
+            )
     except (TmdbError, TmdbRateLimitedError) as exc:
         log.warning(
             "tmdb_alternative_titles_unavailable",
@@ -593,13 +611,14 @@ async def _enrich_candidates_with_aliases(
     client: httpx.AsyncClient,
     aggregates: dict[CandidateKey, _CandidateAggregate],
     ranked_candidates: list[_ScoredCandidate],
+    cache: TmdbCache | None,
 ) -> list[_ScoredCandidate]:
     pool = _select_alt_title_pool(ranked_candidates)
     if not pool:
         return ranked_candidates
 
     alias_results = await asyncio.gather(
-        *[_fetch_candidate_aliases(candidate, config, client) for candidate in pool]
+        *[_fetch_candidate_aliases(candidate, config, client, cache) for candidate in pool]
     )
     alias_map = dict(alias_results)
 
@@ -649,6 +668,8 @@ async def resolve_tmdb_match(
     parsed: ParsedMetadata,
     config: MetadataConfig,
     client: httpx.AsyncClient,
+    *,
+    cache: TmdbCache | None = None,
 ) -> TmdbResolutionOutcome:
     title = parsed.title.strip()
     if not title or config.api_key is None:
@@ -672,7 +693,7 @@ async def resolve_tmdb_match(
         ],
     )
 
-    aggregates = await _collect_candidates(plan, parsed, config, client)
+    aggregates = await _collect_candidates(plan, parsed, config, client, cache)
     if not aggregates:
         log.debug("tmdb_resolution_no_candidates", title=parsed.title, year=parsed.year)
         return TmdbResolutionOutcome(selected=None, candidates=[])
@@ -690,6 +711,7 @@ async def resolve_tmdb_match(
         client,
         aggregates,
         scoring_pool,
+        cache,
     )
     ranked_candidates = _filter_ranked_candidates(ranked_candidates)
     selected = _select_candidate(_preferred_media_type(parsed, config), ranked_candidates)

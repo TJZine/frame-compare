@@ -15,6 +15,7 @@ import structlog
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.progress import phase_display_label, start_phase_progress
+from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
@@ -33,6 +34,7 @@ class PhaseStatus(StrEnum):
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
+PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
 
 @dataclass
@@ -46,6 +48,9 @@ class Phase:
     display_label: str | None = None
     status: PhaseStatus = PhaseStatus.PENDING
     warn_only: bool = False
+    fatal_exceptions: tuple[type[BaseException], ...] = ()
+    retain_on_success: bool | None = None
+    skip_detail: PhaseSkipDetail | None = None
 
     @property
     def progress_label(self) -> str:
@@ -68,10 +73,19 @@ async def execute_phases(
     for phase in phases:
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
+            skip_detail = (
+                phase.skip_detail(context.config)
+                if callable(phase.skip_detail)
+                else phase.skip_detail
+            )
             start_phase_progress(
                 reporter,
                 name=phase.name,
-                display_label=phase.progress_label,
+                display_label=(
+                    f"{phase.progress_label}  {skip_detail}"
+                    if skip_detail is not None
+                    else phase.progress_label
+                ),
                 total=phase.progress_total,
             )
             reporter.set_description("Skipped")
@@ -89,21 +103,28 @@ async def execute_phases(
         try:
             await phase.execute(context)
         except Exception as exc:
-            if not phase.warn_only:
+            if not phase.warn_only or isinstance(exc, phase.fatal_exceptions):
                 phase.status = PhaseStatus.FAILED
                 phase_progress_status = ProgressPhaseStatus.FAILED
                 raise
             phase.status = PhaseStatus.WARNED
             phase_progress_status = ProgressPhaseStatus.WARNED
-            log.warning(
-                "phase_warned",
-                phase=phase.name,
-                error_type=type(exc).__name__,
-                error=str(exc),
-                exc_info=exc,
-            )
+            if isinstance(reporter, LogProgressReporter):
+                log.warning(
+                    "phase_warned",
+                    phase=phase.name,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    exc_info=exc,
+                )
         else:
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)
         finally:
-            reporter.complete_phase(phase_progress_status)
+            if phase.retain_on_success is None:
+                reporter.complete_phase(phase_progress_status)
+            else:
+                reporter.complete_phase(
+                    phase_progress_status,
+                    retain=phase.retain_on_success,
+                )

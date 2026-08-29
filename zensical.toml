@@ -1,40 +1,52 @@
 [project]
 site_name = "Frame Compare"
-site_description = "Video frame comparison tool with tonemapping and slow.pics integration"
+site_description = "Deterministic video comparison with frame selection, audio alignment, HDR-aware rendering, and offline review reports"
 site_url = "https://tjzine.github.io/frame-compare/"
 repo_url = "https://github.com/TJZine/frame-compare"
 edit_uri = "edit/main/docs/"
 docs_dir = "docs"
 site_dir = "site"
+extra_css = ["stylesheets/extra.css"]
 nav = [
   { "Home" = "index.md" },
-  { "Getting Started" = [
-    { "Choose Your Installation" = "getting-started/index.md" },
-    { "Docker" = "getting-started/docker.md" },
+  { "Get Started" = [
+    { "Choose an Installation" = "getting-started/index.md" },
     { "Windows Portable" = "windows-portable.md" },
+    { "Docker" = "getting-started/docker.md" },
     { "Native Source" = "getting-started/native.md" },
-    { "First Comparison" = "guides/first-comparison.md" },
-    { "Troubleshooting" = "guides/troubleshooting.md" },
+    { "Compare Installation Routes" = "getting-started/route-comparison.md" },
+    { "Your First Comparison" = "guides/first-comparison.md" },
   ] },
-  { "Guides" = [
-    { "Analysis Modes" = "guides/analysis-modes.md" },
+  { "User Guide" = [
+    { "How Frame Compare Works" = "guides/how-it-works.md" },
+    { "Sources, References, and Labels" = "guides/sources-and-labels.md" },
+    { "Frame Selection and Analysis" = "guides/analysis-modes.md" },
+    { "Audio Alignment and VSPreview" = "guides/audio-alignment.md" },
+    { "HDR and Tonemapping" = "guides/hdr-tonemapping.md" },
     { "Reports and Overlays" = "guides/reports-and-overlays.md" },
+    { "Presets, History, and Generated Data" = "guides/presets-history-generated-data.md" },
+    { "Configuration Recipes" = "guides/configuration-recipes.md" },
     { "Publishing and Webhooks" = "guides/publishing-and-webhooks.md" },
+    { "Troubleshooting" = "guides/troubleshooting.md" },
     { "Advanced Docker Environments" = "docker-environments.md" },
   ] },
   { "Reference" = [
-    { "CLI and Configuration Contract" = "current-cli-contract.md" },
-    { "API Reference" = "api.md" },
+    { "Commands and Configuration" = "reference/commands-and-configuration.md" },
+    { "Output Layout" = "reference/output-layout.md" },
+    { "Supported Media Runtime" = "supported-media-runtime.md" },
+    { "CLI Behavioral Contract" = "current-cli-contract.md" },
   ] },
-  { "Development" = [
-    { "Contributing" = "https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md" },
+  { "Project" = [
+    { "Internal Python API" = "api.md" },
     { "Current Architecture" = "current-architecture.md" },
     { "Engineering Runbook" = "ENGINEERING_RUNBOOK.md" },
+    { "Physical Windows Runtime Validation" = "media-runtime-windows-validation.md" },
+    { "Performance Evidence" = [
+      { "Analysis Performance Validation" = "analysis-performance-validation.md" },
+      { "Analysis Benchmark History" = "analysis-benchmark-history.md" },
+    ] },
     { "Historical Decisions" = "DECISIONS.md" },
-  ] },
-  { "Performance Evidence" = [
-    { "Analysis Performance Validation" = "analysis-performance-validation.md" },
-    { "Analysis Benchmark History" = "analysis-benchmark-history.md" },
+    { "Contributing" = "https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md" },
   ] },
 ]
 
@@ -45,12 +57,17 @@ features = [
   "content.action.edit",
   "content.action.view",
   "content.code.copy",
+  "content.tabs.link",
   "navigation.sections",
+  "navigation.tabs",
+  "navigation.tabs.sticky",
   "navigation.path",
+  "navigation.tracking",
   "navigation.top",
   "navigation.footer",
   "navigation.instant",
   "search.highlight",
+  "toc.follow",
 ]
 
 [[project.theme.palette]]
@@ -62,6 +79,14 @@ toggle.name = "Switch to dark mode"
 scheme = "slate"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
 
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [

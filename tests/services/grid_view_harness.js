@@ -21,7 +21,7 @@ const grid = context.__GridView;
 assert.equal(grid.layoutName(2, 769, 2), 'two');
 assert.equal(grid.layoutName(3, 1200, 3), 'three-wide');
 assert.equal(grid.layoutName(3, 1199, 3), 'three-wrap');
-assert.equal(grid.layoutName(4, 768, 4), 'four');
+assert.equal(grid.layoutName(4, 768, 1), 'mobile');
 assert.equal(grid.layoutName(6, 1600, 4), 'four');
 assert.equal(grid.layoutName(6, 767, 1), 'mobile');
 
@@ -173,7 +173,9 @@ context.document = {
 context.window = {
     innerWidth: 1300,
     matchMedia() { return mediaQuery; },
-    addEventListener() {},
+    addEventListener(type, listener) {
+        if (type === 'resize') this.resizeListener = listener;
+    },
     requestAnimationFrame(callback) { callback(); },
 };
 context.ResizeObserver = undefined;
@@ -181,7 +183,16 @@ context.ResizeObserver = undefined;
 const announcements = [];
 const clips = Array.from({ length: 6 }, (_, index) => ({
     label: `Clip ${index + 1}`,
+    display: {
+        primary: `Clip ${index + 1}`,
+        release: '',
+        control: `Clip ${index + 1}`,
+        micro: `Clip ${index + 1}`,
+        filename: `clip-${index + 1}.mkv`,
+    },
     resolution: [1920, 1080],
+    size_bytes: (17 + index) * 1024 ** 3,
+    signal: { is_hdr: false },
 }));
 clips[1].resolution = [1080, 1920];
 clips[2].resolution = [2560, 1080];
@@ -201,8 +212,14 @@ const viewer = {
     },
     dom: { stage: gridRoot },
     currentFrame() { return frame; },
+    clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
+    sourceHudLabel(clip, profile = 'control') {
+        return `${clip.display[profile]} • ${clip.resolution[0]}×${clip.resolution[1]} • SDR • ${this.formatFileSize(clip.size_bytes)}`;
+    },
+    formatFileSize(size) { return `${(size / 1024 ** 3).toFixed(2)} GiB`; },
+    clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
-    clampPan() {},
+    viewport: { clampPan() {} },
     updateInspectorData() {},
     updateCurrentFrameMetadata() {},
     announce(message) { announcements.push(message); },
@@ -212,16 +229,37 @@ const owner = grid.create(viewer);
 owner.bind();
 owner.setActive(true);
 owner.render();
+gridRoot.rect.width = 768;
+context.window.resizeListener();
+assert.equal(owner.state.mobile, true);
+gridRoot.rect.width = 1300;
+context.window.resizeListener();
+assert.equal(owner.state.mobile, false);
 assert.equal(cells.children.length, 4);
 assert.deepEqual([...owner.indexes()], [0, 1, 2, 3]);
 assert.equal(controls.hidden, false);
 assert.equal(position.textContent, 'Clips 1–4 of 6');
 assert.equal(cells.children[0].dataset.reference, 'true');
 assert.match(cells.children[0].getAttribute('aria-label'), /Reference/);
+assert.match(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
+assert.match(cells.children[1].getAttribute('aria-label'), /18\.00 GiB/);
 assert.equal(cells.children[3].dataset.reference, 'false');
 assert.doesNotMatch(cells.children[3].getAttribute('aria-label'), /Reference/);
 assert.equal(cells.children[1].dataset.active, 'true');
 assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
+assert.equal(
+    cells.children[0].querySelector('.rv-grid-label-text').textContent,
+    'Clip 1 • 1920×1080 • SDR • 17.00 GiB',
+);
+assert.equal(
+    cells.children[1].querySelector('.rv-grid-label-text').textContent,
+    'Clip 2 • 1080×1920 • SDR • 18.00 GiB',
+);
+viewer.state.overlaysHidden = true;
+owner.updateCellRoles();
+assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
+viewer.state.overlaysHidden = false;
+owner.updateCellRoles();
 
 const mixedImages = cells.querySelectorAll('.rv-grid-image');
 mixedImages.forEach((image, index) => {
@@ -274,14 +312,25 @@ owner.render();
 const currentCell = cells.children[0];
 const currentImage = currentCell.querySelector('.rv-grid-image');
 const currentError = currentCell.querySelector('[data-grid-error]');
+viewer.state.overlaysHidden = true;
+owner.updateCellRoles();
 currentImage.dispatch('error');
 assert.equal(owner.state.failed.has(0), true);
 assert.equal(currentError.hidden, false);
+assert.doesNotMatch(currentCell.getAttribute('aria-label'), /17\.00 GiB/);
+assert.equal(currentError.children[0].textContent, 'Clip 1 image unavailable');
+assert.equal(
+    currentCell.querySelector('[data-grid-retry]').getAttribute('aria-label'),
+    'Retry Clip 1 image',
+);
+assert.equal(announcements.at(-1), 'Clip 1 image unavailable.');
 staleImage.dispatch('load');
 assert.equal(owner.state.failed.has(0), true);
 currentImage.dispatch('load');
 assert.equal(owner.state.failed.has(0), false);
 assert.equal(currentError.hidden, true);
+viewer.state.overlaysHidden = false;
+owner.updateCellRoles();
 
 currentImage.dispatch('error');
 const retry = currentCell.querySelector('[data-grid-retry]');

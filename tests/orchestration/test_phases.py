@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
+import structlog
 from structlog.testing import capture_logs
 
+from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
@@ -25,7 +28,12 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
 from frame_compare.orchestration.types import RunRequest
-from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
+from frame_compare.utils.logging import configure_logging
+from frame_compare.utils.progress import (
+    LogProgressReporter,
+    NullProgressReporter,
+    PlainProgressReporter,
+)
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
@@ -35,6 +43,7 @@ def _make_context(tmp_path: Path) -> RunContext:
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "input",
+        generated_root=tmp_path / "generated",
         run_dir=None,
         screenshots_dir=tmp_path / "screens",
         generated_dir=tmp_path / "generated",
@@ -120,6 +129,7 @@ def test_execute_phases_skips_when_skip_condition_true(tmp_path: Path) -> None:
             name="skip",
             execute=phase_skip,
             skip_condition=lambda config: True,
+            skip_detail=lambda _config: "Disabled",
         ),
         Phase(name="next", execute=phase_next),
     ]
@@ -169,13 +179,14 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
             name="skip",
             execute=phase_skip,
             skip_condition=lambda config: True,
+            skip_detail="Disabled",
         ),
         Phase(name="next", execute=phase_next),
     ]
 
     asyncio.run(execute_phases(phases, context, reporter))
 
-    assert reporter.start_phase_calls == [("SKIP", 1), ("NEXT", 1)]
+    assert reporter.start_phase_calls == [("SKIP  Disabled", 1), ("NEXT", 1)]
     assert reporter.set_description_calls == ["Skipped"]
     assert reporter.complete_phase_calls == [
         ProgressPhaseStatus.SKIPPED,
@@ -207,6 +218,92 @@ def test_execute_phases_preserves_internal_phase_name_for_log_progress(
     )
 
 
+def test_execute_phases_plain_progress_uses_display_labels_without_log_milestones(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_analyze(_: RunContext) -> None:
+        return None
+
+    with capture_logs() as captured:
+        asyncio.run(
+            execute_phases(
+                [Phase(name="analyze", execute=phase_analyze)],
+                context,
+                PlainProgressReporter(),
+            )
+        )
+
+    assert capsys.readouterr().err.startswith("[OK] ANALYZE  Completed in ")
+    assert not any(
+        event.get("event") in {"phase_started", "phase_progress", "phase_completed"}
+        for event in captured
+    )
+
+
+def test_execute_phases_plain_failure_line_is_emitted_before_error_propagates(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_fail(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(
+            execute_phases(
+                [Phase(name="render", execute=phase_fail)],
+                context,
+                PlainProgressReporter(),
+            )
+        )
+
+    assert capsys.readouterr().err == "[FAIL] RENDER\n"
+
+
+def test_execute_phases_forwards_success_retention_hint(tmp_path: Path) -> None:
+    context = _make_context(tmp_path)
+
+    class SpyReporter:
+        def __init__(self) -> None:
+            self.complete_phase_calls: list[tuple[ProgressPhaseStatus, bool | None]] = []
+
+        def start_phase(self, name: str, total: int) -> None:
+            del name, total
+
+        def advance(self, amount: int = 1) -> None:
+            del amount
+
+        def set_description(self, desc: str) -> None:
+            del desc
+
+        def complete_phase(
+            self,
+            status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+        ) -> None:
+            self.complete_phase_calls.append((status, retain))
+
+    reporter = SpyReporter()
+
+    async def phase_publish(_: RunContext) -> None:
+        return None
+
+    asyncio.run(
+        execute_phases(
+            [Phase(name="publish", execute=phase_publish, retain_on_success=True)],
+            context,
+            reporter,
+        )
+    )
+
+    assert reporter.complete_phase_calls == [(ProgressPhaseStatus.COMPLETED, True)]
+
+
 def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     tmp_path: Path,
 ) -> None:
@@ -236,6 +333,41 @@ def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     assert executed == ["warn", "after"]
     assert phases[0].status is PhaseStatus.WARNED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_fatal_exclusion_recovery_stops_warn_only_pipeline(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    executed: list[str] = []
+
+    async def phase_recovery_failure(_: RunContext) -> None:
+        executed.append("analyze")
+        raise ExclusionRecoverySelectionError(
+            "configured exclusions leave too little media for frame selection",
+            requested=8,
+            found=4,
+        )
+
+    async def downstream_side_effect(_: RunContext) -> None:
+        executed.append("render")
+
+    phases = [
+        Phase(
+            name="analyze",
+            execute=phase_recovery_failure,
+            warn_only=True,
+            fatal_exceptions=(ExclusionRecoverySelectionError,),
+        ),
+        Phase(name="render", execute=downstream_side_effect),
+    ]
+
+    with pytest.raises(ExclusionRecoverySelectionError):
+        asyncio.run(execute_phases(phases, context, NullProgressReporter()))
+
+    assert executed == ["analyze"]
+    assert phases[0].status is PhaseStatus.FAILED
+    assert phases[1].status is PhaseStatus.PENDING
 
 
 def test_execute_phases_warn_only_failure_reports_warned_progress_status(
@@ -281,6 +413,60 @@ def test_execute_phases_warn_only_failure_reports_warned_progress_status(
         ProgressPhaseStatus.WARNED,
         ProgressPhaseStatus.COMPLETED,
     ]
+
+
+def test_execute_phases_plain_warn_only_emits_one_ascii_status_line(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_warn(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    configure_logging(log_format="console")
+    asyncio.run(
+        execute_phases(
+            [Phase(name="publish", execute=phase_warn, warn_only=True)],
+            context,
+            PlainProgressReporter(),
+        )
+    )
+
+    stderr = capsys.readouterr().err
+    assert stderr == "[WARN] PUBLISH\n"
+    assert stderr.isascii()
+    assert "\x1b[" not in stderr
+    assert "Traceback" not in stderr
+    assert "phase_warned" not in stderr
+
+
+def test_execute_phases_log_warn_only_retains_structured_exception(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_warn(_: RunContext) -> None:
+        raise RuntimeError("boom")
+
+    configure_logging(log_format="json")
+    monkeypatch.setattr("frame_compare.orchestration.phases.log", structlog.get_logger())
+    asyncio.run(
+        execute_phases(
+            [Phase(name="publish", execute=phase_warn, warn_only=True)],
+            context,
+            LogProgressReporter(),
+        )
+    )
+
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    warning = next(event for event in events if event["event"] == "phase_warned")
+    assert warning["phase"] == "publish"
+    assert warning["error_type"] == "RuntimeError"
+    assert warning["error"] == "boom"
+    assert warning["exception"]
 
 
 def test_execute_phases_fail_fast_failure_reports_failed_progress_status(
@@ -411,3 +597,5 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
 
     assert publish_phase.skip_condition is not None
     assert publish_phase.skip_condition(config) is True
+    assert callable(publish_phase.skip_detail)
+    assert publish_phase.skip_detail(config) == "Disabled"

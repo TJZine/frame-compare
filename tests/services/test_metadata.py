@@ -308,9 +308,7 @@ async def test_resolve_metadata_high_confidence_match_auto_accepts(
     monkeypatch.setattr(
         metadata,
         "resolve_tmdb_match",
-        AsyncMock(
-            return_value=ResolutionOutcome(selected=exact_match, candidates=[exact_match])
-        ),
+        AsyncMock(return_value=ResolutionOutcome(selected=exact_match, candidates=[exact_match])),
     )
 
     result = await resolve_metadata(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
@@ -19,11 +20,24 @@ from pathlib import Path
 
 import structlog
 
+from frame_compare.vs.runtime_contract import runtime_kind
 from frame_compare.vspreview.errors import VSPreviewError, VSPreviewNotFoundError
 from frame_compare.vspreview.output import print_vspreview_session
 from frame_compare.vspreview.session_script import write_vspreview_session_script
 
 log = structlog.get_logger()
+
+_STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
+_STARTUP_STDERR_LIMIT = 4000
+_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER = "ignore:Starting from R74:SyntaxWarning:vstools.enums.color"
+_MISSING_MODULE_PATTERN = re.compile(
+    r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
+)
+_SENSITIVE_ENV_KEY_PATTERN = re.compile(
+    r"(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSWD|WEBHOOK_URL|AUTHORIZATION|"
+    r"CREDENTIAL|PRIVATE_KEY|ACCESS_KEY|COOKIE)(?:_|$)",
+    re.IGNORECASE,
+)
 
 
 class VSPreviewAvailabilityStatus(Enum):
@@ -144,14 +158,13 @@ class VSPreviewConfig:
 
     Attributes:
         enabled: Whether to launch VSPreview for verification
-        timeout_seconds: Reserved for future bounded interactive confirmation flows
-        auto_close: Close VSPreview after user confirms
+        no_color: Whether diagnostics should omit terminal color
+        verbose: Whether to print launch diagnostics
     """
 
     enabled: bool = False
-    timeout_seconds: float = 300.0  # 5 minutes
-    auto_close: bool = True
     no_color: bool = False
+    verbose: bool = False
 
 
 @dataclass(frozen=True)
@@ -163,6 +176,7 @@ class VSPreviewSessionRequest:
     suggested_offsets_by_key: dict[str, int | None]
     cache_dir: Path
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None
+    presentation_names_by_stem: dict[str, str] | None = None
 
 
 def launch_alignment_verification_session(
@@ -189,39 +203,122 @@ def launch_alignment_verification_session(
 
     command = _resolve_launch_command(script_path)
 
-    # Print telemetry per vspreview spec §3.2.3.
-    print_vspreview_session(
-        script_path=script_path,
-        command=command,
-        no_color=config.no_color,
-    )
+    if config.verbose:
+        print_vspreview_session(
+            script_path=script_path,
+            command=command,
+            no_color=config.no_color,
+        )
 
     try:
-        env = os.environ.copy()
-        if config.no_color:
-            env["NO_COLOR"] = "1"
+        env = _build_vspreview_child_env(no_color=config.no_color)
+        _check_startup_readiness(command, env=env)
         returncode = _run_vspreview_command(command, env=env)
     except FileNotFoundError as e:
         raise VSPreviewError("launcher command was not found") from e
+    except VSPreviewError:
+        raise
     except Exception as e:
-        log.debug(
-            "vspreview_launch_unexpected_debug",
-            exception_type=type(e).__name__,
-            error=str(e),
-        )
         raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
 
     if returncode != 0:
         public_reason = f"launch exited with code {returncode}"
-        log.warning(
-            "vspreview_launch_failed",
-            reason=public_reason,
+        raise VSPreviewError(
+            public_reason,
+            command=tuple(command),
             returncode=returncode,
-            hint="Re-run with verbose mode to inspect VSPreview output",
         )
-        raise VSPreviewError(public_reason)
 
     return script_path
+
+
+def _build_vspreview_child_env(*, no_color: bool) -> dict[str, str]:
+    """Build the child-only environment, preserving later user warning policy."""
+    env = os.environ.copy()
+    existing_filters = env.get("PYTHONWARNINGS")
+    env["PYTHONWARNINGS"] = (
+        f"{_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER},{existing_filters}"
+        if existing_filters
+        else _VSTOOLS_COLOR_SYNTAX_WARNING_FILTER
+    )
+    if no_color:
+        env["NO_COLOR"] = "1"
+    return env
+
+
+def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None:
+    """Probe imports once when the resolved launcher uses this interpreter."""
+    if not command or Path(command[0]).resolve() != Path(sys.executable).resolve():
+        return
+    probe_code = (
+        "from frame_compare.vspreview.launcher import prepare_vspreview_compatibility; "
+        "prepare_vspreview_compatibility(); import vspreview.init"
+    )
+    if runtime_kind().casefold() == "windows-portable":
+        probe_code = (
+            "from frame_compare.vspreview.launcher import preload_vapoursynth_runtime; "
+            f"preload_vapoursynth_runtime(); {probe_code}"
+        )
+    probe_command = [sys.executable, "-c", probe_code]
+    try:
+        result = subprocess.run(  # nosec B603
+            probe_command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=_STARTUP_PROBE_TIMEOUT_SECONDS,
+            env=env,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        timeout_output: str | None = None
+        raw_timeout_output = exc.stderr
+        if isinstance(raw_timeout_output, str):
+            timeout_output = raw_timeout_output
+        elif isinstance(raw_timeout_output, bytes):
+            timeout_output = raw_timeout_output.decode("utf-8", errors="replace")
+        raise VSPreviewError(
+            "startup dependency check timed out",
+            command=tuple(command),
+            startup_stderr=(
+                None
+                if timeout_output is None
+                else _redact_inherited_secrets(timeout_output, env)[-_STARTUP_STDERR_LIMIT:]
+            ),
+        ) from exc
+    except OSError as exc:
+        raise VSPreviewError(
+            "startup dependency check could not run",
+            command=tuple(command),
+        ) from exc
+    if result.returncode == 0:
+        return
+    startup_stderr = _redact_inherited_secrets(result.stderr, env)[-_STARTUP_STDERR_LIMIT:]
+    match = _MISSING_MODULE_PATTERN.search(startup_stderr)
+    missing_module = match.group(1) if match else None
+    public_reason = (
+        f"Missing optional dependency: {missing_module}"
+        if missing_module is not None
+        else "VSPreview failed its startup dependency check."
+    )
+    raise VSPreviewError(
+        public_reason,
+        missing_module=missing_module,
+        command=tuple(command),
+        returncode=result.returncode,
+        startup_stderr=startup_stderr,
+    )
+
+
+def _redact_inherited_secrets(text: str, env: dict[str, str]) -> str:
+    """Redact exact sensitive environment values inherited by the child process."""
+    sensitive_values = {
+        value for key, value in env.items() if value and _SENSITIVE_ENV_KEY_PATTERN.search(key)
+    }
+    for value in sorted(sensitive_values, key=len, reverse=True):
+        text = text.replace(value, "<redacted>")
+    return text
 
 
 def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
@@ -230,16 +327,9 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         command,
         stdin=None,
         stdout=None,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
+        stderr=None,
         env=env,
-        bufsize=1,
     ) as process:
-        assert process.stderr is not None
-        for line in process.stderr:
-            sys.stderr.write(line)
-        sys.stderr.flush()
         return process.wait()
 
 
@@ -250,16 +340,29 @@ def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
         suggested_offsets_by_key=request.suggested_offsets_by_key,
         cache_dir=request.cache_dir,
         frame_props_by_stem=request.frame_props_by_stem,
+        presentation_names_by_stem=request.presentation_names_by_stem,
     )
 
 
 def _resolve_launch_command(script_path: Path) -> list[str]:
     """Resolve the launch command for VSPreview.
 
-    Priority per vspreview spec §6.3:
-    1. If `vspreview` executable exists in PATH: `vspreview {script_path}`
-    2. Else: `{sys.executable} -m vspreview {script_path}`
+    The current interpreter uses Frame Compare's compatibility bootstrap. The
+    managed Windows runtime additionally preloads VapourSynth before Qt can
+    register its private native runtime. An external launcher remains the fallback
+    when VSPreview is not installed in the current interpreter.
     """
+    if (
+        runtime_kind().casefold() == "windows-portable"
+        or importlib.util.find_spec("vspreview") is not None
+    ):
+        return [
+            sys.executable,
+            "-m",
+            "frame_compare.vspreview.launcher",
+            str(script_path),
+        ]
+
     vspreview_path = shutil.which("vspreview")
     if vspreview_path is not None:
         return [vspreview_path, str(script_path)]

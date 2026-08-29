@@ -29,7 +29,6 @@ from frame_compare.config.schema_enums import (
 )
 from frame_compare.config.schema_models import (
     AudioAlignmentConfig,
-    DiagnosticsConfig,
     LoggingConfig,
     PathsConfig,
     ScreenshotsConfig,
@@ -126,12 +125,6 @@ def test_analysis_performance_mode_rejects_invalid_value(mode: str) -> None:
         AnalysisConfig.model_validate({"performance_mode": mode})
 
 
-def test_report_output_dir_empty_string_to_none() -> None:
-    """Test that empty string output_dir is normalized to None."""
-    config = ReportConfig(output_dir="")
-    assert config.output_dir is None
-
-
 def test_schema_model_section_defaults_are_representative() -> None:
     """Section models keep the canonical runtime defaults."""
     paths = PathsConfig()
@@ -143,15 +136,12 @@ def test_schema_model_section_defaults_are_representative() -> None:
     sources = SourcesConfig()
     tmdb = TmdbConfig()
     report = ReportConfig()
-    diagnostics = DiagnosticsConfig()
     logging = LoggingConfig()
 
     assert paths.model_dump() == {
         "input_dir": "comparison_videos",
-        "screenshots_dir": "screenshots",
         "generated_dir": "generated",
         "config_dir": "config",
-        "use_run_folders": True,
     }
     assert analysis.user_frames == []
     assert analysis.random_frame_count == 10
@@ -214,9 +204,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert report.default_mode == "slider"
     assert report.embed_images is False
     assert report.auto_open is True
-    assert diagnostics.model_dump() == {
-        "per_frame_nits": False,
-    }
     assert logging.level == LogLevel.INFO
     assert logging.format == LogFormat.CONSOLE
 
@@ -235,7 +222,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
         (SlowpicsConfig, {}),
         (TmdbConfig, {}),
         (ReportConfig, {}),
-        (DiagnosticsConfig, {}),
         (LoggingConfig, {}),
     ],
     ids=lambda value: value.__name__ if isinstance(value, type) else None,
@@ -254,6 +240,13 @@ def test_root_config_ignores_unknown_keys() -> None:
     assert "unknown_future_section" not in config.model_fields_set
 
 
+def test_root_config_ignores_removed_diagnostics_section() -> None:
+    config = ConfigSchema.model_validate({"diagnostics": {"per_frame_nits": True}})
+
+    assert "diagnostics" not in config.model_fields_set
+    assert not hasattr(config, "diagnostics")
+
+
 @pytest.mark.parametrize(
     ("model_type", "removed_key", "value"),
     [
@@ -263,6 +256,23 @@ def test_root_config_ignores_unknown_keys() -> None:
     ],
 )
 def test_removed_inert_config_keys_fail_validation(
+    model_type: type[BaseModel],
+    removed_key: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model_type.model_validate({removed_key: value})
+
+
+@pytest.mark.parametrize(
+    ("model_type", "removed_key", "value"),
+    [
+        (PathsConfig, "screenshots_dir", "screenshots"),
+        (PathsConfig, "use_run_folders", True),
+        (ReportConfig, "output_dir", "reports"),
+    ],
+)
+def test_removed_generated_data_config_keys_fail_ordinary_nested_validation(
     model_type: type[BaseModel],
     removed_key: str,
     value: object,

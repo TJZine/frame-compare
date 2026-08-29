@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.types import WorkspacePaths
 
 _WINDOWS_RESERVED_FILENAMES = {
@@ -46,7 +47,7 @@ def create_slowpics_url_shortcut(
     """Create a deterministic Windows InternetShortcut-style file."""
     try:
         output_dir = _select_shortcut_directory(workspace)
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, PathEscapesRootError) as exc:
         return SlowpicsShortcutResult(
             success=False,
             warning=f"slow.pics shortcut: failed to resolve URL shortcut directory: {exc}",
@@ -54,10 +55,7 @@ def create_slowpics_url_shortcut(
     if output_dir is None:
         return SlowpicsShortcutResult(
             success=False,
-            warning=(
-                "slow.pics shortcut: could not choose a safe output directory from "
-                "the run, screenshots, and generated paths"
-            ),
+            warning="slow.pics shortcut: no reserved run directory is available",
         )
 
     shortcut_path = output_dir / _shortcut_filename(
@@ -78,40 +76,17 @@ def create_slowpics_url_shortcut(
 
 
 def _select_shortcut_directory(workspace: WorkspacePaths) -> Path | None:
-    if workspace.run_dir is not None:
-        return workspace.run_dir
-
-    root = workspace.root.resolve()
-    screenshots_dir = workspace.screenshots_dir.resolve()
-    generated_dir = workspace.generated_dir.resolve()
-
-    if _normalized_anchor(screenshots_dir) != _normalized_anchor(generated_dir):
+    if workspace.run_dir is None:
         return None
-
-    try:
-        common_parent = Path(os.path.commonpath((str(screenshots_dir), str(generated_dir))))
-    except ValueError:
+    resolved_run_dir = require_managed_descendant(workspace.generated_root, workspace.run_dir)
+    resolved_generated_root = workspace.generated_root.resolve()
+    if (
+        workspace.run_dir.is_symlink()
+        or workspace.run_dir.is_junction()
+        or resolved_run_dir.parent != resolved_generated_root
+    ):
         return None
-    common_parent = common_parent.resolve()
-
-    if not _is_safe_shortcut_parent(common_parent, root):
-        return None
-    return common_parent
-
-
-def _is_safe_shortcut_parent(parent: Path, root: Path) -> bool:
-    if _normalized_anchor(parent) != _normalized_anchor(root):
-        return False
-    if not parent.is_relative_to(root):
-        return False
-    if parent == _anchor_path(parent):
-        return False
-    try:
-        if parent == Path.home().resolve():
-            return False
-    except RuntimeError:
-        return False
-    return True
+    return resolved_run_dir
 
 
 def _shortcut_filename(
@@ -142,13 +117,3 @@ def _fallback_stem_from_url(slowpics_url: str) -> str:
     if stem is not None:
         return stem
     return hashlib.sha256(slowpics_url.encode("utf-8")).hexdigest()[:12]
-
-
-def _anchor_path(path: Path) -> Path:
-    if path.anchor:
-        return Path(path.anchor)
-    return path
-
-
-def _normalized_anchor(path: Path) -> str:
-    return os.path.normcase(path.anchor)

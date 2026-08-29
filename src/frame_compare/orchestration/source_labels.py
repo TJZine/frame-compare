@@ -24,6 +24,14 @@ class _LabelCandidate:
     source_index: int
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedSourceLabel:
+    """Canonical label plus the explicit-label provenance needed by presentation."""
+
+    value: str
+    explicit: bool
+
+
 def resolve_source_labels(
     *,
     ordered_paths: list[Path],
@@ -32,6 +40,26 @@ def resolve_source_labels(
     label_parser: Literal["auto", "guessit", "anitopy"],
 ) -> dict[Path, str]:
     """Resolve unique presentation labels without changing source identity."""
+    return {
+        path: label.value
+        for path, label in resolve_source_label_details(
+            ordered_paths=ordered_paths,
+            overrides_by_path=overrides_by_path,
+            label_mode=label_mode,
+            label_parser=label_parser,
+        ).items()
+    }
+
+
+def resolve_source_label_details(
+    *,
+    ordered_paths: list[Path],
+    overrides_by_path: dict[Path, SourceOverrideConfig],
+    label_mode: Literal["stem", "filename", "parsed"],
+    label_parser: Literal["auto", "guessit", "anitopy"],
+    parsed_metadata_by_path: dict[Path, ParsedMetadata] | None = None,
+) -> dict[Path, ResolvedSourceLabel]:
+    """Resolve canonical labels while retaining explicit-label provenance."""
     candidates = [
         _label_candidate(
             path=path,
@@ -39,6 +67,7 @@ def resolve_source_labels(
             label_mode=label_mode,
             label_parser=label_parser,
             source_index=index,
+            parsed_metadata=(parsed_metadata_by_path or {}).get(path),
         )
         for index, path in enumerate(ordered_paths)
     ]
@@ -55,11 +84,11 @@ def resolve_source_labels(
         for candidate in candidates
     ]
 
-    resolved: dict[Path, str] = {}
+    resolved: dict[Path, ResolvedSourceLabel] = {}
     used = {candidate.label for candidate in qualified if candidate.explicit}
     for candidate in qualified:
         if candidate.explicit:
-            resolved[candidate.path] = candidate.label
+            resolved[candidate.path] = ResolvedSourceLabel(candidate.label, True)
             continue
         label = candidate.label
         if label in used:
@@ -70,7 +99,7 @@ def resolve_source_labels(
                 suffix += 1
                 label = f"{base} ({suffix})"
         used.add(label)
-        resolved[candidate.path] = label
+        resolved[candidate.path] = ResolvedSourceLabel(label, False)
     return resolved
 
 
@@ -90,16 +119,21 @@ def _label_candidate(
     label_mode: Literal["stem", "filename", "parsed"],
     label_parser: Literal["auto", "guessit", "anitopy"],
     source_index: int,
+    parsed_metadata: ParsedMetadata | None,
 ) -> _LabelCandidate:
     if override is not None and override.label is not None:
         return _LabelCandidate(path, override.label, True, source_index)
     if label_mode == "filename":
         label = normalize_derived_display_text(path.name)
     elif label_mode == "parsed":
-        parsed = parse_filename(
-            path.name,
-            parser_priority=label_parser,
-            alternate_policy="fallback",
+        parsed = (
+            parsed_metadata
+            if parsed_metadata is not None
+            else parse_filename(
+                path.name,
+                parser_priority=label_parser,
+                alternate_policy="fallback",
+            )
         )
         label = _parsed_label(parsed, fallback=path.stem)
     else:
@@ -161,4 +195,9 @@ def _qualify_derived_collision(candidate: _LabelCandidate) -> _LabelCandidate:
     )
 
 
-__all__ = ["normalize_derived_display_text", "resolve_source_labels"]
+__all__ = [
+    "ResolvedSourceLabel",
+    "normalize_derived_display_text",
+    "resolve_source_label_details",
+    "resolve_source_labels",
+]

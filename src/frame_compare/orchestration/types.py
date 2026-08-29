@@ -68,19 +68,12 @@ class RunRequest:
         return cli_config_overrides_from(self)
 
 
-def _empty_str_list() -> list[str]:
-    return []
-
-
-def _empty_phase_timings() -> dict[str, float]:
-    return {}
-
-
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
 type SlowpicsUploadConfirmationDecision = Literal["confirmed", "declined"]
+type FullWindowRetryConfirmationDecision = Literal["confirmed", "declined"]
 type MetricsCacheStatus = Literal["skipped", "hit", "miss"]
 type SlowpicsUploadConfirmationStatus = Literal[
     "not_applicable",
@@ -107,6 +100,25 @@ class SlowpicsUploadConfirmationFn(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class FullWindowRetryConfirmationRequest:
+    """Bounded facts passed to the CLI-owned full-window retry confirmation."""
+
+    requested_frame_count: int
+    eligible_frame_count: int
+    ignore_lead_seconds: float
+    ignore_trail_seconds: float
+
+
+class FullWindowRetryConfirmationFn(Protocol):
+    """CLI-owned callback for a run-only full-window retry decision."""
+
+    def __call__(
+        self,
+        request: FullWindowRetryConfirmationRequest,
+    ) -> FullWindowRetryConfirmationDecision: ...
+
+
+@dataclass(frozen=True, slots=True)
 class ReservedRunCapture:
     """Facts known immediately after a run folder's identity is durable."""
 
@@ -114,6 +126,7 @@ class ReservedRunCapture:
     clip_count: int
     preflight_duration: float
     preflight_warnings: tuple[str, ...]
+    run_warnings: list[str]
 
 
 @dataclass(frozen=True)
@@ -136,9 +149,9 @@ class RunResult:
     metrics_cache_status: MetricsCacheStatus = "skipped"
 
     # Diagnostics
-    errors: list[str] = field(default_factory=_empty_str_list)
-    warnings: list[str] = field(default_factory=_empty_str_list)
-    phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
+    errors: list[str] = field(default_factory=list[str])
+    warnings: list[str] = field(default_factory=list[str])
+    phase_timings: dict[str, float] = field(default_factory=dict[str, float])
 
 
 @dataclass
@@ -150,6 +163,7 @@ class RunDependencies:
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
+    confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=_utc_now)
     monotonic_timer: Callable[[], float] = field(default=monotonic)
     capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(

@@ -22,6 +22,9 @@ const lensPath = path.join(
     'assets',
     'lens.js',
 );
+const viewerFormatPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'viewer_format.js');
+const inspectorPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'inspector.js');
+const viewportPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'viewport.js');
 
 let activeDocument = null;
 
@@ -29,13 +32,34 @@ function payloadWithClipCount(clipCount) {
     const clips = Array.from({ length: clipCount }, (_, idx) => ({
         name: `clip-${idx + 1}`,
         label: `Clip ${idx + 1}`,
+        display: {
+            primary: `Clip ${idx + 1}`,
+            release: '',
+            control: `Clip ${idx + 1}`,
+            micro: `Clip ${idx + 1}`,
+            filename: `clip-${idx + 1}.mkv`,
+        },
         frame_count: 100,
         resolution: [1920, 1080],
         fps: 24,
-        hdr: false,
+        size_bytes: 17 * 1024 * 1024 * 1024,
+        signal: {
+            is_hdr: false,
+            primaries: 1,
+            transfer: 1,
+            matrix: 10,
+            range: 'limited',
+            dolby_vision_rpu: false,
+        },
+        presentation: {
+            state: 'sdr',
+            tone_curve: null,
+            target_nits: null,
+        },
+        active_picture: null,
     }));
     return {
-        version: '1.0',
+        version: '1.2',
         report_id: 'report_viewer_state_contract',
         generated_at: '2026-06-02T12:00:00+00:00',
         title: 'Viewer State Contract',
@@ -53,11 +77,14 @@ function payloadWithClipCount(clipCount) {
         frames: [10, 20].map((number) => ({
             number,
             label: `Frame ${number}`,
-            detail: `Source frame ${number}`,
+            detail: 'Selected comparison frame',
             category: 'selected',
-            images: clips.map((clip) => ({
+            images: clips.map((clip, clipIndex) => ({
                 clip: clip.name,
                 src: `${clip.name}/${number}.png`,
+                source_frame: number,
+                picture_type: 'B',
+                dolby_vision_rpu: number === 10 && clipIndex === 0,
             })),
         })),
     };
@@ -67,6 +94,9 @@ function fakeElement() {
     const classes = new Set();
     const attributes = new Map();
     const listeners = new Map();
+    let definitionValues = null;
+    const inspectorPrimary = { value: null };
+    const inspectorRelease = { value: null };
     return {
         value: '',
         textContent: '',
@@ -127,15 +157,30 @@ function fakeElement() {
         focus() {
             if (activeDocument) activeDocument.activeElement = this;
         },
+        scrollIntoView() {},
         replaceChildren(...children) {
             this.children = children;
+        },
+        querySelector(selector) {
+            if (selector === '.rv-inspector-clip-primary') {
+                if (!inspectorPrimary.value) inspectorPrimary.value = fakeElement();
+                return inspectorPrimary.value;
+            }
+            if (selector === '.rv-inspector-clip-release') {
+                if (!inspectorRelease.value) inspectorRelease.value = fakeElement();
+                return inspectorRelease.value;
+            }
+            return null;
         },
         querySelectorAll(selector) {
             if (selector === '.rv-inspector-clip-heading span') {
                 return [fakeElement(), fakeElement()];
             }
             if (selector === 'dd') {
-                return [fakeElement(), fakeElement(), fakeElement(), fakeElement()];
+                if (definitionValues === null) {
+                    definitionValues = Array.from({ length: 7 }, () => fakeElement());
+                }
+                return definitionValues;
             }
             return [];
         },
@@ -201,11 +246,13 @@ function loadViewer({ clipCount, savedState = null }) {
         },
     };
     activeDocument = context.document;
-    const script = `${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__Lens = Lens;\nglobalThis.__ReportViewer = ReportViewer;`;
+    const script = `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(inspectorPath, 'utf8')}\n${fs.readFileSync(viewportPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__Lens = Lens;\nglobalThis.__Inspector = Inspector;\nglobalThis.__Viewport = Viewport;\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
     assert.equal(typeof context.__Lens.create, 'function');
 
     const viewer = context.__ReportViewer;
+    viewer.inspector = context.__Inspector.create(viewer);
+    viewer.viewport = context.__Viewport.create(viewer);
     const payload = viewer.normalizePayload(payloadWithClipCount(clipCount));
     viewer.state.data = payload;
     viewer.state.mode = payload.default_mode;
@@ -268,6 +315,7 @@ function loadViewer({ clipCount, savedState = null }) {
         btnAlignToggle: fakeElement(),
         alignmentStatus: fakeElement(),
         btnInfo: fakeElement(),
+        btnInspector: fakeElement(),
         inspector: fakeElement(),
         btnInspectorClose: fakeElement(),
         inspectorTabs: ['frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
@@ -283,6 +331,7 @@ function loadViewer({ clipCount, savedState = null }) {
         inspectorFrameCategory: fakeElement(),
         inspectorFrameDetail: fakeElement(),
         inspectorFramePosition: fakeElement(),
+        inspectorSourceFrames: fakeElement(),
         inspectorClips: fakeElement(),
         inspectorAlignPair: fakeElement(),
         inspectorAlignPreset: fakeElement(),
@@ -315,12 +364,19 @@ function loadViewer({ clipCount, savedState = null }) {
             ...fakeElement(),
             dataset: { filmstripSize: size },
         })),
+        filmstrip: fakeElement(),
         activeFilterBadge: fakeElement(),
         alignPopover: {
             ...fakeElement(),
             hidden: true,
         },
     };
+    viewer.dom.btnInfo.setAttribute('aria-label', 'Report information');
+    viewer.dom.btnInfo.setAttribute('title', 'Report Info');
+    viewer.dom.btnInspector.setAttribute('aria-controls', 'rv-inspector');
+    viewer.dom.btnInspector.setAttribute('aria-expanded', 'false');
+    viewer.dom.btnInspector.setAttribute('aria-label', 'Open Inspector');
+    viewer.dom.btnInspector.setAttribute('title', 'Inspector (I)');
     viewer.dom.inspectorFocusables = [
         viewer.dom.btnInspectorClose,
         ...viewer.dom.inspectorTabs,
@@ -349,7 +405,7 @@ function loadViewer({ clipCount, savedState = null }) {
     };
     viewer.reviewController = null;
     viewer.render = function renderStateOnly() {
-        this.applyAlignment();
+        this.viewport.applyAlignment();
         this.persistViewportState();
     };
 
@@ -359,7 +415,7 @@ function loadViewer({ clipCount, savedState = null }) {
 
     viewer.applyDefaultSelection();
     viewer.restorePersistedState();
-    viewer.applyAlignment();
+    viewer.viewport.applyAlignment();
     return {
         viewer,
         storage,
@@ -391,6 +447,38 @@ function keyboardEvent(key) {
 const summary = {};
 
 {
+    const { viewer } = loadViewer({ clipCount: 4 });
+    const clip = {
+        name: 'canonical-name',
+        label: 'Canonical label',
+        display: {
+            primary: 'Primary release identity',
+            release: 'Release descriptor',
+            control: 'Control descriptor',
+            micro: 'Micro descriptor',
+            filename: 'Exact.File.Name.mkv',
+        },
+    };
+    assert.equal(viewer.clipDisplay(clip), 'Control descriptor');
+    assert.equal(viewer.clipDisplay(clip, 'micro'), 'Micro descriptor');
+    assert.equal(
+        viewer.clipAccessibleName(clip),
+        'Primary release identity — Exact.File.Name.mkv',
+    );
+    assert.equal(viewer.stableClipRole(0), 'Reference');
+    assert.equal(viewer.stableClipRole(1), 'Comparison 1');
+    viewer.state.data.default_selection.left_clip_index = 2;
+    assert.equal(viewer.stableClipRole(0), 'Comparison 1');
+    assert.equal(viewer.stableClipRole(1), 'Comparison 2');
+    assert.equal(viewer.stableClipRole(2), 'Reference');
+    assert.equal(viewer.stableClipRole(3), 'Comparison 3');
+    summary.clipDisplayProfiles = {
+        requiredPayloadProfiles: true,
+        stableInspectorRoles: true,
+    };
+}
+
+{
     const { viewer } = loadViewer({
         clipCount: 4,
         savedState: {
@@ -403,6 +491,9 @@ const summary = {};
             panX: 12,
             panY: -5,
             revealPercent: 120,
+            alignmentPreset: 'custom',
+            alignX: 77,
+            alignY: -88,
             pairAlignments: {
                 '0:1': { alignmentPreset: 'custom', alignX: 5, alignY: -2 },
                 '1:0': { alignmentPreset: 'custom', alignX: -7, alignY: 3 },
@@ -432,6 +523,37 @@ const summary = {};
         currentAlignment: [viewer.state.alignX, viewer.state.alignY],
         alignmentStatus: viewer.dom.alignmentStatus.textContent,
     };
+}
+
+{
+    const { viewer } = loadViewer({
+        clipCount: 2,
+        savedState: {
+            alignmentPreset: 'custom',
+            alignX: 77,
+            alignY: -88,
+        },
+    });
+
+    assert.deepEqual(Object.keys(viewer.state.pairAlignments), []);
+    assert.equal(viewer.state.alignmentPreset, 'none');
+    assert.equal(viewer.state.alignX, 0);
+    assert.equal(viewer.state.alignY, 0);
+
+    const malformedStorage = loadViewer({
+        clipCount: 2,
+        savedState: {
+            pairAlignments: {
+                '0:1': { alignmentPreset: 'custom', alignX: 6, alignY: -7 },
+            },
+        },
+    });
+    malformedStorage.storage.set(malformedStorage.storageKey, '{malformed');
+    malformedStorage.viewer.restorePersistedState();
+    assert.deepEqual(Object.keys(malformedStorage.viewer.state.pairAlignments), ['0:1']);
+    assert.equal(malformedStorage.viewer.state.alignmentPreset, 'custom');
+    assert.equal(malformedStorage.viewer.state.alignX, 6);
+    assert.equal(malformedStorage.viewer.state.alignY, -7);
 }
 
 {
@@ -528,18 +650,22 @@ const summary = {};
     assert.equal(viewer.state.inspectorTab, 'align');
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
+    viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
+    viewer.setInspectorOpen(false, { focus: false, save: false });
 
     assert.equal(reviewMetrics.creates, 0);
     viewer.setInspectorTab('review');
     assert.equal(viewer.state.inspectorTab, 'review');
-    assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
+    assert.deepEqual(reviewMetrics, { creates: 0, binds: 0, renders: 0 });
     viewer.setInspectorTab('export');
     viewer.setInspectorTab('review');
-    assert.equal(reviewMetrics.creates, 1);
+    assert.equal(reviewMetrics.creates, 0);
     viewer.setInspectorTab('export');
     const focusables = viewer.dom.inspectorFocusables;
-    viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
-    document.activeElement = viewer.dom.btnInfo;
+    const initiatingControl = fakeElement();
+    document.activeElement = initiatingControl;
+    const infoLabel = viewer.dom.btnInfo.getAttribute('aria-label');
+    const infoTitle = viewer.dom.btnInfo.getAttribute('title');
     viewer.setInspectorOpen(true);
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[4]);
     const wrapEvent = keyboardEvent('ArrowRight');
@@ -550,8 +676,16 @@ const summary = {};
     viewer.setInspectorTab('export');
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
+    assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'true');
+    assert.equal(viewer.dom.btnInspector.classList.contains('active'), true);
     viewer.setInspectorOpen(false);
-    assert.equal(document.activeElement, viewer.dom.btnInfo);
+    assert.equal(document.activeElement, initiatingControl);
+    assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'false');
+    assert.equal(viewer.dom.btnInspector.classList.contains('active'), false);
+    assert.equal(viewer.dom.btnInfo.getAttribute('aria-label'), infoLabel);
+    assert.equal(viewer.dom.btnInfo.getAttribute('title'), infoTitle);
+    assert.equal(viewer.dom.btnInfo.getAttribute('aria-pressed'), null);
+    const restoredKeyboardFocusToOrigin = document.activeElement === initiatingControl;
     assert.equal(viewer.state.inspectorRestoreFocus, null);
     assert.equal(viewer.dom.inspector.inert, true);
     focusables.forEach((element) => {
@@ -564,6 +698,10 @@ const summary = {};
         assert.equal(element.tabIndex, index === 4 ? 0 : -1);
     });
     viewer.setInspectorOpen(false);
+    document.activeElement = document.body;
+    viewer.setInspectorOpen(true);
+    viewer.setInspectorOpen(false);
+    assert.equal(document.activeElement, viewer.dom.btnInspector);
     viewer.setBlinkIntervalMs(300);
     viewer.setBlinkPaused(true);
     const saved = persisted(storage, storageKey);
@@ -583,9 +721,59 @@ const summary = {};
         blinkPausedPersisted: Object.hasOwn(saved, 'blinkPaused'),
         closedInspectorInert: viewer.dom.inspector.inert,
         closedInspectorTabIndex: viewer.dom.btnInspectorClose.getAttribute('tabindex'),
-        restoredKeyboardFocusToInfo: document.activeElement === viewer.dom.btnInfo,
+        restoredKeyboardFocusToOrigin,
         clearedKeyboardFocusRestoreTarget: viewer.state.inspectorRestoreFocus === null,
     };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 1 });
+    viewer.setInspectorOpen(true, { focus: false, save: false });
+    const values = viewer.dom.inspectorClips.children[0].querySelectorAll('dd');
+    assert.equal(values.length, 7);
+    assert.equal(values[4].textContent, '17.00 GiB');
+    assert.equal(values[5].textContent, 'SDR · BT.709 / BT.709 / BT.2020c · Limited');
+    assert.equal(values[6].textContent, 'SDR');
+    summary.inspectorClipMetadata = {
+        valueCount: values.length,
+        fileSize: values[4].textContent,
+        signal: values[5].textContent,
+        presentation: values[6].textContent,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    const release = '2160p | WEB-DL | GROUP';
+    viewer.state.data.clips[0].display = {
+        primary: `Example (2026) | ${release}`,
+        release,
+    };
+    viewer.state.data.clips[1].display = {
+        primary: 'Explicit comparison label',
+        release,
+    };
+    viewer.setInspectorOpen(true, { focus: false, save: false });
+    const automaticRelease = viewer.dom.inspectorClips.children[0]
+        .querySelector('.rv-inspector-clip-release');
+    const explicitRelease = viewer.dom.inspectorClips.children[1]
+        .querySelector('.rv-inspector-clip-release');
+    assert.equal(automaticRelease.hidden, true);
+    assert.equal(automaticRelease.textContent, '');
+    assert.equal(explicitRelease.hidden, false);
+    assert.equal(explicitRelease.textContent, release);
+    summary.inspectorReleasePresentation = {
+        automaticIdentityNotDuplicated: automaticRelease.hidden,
+        explicitLabelKeepsReleaseDifferentiator: !explicitRelease.hidden,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    viewer.setInspectorOpen(true, { focus: false, save: false });
+    summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
+        item => item.textContent,
+    );
 }
 
 {
@@ -740,45 +928,79 @@ const summary = {};
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
-    viewer.state.mode = 'slider';
-    viewer.state.zoom = 2;
-    viewer.state.revealPercent = 25;
-    viewer.dom.canvas.offsetWidth = 0;
-    viewer.dom.canvas.clientWidth = 0;
-    viewer.dom.canvas.getBoundingClientRect = () => ({ width: 800 });
-    viewer.dom.labelLeft.offsetWidth = 90;
-    viewer.dom.labelRight.offsetWidth = 80;
-
-    assert.equal(viewer.untransformedCanvasWidth(), 400);
-    const positions = viewer.smartLabelPositions(400, 90, 80);
-    assert.equal(positions.leftX, 290);
-    assert.equal(positions.rightX, 310);
-    viewer.updateSmartStageLabels();
-    assert.equal(viewer.dom.canvas.style.values['--label-left-x'], '290px');
-    assert.equal(viewer.dom.canvas.style.values['--label-right-x'], '310px');
-    summary.smartLabelGeometry = {
-        untransformedWidth: viewer.untransformedCanvasWidth(),
-        labelLeftX: viewer.dom.canvas.style.values['--label-left-x'],
-        labelRightX: viewer.dom.canvas.style.values['--label-right-x'],
+    const { viewer } = loadViewer({ clipCount: 2 });
+    const clip = {
+        label: 'Title.2160p.WEB-DL.Service-GROUP',
+        display: {
+            primary: 'Title.2160p.WEB-DL.Service-GROUP',
+            release: '2160p | Service WEB-DL | GROUP',
+            control: 'Title.2160p.WEB-DL.Service-GROUP',
+            micro: 'Service WEB-DL',
+            filename: 'Title.2160p.WEB-DL.Service-GROUP.mkv',
+        },
+        resolution: [3840, 2160],
+        size_bytes: 17 * 1024 ** 3,
+        signal: { is_hdr: true },
     };
+    assert.equal(
+        viewer.clipOverlayLabel(clip),
+        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
+    );
+    assert.equal(
+        viewer.clipOverlayLabel(clip, 'Left'),
+        'LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
+    );
+    summary.sourceOverlayLabels = {
+        single: viewer.clipOverlayLabel(clip),
+        slider: viewer.clipOverlayLabel(clip, 'Left'),
+        diff: viewer.clipOverlayLabel(clip, 'Base'),
+    };
+
+    assert.equal(viewer.formatFileSize(1), '1.00 B');
+    assert.equal(viewer.formatFileSize(1023), '1023.00 B');
+    assert.equal(viewer.formatFileSize(1024), '1.00 KiB');
+    assert.equal(viewer.formatFileSize(512 * 1024), '512.00 KiB');
+    assert.equal(viewer.formatFileSize(1024 ** 2), '1.00 MiB');
+    assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
+    assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
+    assert.equal(viewer.formatFileSize(0), '');
+    assert.equal(viewer.formatFileSize(-1), '');
+    assert.equal(viewer.formatFileSize(Number.NaN), '');
+    assert.equal(
+        viewer.formatSignal({
+            is_hdr: true,
+            primaries: 9,
+            transfer: 16,
+            matrix: 10,
+            range: 'limited',
+            dolby_vision_rpu: true,
+        }),
+        'HDR · BT.2020 / PQ / BT.2020c · Limited · DV RPU',
+    );
 }
 
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    viewer.state.activeClipIdx = viewer.state.leftClipIdx;
-    const leftActiveLabels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(leftActiveLabels.left, 'Clip 1');
-    assert.equal(leftActiveLabels.right, '');
+    const labels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
+    assert.equal(labels.left, 'FIRST: Clip 1');
+    assert.equal(labels.right, 'SECOND: Clip 2');
 
+    viewer.state.mode = 'blink';
+    viewer.state.activeClipIdx = viewer.state.leftClipIdx;
+    viewer.updateImages();
+    assert.equal(viewer.dom.labelLeft.textContent, 'FIRST: Clip 1 • 1920×1080 • SDR • 17.00 GiB');
+    assert.equal(viewer.dom.labelRight.textContent, 'SECOND: Clip 2 • 1920×1080 • SDR • 17.00 GiB');
+    assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), true);
+    assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), false);
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
-    const rightActiveLabels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(rightActiveLabels.left, '');
-    assert.equal(rightActiveLabels.right, 'Clip 2');
+    viewer.updateImages();
+    assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), false);
+    assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), true);
     summary.blinkLabels = {
-        leftActive: leftActiveLabels,
-        rightActive: rightActiveLabels,
+        labels,
+        activeLabelMoved: false,
+        activeStateMoved: true,
     };
 }
 
@@ -811,9 +1033,105 @@ const summary = {};
 }
 
 {
+    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const buttons = ['first', 'second', 'third'].map(value => ({
+        ...fakeElement(),
+        dataset: { value },
+    }));
+    buttons[0].setAttribute('aria-checked', 'true');
+    buttons[1].setAttribute('aria-checked', 'false');
+    buttons[2].setAttribute('aria-checked', 'false');
+    let selected = 'first';
+    viewer.bindRadioGroup(buttons, button => {
+        selected = button.dataset.value;
+        buttons.forEach(item => item.setAttribute('aria-checked', item === button ? 'true' : 'false'));
+        viewer.syncRadioGroupTabStops(buttons);
+    });
+    viewer.syncRadioGroupTabStops(buttons);
+
+    let prevented = false;
+    let stopped = false;
+    buttons[0].dispatch('keydown', {
+        key: 'ArrowLeft',
+        preventDefault() { prevented = true; },
+        stopPropagation() { stopped = true; },
+    });
+
+    assert.equal(selected, 'third');
+    assert.equal(document.activeElement, buttons[2]);
+    assert.deepEqual(buttons.map(button => button.tabIndex), [-1, -1, 0]);
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    summary.radioGroupKeyboard = {
+        wrapsAndSelects: selected === 'third',
+        rovingTabStop: buttons[2].tabIndex === 0,
+        preventsNativeScroll: prevented,
+        stopsGlobalShortcut: stopped,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+    let prevented = false;
+    viewer.dom.modal.classList.remove('open');
+    viewer.dom.infoModal.classList.remove('open');
+    viewer.handleKey({
+        key: 'ArrowRight',
+        target: { tagName: 'DIV', isContentEditable: false, closest() { return null; } },
+        preventDefault() { prevented = true; },
+    });
+    assert.equal(viewer.state.currentFrameIdx, 1);
+    assert.equal(prevented, true);
+    summary.frameKeyboard = {
+        selectedNextFrame: viewer.state.currentFrameIdx === 1,
+        preventsNativeScroll: prevented,
+    };
+}
+
+{
+    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const items = [0, 1].map(idx => ({
+        ...fakeElement(),
+        dataset: { idx: String(idx) },
+        closest(selector) {
+            return selector === '.rv-filmstrip-item' ? this : null;
+        },
+    }));
+    const filmstrip = fakeElement();
+    filmstrip.children = items;
+    filmstrip.querySelector = selector => {
+        const match = selector.match(/data-idx="(\d+)"/);
+        return match ? items[Number(match[1])] : null;
+    };
+    viewer.dom.filmstrip = filmstrip;
+    viewer.dom.filterChips = [];
+    viewer.bindFilmstripEvents();
+
+    let prevented = false;
+    let stopped = false;
+    filmstrip.dispatch('keydown', {
+        key: 'ArrowRight',
+        target: items[0],
+        preventDefault() { prevented = true; },
+        stopPropagation() { stopped = true; },
+    });
+
+    assert.equal(viewer.state.currentFrameIdx, 1);
+    assert.equal(document.activeElement, items[1]);
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    summary.filmstripKeyboard = {
+        selectedNextFrame: viewer.state.currentFrameIdx === 1,
+        focusedSelection: document.activeElement === items[1],
+        preventsNativeScroll: prevented,
+        stopsGlobalShortcut: stopped,
+    };
+}
+
+{
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
-    viewer.setManualAlignment(4, 5);
+    viewer.viewport.setManualAlignment(4, 5);
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
@@ -822,7 +1140,7 @@ const summary = {};
     assert.equal(viewer.state.alignY, 0);
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
 
-    viewer.setManualAlignment(-1, 8);
+    viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
     assert.equal(viewer.state.alignX, 4);
     assert.equal(viewer.state.alignY, 5);
@@ -838,14 +1156,14 @@ const summary = {};
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
 
-    viewer.setManualAlignment(21, -3);
+    viewer.viewport.setManualAlignment(21, -3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 3);
     assert.equal(viewer.state.rightClipIdx, 0);
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
 
-    viewer.setManualAlignment(-21, 3);
+    viewer.viewport.setManualAlignment(-21, 3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 3);
@@ -864,7 +1182,7 @@ const summary = {};
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
 
-    viewer.setManualAlignment(12, 13);
+    viewer.viewport.setManualAlignment(12, 13);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
@@ -925,11 +1243,11 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 4 });
 
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
-    viewer.setAlignmentPreset('left-1');
+    viewer.viewport.setAlignmentPreset('left-1');
     assert.equal(viewer.state.alignX, -1);
     assert.equal(viewer.state.alignY, 0);
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: preset left 1px');
-    viewer.setAlignmentPreset('none');
+    viewer.viewport.setAlignmentPreset('none');
     assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
     summary.alignmentStatus = {
         neutral: 'Aligned: none',
@@ -943,7 +1261,7 @@ const summary = {};
 
     viewer.setMode('overlay');
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
-    viewer.setManualAlignment(9, -4);
+    viewer.viewport.setManualAlignment(9, -4);
     viewer.updateImages();
     assert.equal(viewer.dom.canvas.style.values['--align-x'], '9px');
     assert.equal(viewer.dom.canvas.style.values['--align-y'], '-4px');
@@ -1078,13 +1396,13 @@ const summary = {};
     };
     viewer.state.panX = 3;
     viewer.state.panY = 4;
-    viewer.setPan = function setPanWithoutLayout(x, y) {
-        this.state.panX = x;
-        this.state.panY = y;
+    viewer.viewport.setPan = function setPanWithoutLayout(x, y) {
+        this.viewer.state.panX = x;
+        this.viewer.state.panY = y;
     };
 
     assert.equal(
-        viewer.updatePanFromPointer({ pointerId: 7, clientX: 16, clientY: 20 }),
+        viewer.viewport.updatePanFromPointer({ pointerId: 7, clientX: 16, clientY: 20 }),
         true,
     );
     assert.deepEqual([viewer.state.panX, viewer.state.panY], [9, 4]);
@@ -1108,7 +1426,7 @@ const summary = {};
         lensPointHandled: true,
         lensTouchStart: { pointerId: 8, clientX: 20, clientY: 30 },
     };
-    viewer.stopPointerInteraction({ pointerId: 8, clientX: 20, clientY: 30 });
+    viewer.viewport.stopPointerInteraction({ pointerId: 8, clientX: 20, clientY: 30 });
     assert.equal(cycleCount, 0);
     summary.lensPanIndependence = {
         panAppliedWithoutInspectorGestureGate: true,
@@ -1126,9 +1444,9 @@ const summary = {};
     const touchSample = { ...viewer.lens.state.point };
     viewer.state.panX = 12;
     viewer.state.panY = -7;
-    viewer.applyPan();
-    viewer.applyZoom(1.75, { clampPan: false });
-    viewer.applyAlignment();
+    viewer.viewport.applyPan();
+    viewer.viewport.applyZoom(1.75, { clampPan: false });
+    viewer.viewport.applyAlignment();
     assert.deepEqual(viewer.lens.state.point, touchSample);
     assert.equal(viewer.lens.refreshes, 3);
     assert.equal(viewer.lens.syncs, 0);
@@ -1153,10 +1471,10 @@ const summary = {};
             isPanning: false,
             capturedPointerIds: new Set(),
         };
-        viewer.startPanFromPointer = () => { panStarts += 1; };
-        viewer.updatePanFromPointer = () => { panMoves += 1; return true; };
-        viewer.updateSliderFromPointer = () => { sliderMoves += 1; };
-        viewer.captureStagePointer = () => {};
+        viewer.viewport.startPanFromPointer = () => { panStarts += 1; };
+        viewer.viewport.updatePanFromPointer = () => { panMoves += 1; return true; };
+        viewer.viewport.updateSliderFromPointer = () => { sliderMoves += 1; };
+        viewer.viewport.captureStagePointer = () => {};
         viewer.startDeferredViewportGesture(
             { pointerId: 1, pointerType: 'touch', button: 0, clientX: 30, clientY: 40 },
             { clientX: 10, clientY: 20 },
@@ -1186,9 +1504,9 @@ const summary = {};
             return selector.split(', ').includes('.rv-lens-settings') ? this : null;
         },
     };
-    viewer.resetViewport = () => { resets += 1; };
-    viewer.zoomAtPoint = () => { zooms += 1; };
-    viewer.panByPixels = () => { pans += 1; };
+    viewer.viewport.resetViewport = () => { resets += 1; };
+    viewer.viewport.zoomAtPoint = () => { zooms += 1; };
+    viewer.viewport.panByPixels = () => { pans += 1; };
     viewer.state.mode = 'slider';
     viewer.handleViewportDoubleClick({ target: chromeTarget, preventDefault() {} });
     viewer.handleViewportWheel({
