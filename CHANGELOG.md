@@ -38,8 +38,10 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 - Bump Frame Compare to 0.5.0, classify the project as beta, and refresh the managed
   stack to Python 3.13.15, uv 0.12.7, VapourSynth R79/API R4.2,
-  L-SMASH-Works 1310, vs-placebo 2.0.4, Akarin 1.5.0, and VSZip 22.1.0.
-  Docker includes FFMS2 5.0; Windows portable intentionally excludes FFMS2.
+  L-SMASH-Works 1310, vs-placebo 2.0.4, Akarin 1.5.0, VSZip 22.1.0, and
+  VSPreview 0.20.1. Windows portable uses the LGPL FFmpeg
+  `n8.1.2-34-g9b6c8969e0` build. Docker uses Debian FFmpeg 7.1.5 and includes
+  FFMS2 5.0; Windows portable intentionally excludes FFMS2.
 - Batch compatible FFmpeg frame requests through one ordered decode pass and render
   independent source batches concurrently while preserving deterministic output
   order, exact per-frame facts, failure behavior, and progress reporting.
@@ -53,9 +55,11 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Improve offline viewer keyboard navigation, focus management, radio-group and
   filmstrip behavior, source-role labels, and accessible names without changing the
   self-contained report model.
-- Make `doctor` validate supported VapourSynth, L-SMASH-Works, vs-placebo, FFMS2,
-  FFmpeg, and ffprobe versions and required plugin surfaces rather than checking only
-  whether components are present.
+- Make `doctor` validate observable managed-runtime versions and required plugin
+  surfaces for VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg, and ffprobe
+  rather than checking only component presence. L-SMASH-Works' native version is
+  reported explicitly as unobservable while its required source functions are
+  verified.
 - Carry canonical exact-frame, signal, presentation, geometry, and tonemap facts
   through rendering, overlays, slow.pics upload planning, and reports.
 - Strengthen Frame Compare-owned L-SMASH index naming, managed-runtime isolation,
