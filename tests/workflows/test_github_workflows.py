@@ -76,12 +76,16 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "release.yml")
     steps = workflow["jobs"]["publish"]["steps"]
     names = [step.get("name") for step in steps]
+    prepare_notes = steps[names.index("Prepare validated release notes")]["run"]
     recheck = steps[names.index("Recheck main, collisions, and create exact tag")]["run"]
     draft = steps[names.index("Create a new draft release")]["run"]
     verify_draft = steps[names.index("Verify draft target and exact remote asset bytes")]["run"]
     publish = steps[names.index("Publish verified release")]["run"]
     verify_final = steps[names.index("Verify final publication state")]["run"]
 
+    assert names.index("Prepare validated release notes") < names.index(
+        "Recheck main, collisions, and create exact tag"
+    )
     assert names.index("Recheck main, collisions, and create exact tag") < names.index(
         "Create a new draft release"
     )
@@ -96,7 +100,10 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
     assert "git/ref/tags/${RELEASE_TAG}" in recheck
     assert "releases/tags/${RELEASE_TAG}" in recheck
     assert "ref=refs/tags/${RELEASE_TAG}" in recheck
+    assert '--release-notes-output "$RUNNER_TEMP/release-notes.md"' in prepare_notes
     assert '"draft=true"' in draft
+    assert '-f "body=${release_body}"' in draft
+    assert "See CHANGELOG.md at the tagged commit" not in draft
     assert "--method PATCH" in publish and '"draft=false"' in publish
     assert all(
         semantic in verify_draft
@@ -104,6 +111,7 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
             '"$remote_tag" != "$RELEASE_TAG"',
             '"$target" != "$EXPECTED_SHA"',
             '"$tag_sha" != "$EXPECTED_SHA"',
+            '"$remote_body" != "$expected_body"',
             '"${actual[*]}" != "${wanted[*]}"',
             '"$digest" != "sha256:${local_hash}"',
         )
@@ -114,6 +122,7 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
         '"$remote_tag" != "$RELEASE_TAG"',
         '"$target" != "$EXPECTED_SHA"',
         '"$tag_sha" != "$EXPECTED_SHA"',
+        '"$remote_body" != "$expected_body"',
         '"${actual[*]}" != "${wanted[*]}"',
         '"$digest" != "sha256:${local_hash}"',
     ):
@@ -126,6 +135,7 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
             '"$remote_tag" != "$RELEASE_TAG"',
             '"$target" != "$EXPECTED_SHA"',
             '"$tag_sha" != "$EXPECTED_SHA"',
+            '"$remote_body" != "$expected_body"',
             '"${actual[*]}" != "${wanted[*]}"',
             '"$digest" != "sha256:${local_hash}"',
         )

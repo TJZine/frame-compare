@@ -317,7 +317,8 @@ Current CI ownership:
   PR/manual entrypoint. Its `release` operation calls
   `.github/workflows/release.yml` from the selected exact commit, which requires
   channel/version/tag/SHA inputs, rechecks stable against current `main`, rejects
-  tag/release collisions, and publishes only after a complete draft asset proof.
+  tag/release collisions, renders the matching validated `CHANGELOG.md` section as
+  the release body, and publishes only after complete draft asset and body proof.
   Keeping dispatch at this pre-existing path makes the pre-merge RC reachable
   without a preparatory commit on `main`.
 - `.github/workflows/release-please.yml` runs only after the version currently
