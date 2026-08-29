@@ -66,9 +66,9 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 ### Fixed
 
 - Correct computed audio-alignment offsets to use the documented
-  `reference - comparison` sign convention. The pre-MVP shared alignment cache
-  format is reset to schema v1 so offsets produced under the previous convention are
-  not reused.
+  `reference - comparison` sign convention. Published v0.1.0 cache entries miss under
+  the new runtime-aware source-set identity; caches created by intermediate v0.5.0
+  pre-release builds should be cleared before final validation.
 - Merge FFprobe HDR color metadata field-by-field only when VapourSynth frame
   properties are missing, malformed, or H.273-unspecified.
 - Capture FFmpeg picture type from the same exact-frame extraction process used to
@@ -104,8 +104,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   incompatible runtimes.
 - Analysis, probe, alignment, and source-index caches include updated runtime
   identities and may be invalidated or rebuilt.
-- Previously retained computed alignment offsets are not reused after the sign
-  convention correction and shared alignment-cache schema reset.
+- Clear any shared alignment reuse cache produced by an intermediate v0.5.0 build
+  before validating the final candidate after the offset-sign correction.
 - Existing v1.1 reports remain self-contained; regenerated v1.2 reports start with
   fresh browser-local viewer and review state.
 
