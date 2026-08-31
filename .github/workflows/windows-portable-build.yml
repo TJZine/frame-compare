@@ -16,18 +16,21 @@ on:
         description: Require the protected signing path
         required: true
         type: boolean
+      environment_name:
+        description: GitHub environment that owns approval and signing-secret access
+        required: true
+        type: string
       prepare_release_assets:
         description: Prepare the exact four versioned release assets
         required: true
         type: boolean
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML:
-        required: false
 
 jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 90
+    environment:
+      name: ${{ inputs.environment_name }}
     env:
       REQUIRE_SIGNING: ${{ inputs.require_signing }}
     steps:

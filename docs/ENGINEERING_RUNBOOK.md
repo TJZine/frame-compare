@@ -341,7 +341,7 @@ Canonical verification path:
 
    ```bash
    WorkflowRef='<branch-containing-the-workflow>'
-   ExpectedSha='<40-character-lowercase-tested-sha>'
+   ExpectedSha='<40-character-lowercase-head-sha-of-WorkflowRef>'
    gh workflow run windows-portable.yml \
      --ref "$WorkflowRef" \
      -f operation=verify \
@@ -350,9 +350,32 @@ Canonical verification path:
    gh run list --workflow windows-portable.yml --limit 1
    ```
 
-   Record the resulting workflow URL, exact SHA, success/failure result, and any
-   uploaded portable/package proof. A hosted success proves package/offscreen behavior;
+   The secret-free validation job requires `ExpectedSha` to equal the selected
+   protected branch head or protected, conventionally named release-tag head before
+   the signed reusable workflow can start. The selected `release-candidate` or `production`
+   environment owns the signing key, required reviewer approval, and allowed
+   deployment branch/tag rules; `windows-ci` is the unsigned pull-request environment
+   and must not contain signing secrets. Record the resulting workflow URL, exact SHA,
+   success/failure result, and any uploaded portable/package proof. A hosted success
+   proves package/offscreen behavior;
    complete physical Windows desktop acceptance remains a separate handoff.
+
+   Before enabling this workflow, maintainers must finish the environment migration:
+
+   - create `windows-ci` without secrets or approval requirements;
+   - require reviewers and restrict deployment branches/tags on both
+     `release-candidate` and `production`;
+   - store `WINDOWS_UPDATE_SIGNING_KEY_XML` only as an environment secret in both
+     protected environments; and
+   - atomically remove the same-named repository secret and any organization secret
+     that grants this repository access, then confirm `windows-ci` and an ordinary
+     workflow cannot resolve it.
+
+   GitHub resolves same-named environment secrets ahead of repository/organization
+   secrets rather than enforcing an environment-only namespace. The migration and
+   hosted negative-access proof are therefore release-blocking prerequisites.
+   Guarded RC and stable releases must also be dispatched from a protected branch;
+   the release workflow creates the validated release tag only after its preflight.
 
 Current CI ownership:
 
@@ -375,11 +398,12 @@ Current CI ownership:
   release orchestrator.
 - `.github/workflows/windows-portable-build.yml` also builds and verifies a code-only
   update zip after the full bundle exists. Pull requests prove unsigned update
-  zip creation and layout. Reusable release and manual runs require
-  `WINDOWS_UPDATE_SIGNING_KEY_XML`; they fail before artifact publication when
-  the secret is absent, does not match the committed public key, or signing
-  verification fails. Every public Windows release includes the signed update zip
-  and its checksum.
+  zip creation and layout in the secret-free `windows-ci` environment. Reusable
+  release and manual runs obtain `WINDOWS_UPDATE_SIGNING_KEY_XML` from the selected
+  protected `release-candidate` or `production` environment only after its approval
+  and branch/tag rules pass; they fail before artifact publication when the secret is
+  absent, does not match the committed public key, or signing verification fails.
+  Every public Windows release includes the signed update zip and its checksum.
 
 GitHub-hosted Windows proves packaging and generated-fixture behavior, not a
 physical release workstation. A media-runtime refresh remains unmergeable until
@@ -424,7 +448,8 @@ rejects them if they remain. Live RC/stable dispatches, production approval,
 remote tag/release cleanup, and the final merge are maintainer-only.
 
 When updater or release-package logic changes and the signed-update path cannot
-run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML`, mark signing as
+run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML` (mapped from the protected
+environment secret in hosted CI), mark signing as
 documented-only in the task handoff and require explicit maintainer or
 Windows-runner confirmation before treating the signed update release path as
 fully verified.

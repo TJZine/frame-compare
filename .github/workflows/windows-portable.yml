@@ -13,7 +13,7 @@ on:
           - verify
           - release
       channel:
-        description: Publication channel (release operation only)
+        description: Approval channel for signed verification or publication
         required: true
         default: rc
         type: choice
@@ -46,21 +46,64 @@ jobs:
       expected_sha: ${{ github.sha }}
       release_tag: ""
       require_signing: false
+      environment_name: windows-ci
       prepare_release_assets: false
+
+  validate_manual:
+    name: Validate signed verification request
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'verify'
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      expected_sha: ${{ steps.validate.outputs.expected_sha }}
+    steps:
+      - name: Bind expected SHA to the selected ref head
+        id: validate
+        shell: bash
+        env:
+          DISPATCH_REF_NAME: ${{ github.ref_name }}
+          DISPATCH_REF_PROTECTED: ${{ github.ref_protected }}
+          DISPATCH_REF_TYPE: ${{ github.ref_type }}
+          DISPATCH_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ inputs.expected_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_sha must be an exact 40-character lowercase commit SHA." >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_REF_TYPE" != "branch" && "$DISPATCH_REF_TYPE" != "tag" ]]; then
+            echo "Signed verification must be dispatched from a branch or tag." >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_REF_PROTECTED" != "true" ]]; then
+            echo "Signed verification refs must be protected by a branch or tag rule." >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_REF_TYPE" == "tag" && ! "$DISPATCH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Signed verification tags must use the release tag format." >&2
+            exit 1
+          fi
+          if [[ "$EXPECTED_SHA" != "$DISPATCH_SHA" ]]; then
+            echo "The selected workflow ref head must equal expected_sha." >&2
+            exit 1
+          fi
+          printf 'expected_sha=%s\n' "$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
 
   verify_manual:
     name: Verify signed Windows portable artifacts
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'verify'
+    needs: validate_manual
     permissions:
       contents: read
     uses: ./.github/workflows/windows-portable-build.yml
     with:
-      expected_sha: ${{ inputs.expected_sha || github.sha }}
+      expected_sha: ${{ needs.validate_manual.outputs.expected_sha }}
       release_tag: ""
       require_signing: true
+      environment_name: ${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}
       prepare_release_assets: false
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
 
   release:
     name: Run guarded release
@@ -78,5 +121,3 @@ jobs:
       version: ${{ inputs.version }}
       tag: ${{ inputs.tag }}
       expected_sha: ${{ inputs.expected_sha }}
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}

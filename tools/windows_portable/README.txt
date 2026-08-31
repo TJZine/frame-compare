@@ -121,7 +121,8 @@ RELEASE SIGNING (Maintainers):
       - Prefer injecting the signing key path via a masked secret into SIGNING_KEY_XML_PATH.
       - Avoid passing the key path on the command line to reduce exposure in shell history / process listings.
       - GitHub release/manual bundle workflow signs the code-only update zip when the
-        WINDOWS_UPDATE_SIGNING_KEY_XML repository secret contains the private key XML.
+        WINDOWS_UPDATE_SIGNING_KEY_XML secret exists only in the approved
+        release-candidate and production environments.
 
   Unsigned zips are for local/dev only and require unsafe confirmation in the updater.
   That confirmation never bypasses the media-runtime fingerprint boundary: a
