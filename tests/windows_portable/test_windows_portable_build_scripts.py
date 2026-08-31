@@ -1042,8 +1042,8 @@ def _write_extracted_verifier_fixture(
             for name, version in (
                 ("jetpytools", "3.1.1"),
                 ("PySide6", "6.11.2"),
-                ("PySide6-Addons", "6.11.2"),
-                ("PySide6-Essentials", "6.11.2"),
+                ("PySide6_Addons", "6.11.2"),
+                ("PySide6_Essentials", "6.11.2"),
                 ("shiboken6", "6.11.2"),
                 ("vapoursynth-bestsource", "21.0"),
                 ("vspackrgb", "1.4.0"),

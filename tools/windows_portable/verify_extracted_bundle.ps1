@@ -775,7 +775,8 @@ $inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]
 foreach ($distribution in (Get-RequiredArray $inventory "python_distributions" "bundle_inventory")) {
   $distributionName = Get-RequiredString $distribution "name" "python distribution"
   $distributionVersion = Get-RequiredString $distribution "version" "python distribution"
-  $inventoryDistributionVersions.Add($distributionName, $distributionVersion)
+  $normalizedDistributionName = ($distributionName -replace "[-_.]+", "-").ToLowerInvariant()
+  $inventoryDistributionVersions.Add($normalizedDistributionName, $distributionVersion)
 }
 foreach ($entry in $requiredVsViewDistributions.GetEnumerator()) {
   if (
