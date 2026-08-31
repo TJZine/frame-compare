@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeGuard, cast
@@ -14,6 +15,25 @@ from frame_compare.utils.atomic_write import write_text_atomic
 ALIGNMENT_REVIEW_SCHEMA_VERSION = 1
 ALIGNMENT_REVIEW_RESULT_SUFFIX = ".alignment-result.json"
 VSVIEW_SESSIONS_DIR_NAME = "vsview_sessions"
+
+ALIGNMENT_REVIEW_METADATA_VERSION_KEY = "frame_compare_contract_version"
+ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY = "frame_compare_session_id"
+ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY = "frame_compare_alignment_key"
+ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY = "frame_compare_comparison_ordinal"
+ALIGNMENT_REVIEW_METADATA_ROLE_KEY = "frame_compare_output_role"
+ALIGNMENT_REVIEW_METADATA_NAME_KEY = "frame_compare_presentation_name"
+ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY = "frame_compare_suggested_offset"
+ALIGNMENT_REVIEW_METADATA_KEYS = frozenset(
+    {
+        ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+        ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+        ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+        ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
+        ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+        ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+        ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+    }
+)
 
 
 class AlignmentReviewContractError(ValueError):
@@ -43,6 +63,93 @@ class AlignmentReviewExpectedComparison:
         ):
             if not _is_int(value) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewOutputCandidate:
+    """Untrusted VSView output facts used to discover an alignment workspace."""
+
+    output_id: int
+    source_frame_count: int
+    metadata: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewOutputMetadata:
+    output_id: int
+    source_frame_count: int
+    session_id: str
+    comparison_key: str
+    comparison_ordinal: int
+    role: Literal["reference", "comparison"]
+    presentation_name: str
+    suggested_offset: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewComparisonMetadata:
+    comparison_key: str
+    comparison_ordinal: int
+    suggested_offset: int | None
+    reference: AlignmentReviewOutputMetadata
+    comparison: AlignmentReviewOutputMetadata
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewWorkspaceMetadata:
+    session_id: str
+    comparisons: tuple[AlignmentReviewComparisonMetadata, ...]
+
+
+def parse_alignment_review_workspace_metadata(
+    candidates: tuple[AlignmentReviewOutputCandidate, ...],
+) -> AlignmentReviewWorkspaceMetadata:
+    """Strictly parse one complete Frame Compare VSView output workspace."""
+    if not candidates:
+        raise AlignmentReviewContractError("alignment review workspace has no outputs")
+    outputs = tuple(_parse_output_metadata(candidate) for candidate in candidates)
+    session_id = outputs[0].session_id
+    if any(output.session_id != session_id for output in outputs):
+        raise AlignmentReviewContractError("alignment review workspace mixes sessions")
+    if len({output.output_id for output in outputs}) != len(outputs):
+        raise AlignmentReviewContractError("alignment review output identifiers are duplicated")
+
+    by_ordinal = dict[int, list[AlignmentReviewOutputMetadata]]()
+    for output in outputs:
+        by_ordinal.setdefault(output.comparison_ordinal, []).append(output)
+    if sorted(by_ordinal) != list(range(1, len(by_ordinal) + 1)):
+        raise AlignmentReviewContractError("alignment review comparison ordinals are incomplete")
+
+    comparisons = list[AlignmentReviewComparisonMetadata]()
+    keys = set[str]()
+    for ordinal in sorted(by_ordinal):
+        pair = by_ordinal[ordinal]
+        if len(pair) != 2 or {output.role for output in pair} != {"reference", "comparison"}:
+            raise AlignmentReviewContractError(
+                "alignment review comparison output pair is incomplete"
+            )
+        reference = next(output for output in pair if output.role == "reference")
+        comparison = next(output for output in pair if output.role == "comparison")
+        if (
+            reference.comparison_key != comparison.comparison_key
+            or reference.suggested_offset != comparison.suggested_offset
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review comparison output pair is mismatched"
+            )
+        if reference.comparison_key in keys:
+            raise AlignmentReviewContractError("alignment review comparison keys are duplicated")
+        keys.add(reference.comparison_key)
+        comparisons.append(
+            AlignmentReviewComparisonMetadata(
+                comparison_key=reference.comparison_key,
+                comparison_ordinal=ordinal,
+                suggested_offset=reference.suggested_offset,
+                reference=reference,
+                comparison=comparison,
+            )
+        )
+    return AlignmentReviewWorkspaceMetadata(session_id=session_id, comparisons=tuple(comparisons))
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +319,50 @@ def _session_id_from_filename(filename: str) -> str:
         raise AlignmentReviewContractError("invalid VSView session script filename")
     token = Path(filename).stem.rpartition("_")[2]
     return _validated_session_id(token)
+
+
+def _parse_output_metadata(
+    candidate: AlignmentReviewOutputCandidate,
+) -> AlignmentReviewOutputMetadata:
+    if not _is_int(candidate.output_id):
+        raise AlignmentReviewContractError("alignment review output identifier must be an integer")
+    if not _is_int(candidate.source_frame_count) or candidate.source_frame_count <= 0:
+        raise AlignmentReviewContractError("alignment review output frame count must be positive")
+    if set(candidate.metadata) != set(ALIGNMENT_REVIEW_METADATA_KEYS):
+        raise AlignmentReviewContractError("alignment review output metadata fields are invalid")
+    metadata = candidate.metadata
+    version = metadata[ALIGNMENT_REVIEW_METADATA_VERSION_KEY]
+    session_id = metadata[ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY]
+    comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
+    ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
+    role = metadata[ALIGNMENT_REVIEW_METADATA_ROLE_KEY]
+    name = metadata[ALIGNMENT_REVIEW_METADATA_NAME_KEY]
+    suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
+    if not _is_int(version) or version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
+        raise AlignmentReviewContractError("unsupported alignment review output metadata version")
+    if not isinstance(session_id, str):
+        raise AlignmentReviewContractError("alignment review output session identifier is invalid")
+    session_id = _validated_session_id(session_id)
+    if not isinstance(comparison_key, str) or not comparison_key:
+        raise AlignmentReviewContractError("alignment review output comparison key is invalid")
+    if not _is_int(ordinal) or ordinal <= 0:
+        raise AlignmentReviewContractError("alignment review output ordinal is invalid")
+    if role not in {"reference", "comparison"}:
+        raise AlignmentReviewContractError("alignment review output role is invalid")
+    if not isinstance(name, str) or not name:
+        raise AlignmentReviewContractError("alignment review output presentation name is invalid")
+    if suggested_offset is not None and not _is_int(suggested_offset):
+        raise AlignmentReviewContractError("alignment review suggested offset is invalid")
+    return AlignmentReviewOutputMetadata(
+        output_id=candidate.output_id,
+        source_frame_count=candidate.source_frame_count,
+        session_id=session_id,
+        comparison_key=comparison_key,
+        comparison_ordinal=ordinal,
+        role=cast(Literal["reference", "comparison"], role),
+        presentation_name=name,
+        suggested_offset=suggested_offset,
+    )
 
 
 def _validated_session_id(value: str) -> str:

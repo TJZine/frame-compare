@@ -6,18 +6,109 @@ from pathlib import Path
 import pytest
 
 from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+    ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+    ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
+    ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+    ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+    ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+    ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
     AlignmentReviewContractError,
     AlignmentReviewExpectedComparison,
+    AlignmentReviewOutputCandidate,
     AlignmentReviewResult,
     AlignmentReviewSession,
     ConfirmedAlignmentReviewDecision,
     KeepCurrentAlignmentReviewDecision,
     alignment_review_session_from_script,
+    parse_alignment_review_workspace_metadata,
     read_alignment_review_result,
     write_alignment_review_result,
 )
 
 _SESSION_ID = "12345678123456781234567812345678"
+
+
+def _output(
+    output_id: int,
+    ordinal: int,
+    role: str,
+    *,
+    key: str = "ref:a",
+    suggestion: int | None = 12,
+    session_id: str = _SESSION_ID,
+) -> AlignmentReviewOutputCandidate:
+    return AlignmentReviewOutputCandidate(
+        output_id=output_id,
+        source_frame_count=100,
+        metadata={
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1,
+            ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: session_id,
+            ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: key,
+            ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY: ordinal,
+            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: role,
+            ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"{role} {ordinal}",
+            ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY: suggestion,
+        },
+    )
+
+
+def test_workspace_metadata_accepts_complete_ordered_pairs() -> None:
+    workspace = parse_alignment_review_workspace_metadata(
+        (_output(1, 1, "reference"), _output(2, 1, "comparison"))
+    )
+
+    assert workspace.session_id == _SESSION_ID
+    assert workspace.comparisons[0].comparison_key == "ref:a"
+    assert workspace.comparisons[0].reference.source_frame_count == 100
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        (),
+        (_output(1, 1, "reference"),),
+        (_output(1, 2, "reference"), _output(2, 2, "comparison")),
+        (_output(1, 1, "reference"), _output(2, 1, "reference")),
+        (_output(1, 1, "reference"), _output(1, 1, "comparison")),
+        (
+            _output(1, 1, "reference"),
+            _output(2, 1, "comparison", suggestion=-2),
+        ),
+        (
+            _output(1, 1, "reference"),
+            _output(2, 1, "comparison", session_id="87654321876543218765432187654321"),
+        ),
+    ],
+)
+def test_workspace_metadata_rejects_incomplete_or_mixed_outputs(
+    outputs: tuple[AlignmentReviewOutputCandidate, ...],
+) -> None:
+    with pytest.raises(AlignmentReviewContractError):
+        parse_alignment_review_workspace_metadata(outputs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, True),
+        (ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY, True),
+        (ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY, True),
+        (ALIGNMENT_REVIEW_METADATA_ROLE_KEY, "other"),
+        (ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY, ""),
+        (ALIGNMENT_REVIEW_METADATA_NAME_KEY, ""),
+    ],
+)
+def test_workspace_metadata_rejects_malformed_values(field: str, value: object) -> None:
+    reference = _output(1, 1, "reference")
+    malformed = AlignmentReviewOutputCandidate(
+        output_id=reference.output_id,
+        source_frame_count=reference.source_frame_count,
+        metadata=dict(reference.metadata) | {field: value},
+    )
+
+    with pytest.raises(AlignmentReviewContractError):
+        parse_alignment_review_workspace_metadata((malformed, _output(2, 1, "comparison")))
 
 
 def _session(tmp_path: Path) -> AlignmentReviewSession:
