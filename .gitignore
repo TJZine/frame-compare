@@ -37,7 +37,7 @@ CODEX.md
 **/generated/clip_probe.toml
 **/generated/manual_overrides.toml
 **/generated/cache/
-**/generated/vspreview_sessions/
+**/generated/vsview_sessions/
 .desloppify/
 .agents/skills/desloppify/
 /scorecard.png

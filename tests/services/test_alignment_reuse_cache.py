@@ -212,7 +212,7 @@ def test_computed_cache_evidence_without_stability_warns_and_misses(
         provenance = _provenance(
             request,
             result=confirmed,
-            provenance="vspreview_confirmed_this_run",
+            provenance="interactive_confirmed_this_run",
             computed_result=computed,
         )
     else:
@@ -259,7 +259,7 @@ def test_negative_largest_adjacent_jump_warns_and_misses(
         provenance = _provenance(
             request,
             result=confirmed,
-            provenance="vspreview_confirmed_this_run",
+            provenance="interactive_confirmed_this_run",
             computed_result=computed,
         )
     else:
@@ -393,7 +393,7 @@ def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(
     assert entry.result.correlation_score == pytest.approx(0.876)
 
 
-def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one(
+def test_shared_reuse_cache_round_trips_interactive_confirmed_entry_with_score_one(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
@@ -403,7 +403,7 @@ def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one
             _provenance(
                 request,
                 result=_result(request, correlation_score=0.123, source="manual"),
-                provenance="vspreview_confirmed_this_run",
+                provenance="interactive_confirmed_this_run",
             )
         ],
         accepted_at="2026-06-06T12:00:00Z",
@@ -414,14 +414,14 @@ def test_shared_reuse_cache_round_trips_vspreview_confirmed_entry_with_score_one
     entry = next(iter(entries.values()))
     result = entry.result
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
-    assert entry.origin == "vspreview_confirmed"
+    assert entry.origin == "interactive_confirmed"
     assert result.source == "cached"
     assert result.algorithm is None
     assert result.correlation_score == 1.0
     assert entry.computed_result is None
 
 
-def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
+def test_shared_reuse_cache_round_trips_interactive_entry_with_computed_fallback(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
@@ -444,7 +444,7 @@ def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
             _provenance(
                 request,
                 result=confirmed,
-                provenance="vspreview_confirmed_this_run",
+                provenance="interactive_confirmed_this_run",
                 computed_result=computed,
             )
         ],
@@ -455,7 +455,7 @@ def test_shared_reuse_cache_round_trips_vspreview_entry_with_computed_fallback(
 
     assert entries is not None
     entry = next(iter(entries.values()))
-    assert entry.origin == "vspreview_confirmed"
+    assert entry.origin == "interactive_confirmed"
     assert entry.result.frame_offset == 47
     assert entry.result.stability == summary
     assert entry.computed_result is not None
@@ -672,7 +672,7 @@ def test_shared_reuse_cache_version_mismatch_warns_and_misses(
     request = _request(tmp_path)
     cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
     cache_file.parent.mkdir(parents=True)
-    cache_file.write_text('version = "2"', encoding="utf-8")
+    cache_file.write_text('version = "1"', encoding="utf-8")
     warnings: list[str] = []
 
     def _warning(event: str, **_kwargs: object) -> None:
@@ -682,6 +682,24 @@ def test_shared_reuse_cache_version_mismatch_warns_and_misses(
 
     assert load_reusable_offset_entries(request) is None
     assert warnings == ["alignment_reuse_cache_version_mismatch"]
+
+
+def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_text(
+        'version = "1"\n[source_sets.legacy]\nmarker = "must-not-survive"\n',
+        encoding="utf-8",
+    )
+
+    save_reusable_offsets(request, [_provenance(request)])
+
+    data = _cache_data(request)
+    assert data["version"] == "2"
+    source_sets = data["source_sets"]
+    assert isinstance(source_sets, dict)
+    assert "legacy" not in source_sets
 
 
 def test_shared_reuse_cache_malformed_source_sets_warns_and_misses(
@@ -996,7 +1014,7 @@ def test_shared_reuse_cache_invalid_float_fields_warn_and_miss(
         provenance = _provenance(
             request,
             result=confirmed,
-            provenance="vspreview_confirmed_this_run",
+            provenance="interactive_confirmed_this_run",
             computed_result=result,
         )
     else:

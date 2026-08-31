@@ -96,7 +96,7 @@ class AudioAlignmentConfig(BaseModel):
     enable: bool = True
     sample_rate: int = Field(default=8000, ge=4000, le=48000)
     max_offset_seconds: float = Field(default=30.0, ge=1.0)
-    use_vspreview: bool = False
+    use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
     previous_offsets: Literal["disabled", "prompt", "always"] = "disabled"

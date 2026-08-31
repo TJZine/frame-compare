@@ -54,9 +54,9 @@ from frame_compare.vs.errors import (
     VapourSynthError,
     VapourSynthNotFoundError,
 )
-from frame_compare.vspreview.errors import (
-    VSPreviewError,
-    VSPreviewNotFoundError,
+from frame_compare.vsview.errors import (
+    VSViewError,
+    VSViewNotFoundError,
 )
 
 
@@ -75,7 +75,7 @@ def _render_rich_markup(markup: str) -> str:
         (PluginNotFoundError, ("lsmas",), "FC-2003"),
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
-        (VSPreviewNotFoundError, (), "FC-2008"),
+        (VSViewNotFoundError, (), "FC-2008"),
         (TonemapRequiresVapourSynthError, (), "FC-2009"),
         # InputError (FC-3xxx)
         (NoVideosFoundError, (Path("/test"),), "FC-3001"),
@@ -96,7 +96,7 @@ def _render_rich_markup(markup: str) -> str:
         (SourceLoadError, (Path("/src"), "test"), "FC-4015"),
         (MetadataError, ("test",), "FC-4016"),
         (ReportError, ("test",), "FC-4017"),
-        (VSPreviewError, ("test",), "FC-4019"),
+        (VSViewError, ("test",), "FC-4019"),
         # NetworkError (FC-5xxx)
         (SlowpicsError, ("test",), "FC-5002"),
         (SlowpicsRateLimitedError, (), "FC-5003"),
@@ -158,10 +158,10 @@ def test_insufficient_frames_error_details_shape():
     assert details["required"] == required
 
 
-def test_vspreview_error_omits_public_details() -> None:
-    error = VSPreviewError("launch exited with code 3")
+def test_vsview_error_omits_public_details() -> None:
+    error = VSViewError("launch exited with code 3")
 
-    assert error.context.message == "VSPreview failed: launch exited with code 3"
+    assert error.context.message == "VSView failed: launch exited with code 3"
     assert error.context.details is None
 
 

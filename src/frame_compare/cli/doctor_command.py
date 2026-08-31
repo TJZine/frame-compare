@@ -24,7 +24,7 @@ _DOCTOR_DISPLAY_LABELS = {
     "vs_placebo": "vs-placebo",
     "ffms2": "FFMS2",
     "ffmpeg": "FFmpeg",
-    "vspreview": "VSPreview",
+    "vsview": "VSView",
     "slowpics": "slow.pics",
     "tmdb_api_key": "TMDB API key",
 }

@@ -118,7 +118,7 @@ class TestCollectChecks:
             "vs_placebo",
             "ffms2",
             "ffmpeg",
-            "vspreview",
+            "vsview",
             "slowpics",
             "tmdb_api_key",
         ]
@@ -126,30 +126,30 @@ class TestCollectChecks:
         assert checks[-1].category == "network"
 
 
-class TestCheckVSPreview:
-    """Tests for the optional VSPreview diagnostic check."""
+class TestCheckVSView:
+    """Tests for the optional VSView diagnostic check."""
 
-    def test_check_vspreview_probe_failure_is_optional_status(self) -> None:
-        from frame_compare.vspreview.adapter import (
-            VSPreviewAvailability,
-            VSPreviewAvailabilityStatus,
+    def test_check_vsview_probe_failure_is_optional_status(self) -> None:
+        from frame_compare.vsview.adapter import (
+            VSViewAvailability,
+            VSViewAvailabilityStatus,
         )
 
         checks = collect_checks()
-        vspreview_check = next(c for c in checks if c.name == "vspreview")
+        vsview_check = next(c for c in checks if c.name == "vsview")
 
         with patch(
-            "frame_compare.vspreview.adapter.check_vspreview_availability",
-            return_value=VSPreviewAvailability(
-                status=VSPreviewAvailabilityStatus.PROBE_FAILED,
-                message="VSPreview availability probe failed",
+            "frame_compare.vsview.adapter.check_vsview_availability",
+            return_value=VSViewAvailability(
+                status=VSViewAvailabilityStatus.PROBE_FAILED,
+                message="VSView availability probe failed",
                 error_details={
                     "exception_type": "RuntimeError",
                     "exception": "broken import metadata",
                 },
             ),
         ):
-            result = vspreview_check.check_fn()
+            result = vsview_check.check_fn()
 
         assert result.passed is True
         assert "probe failed" in result.message

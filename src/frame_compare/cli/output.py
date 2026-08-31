@@ -204,24 +204,24 @@ def print_at_a_glance(
 
     workspace = resolve_paths(config, root)
 
-    vspreview_status: str | None = None
-    use_vspreview = config.audio_alignment.use_vspreview or request.force_interactive_alignment
+    vsview_status: str | None = None
+    use_vsview = config.audio_alignment.use_vsview or request.force_interactive_alignment
     force_interactive = (
         config.audio_alignment.force_interactive or request.force_interactive_alignment
     )
-    if use_vspreview or force_interactive:
-        from frame_compare.vspreview.adapter import (
-            VSPreviewAvailabilityStatus,
-            check_vspreview_availability,
+    if use_vsview or force_interactive:
+        from frame_compare.vsview.adapter import (
+            VSViewAvailabilityStatus,
+            check_vsview_availability,
         )
 
-        availability = check_vspreview_availability()
+        availability = check_vsview_availability()
         if availability.is_available:
-            vspreview_status = "available (true)"
-        elif availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            vspreview_status = availability.public_probe_failure_status()
+            vsview_status = "available (true)"
+        elif availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
+            vsview_status = availability.public_probe_failure_status()
         else:
-            vspreview_status = "unavailable (false)"
+            vsview_status = "unavailable (false)"
 
     from frame_compare.utils.subproc import resolve_executable
 
@@ -375,18 +375,18 @@ def print_at_a_glance(
     }[config.audio_alignment.previous_offsets]
     _add_kv(table, "Offsets", _styled_value(reuse_policy_label))
     manual_review_text: str
-    if not use_vspreview and not force_interactive:
+    if not use_vsview and not force_interactive:
         manual_review_text = "Not configured"
     elif force_interactive:
-        manual_review_text = "VSPreview required"
+        manual_review_text = "VSView required"
     else:
-        manual_review_text = "VSPreview requested"
+        manual_review_text = "VSView requested"
     _add_kv(table, "Review", _styled_value(manual_review_text))
-    if vspreview_status is not None:
+    if vsview_status is not None:
         preview_status: StatusPresentation = (
-            "OK" if vspreview_status.startswith("available") else "WARN"
+            "OK" if vsview_status.startswith("available") else "WARN"
         )
-        _add_kv(table, "VSPreview", _status_value(preview_status, vspreview_status))
+        _add_kv(table, "VSView", _status_value(preview_status, vsview_status))
 
     # ── Review ──
     _add_separator(table)

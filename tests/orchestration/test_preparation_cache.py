@@ -31,7 +31,7 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
 from frame_compare.orchestration.execution_types import PrepState
-from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
+from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     metric_cache_request_for_cache_inputs,

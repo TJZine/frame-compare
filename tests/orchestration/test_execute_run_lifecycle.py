@@ -731,7 +731,7 @@ config_dir = "config"
 [audio_alignment]
 enable = false
 force_interactive = false
-use_vspreview = false
+use_vsview = false
 
 [report]
 enable = false
@@ -770,7 +770,7 @@ enable = false
     assert config.analysis.random_seed == 123
     assert config.slowpics.auto_upload is False
     assert config.audio_alignment.force_interactive is True
-    assert config.audio_alignment.use_vspreview is True
+    assert config.audio_alignment.use_vsview is True
 
 
 def test_execute_run_publish_skip_follows_effective_slowpics_config(

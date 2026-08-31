@@ -16,7 +16,7 @@ NAMESPACE_ROOTS = (
     "frame_compare.services",
     "frame_compare.services.report",
     "frame_compare.utils",
-    "frame_compare.vspreview",
+    "frame_compare.vsview",
 )
 
 ORCHESTRATION_EXPORTS = (

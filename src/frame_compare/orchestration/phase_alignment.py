@@ -66,7 +66,7 @@ def run_align_phase(
         enable=ctx.config.audio_alignment.enable,
         sample_rate=ctx.config.audio_alignment.sample_rate,
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
-        use_vspreview=ctx.config.audio_alignment.use_vspreview,
+        use_vsview=ctx.config.audio_alignment.use_vsview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
         correlation_mode=ctx.config.audio_alignment.correlation_mode,

@@ -234,7 +234,7 @@ def run(
     force_interactive_alignment: bool = _option(
         False,
         "--force-interactive-alignment",
-        help="Force VSPreview alignment; persists with --write-config.",
+        help="Force VSView alignment; persists with --write-config.",
         rich_help_panel="Rendering and alignment",
     ),
     no_upload: bool = _option(

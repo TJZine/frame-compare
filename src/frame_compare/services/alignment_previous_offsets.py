@@ -208,12 +208,12 @@ def shared_write_is_service_eligible(
         provenance = provenances.get(_alignment_key_from_request(request, comparison))
         if provenance is None:
             return False
-        if provenance.provenance in {"computed_this_run", "vspreview_confirmed_this_run"}:
+        if provenance.provenance in {"computed_this_run", "interactive_confirmed_this_run"}:
             has_current_run_write = True
         if provenance.provenance not in {
             "computed_this_run",
             "shared_computed_offsets",
-            "vspreview_confirmed_this_run",
+            "interactive_confirmed_this_run",
         }:
             return False
         if (

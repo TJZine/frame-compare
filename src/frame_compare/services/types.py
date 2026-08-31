@@ -15,10 +15,10 @@ type AlignmentStabilityClassification = Literal[
     "insufficient_evidence",
 ]
 type PreviousOffsetReusePolicy = Literal["disabled", "prompt", "always"]
-type AlignmentReuseCacheOrigin = Literal["computed", "vspreview_confirmed"]
+type AlignmentReuseCacheOrigin = Literal["computed", "interactive_confirmed"]
 type AlignmentWriteProvenance = Literal[
     "computed_this_run",
-    "vspreview_confirmed_this_run",
+    "interactive_confirmed_this_run",
     "shared_computed_offsets",
     "shared_previous_offsets",
     "preexisting_manual_override",
@@ -93,7 +93,7 @@ class AlignmentConfig:
     enable: bool = True
     sample_rate: int = 8000
     max_offset_seconds: float = 30.0
-    use_vspreview: bool = False
+    use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
     previous_offsets: PreviousOffsetReusePolicy = "disabled"

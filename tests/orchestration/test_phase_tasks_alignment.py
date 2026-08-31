@@ -76,7 +76,7 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     }
     assert captured["config"].sample_rate == 12000
     assert captured["config"].max_offset_seconds == 4.5
-    assert captured["config"].use_vspreview is True
+    assert captured["config"].use_vsview is True
     assert captured["config"].cache_results is False
     assert captured["config"].correlation_mode == "gcc_phat"
     assert captured["config"].preprocessing_mode == "standard"
