@@ -724,43 +724,10 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $expectedFingerprint = Get-RequiredStringProperty -Object $manifest -Name "expected_requirements_lock_sha256" -Context "manifest"
     $installedFingerprint = [string]$installedCompatibility["requirements_lock_sha256"]
     if ($installedFingerprint -ne $expectedFingerprint.ToLowerInvariant()) {
-      $promptRequiresUnsigned = -not $signatureValid
-      if (-not $interactive) {
-        throw "Dependency fingerprint mismatch and non-interactive mode; refusing update."
-      }
-      Write-Host "Dependency fingerprint mismatch detected."
-      Write-Host "Installed: $installedFingerprint"
-      Write-Host "Expected:  $expectedFingerprint"
-      Write-Host "C = Cancel (recommended)"
-      Write-Host "O = Open releases page"
-      Write-Host "U = Unsafe apply anyway (requires typing APPLY)"
-      if ($promptRequiresUnsigned) {
-        Write-Host "X = Apply unsigned (Unsafe; requires typing UNSIGNED)"
-      }
-      $choice = (Read-Choice -Prompt "Choose [C/O/U/X], default C").ToUpperInvariant()
-      if ([string]::IsNullOrWhiteSpace($choice) -or $choice -eq "C") {
-        throw "Canceled due to dependency mismatch."
-      }
-      if ($choice -eq "O") {
-        try {
-          Start-Process "https://github.com/TJZine/frame-compare/releases/latest" | Out-Null
-        } catch {
-          Write-Host "Unable to open browser automatically."
-        }
-        throw "Canceled due to dependency mismatch."
-      }
-      if ($choice -eq "U") {
-        if (!(Confirm-Token -Token "APPLY" -Prompt "Type APPLY to continue unsafely")) {
-          throw "Canceled due to dependency mismatch."
-        }
-      } elseif ($choice -eq "X" -and $promptRequiresUnsigned) {
-        if (!(Confirm-Token -Token "UNSIGNED" -Prompt "Type UNSIGNED to continue with unsigned update")) {
-          throw "Canceled due to dependency mismatch."
-        }
-        $unsignedAllowed = $true
-      } else {
-        throw "Canceled due to dependency mismatch."
-      }
+      throw (
+        "Dependency fingerprint mismatch; code-only update refused. " +
+        "Install the complete Windows portable bundle from the releases page."
+      )
     }
 
     $payloadDir = Join-PathParts -Root $tempRoot -Parts @("payload", "app", "src", "frame_compare")

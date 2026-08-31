@@ -21,6 +21,9 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     assert "-ExtractRoot dist/zip_extract_check" in verify_step["run"]
     assert verify_step["env"] == {"EXPECTED_SHA": "${{ inputs.expected_sha }}"}
     assert '-ExpectedCommitSha "$env:EXPECTED_SHA"' in verify_step["run"]
+    assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verify_step["run"]
+    assert "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok" in verify_step["run"]
+    assert "WINDOWS_EXTRACTED_PROOF result=ok" in verify_step["run"]
     assert "inputs.expected_sha" not in verify_step["run"]
     assert "-CommandTimeoutSeconds 300" in verify_step["run"]
 

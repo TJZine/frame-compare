@@ -757,6 +757,36 @@ foreach ($collectionName in @("corresponding_sources", "python_distributions")) 
   }
 }
 
+$requiredVsViewDistributions = [ordered]@{
+  "jetpytools" = "3.1.1"
+  "pyside6" = "6.11.2"
+  "pyside6-addons" = "6.11.2"
+  "pyside6-essentials" = "6.11.2"
+  "shiboken6" = "6.11.2"
+  "vapoursynth-bestsource" = "21.0"
+  "vspackrgb" = "1.4.0"
+  "vsview" = "0.10.3"
+  "vsview-cli" = "1.2.0"
+  "vsjetengine" = "1.7.0"
+}
+$inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
+  [System.StringComparer]::OrdinalIgnoreCase
+)
+foreach ($distribution in (Get-RequiredArray $inventory "python_distributions" "bundle_inventory")) {
+  $distributionName = Get-RequiredString $distribution "name" "python distribution"
+  $distributionVersion = Get-RequiredString $distribution "version" "python distribution"
+  $inventoryDistributionVersions.Add($distributionName, $distributionVersion)
+}
+foreach ($entry in $requiredVsViewDistributions.GetEnumerator()) {
+  if (
+    -not $inventoryDistributionVersions.ContainsKey($entry.Key) -or
+    $inventoryDistributionVersions[$entry.Key] -cne $entry.Value
+  ) {
+    throw "Extracted bundle VSView distribution mismatch: $($entry.Key)=$($entry.Value) required."
+  }
+}
+Write-Host "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok"
+
 $manifestSources = Get-RequiredArray $manifest "corresponding_sources" "manifest"
 $inventorySources = Get-RequiredArray $inventory "corresponding_sources" "bundle_inventory"
 if ($manifestSources.Count -ne $inventorySources.Count) {

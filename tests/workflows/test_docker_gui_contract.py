@@ -14,23 +14,24 @@ from ._helpers import with_bash_env as _with_bash_env
 from ._helpers import write_bash_env as _write_bash_env
 
 
-def test_dockerfile_gui_target_uses_lock_derived_vspreview_install(repo_root: Path) -> None:
+def test_dockerfile_gui_target_uses_lock_derived_vsview_install(repo_root: Path) -> None:
     dockerfile = _read_text_or_fail(repo_root / "Dockerfile")
     stage_names = re.findall(r"^FROM .* AS (\S+)$", dockerfile, re.MULTILINE)
 
     assert "FROM runtime AS gui-linux" in dockerfile
     assert stage_names[-1] == "default-runtime"
     assert (
-        "uv export --frozen --no-dev --extra vspreview --no-emit-project --format requirements.txt"
+        "uv export --frozen --no-dev --extra vsview --no-emit-project --format requirements.txt"
         in dockerfile
     )
-    assert "--output-file /tmp/requirements.vspreview.lock.txt" in dockerfile
+    assert "--output-file /tmp/requirements.vsview.lock.txt" in dockerfile
     assert (
         "python -m pip install --no-cache-dir --user --require-hashes \\\n"
-        "        -r /tmp/requirements.vspreview.lock.txt"
+        "        -r /tmp/requirements.vsview.lock.txt"
     ) in dockerfile
-    assert "pip install vspreview" not in dockerfile
-    assert "pip install PyQt6" not in dockerfile
+    assert "pip install vsview" not in dockerfile
+    assert "--extra recommended" not in dockerfile
+    assert "--extra full" not in dockerfile
 
 
 def test_gui_override_uses_optional_gui_linux_profile_and_minimal_x11_contract(
@@ -71,20 +72,34 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
     script = _read_text_or_fail(repo_root / "tools" / "verify_docker_gui.sh")
 
     assert "docker-compose.gui-linux.yml" in script
-    assert "python -m vspreview --help" in script
+    assert "python -m vsview --help" in script
+    assert "from PySide6.QtWidgets import QApplication" in script
+    assert 'hasattr(vs.core, "bs")' in script
     assert "frame-compare doctor --json" in script
     assert 'doctor_report.get("doctor", {}).get("checks", [])' in script
-    assert 'entry.get("id") == "vspreview"' in script
-    assert 'entry.get("name") == "vspreview"' not in script
+    assert 'entry.get("id") == "vsview"' in script
+    assert 'entry.get("name") == "vsview"' not in script
     assert 'entry.get("available")' not in script
-    assert "check_vspreview_availability" in script
+    assert "check_vsview_availability" in script
     assert "launch_alignment_verification_session" in script
+    assert "from vsview import set_output" in script
+    assert "color=c=black:size=64x48:rate=1:duration=1" in script
+    assert "color=c=white:size=64x48:rate=1:duration=1" in script
+    assert 'types.ModuleType("__vsview__")' in script
+    assert 'expected_names = {0: "Reference", 1: "Comparison 1"}' in script
+    assert "outputs[index].clip.get_frame(0)" in script
+    assert "source_index_path(reference)" in script
+    assert "source_index_path(comparison)" in script
+    assert 'rm -rf -- "$proof_dir"' in script
+    assert "DOCKER_GUI_PROOF temp_cleanup=ok" in script
     assert "xhost +si:localuser:" in script
     assert "xhost -si:localuser:" in script
     assert "xhost +" not in script.replace("xhost +si:localuser:", "")
     assert "Manual GUI launch example:" in script
     assert "frame-compare-run" in script
     assert "--inside-container" in script
+    assert '"$service" -c \\' in script
+    assert '"$service" -lc \\' not in script
 
 
 def test_verify_docker_gui_inside_container_proves_production_tooling_absence(
@@ -107,8 +122,12 @@ python() {
 
 frame-compare() {
   if [[ "${1:-}" == "doctor" ]]; then
-    printf '{"doctor":{"checks":[{"id":"vspreview","status":"pass","message":"VSPreview is available for interactive alignment"}]}}\n'
+    printf '{"doctor":{"checks":[{"id":"vsview","status":"pass","message":"VSView is available for interactive alignment"}]}}\n'
   fi
+}
+
+ffmpeg() {
+  return 0
 }
 """,
     )
@@ -133,6 +152,8 @@ frame-compare() {
     combined = result.stdout + result.stderr
     assert result.returncode == 0
     assert "DOCKER_GUI_PROOF production_tooling_absent=ok" in combined
+    assert "DOCKER_GUI_PROOF real_media=ok" in combined
+    assert "DOCKER_GUI_PROOF temp_cleanup=ok" in combined
 
 
 def test_verify_docker_gui_inside_container_rejects_uv_tooling(

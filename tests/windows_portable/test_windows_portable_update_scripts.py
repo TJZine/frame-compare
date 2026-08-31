@@ -648,6 +648,23 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
     assert all(entry["bytes"] > 0 for entry in manifest["files"])
 
 
+def test_windows_portable_update_never_bypasses_dependency_mismatch(repo_root: Path) -> None:
+    updater = (repo_root / "tools/windows_portable/shim/frame-compare-update.ps1").read_text(
+        encoding="utf-8"
+    )
+    mismatch_start = updater.index(
+        "$expectedFingerprint = Get-RequiredStringProperty -Object $manifest"
+    )
+    mismatch_end = updater.index("$payloadDir = Join-PathParts", mismatch_start)
+    mismatch_block = updater[mismatch_start:mismatch_end]
+
+    assert "Dependency fingerprint mismatch; code-only update refused" in mismatch_block
+    assert "complete Windows portable bundle" in mismatch_block
+    assert "Read-Choice" not in mismatch_block
+    assert "Confirm-Token" not in mismatch_block
+    assert "Start-Process" not in mismatch_block
+
+
 def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:
     sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
     sign_script = _read_text_or_fail(sign_path)
