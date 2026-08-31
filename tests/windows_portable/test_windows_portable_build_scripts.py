@@ -661,6 +661,8 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert "Stop-Process -Id $process.Id -Force" in launch_proof
     assert "$process.WaitForExit(10000)" in launch_proof
     assert "VSView offscreen proof left its process running." in launch_proof
+    assert '$normalizedCombined = ($combined -replace "\\s+", " ").Trim()' in launch_proof
+    assert "$normalizedCombined.Contains($marker)" in launch_proof
     for marker in (
         "[RUN] VSView Bootstrap",
         "[OK] VSView Ready",

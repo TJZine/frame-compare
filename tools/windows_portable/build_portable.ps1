@@ -743,6 +743,7 @@ function Invoke-VSViewOffscreenLaunchProof(
   $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
   $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
   $combined = "$stdout`n$stderr"
+  $normalizedCombined = ($combined -replace "\s+", " ").Trim()
   Write-Host $combined
 
   if (-not $timedOut) {
@@ -755,7 +756,7 @@ function Invoke-VSViewOffscreenLaunchProof(
     "Content loaded successfully",
     "Frame 0 rendered"
   )) {
-    if (-not $combined.Contains($marker)) {
+    if (-not $normalizedCombined.Contains($marker)) {
       throw "VSView offscreen proof marker missing: $marker"
     }
   }
