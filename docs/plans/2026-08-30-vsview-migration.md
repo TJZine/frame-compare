@@ -300,6 +300,23 @@ both frame-zero renders, exact-process cleanup, provenance, install, and install
 parity. The repository-side final gate transcript is retained at
 `.tmp/windows-validation-5b373c8c/repository-gates-ab4174d7.log`.
 
+The WebEngine-excluded local successor was built from exact committed HEAD
+`e0961b0661bc89d02b659b062a45ebe6226faea4`. Its canonical ZIP is 377,280,745
+bytes with SHA-256
+`a13b713d02046146e5f02768f3001d183312cd590c5c241bb8acaaf8ad3d47fd` and full
+runtime fingerprint
+`dc440dadfd2f1bfee3038a9b522aa5d2bc0fc864c6325bba9a067d0e5c892a54`.
+The build excluded the exact pinned 123-file, 359,205,252-byte Qt
+WebEngine/Chromium runtime surface, then the combined VSView proof retained Qt
+Multimedia FFmpeg 7.1.5 and passed preload, `QApplication`, native imports,
+BestSource, L-SMASH, named-output frame rendering, Vulkan tonemap, and offscreen
+cleanup. The fresh ZIP verifier reported WebEngine absent, exact commit provenance,
+99 license records, candidate/install/shim parity, and `result=ok`. Evidence:
+`.tmp/windows-validation-e0961b06/build-portable.log`,
+`.tmp/windows-validation-e0961b06/portable-zip-sha256.txt`, and
+`.tmp/windows-validation-e0961b06/verify-extracted-bundle.log`. This is a local
+equivalent; a hosted run of this successor remains pending.
+
 ### Phase 4: Physical Windows acceptance
 
 - [x] Record the exact commit, bundle hash, Windows build, CPU/GPU/driver, Qt/runtime
@@ -326,6 +343,12 @@ Physical evidence recorded on 2026-08-31:
   `aa84ec2c17ab2396283f58f37e649a181de38aae8dcd2cb3f8092cde23d898b1`.
   Full runtime fingerprint:
   `6b09db7e3f3d388c4b61b2495b325968b336e4c84bc1b846d90afa5a125ee7a1`.
+- Latest packaging-only successor: committed HEAD
+  `e0961b0661bc89d02b659b062a45ebe6226faea4`; canonical ZIP 377,280,745 bytes,
+  SHA-256 `a13b713d02046146e5f02768f3001d183312cd590c5c241bb8acaaf8ad3d47fd`;
+  WebEngine/Chromium absent and extracted verification passed. This successor does
+  not replace the visible/manual evidence captured from `ab4174d7`; the final
+  uninstrumented visible spot-check remains open.
 - Host: Windows 10 Home x64 build 19045; Ryzen 9 5900X (12 cores/24 threads);
   34,263,650,304 bytes RAM; NVIDIA GeForce RTX 5080; driver
   `32.0.16.1656` dated 2026-08-20 locally (DxDiag 2026-08-19); Vulkan loader
@@ -429,15 +452,15 @@ Physical evidence recorded on 2026-08-31:
   without a render error, loaded no WebEngine/Chromium module, and was terminated by
   exact PID. The production builder now fail-closes on the pinned 123-file,
   359,205,252-byte extracted WebEngine/Chromium surface, excludes it, and requires
-  built/extracted absence markers. This is focused diagnostic evidence, not a substitute
-  for rebuilding and re-verifying the canonical portable ZIP.
+  built/extracted absence markers. The exact-HEAD `e0961b06` canonical build and fresh
+  extracted verifier retained both absence markers and passed.
 - The PySide6/Qt distribution-compliance gate remains **open**. The current inventory
   and 99 copied license records do not yet establish a matching SBOM/provenance for the
   deployed Qt subset, complete Qt Multimedia FFmpeg lineage, a distributor-controlled
   corresponding-source offer, or legal adjudication. Owner: distributor/legal and
-  release maintainer. Release impact: blocking. Revisit only after the fresh portable
-  ZIP proves WebEngine/Chromium absent and the remaining artifacts are retained and
-  adjudicated together.
+  release maintainer. Release impact: blocking. WebEngine/Chromium absence is now
+  proved for the local canonical ZIP; revisit when the remaining artifacts are retained
+  and adjudicated together, and when the same exclusion passes hosted Windows.
 
 Decision: keep this plan **Active** and the release **blocked**. A physical spot-check
 of the canonical single-copy bundle, uninstrumented clean GUI close/screenshot,
