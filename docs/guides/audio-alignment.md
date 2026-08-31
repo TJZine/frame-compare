@@ -1,7 +1,7 @@
-# Audio alignment and VSPreview
+# Audio alignment and VSView
 
 Frame Compare can estimate timing offsets between the reference and comparison sources,
-reuse a previously accepted source relationship, and optionally open VSPreview for
+reuse a previously accepted source relationship, and optionally open VSView for
 manual verification. Alignment changes which source frames are compared; it does not
 retime or rewrite the input files.
 
@@ -22,7 +22,7 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 1. Let automatic alignment compute an offset.
 2. Review confidence and warnings.
-3. Use VSPreview for optional interactive verification when the route is available and
+3. Use VSView for optional interactive verification when the route is available and
    the evidence needs manual confirmation. It is not part of automatic correlation.
 4. Verify dialogue, cuts, and motion in the final report.
 5. Reuse an accepted result only while the same source identities and alignment-affecting
@@ -41,7 +41,7 @@ surface documented in the
 
 ## Previous offset reuse
 
-Accepted computed or VSPreview-confirmed offsets can be stored in the shared alignment
+Accepted computed or interactively confirmed offsets can be stored in the shared alignment
 reuse cache. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
 selected reference relationship, audio stream choices, alignment settings, and relevant
 runtime identity.
@@ -54,35 +54,48 @@ possible drift, possible discontinuity, variable, or insufficient. This summary 
 diagnostic only: Frame Compare always retains the selected constant offset and trims.
 Material non-stable evidence produces one concise warning and should be verified at
 multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
-schema v1 requires the compact summary and the reference-minus-comparison sign
-convention. Other schema versions are ignored; there is no cache migration or
-compatibility path.
+schema v2 requires the compact summary and the reference-minus-comparison sign
+convention. Schema-v1 entries are ignored and recomputed; there is no cache migration
+or compatibility path. Run-local `manual_overrides.toml` remains a v1 file with the
+same path and offset semantics.
 
-## Interactive verification with VSPreview
+## Interactive verification with VSView
 
-VSPreview is included in the Windows portable bundle and optional in native
-installations. The default Docker route does not provide an interactive desktop
-session.
+VSView 0.10.3 is included in the Windows portable bundle and is optional in native
+installations through the base `vsview` extra. The upstream `recommended` and `full`
+extras are intentionally not selected. The default Docker route does not provide an
+interactive desktop session. The Linux X11 profile has an offscreen VSView/session/
+render proof, but visible desktop launch remains host-dependent and unverified.
 
-Normal mode keeps VSPreview launch and optional startup-failure presentation concise.
-Use `--verbose` for the generated command and bounded startup diagnostics. If optional
-VSPreview verification cannot start, Frame Compare retains the computed audio alignment
-and directs you to `frame-compare doctor`; forced interactive mode still fails.
-Successful sessions continue to inherit VSPreview and native decoder/index output.
+Set `audio_alignment.use_vsview = true` to request optional interactive verification,
+or use `--force-interactive-alignment` when a successful review is required. Normal
+mode keeps launch and startup-failure presentation concise. Use `--verbose` for the
+generated command and bounded startup diagnostics. If optional VSView verification
+cannot start, Frame Compare retains the computed audio alignment and directs you to
+`frame-compare doctor`; forced interactive mode still fails.
+
+Successful sessions continue to inherit native L-SMASH-Works decoder/index output.
+BestSource is a VSView/UI-only capability and does not replace Frame Compare's source
+loader, analysis, probe, render, index, or cache-key behavior. The generated session
+uses documented `from vsview import set_output` registration with explicit `Reference`
+and `Comparison N` names, while preserving source order, multi-comparison behavior,
+Frame Compare overlays, and BT.709 preview defaults.
+
 The interactive terminal flow remains nested under `ALIGN` and stages the operator
-through `[RUN] VSPreview Bootstrap`, `[OK] VSPreview Ready`, and
-`[WAIT] VSPreview Confirmation`. Normal labels use the same prepared release-aware
-source identities as the rest of Frame Compare, while paths and filename stems remain
-the internal alignment and override identities. These literal markers remain present
-with color disabled. Ready gives a directly nested next action, and the confirmation
-instructions and prompts are visibly nested beneath the blocking `[WAIT]` state. One
-known non-actionable vendor `SyntaxWarning` is suppressed in the VSPreview child;
-when Frame Compare reports incomplete preview color properties, it applies the same
-explicit BT.709 preview defaults that VSPreview would otherwise assume, avoiding the
-redundant warning once per output. Missing modern `_Range` is reported once but remains
-unset, preserving VSPreview's native range inference. VSPreview 0.20's malformed empty
-`<>` duplicate is filtered; warnings with actual property details and other native
-diagnostics remain inherited.
+through `[RUN] VSView Bootstrap`, `[OK] VSView Ready`, and `[WAIT] VSView Confirmation`.
+Normal labels use the same prepared release-aware source identities as the rest of
+Frame Compare, while paths and filename stems remain internal alignment identities.
+These literal markers remain present with color disabled. Ready gives a directly
+nested next action, and confirmation instructions and prompts are visibly nested
+beneath the blocking `[WAIT]` state. Missing modern `_Range` is reported once but
+remains unset, preserving VSView's native range inference; other native diagnostics
+remain inherited.
+
+The migration gains a maintained viewer, named outputs, synchronized multi-output
+review, and current frame/property surfaces. It intentionally removes the retired
+viewer-specific config key, package extra, imports, generated session path, symbolic
+names, and compatibility mutations. Existing v1 shared alignment entries are not
+reused; they are rebuilt as schema v2.
 
 Confirmation uses untrimmed source-frame indices. Find the same visible moment in the
 reference and comparison, then enter the reference frame followed by the comparison
@@ -92,10 +105,9 @@ audio result unchanged when one is available. Every signed offset is reference m
 comparison: positive trims the reference, negative trims the comparison. Native decoder
 and index diagnostics remain visible between Frame Compare-owned status rows.
 
-<figure class="fc-doc-figure">
-  <img src="../images/vspreview-alignment.webp" alt="VSPreview showing EBU DVB PQ10 Reference beside EBU DVB HLG10 Comparison at frame 1000 with a zero-frame offset hint and timeline controls.">
-  <figcaption>The physical Windows proof places the EBU/DVB reference and comparison at frame 1000 with a zero-frame hint beside the timeline so alignment can be checked at multiple evidence points.</figcaption>
-</figure>
+No alignment screenshot is embedded here until the physical-Windows VSView acceptance
+pass supplies a current, provenance-recorded capture. macOS and headless Docker proof
+does not establish native desktop ergonomics.
 
 During verification, inspect multiple evidence points:
 
@@ -114,7 +126,7 @@ different edit.
 | --- | --- | --- |
 | Low or unstable correlation | Silence, replaced music, wrong stream, or different edit | Select corresponding audio, increase evidence, or verify manually |
 | Good early match but later drift | FPS or timing mismatch | Recheck effective FPS and source structure; do not treat a constant offset as sufficient |
-| VSPreview cannot launch | Missing optional UI dependencies or desktop/runtime issue | Run `doctor`, use Windows portable or a valid native VSPreview installation, or continue without interactive verification |
+| VSView cannot launch | Missing optional UI dependencies or desktop/runtime issue | Run `doctor`, use the Windows portable bundle or a valid native VSView installation, or continue without interactive verification |
 | Reused offset no longer looks correct | Source or runtime changed outside the reusable identity assumptions | Reject reuse, clear the alignment cache entry, and recompute |
 | Selected frames disappear after alignment | Shared overlap is smaller than the initial reference-domain plan | Reduce trims or requested counts and review the warning/error context |
 

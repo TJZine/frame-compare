@@ -8,18 +8,20 @@ import yaml
 from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
 
 
-def test_vspreview_extra_pins_supported_native_windows_media_stack(repo_root: Path) -> None:
+def test_vsview_extra_pins_supported_native_windows_media_stack(repo_root: Path) -> None:
     with (repo_root / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
 
-    dependencies = set(project["optional-dependencies"]["vspreview"])
+    dependencies = set(project["optional-dependencies"]["vsview"])
 
+    assert "vsview==0.10.3" in dependencies
     assert "vapoursynth==79" in dependencies
     assert "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'" in dependencies
     assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies
 
     native_install = _read_text_or_fail(repo_root / "docs" / "getting-started" / "native.md")
-    assert "pins the repository-managed VapourSynth Python package to R79" in native_install
+    assert "The `vsview` extra pins VSView 0.10.3" in native_install
+    assert "package to R79" in native_install
     assert "`vapoursynth-lsmas 1310.0.0.0`" in native_install
     assert "`vs-placebo 2.0.4`" in native_install
 

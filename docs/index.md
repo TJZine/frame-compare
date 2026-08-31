@@ -54,7 +54,7 @@ every difference in a portable report.
 
 ### Windows portable
 
-The supported Python and media runtime, VSPreview, installer, updater, and rollback
+The supported Python and media runtime, VSView, installer, updater, and rollback
 tooling in one distribution.
 
 [Install on Windows](windows-portable.md)
@@ -109,7 +109,7 @@ picture content.
 ### Sources that line up
 
 Shared-window analysis, automatic audio alignment, trim handling, and optional
-VSPreview review.
+VSView review.
 
 </div>
 

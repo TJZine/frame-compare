@@ -46,15 +46,16 @@ current host UID/GID so their writable bind-mount output remains host-owned.
 
 | Environment | Current supported posture | Not first-class / not supported by default | Notes |
 | ----------- | ------------------------- | ------------------------------------------ | ----- |
-| macOS Docker Desktop | Backend rendering, HTML reports, software tonemap, `doctor`, non-GUI `run`, reproducible software Vulkan path | Native GPU acceleration, Docker-based VSPreview GUI launch, native Qt desktop forwarding | Supported for backend/software-Vulkan features only. macOS Docker does not support VSPreview GUI launch beyond the documented backend features; use a native desktop runtime for VSPreview GUI workflows. |
-| Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSPreview unless separately configured | This is the canonical default Docker mode. |
-| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile and GPU proof script for host-dependent Vulkan acceleration | Guaranteed parity without host setup, default CI path, GUI/VSPreview by default | Documented-only/unverified in this repo unless you run the dedicated proof on a compatible Linux NVIDIA host. |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSPreview dependency availability on Linux desktop hosts | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. Documented-only/unverified until `bash tools/verify_docker_gui.sh` passes on a compatible Linux desktop host. Real UI launch remains manual and host-dependent even after the non-UI proof passes. |
-| Native Windows portable | Full native app path including backend rendering, reports, VSPreview GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. See [Windows Portable](windows-portable.md). |
+| macOS Docker Desktop | Backend rendering, HTML reports, software tonemap, `doctor`, non-GUI `run`, reproducible software Vulkan path | Native GPU acceleration, Docker-based VSView GUI launch, native Qt desktop forwarding | Supported for backend/software-Vulkan features only. macOS Docker does not support VSView GUI launch beyond the documented backend features; use a native desktop runtime for VSView GUI workflows. |
+| Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSView unless separately configured | This is the canonical default Docker mode. |
+| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile and GPU proof script for host-dependent Vulkan acceleration | Guaranteed parity without host setup, default CI path, GUI/VSView by default | Documented-only/unverified in this repo unless you run the dedicated proof on a compatible Linux NVIDIA host. |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSView dependency availability, generated-session loading, and offscreen rendering | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. The offscreen proof currently passes for VSView 0.10.3 with a production-generated L-SMASH session, named `Reference`/`Comparison 1` outputs, and frame-0 rendering. Visible X11 launch remains unverified; real UI launch is manual and host-dependent. |
+| Native Windows portable | Full native app path including backend rendering, reports, VSView GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. See [Windows Portable](windows-portable.md). |
 
 Optional Docker GPU and GUI profiles require compatible host setup and separate
 verification. The default Docker behavior remains the deterministic headless
-software-Vulkan path even when a host could support more.
+software-Vulkan path even when a host could support more. The GUI verifier's current
+offscreen result does not establish visible X11 desktop behavior.
 
 ---
 
@@ -90,7 +91,7 @@ and
 
 ## Linux X11 GUI Profile
 
-The optional GUI profile is for Linux desktop users who want VSPreview inside the
+The optional GUI profile is for Linux desktop users who want VSView inside the
 container for interactive alignment checks. It does not change the default Docker
 image or the default CI-safe path.
 
@@ -104,7 +105,7 @@ image or the default CI-safe path.
 - The GUI profile runs as the host UID/GID via `FRAME_COMPARE_HOST_UID` and
   `FRAME_COMPARE_HOST_GID` so local-user X11 permissions and mounted cookie files
   line up with the host session, while preserving the image's locked Python user
-  base for VSPreview imports.
+  base for VSView imports.
 
 ### Proof Command
 

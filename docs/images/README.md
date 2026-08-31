@@ -88,7 +88,7 @@ The downloaded source hashes were `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA20
 
 - Capture a lossless PNG first.
 - Do not upscale.
-- Use WebP for report and VSPreview imagery when text and fine detail remain sharp.
+- Use WebP for report and future VSView imagery when text and fine detail remain sharp.
 - Keep terminal captures as PNG.
 - Strip EXIF and unrelated metadata during export.
 - Preserve one canonical report overview and reuse it in the README, documentation home,
@@ -124,11 +124,11 @@ The downloaded source hashes were `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA20
   diagnostic render. Its label card repeats only values proved by ffprobe, the selected
   run, and the portable runtime proof; it does not claim calibrated luminance or missing
   mastering metadata.
-- The one-off VSPreview capture uses `C:\FrameCompareDemo\alignment.py` as an external
-  fixture so the window title contains no generated-script path or username. The fresh
-  bundle's optional launcher emitted FC-4019 during the CLI run; direct VSPreview opened
-  successfully on the same physical runtime after the known external dependency-
-  compatibility workaround. No repository production code was changed.
+- No interactive alignment capture is currently published. A future physical-Windows
+  capture must use the VSView bundle from the tested commit, a generic external fixture,
+  and a complete provenance record before it is added to this directory or referenced
+  by active documentation. macOS and headless Docker evidence cannot establish the
+  native desktop UI surface.
 - The capture config deliberately keeps `report.auto_open = false`, `slowpics.auto_upload =
   false`, `--skip-metadata`, and one explicit user frame so the public example performs no
   network publication and stays deterministic.
@@ -160,7 +160,6 @@ information is never rendered into the image.
 | `report-diff.webp` | Difference-location example |
 | `report-grid.webp` | Three-source triage |
 | `report-inspector.webp` | Metadata and review controls |
-| `vspreview-alignment.webp` | Interactive alignment verification |
 | `first-run-dry-run.png` | Pre-render intent validation |
 | `first-run-complete.png` | Cropped final run summary |
 | `windows-portable-install.png` | Checksum and shim installation |

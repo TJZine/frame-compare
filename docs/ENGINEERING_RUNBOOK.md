@@ -231,10 +231,10 @@ Current capability contract:
 
 | Environment | Default posture |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSPreview GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSView GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
 | Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile plus dedicated GUI proof path; documented-only/unverified unless separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the offscreen VSView/session/render proof passes, while visible X11 launch remains unverified until separately proved on a compatible Linux X11 desktop host |
 | Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
 
 When documenting or reviewing optional Docker GPU/profile work, cite the official
@@ -275,6 +275,14 @@ the cleanup command `xhost -si:localuser:<user>`. Real UI launch remains manual
 only; the proof command should verify dependency availability and session-script
 generation without requiring a visible desktop launch.
 
+The current migration proof has passed this offscreen path: the `gui-linux` image
+loaded a production-generated L-SMASH session with VSView 0.10.3, registered the
+`Reference` and `Comparison 1` outputs, and rendered frame 0 for both outputs. This
+proves the container dependency graph, generated-session loading, named-output
+registration, and offscreen rendering. It does not prove a visible X11 desktop
+launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance;
+visible X11 remains unverified.
+
 If the local machine cannot run the GUI proof command, record GUI support as
 documented-only/unverified rather than supported.
 
@@ -297,17 +305,22 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4, Akarin 1.5.0, VSZip 22.1.0,
-   and the selected LGPL-only FFmpeg artifact. FFMS2 must remain absent from the
-   Windows baseline. In one
+   verify R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.10.3,
+   PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
+   FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
-   importing PyQt6 and VSPreview, then recheck the plugin environment, open the
-   generated media through L-SMASH, and invoke the application tonemap path. Run the
-   direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
+   importing PySide6 or VSView, then recheck the plugin environment, open the generated
+   media through L-SMASH, and invoke the application tonemap path. BestSource is
+   VSView/UI-only and does not replace Frame Compare's generated-session source loader.
+   Run the direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
    `vulkan_runtime_unavailable` skip is permitted only on hosts without that runtime
    and does not replace the separate physical-Windows GPU proof.
 5. Build the code-only update ZIP when updater logic changes and prove both a
-   matching-runtime apply/rollback and a mismatched-runtime fail-closed refusal.
+   matching-runtime apply/rollback and a mismatched media-runtime or requirements-
+   fingerprint fail-closed refusal. Every pre-VSView bundle requires a complete
+   portable reinstall; a code-only update must not mix its old UI/native dependency
+   graph with the new application code, even when the media-runtime fingerprint and
+   L-SMASH index token are unchanged.
 6. Sign the update ZIP when updater or release-package logic changes.
 7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
 

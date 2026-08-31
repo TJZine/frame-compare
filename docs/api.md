@@ -206,9 +206,9 @@ Resolved tonemap settings for VS operations.
 
 Protocol for loading VapourSynth clips.
 
-## frame_compare.vspreview
+## frame_compare.vsview
 
-VSPreview integration module for Frame Compare.
+VSView integration module for Frame Compare.
 
 ## frame_compare.runner
 
