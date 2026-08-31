@@ -87,14 +87,14 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
     vs_placebo_package = app_site_packages / "vs_placebo"
     vs_placebo_libs = app_site_packages / "vs_placebo.libs"
     lsmas_dir = bundle_root / "vs" / "extra-plugins" / "lsmas"
-    qt_bin = app_site_packages / "PyQt6" / "Qt6" / "bin"
+    pyside_package = app_site_packages / "PySide6"
     for directory in (
         vapoursynth_package,
         vapoursynth_libs,
         vs_placebo_package,
         vs_placebo_libs,
         lsmas_dir,
-        qt_bin,
+        pyside_package,
     ):
         directory.mkdir(parents=True)
     ffmpeg_bin = bundle_root / "ffmpeg" / "bin"
@@ -133,7 +133,7 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
     ]
     assert calls == expected_calls
     assert str(ffmpeg_bin) not in calls
-    assert str(qt_bin) not in calls
+    assert str(pyside_package) not in calls
 
 
 def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(
