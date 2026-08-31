@@ -16,7 +16,7 @@ It is intentionally about current behavior, not desired future behavior.
 - [CLI Flag To Config Mapping](#cli-flag-to-config-mapping)
 - [Config-Only Analysis Surface](#config-only-analysis-surface)
 - [Config-Only slow.pics Surface](#config-only-slowpics-surface)
-- [VSPreview Interactive Diagnostics](#vspreview-interactive-diagnostics)
+- [VSView Interactive Diagnostics](#vsview-interactive-diagnostics)
 - [Config-Only Screenshot Surface](#config-only-screenshot-surface)
 - [Config Validation, Logging, And Migration](#config-validation-logging-and-migration)
 - [Config-Only Audio Alignment Surface](#config-only-audio-alignment-surface)
@@ -298,7 +298,7 @@ unchanged.
 - `--dry-run` performs no doctor checks, FFmpeg/ffprobe or media probing, analysis,
   alignment, cache reads or writes, run-folder reservation or metadata writes,
   rendering or report generation, network metadata/publishing, browser or clipboard
-  action, or VSPreview launch. `--no-cache` and `--from-cache-only` are still
+  action, or VSView launch. `--no-cache` and `--from-cache-only` are still
   validated as mutually exclusive, but neither performs cache access.
 - `--dry-run` is incompatible with `--write-config` and `--diagnose-paths`. It
   preserves the effective future run's existing `--json`, `--quiet`, interactive,
@@ -329,7 +329,7 @@ unchanged.
 - `checks_not_performed` is the fixed ordered list `doctor`, `ffprobe_or_ffmpeg`,
   `media_probe`, `analysis`, `alignment`, `cache_reads_or_writes`,
   `run_folder_reservation_or_metadata_writes`, `render_or_report_generation`,
-  `network_publishing_or_metadata`, and `browser_clipboard_or_vspreview`.
+  `network_publishing_or_metadata`, and `browser_clipboard_or_vsview`.
 - The JSON plan never dumps effective config. The resolved input directory is its only
   deliberately reported absolute path. Source entries are filenames only. API keys,
   webhook URLs, tokens, and other secret values are excluded; only
@@ -364,7 +364,7 @@ unchanged.
   schema remains unchanged and `slowpics_url` remains the only machine-readable
   slow.pics result field.
 - `--json` is incompatible with interactive alignment. If the effective config enables
-  `audio_alignment.use_vspreview` or `audio_alignment.force_interactive`, the CLI exits
+  `audio_alignment.use_vsview` or `audio_alignment.force_interactive`, the CLI exits
   with the standard config-error payload and exit code before entering the runtime
   pipeline.
 - `--json` is incompatible with `audio_alignment.previous_offsets = "prompt"`
@@ -444,10 +444,10 @@ unchanged.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
-- When the Run plan reports optional VSPreview probe failures, it uses a
+- When the Run plan reports optional VSView probe failures, it uses a
   sanitized summary rather than raw probe exception text.
 - The Run plan uses neutral configuration rows such as `Mode`, `Offsets`, `Review`,
-  and `VSPreview`; status tokens are reserved for actual capability checks and
+  and `VSView`; status tokens are reserved for actual capability checks and
   runtime outcomes. The `Offsets` row reports `Do not reuse previous offsets`,
   `Ask before reusing previous offsets`, or `Reuse previous offsets when valid`.
 - The `Analysis` row reports the effective `analysis.performance_mode` as
@@ -496,21 +496,18 @@ unchanged.
 - Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
-  VSPreview review is labeled `ALIGN | Interactive verification`.
-- Normal interactive VSPreview launch presentation omits generated script and command
+  VSView review is labeled `ALIGN | Interactive verification`.
+- Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
   module, normal mode emits one sanitized warning and continues with the computed
-  audio alignment; forced interactive failure remains fatal. A successful VSPreview
-  child continues to inherit its native stdout and stderr diagnostics. One known
-  non-actionable `vstools.enums.color` `SyntaxWarning` is suppressed through the
-  child-only Python warning environment. When Frame Compare reports missing,
-  unspecified, or malformed preview color properties, the generated session applies
-  the same explicit BT.709 preview defaults that VSPreview would otherwise assume;
-  this avoids VSPreview's redundant per-output frame-property warnings. Missing modern
-  `_Range` remains unset and is reported once in Frame Compare's styled assumptions;
-  VSPreview 0.20's malformed empty `<>` duplicate is filtered without changing preview
-  range behavior or suppressing warnings that name actual properties.
+  audio alignment; forced interactive failure remains fatal. A successful VSView
+  child continues to inherit its native stdout and stderr diagnostics. When Frame
+  Compare reports missing, unspecified, or malformed preview color properties, the
+  generated session applies the same explicit BT.709 preview defaults that VSView
+  would otherwise assume; this avoids redundant per-output frame-property warnings.
+  Missing modern `_Range` remains unset and is reported once in Frame Compare's
+  styled assumptions. Other native warnings and diagnostics remain inherited.
 - The known slow.pics upload start/complete lifecycle events are DEBUG evidence in
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
@@ -659,10 +656,10 @@ recovery requirement.
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
   corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
   a warning and an unusable index location retries source loading without an index.
-  Generated VSPreview sessions pass this same owned, runtime-versioned path as the
+  Generated VSView sessions pass this same owned, runtime-versioned path as the
   `cachefile` for the reference and every comparison; a missing index may be created
   there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
-  rejects that index location during preview loading, the external preview child does
+  rejects that index location during VSView loading, the external VSView child does
   not remove or rebuild the parent-owned index; it retries that source cache-free and
   preserves the original construction error if the fallback also fails.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -975,7 +972,7 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 | `--seed` | `analysis.random_seed` | Deterministic frame-selection seed override. |
 | `--overlay` | `screenshots.overlay_mode` | Overlay mode override. |
 | `--no-upload` | `slowpics.auto_upload` | Inverted flag: passing it sets effective `auto_upload = false`, and persists that value when combined with `--write-config`. |
-| `--force-interactive-alignment` | `audio_alignment.force_interactive` | Also forces `audio_alignment.use_vspreview = true`. |
+| `--force-interactive-alignment` | `audio_alignment.force_interactive` | Also forces `audio_alignment.use_vsview = true`. |
 
 `--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
 slow.pics `run` flags exist.
@@ -1159,53 +1156,56 @@ The JSON output schema remains unchanged by report-confirmed upload:
 There are no current slow.pics config fields for image format or optimization
 toggles or tags.
 
-## VSPreview Interactive Diagnostics
+## VSView Interactive Diagnostics
 
-VSPreview parent telemetry, generated Frame Compare session diagnostics,
-preview assumptions, ready text, and terminal confirmation prompts use stderr as
-the single human diagnostic stream. The VSPreview child process is launched with
-inherited stdout and stderr so native carriage-return progress (including L-SMASH
-index creation) refreshes in place. Frame Compare-owned generated script diagnostics
-are written to stderr.
+VSView 0.10.3 parent telemetry, generated Frame Compare session diagnostics, preview
+assumptions, ready text, and terminal confirmation prompts use stderr as the single
+human diagnostic stream. The VSView child process is launched with inherited stdout
+and stderr so native carriage-return progress (including L-SMASH index creation)
+refreshes in place. Frame Compare-owned generated script diagnostics are written to
+stderr.
 
-When interactive alignment launches a generated VSPreview session, the
-diagnostic order is:
+When interactive alignment launches a generated VSView session, the diagnostic order
+is:
 
-1. parent `VSPreview Session` telemetry
-2. generated `[RUN] VSPreview Bootstrap` and prepared reference identity, before the
+1. parent `VSView Session` telemetry
+2. generated `[RUN] VSView Bootstrap` and prepared reference identity, before the
    first source load can emit native indexing diagnostics
 3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
-   paired truthful output-slot mappings
-4. generated `[WARN] VSPreview Display Assumptions`, only when assumptions exist
-5. generated `[OK] VSPreview Ready` with a directly nested operator action
-6. parent `[WAIT] VSPreview Confirmation` with nested instructions and prompts
+   paired truthful named-output mappings
+4. generated `[WARN] VSView Display Assumptions`, only when assumptions exist
+5. generated `[OK] VSView Ready` with a directly nested operator action
+6. parent `[WAIT] VSView Confirmation` with nested instructions and prompts
 
-Normal VSPreview labels reuse the release-aware presentation identities prepared by
-the typed alignment request. Paths and stems remain the internal source, suggested
+Normal VSView labels reuse the release-aware presentation identities prepared by the
+typed alignment request. Paths and stems remain the internal source, suggested
 offset, confirmation, manual-override, and alignment-result identities. Confirmation
 asks the operator to find the same visible moment, then enter its untrimmed reference
 and comparison source-frame indices in that order. The prompt shows the audio-derived
 matching pair and which source it would trim; `skip` leaves the current audio result
-unchanged when one is available.
-Confirmation calculates the offset as reference minus comparison. Generated and parent
-no-color output retain the literal lifecycle markers. Native source/index diagnostics
-remain inherited without buffering; the known non-actionable `vstools.enums.color`
-`SyntaxWarning` is suppressed in the child.
+unchanged when one is available. Confirmation calculates the offset as reference
+minus comparison. Generated and parent no-color output retain the literal lifecycle
+markers. Native source/index diagnostics remain inherited without buffering.
 
-Generated VSPreview display assumptions are preview-only diagnostics derived from
-Frame Compare's existing clip probe metadata and serialized into the generated
-session script. Missing, unspecified, malformed, or unparseable `_Matrix`,
-`_Transfer`, or `_Primaries` frame properties are collected and shown in the
-styled assumptions section after output rows and before `VSPreview Ready`. Normal
-output identifies the source and describes the preview behavior without exposing raw
-frame-property names.
+Frame Compare registers outputs through VSView's documented
+`from vsview import set_output` API with explicit `Reference` and `Comparison N`
+names. The generated session retains L-SMASH-Works source loading, owned index paths,
+source order, multi-comparison behavior, overlays, and BT.709 preview defaults.
+BestSource is a VSView/UI-only capability and is not used by Frame Compare's analysis,
+probe, render, index, or cache-key owners.
+
+Generated VSView display assumptions are preview-only diagnostics derived from Frame
+Compare's existing clip probe metadata and serialized into the generated session
+script. Missing, unspecified, malformed, or unparseable `_Matrix`, `_Transfer`, or
+`_Primaries` frame properties are collected and shown in the styled assumptions
+section after output rows and before `VSView Ready`. Normal output identifies the
+source and describes the preview behavior without exposing raw frame-property names.
 For those properties only, the generated session sets explicit BT.709 values on the
-preview clip so VSPreview does not repeat its equivalent warning for every output.
-Missing modern `_Range` is reported separately but remains unset so VSPreview retains
-its native range inference and display behavior.
-The generated session does not decode source frames just to collect these assumptions.
-These preview-only defaults do not change render, report, analysis, or alignment
-semantics.
+preview clip so VSView does not repeat its equivalent warning for every output.
+Missing modern `_Range` is reported separately but remains unset so VSView retains its
+native range inference and display behavior. The generated session does not decode
+source frames just to collect these assumptions. These preview-only defaults do not
+change render, report, analysis, or alignment semantics.
 
 ## Config-Only Screenshot Surface
 
@@ -1324,16 +1324,22 @@ comparison source frame`. A positive offset trims that many frames from the refe
 a negative offset trims the absolute value from the comparison. Correlation lag is
 converted to this sign convention before consensus evidence, hints, caching, and trims.
 
+- `use_vsview` is a boolean, defaulting to `false`, that enables optional VSView
+  confirmation after computed alignment. `force_interactive` is a boolean, defaulting
+  to `false`, that requires the interactive review to succeed; it also enables
+  `use_vsview` through `--force-interactive-alignment` when that flag is supplied.
+  These settings affect only the interactive verification route, not correlation,
+  source loading, rendering, or report generation.
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
-  shared VSPreview-confirmed offsets. It is config-only, has no `run` flag, and
+  shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Exact-match computed audio alignment
   offsets are deterministic cache hits when `cache_results = true`, regardless
   of `previous_offsets`; the policy only controls whether prior human-confirmed
   offsets are reused. `disabled` is the default and does not read or reuse shared
-  VSPreview-confirmed offsets, but eligible current-run computed or
-  VSPreview-confirmed results still write to the shared reuse cache when
+  interactively confirmed offsets, but eligible current-run computed or
+  interactively confirmed results still write to the shared reuse cache when
   `cache_results = true`. `prompt` shows a Rich stderr table for a complete
-  valid VSPreview-confirmed offset set and asks
+  valid interactively confirmed offset set and asks
   <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
@@ -1363,13 +1369,14 @@ converted to this sign convention before consensus evidence, hints, caching, and
   `cache_results = true`. `previous_offsets = "disabled"` remains compatible
   with `cache_results = false`.
 - `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
-  and `previous_offsets = "always"` because reuse can skip VSPreview.
+  and `previous_offsets = "always"` because reuse can skip VSView.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
 - Cached computed stability summaries are diagnostic-only scalar evidence. The current
-  alignment reuse cache schema is v1. It requires summaries for computed entries and
+  alignment reuse cache schema is v2. It stores neutral `computed` and
+  `interactive_confirmed` origins and requires summaries for computed entries and
   embedded computed results and uses the reference-minus-comparison sign convention.
-  Other schema versions and entries missing required summaries are ignored; there is no
-  cache migration or compatibility path. Summaries do not affect cache identity,
+  Schema-v1 entries and other unsupported versions, plus entries missing required
+  summaries, are ignored; there is no cache migration or compatibility path. Summaries do not affect cache identity,
   selected offsets, or trims.
 - `correlation_mode = "raw_fft" | "gcc_phat"` selects the correlation algorithm
   used by the computed estimator. `raw_fft` is the default.
@@ -1547,7 +1554,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   comparisons.`, `[WARN] Ready for local comparisons; optional or network checks
   need attention.`, or `[OK] Runtime is ready for comparisons.` It then groups checks
   under `Required`, `Optional`, and `Network and credentials`, in their existing
-  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSPreview`, and
+  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSView`, and
   `TMDB API key`.
 - Human check status markers are `[FAIL]` for critical failures, `[SKIP]` for
   passed optional checks whose capability is unavailable, `[WARN]` for failed
@@ -1566,7 +1573,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   wording and may expose only the exception type in JSON `details`; raw exception
   messages are not emitted in human or JSON doctor output.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
-- Optional VSPreview probe diagnostics may include exception type metadata, but do not
+- Optional VSView probe diagnostics may include exception type metadata, but do not
   expose raw probe exception messages.
 
 ## `preset` Command Contract

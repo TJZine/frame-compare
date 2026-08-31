@@ -12,7 +12,7 @@ and the level of reproducibility the route can provide.
 | Windows portable source build | Windows 10/11 x64 | Medium to high | Build scripts assemble pinned inputs | Supported packaging fallback |
 | Docker default | macOS or Linux | Low to medium | Image | Recommended headless macOS/Linux route |
 | Docker NVIDIA | Compatible Linux NVIDIA host | High | Image plus host driver/toolkit | Experimental until proved on the host |
-| Docker X11 | Linux X11 desktop | High | Image plus host display/session | Experimental until proved on the host |
+| Docker X11 | Linux X11 desktop | High | Image plus host display/session | Offscreen VSView proof passes; visible X11 remains experimental until proved on the host |
 | Native source with `uv` | Windows, macOS, or Linux | High | Locked Python environment plus host media stack | Advanced |
 | Native source with pip | Compatible Python host | Highest | User-managed Python and media stack | Advanced integration route |
 
@@ -26,7 +26,7 @@ drivers. Use the same route and runtime when bit-for-bit output matters.
 | Discovery, probing, selection, and alignment | Yes | Yes | Yes | Yes | Yes, with required runtime |
 | SDR screenshots and offline reports | Yes | Yes | Yes | Yes | Yes, with required runtime |
 | HDR tonemapping | Host Vulkan stack | Software Vulkan | Intended host GPU path | Host-dependent | Host-dependent |
-| Interactive VSPreview alignment | Included | No | No | Experimental | Optional and host-managed |
+| Interactive VSView alignment | Included | No | No | Experimental | Optional and host-managed |
 | Browser opening and clipboard behavior | Available in an interactive desktop session | No | No | Host/session-dependent | Host/session-dependent |
 | Signed code-only updates and rollback | Yes | No | No | No | No |
 | Persistent history and caches | Yes | Yes through host mounts | Yes | Yes | Yes |
@@ -39,7 +39,7 @@ Headless, SSH, service, non-TTY, and restricted native sessions should not rely 
 ### Windows portable
 
 Choose this for the least setup and the broadest tested Windows feature set. The bundle
-contains the selected runtime, supports interactive VSPreview alignment, and provides
+contains the selected runtime, supports interactive VSView alignment, and provides
 user-level install, update, backup, rollback, and uninstall commands.
 
 Tradeoffs:
@@ -62,7 +62,7 @@ Tradeoffs:
 
 - The image is currently built from the repository rather than pulled from a promised
   public registry.
-- The default route does not provide VSPreview.
+- The default route does not provide VSView.
 - Containers cannot directly open the host browser or reliably use the host clipboard.
 - macOS Docker Desktop does not expose a native GPU path for this workflow.
 
@@ -71,8 +71,10 @@ Tradeoffs:
 ### Optional Docker profiles
 
 The Linux NVIDIA and X11 routes are separate host-dependent proof surfaces. Passing the
-default Docker verification does not prove either optional profile. Use the dedicated
-commands and treat support as unverified until the profile passes on the actual host.
+default Docker verification does not prove either optional profile. The VSView X11
+profile's offscreen dependency/session/render proof currently passes, but visible X11
+desktop behavior remains unverified until exercised on a compatible Linux host. Use the
+dedicated commands for the relevant proof surface.
 
 [Advanced Docker environments](../docker-environments.md)
 

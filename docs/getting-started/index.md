@@ -13,7 +13,8 @@ you want to own.
 **Recommended for Windows 10/11 x64.**
 
 The published bundle includes Python, FFmpeg, VapourSynth, the supported source and
-tonemapping plugins, VSPreview, PyQt6, installer, updater, and rollback tooling.
+tonemapping plugins, VSView with its PySide6 backend, installer, updater, and rollback
+tooling.
 
 [Install the Windows portable bundle](../windows-portable.md){ .md-button .md-button--primary }
 
@@ -27,7 +28,7 @@ tonemapping plugins, VSPreview, PyQt6, installer, updater, and rollback tooling.
 
 The image provides the managed runtime and uses explicit host mounts for configuration,
 media, reports, run records, and caches. The default route uses software Vulkan and
-does not include interactive VSPreview.
+does not include interactive VSView.
 
 [Start with Docker](docker.md){ .md-button .md-button--primary }
 

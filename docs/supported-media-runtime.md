@@ -10,12 +10,10 @@ A version shown here is supported only as part of the complete profile described
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
 | VapourSynth | R78 | **R79**, commit `acabf605b2205b32d65859bb2736405719d2fafd` | 2026-08-07 | Formal stable release | Latest non-prerelease release. It supplies CPython 3.13-compatible ABI3 wheels, keeps API R4.2, and improves cache cycling, `vspipe` MKV output, and zimg API validation. |
-| VSPreview | 0.20.1 | **0.20.1** | 2026-07-17 | Stable Python release | The UI release is unchanged; Frame Compare's launcher restores the three VSJetPack 1.x APIs it still uses before starting it with the locked graph below. |
-| VSJetEngine | 1.2.0 | **1.7.0** | 2026-08-21 | Stable Python release | Current locked VSPreview dependency resolution. |
-| VSJetPack | 1.5.0 | **2.2.2** | 2026-08-18 | Stable Python release | Current locked resolution; Frame Compare provides a bounded VSPreview compatibility bootstrap for the removed `vs_object`, `set_output`, and `DitherType.is_fmtc` APIs. |
-| Akarin | 1.4.1 | **vapoursynth-akarin 1.5.0**, commit `a72584a969972b4cfd1b1fd11a4b0e3350f83432` | 2026-08-27 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. The Windows wheel's zstd DLL still matches MSYS2 CLANG64 zstd 1.5.7-2 exactly; Linux wheel SBOMs still identify Ubuntu libzstd1 1.4.8+dfsg-3build1. Namespace loading, source provenance, and the combined LGPL-3.0-only/BSD-3-Clause license surface are verified. |
-| VSZip | Not bundled | **vapoursynth-vszip 22.1.0**, commit `beb7a0ab0e4166580b76560ae3f7c7f5e376ac90` | 2026-07-16 | Official PyPI wheels and upstream tag | Bundled native plugin surface with Windows x64 and Linux x86_64/aarch64 wheels. Its build manifest pins statically compiled vapoursynth-zig commit `b87ff61ce680fa5a4cf7d44a9cb4b605c5037432` and zigimg commit `0bbe201a5591219177f2444371c2897746b47774`; loading, provenance, and the combined MIT/LGPL-2.1-only license surface are verified. |
-| VSJetPack support graph | jetpytools 2.2.7; psutil absent | **jetpytools 3.1.1; psutil 7.2.2** | Resolved 2026-08-15 | Locked Python resolution | Accepted current dependency graph; these versions are hash-locked on every supported Python platform. |
+| VSView | Retired legacy viewer | **0.10.3** | 2026-08-16 | Stable Python release | Maintained next-generation viewer. Frame Compare uses its documented `set_output` API and named outputs with the base extra only; the `recommended`/`full` extras are not part of the supported graph. |
+| PySide6 | Previous Qt binding | **6.11.2** | Resolved 2026-08-30 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
+| VSJetEngine | 1.2.0 | **1.7.0** | 2026-08-21 | Stable Python release | Current locked VSView dependency resolution. |
+| VSView support graph | Retired viewer dependency graph | **jetpytools 3.1.1; vsjetengine 1.7.0; BestSource 21.0; vspackrgb 1.4.0** | Resolved 2026-08-30 | Locked Python resolution | Accepted base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
 | Windows L-SMASH-Works package | 1296.0.0.1 | **vapoursynth-lsmas 1310.0.0.0** | 2026-08-23 | Non-yanked official PyPI wheel | Official wheel for the 1310 native lineage. Its plugin DLL imports only Windows/UCRT system libraries; unlike the release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. |
 | L-SMASH | commit `84740c5d960ab622f4c08b971dc59192bc27ef74` | commit **`d186eb95388710a7a91f6fd353169b457ebbb9db`** | 2026-07-28 | Pinned maintainer-fork commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1310. No newer appropriate formal stable tag supersedes it. |
@@ -54,9 +52,9 @@ and Frame Compare-owned indexes before reuse.
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
-- Akarin 1.5.0 and VSZip 22.1.0 Windows wheels, including their native plugin
-  payloads, bundled zstd/vapoursynth-zig/zigimg lineages, license files, and
-  upstream source provenance.
+- VSView 0.10.3 with its base dependency graph, PySide6 6.11.2, BestSource,
+  and vspackrgb for the optional interactive UI. BestSource remains UI-only;
+  generated Frame Compare sessions continue to load media through L-SMASH-Works.
 - Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
 - FFMS2 intentionally excluded.
 - Plugins load from deterministic VapourSynth package and extra-plugin paths with
@@ -73,11 +71,14 @@ and Frame Compare-owned indexes before reuse.
   verifies actual L-SMASH linkage.
 - FFMS2 5.0 built from source against the same VapourSynth and Debian FFmpeg stack.
 - vs-placebo 2.0.4 manylinux wheel.
-- Akarin 1.5.0 and VSZip 22.1.0 manylinux wheels, loaded and inspected through
-  their VapourSynth namespaces by the Docker integration gate; the gate also
-  verifies Akarin's auditwheel zstd SBOM and the statically compiled VSZip inputs.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
 - Software Vulkan through Mesa is the canonical headless validation path.
+
+VSView is optional for native and Docker workflows. Its base package is the supported
+choice; the upstream `recommended` and `full` extras add unrelated graph features and
+are intentionally excluded. Frame Compare's generated sessions retain L-SMASH-Works
+source loading and owned index paths. VSView's BestSource workspace is not a migration
+of Frame Compare's analysis, probe, render, index, or cache-key source loader.
 
 The Linux build retains L-SMASH-Works' narrow VapourSynth-only Meson path even
 though upstream marks Meson deprecated. The upstream CMake build enables several
@@ -117,14 +118,6 @@ A changed frame count, duration, or frame property is not automatically treated 
 Frame Compare regression; it must be classified against the upstream correction and
 the media specification.
 
-### Akarin 1.5.0
-
-The selected release adds floating-point precision formatting to `akarin.Text`, fixes
-numeric-prefix parsing, and changes JIT allocation to named anonymous mappings. The
-`akarin` namespace remains compatible with the runtime proof. The Windows wheel keeps
-the exact zstd 1.5.7-2 DLL used by 1.4.1, and both Linux wheels retain the same
-auditwheel-recorded Ubuntu zstd lineage.
-
 ### FFMS2 5.0
 
 Docker requires the `ffms2` namespace, `Source`, and `Version`. In the pinned FFMS2
@@ -148,8 +141,8 @@ fingerprints for:
 
 | Scope | Included runtime surface | Intentionally excluded |
 | --- | --- | --- |
-| `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo, Akarin, VSZip, and standalone FFmpeg |
-| `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo, Akarin, and VSZip |
+| `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
+| `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo |
 | `alignment` | Profile-specific standalone FFmpeg lineage | VapourSynth and tone mapping |
 | `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, Docker OBUParse, and index policy | standalone FFmpeg and tone mapping |
 | `full` | Complete supported deployment profile | None |
@@ -157,6 +150,12 @@ fingerprints for:
 This avoids both unsafe reuse and unnecessary invalidation. A tone-mapping-only update
 does not discard metric arrays; a standalone FFmpeg update invalidates alignment reuse
 without discarding L-SMASH-Works indexes.
+
+The shared alignment reuse cache is schema v2 after the viewer migration. It stores
+neutral `computed` and `interactive_confirmed` origins. Existing schema-v1 entries are
+ignored and recomputed; no v1 migration or compatibility reader is provided. Run-local
+`manual_overrides.toml` remains a v1 file with the same path, ordering, atomic-write
+behavior, and offset semantics.
 
 Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 
@@ -179,9 +178,10 @@ installed bundle's full runtime fingerprint with the signed update manifest befo
 changing files. A missing, legacy, malformed, or different fingerprint fails closed,
 even when an unsafe Python-dependency override was requested.
 
-Crossing from the previous R79/1296/2.0.4/Akarin 1.4.1/VSZip runtime to the selected
-R79/1310/2.0.4/Akarin 1.5.0/VSZip runtime requires a complete portable bundle reinstall
-because the runtime fingerprints and Frame Compare-owned index tokens change.
+A pre-VSView portable bundle differs in its full media-runtime fingerprint and
+Python/UI requirements fingerprint. It requires a complete portable bundle reinstall;
+a code-only update must fail closed rather than mix the old dependency graph with the
+new application code.
 Generated data should remain outside the bundle when it must survive replacement.
 
 ## Licensing and corresponding source
@@ -201,11 +201,8 @@ FFmpeg components.
 | vs-placebo | LGPL-2.1-only |
 | libplacebo | LGPL-2.1-or-later |
 | libdovi | MIT |
-| Akarin | LGPL-3.0-only |
-| Akarin-bundled zstd | BSD-3-Clause |
-| VSZip | MIT |
-| VSZip-bundled vapoursynth-zig | LGPL-2.1-only |
-| VSZip-bundled zigimg | MIT |
+| VSView | EUPL-1.2 plus the bundled MIT/Apache-2.0/ISC/OFL-1.1 components declared by its distribution metadata |
+| PySide6 family | LGPL-3.0-only or GPL-2.0-only or GPL-3.0-only, as advertised by the distribution metadata |
 | Windows BtbN FFmpeg | LGPL-only |
 | Docker Debian FFmpeg | GPL-2.0-or-later |
 
@@ -215,6 +212,14 @@ verify every artifact's exact byte size and SHA-256 and stop on mismatch. The bu
 inventory records installed distributions, native artifacts, source URLs, license
 paths, and hashes. The Docker image also retains Debian FFmpeg's package copyright
 file and records its GPL-2.0-or-later profile in runtime provenance.
+
+The VSView Windows candidate is not release-ready solely because these top-level
+expressions and source URLs are recorded. The PySide6 Addons wheel contains Qt
+WebEngine/Chromium and Qt Multimedia payloads but does not ship a complete open-source
+notice set or SBOM. Release remains blocked until the exact third-party notices,
+Qt/FFmpeg lineage, distributor-controlled corresponding-source offer, and hosted
+Windows artifact inventory are completed and adjudicated.
+
 This classification follows [FFmpeg's GPL configuration rule](https://ffmpeg.org/doxygen/7.1/md_LICENSE.html)
 and the exact [Debian Trixie package copyright record](https://sources.debian.org/copyright/license/ffmpeg/7%3A7.1.5-0%2Bdeb13u1/).
 
@@ -225,7 +230,11 @@ generated fixtures, runtime identities, updater compatibility, and deterministic
 layout. For generated HDR fixtures, `ffprobe` is the encoded stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. It does not replace final validation on the supported physical Windows system.
+frame property. The current Linux GUI verifier additionally proves that the VSView
+0.10.3 image can load a production-generated L-SMASH session, register named
+`Reference`/`Comparison 1` outputs, and render frame 0 for both outputs under its
+offscreen path. That is not visible X11 desktop proof and does not replace final
+validation on the supported physical Windows system.
 Before merge, that pass must still cover the RTX/Vulkan path, HDR10 and Dolby Vision
 real media, perceptual comparisons, timing/VFR/interlacing/repeated-field cases, alpha
 where available, audio synchronization, old/new index behavior, and an actual

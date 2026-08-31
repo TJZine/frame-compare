@@ -25,7 +25,7 @@ Generated cache files under `.codex/cache/` are optional aids only and must not 
 - Package/build: `uv`, hatchling, `pyproject.toml`, `uv.lock`
 - CLI framework: Typer, Rich
 - Data/modeling: Pydantic, pydantic-settings
-- Media/runtime: NumPy, Pillow, FFmpeg, optional VapourSynth/vspreview, video metadata/parsing libraries
+- Media/runtime: NumPy, Pillow, FFmpeg, optional VapourSynth/VSView, video metadata/parsing libraries
 - HTTP/integration: httpx; optional publishing integrations
 - Type/lint/test: Pyright strict, Ruff, pytest, import-linter, coverage
 

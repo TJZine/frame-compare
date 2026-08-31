@@ -12,6 +12,33 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Populate guarded GitHub releases from the matching validated changelog section
   instead of a placeholder, and verify the release body through publication.
 
+### Changed
+
+- Replace the retired interactive viewer integration with VSView 0.10.3 using its
+  documented named-output API. The supported dependency is the base `vsview` extra;
+  its `recommended` and `full` extras are not selected.
+- Preserve generated-session L-SMASH-Works loading, Frame Compare overlays, source
+  ordering, audio alignment semantics, and terminal confirmation while removing the
+  old viewer compatibility bootstrap. VSView's BestSource workspace remains UI-only
+  and does not replace Frame Compare's analysis, probe, render, index, or cache-key
+  source loader.
+- Rename interactive diagnostic and machine-readable identifiers to VSView, including
+  `audio_alignment.use_vsview`, the `vsview` doctor check, and the
+  `browser_clipboard_or_vsview` dry-run field. Numeric error codes remain unchanged.
+- Bump the shared alignment reuse cache to schema v2 with neutral interactive origins;
+  schema-v1 entries are ignored and recomputed. Run-local `manual_overrides.toml`
+  remains a v1 file with the same path and offset semantics.
+
+### Upgrade notes
+
+- VSPreview-era native or Windows portable installations must install the complete
+  VSView bundle. A code-only update fails closed when the installed requirements or
+  media-runtime fingerprint does not match; it never mixes the old UI/native graph
+  with new application code.
+- Replace `audio_alignment.use_vspreview = true` with
+  `audio_alignment.use_vsview = true` in authored configuration. The old key is no
+  longer accepted, and the shared alignment reuse cache is rebuilt as schema v2.
+
 ## [0.5.0]
 
 ### Added

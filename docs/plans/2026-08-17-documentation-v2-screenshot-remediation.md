@@ -50,7 +50,7 @@ Do not:
 Produce a visually coherent V2 documentation set that:
 
 1. uses one rights-cleared natural-image comparison dataset for the product-facing
-   report and alignment screenshots;
+   report and the future VSView alignment capture;
 2. uses generic physical filenames and explicit readable display labels;
 3. demonstrates real texture, shadows, gradients, edges, and source differences;
 4. contains no private paths, original release-group names, secrets, or accidental
@@ -111,7 +111,7 @@ Preserve all of the following:
 - The report overview is one canonical asset reused in three locations.
 - Slider, grid, inspector, and preferably diff come from the same generated report and
   selected frame.
-- The visible source order and labels remain consistent across the report and VSPreview
+- The visible source order and labels remain consistent across the report and VSView
   captures.
 - Source identity is not confused with presentation labels.
 - No screenshot implies that slider mode displays three simultaneous full source views.
@@ -268,7 +268,7 @@ motion_frame_count = 2
 
 [audio_alignment]
 enable = true
-use_vspreview = true
+use_vsview = true
 
 [screenshots]
 overlay_mode = "standard"
@@ -336,7 +336,7 @@ Recommended final dimensions:
 | Asset family | Target |
 | --- | --- |
 | Report overview, slider, diff, grid, inspector | Exact visible 1080p-height browser surface; 1683 × 1080 on the current capture host |
-| VSPreview | Approximately 1600–1920 px wide; crop unused desktop chrome |
+| VSView | Approximately 1600–1920 px wide; crop unused desktop chrome |
 | Terminal captures | Approximately 1000–1200 px wide, tightly cropped to relevant output |
 | HDR diagnostic | Approximately 1280 × 720 or the natural screenshot aspect ratio |
 
@@ -417,9 +417,11 @@ unreadable or misleading. If retained:
 - keep the caption explicit that diff locates changed regions;
 - do not imply the pattern is representative source footage.
 
-### 6. `vspreview-alignment.webp` — required replacement
+### 6. Future VSView alignment capture — deferred physical-Windows asset
 
-Use the same source set when practical. Show:
+The obsolete alignment asset has been removed. Do not fabricate a replacement on macOS
+or in headless Docker. Capture the future asset only during the physical-Windows
+VSView acceptance pass, using the same source set when practical. Show:
 
 - reference and comparison identity;
 - proposed or accepted frame offset;
@@ -569,7 +571,7 @@ Perform a full-resolution privacy review of every asset. Search for hidden discl
 - filenames;
 - terminal output;
 - browser title bars;
-- VSPreview scripts and window titles;
+- VSView scripts and window titles;
 - report metadata;
 - generated paths;
 - overlay text.
@@ -682,13 +684,15 @@ The task is complete only when all of the following are true:
 - Slider, grid, and inspector use the same report and selected frame.
 - Diff is either replaced with the natural report or explicitly retained with a recorded
   clarity rationale.
-- VSPreview uses realistic, readable, full source labels.
+- The future VSView capture uses realistic, readable, full source labels.
 - The completion image is a shallow final-summary crop.
 - Doctor and Windows install captures have been reviewed at rendered width.
 - The new HDR diagnostic asset is present and accurately captioned.
 - No screenshot exposes private or original release identity.
 - Rights and attribution are recorded.
-- Existing image paths remain valid.
+- Every referenced image path remains valid; the deferred VSView alignment capture has
+  no published path until the physical-Windows acceptance pass supplies one.
+- The obsolete alignment asset is removed and no active documentation references it.
 - Alt text and captions match the actual final assets.
 - Strict Zensical build passes.
 - Focused documentation tests pass.

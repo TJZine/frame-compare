@@ -104,8 +104,8 @@ and writes the report. Network publication occurs only when the effective config
 or command explicitly enables it.
 
 <figure class="fc-doc-figure">
-  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched EBU/DVB clips, one selected frame, the report and run-folder paths, the VSPreview warning summary, and elapsed time.">
-  <figcaption>The completed run summary links the report and run folder to the three matched sources, records frame 1000, surfaces the optional VSPreview warning, and reports the duration.</figcaption>
+  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched EBU/DVB clips, one selected frame, the report and run-folder paths, the optional VSView warning summary, and elapsed time.">
+  <figcaption>The completed run summary links the report and run folder to the three matched sources, records frame 1000, surfaces the optional VSView warning, and reports the duration.</figcaption>
 </figure>
 
 ## Find the result
@@ -145,6 +145,6 @@ Continue with:
 - [Reports and Overlays](reports-and-overlays.md)
 - [Sources, References, and Labels](sources-and-labels.md)
 - [Frame Selection and Analysis](analysis-modes.md)
-- [Audio Alignment and VSPreview](audio-alignment.md)
+- [Audio Alignment and VSView](audio-alignment.md)
 - [HDR and Tonemapping](hdr-tonemapping.md)
 - [Troubleshooting](troubleshooting.md)
