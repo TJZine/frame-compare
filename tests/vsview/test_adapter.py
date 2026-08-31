@@ -208,7 +208,7 @@ def test_resolve_launch_command_uses_native_launcher_for_managed_runtime(
         sys.executable,
         "-m",
         "frame_compare.vsview.launcher",
-        "generated/session.py",
+        str(Path("generated/session.py")),
     ]
 
 
@@ -224,7 +224,7 @@ def test_resolve_launch_command_uses_external_executable_when_module_missing(
 
     assert _resolve_launch_command(Path("generated/session.py")) == [
         "/usr/local/bin/vsview",
-        "generated/session.py",
+        str(Path("generated/session.py")),
     ]
 
 

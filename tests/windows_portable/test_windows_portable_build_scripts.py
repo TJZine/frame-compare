@@ -1029,11 +1029,23 @@ def _write_extracted_verifier_fixture(
                 "declared_license": "MIT",
                 "license_classifiers": [],
                 "license_expression": [],
-                "name": "fixture-package",
+                "name": name,
                 "project_urls": [],
-                "source_url": "https://pypi.org/project/fixture-package/1.0/",
-                "version": "1.0",
+                "source_url": f"https://pypi.org/project/{name}/{version}/",
+                "version": version,
             }
+            for name, version in (
+                ("jetpytools", "3.1.1"),
+                ("PySide6", "6.11.2"),
+                ("PySide6-Addons", "6.11.2"),
+                ("PySide6-Essentials", "6.11.2"),
+                ("shiboken6", "6.11.2"),
+                ("vapoursynth-bestsource", "21.0"),
+                ("vspackrgb", "1.4.0"),
+                ("VSView", "0.10.3"),
+                ("vsview-cli", "1.2.0"),
+                ("vsjetengine", "1.7.0"),
+            )
         ],
         "schema_version": 2,
         "source_build_install_scripts": [
