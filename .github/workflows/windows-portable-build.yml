@@ -145,8 +145,8 @@ jobs:
           $bundleConfigDir = Join-Path $bundle "config"
           $bundleInputDir = Join-Path $bundle "comparison_videos"
           $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
+          $canonicalLsmasPlugin = Join-Path $vsPackagePlugins "LSMASHSource.dll"
           $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
-          $lsmasManifest = Join-Path $extraPluginRoot "lsmas/manifest.vs"
 
           if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
             throw "Missing default workspace directory in bundle: $bundleConfigDir"
@@ -157,11 +157,11 @@ jobs:
           if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
             throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
           }
-          if (!(Test-Path -LiteralPath $extraPluginRoot -PathType Container)) {
-            throw "Missing extra VapourSynth plugin directory: $extraPluginRoot"
+          if (!(Test-Path -LiteralPath $canonicalLsmasPlugin -PathType Leaf)) {
+            throw "Missing canonical L-SMASH plugin: $canonicalLsmasPlugin"
           }
-          if (!(Test-Path -LiteralPath $lsmasManifest -PathType Leaf)) {
-            throw "Missing L-SMASH manifest: $lsmasManifest"
+          if (Test-Path -LiteralPath $extraPluginRoot) {
+            throw "Unexpected duplicate extra-plugin tree: $extraPluginRoot"
           }
 
       - name: "Smoke: absolute candidate launcher"

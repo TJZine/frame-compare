@@ -20,6 +20,7 @@ REQUIRED_DISTRIBUTIONS = {
     "shiboken6",
     "vapoursynth",
     "vapoursynth-bestsource",
+    "vapoursynth-lsmas",
     "vs-placebo",
     "vsjetengine",
     "vspackrgb",

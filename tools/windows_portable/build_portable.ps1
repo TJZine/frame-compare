@@ -217,27 +217,6 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
     return
   }
 
-  if ($type -eq "copy_file") {
-    $sourcePath = Get-RequiredStringProperty -Object $install -Name "source_path" -Context "artifact '$artifactId' install"
-    $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
-    Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $tmp
-    $sourcePathNorm = ($sourcePath -replace "/", "\\").TrimStart("\\")
-    $src = Join-Path $tmp $sourcePathNorm
-    if (!(Test-Path -LiteralPath $src)) {
-      throw "Expected file not found in archive: $sourcePath (artifact $artifactId)"
-    }
-    Ensure-Directory -Path (Split-Path -Parent $dest)
-    Copy-Item -Force -LiteralPath $src -Destination $dest
-    $manifestEntry = Get-OptionalStringProperty -Object $install -Name "manifest"
-    if ($manifestEntry -ne "") {
-      $manifestPath = Join-Path (Split-Path -Parent $dest) "manifest.vs"
-      $manifestContent = "[VapourSynth Manifest V1]`r`n$manifestEntry`r`n"
-      Set-Content -LiteralPath $manifestPath -Value $manifestContent -Encoding ASCII
-    }
-    Remove-Item -Recurse -Force -LiteralPath $tmp
-    return
-  }
-
   throw "Unknown install.type '$type' for artifact $artifactId"
 }
 
@@ -309,7 +288,7 @@ try {
   $env:PYTHONUTF8 = "1"
   $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$bundleRoot\app\src;$bundleRoot\app\site-packages"
-  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\vs\extra-plugins"
+  Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
   $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
   $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
@@ -326,8 +305,7 @@ try {
     (Join-Path $vsPackage "plugins"),
     (Join-Path $sitePackages "vapoursynth.libs"),
     (Join-Path $sitePackages "vs_placebo"),
-    (Join-Path $sitePackages "vs_placebo.libs"),
-    (Join-Path $bundleRoot "vs\extra-plugins\lsmas")
+    (Join-Path $sitePackages "vs_placebo.libs")
   )
   $existingPathEntries = @(
     $pathEntries |
@@ -530,7 +508,7 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   Push-Location $RepoRoot
   try {
     # Export pinned, hashed requirements from uv.lock (exclude project itself; we run from app/src via PYTHONPATH).
-    uv export --frozen --no-dev --no-emit-project --extra vsview --format requirements.txt --output-file $reqFile | Out-Null
+    uv export --frozen --no-dev --no-emit-project --no-emit-package vapoursynth-lsmas --extra vsview --format requirements.txt --output-file $reqFile | Out-Null
     Assert-LastExitCode -CommandLabel "uv export"
   } finally {
     Pop-Location
@@ -601,7 +579,7 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   $env:PYTHONUTF8 = "1"
   $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$BundleRoot\app\src;$BundleRoot\app\site-packages"
-  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\vs\extra-plugins"
+  Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
   $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
   $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
@@ -618,8 +596,7 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
     (Join-Path $vsPackage "plugins"),
     (Join-Path $sitePackages "vapoursynth.libs"),
     (Join-Path $sitePackages "vs_placebo"),
-    (Join-Path $sitePackages "vs_placebo.libs"),
-    (Join-Path $BundleRoot "vs\extra-plugins\lsmas")
+    (Join-Path $sitePackages "vs_placebo.libs")
   )
   $existingEntries = @(
     $pathEntries |
@@ -715,13 +692,11 @@ function Invoke-VSViewOffscreenLaunchProof(
   $stderrPath = Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log"
   $originalQtPlatform = Get-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM"
   $originalNoColor = Get-ProcessEnvironmentValue -Name "NO_COLOR"
-  $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
   $process = $null
   $timedOut = $false
   try {
     $env:QT_QPA_PLATFORM = "offscreen"
     $env:NO_COLOR = "1"
-    Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
     $quotedSessionPath = '"' + $SessionPath + '"'
     $process = Start-Process -FilePath $Python -ArgumentList @(
       "-m",
@@ -740,7 +715,6 @@ function Invoke-VSViewOffscreenLaunchProof(
     }
     Restore-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM" -Value $originalQtPlatform
     Restore-ProcessEnvironmentValue -Name "NO_COLOR" -Value $originalNoColor
-    Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
   }
 
   $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
@@ -844,6 +818,7 @@ def prove_vsview_distribution_contract() -> None:
         "pyside6-essentials": "6.11.2",
         "shiboken6": "6.11.2",
         "vapoursynth-bestsource": "21.0",
+        "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "1.4.0",
         "vsview": "0.10.3",
         "vsview-cli": "1.2.0",
@@ -911,7 +886,6 @@ def prove_vapoursynth_environment() -> None:
     api_major = getattr(api_version, "api_major", None)
     api_minor = getattr(api_version, "api_minor", None)
     plugin_dir = Path(vs.get_plugin_dir())
-    extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
@@ -920,7 +894,12 @@ def prove_vapoursynth_environment() -> None:
     assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
     assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
-    assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
+    canonical_lsmas_plugin = plugin_dir / "LSMASHSource.dll"
+    assert_true(canonical_lsmas_plugin.is_file(), f"canonical L-SMASH plugin missing: {canonical_lsmas_plugin}")
+    assert_true(
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH" not in os.environ,
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH should not be set",
+    )
     assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
     assert_true("lsmas" in plugin_namespaces, f"lsmas plugin missing: {plugin_namespaces}")
     assert_true("placebo" in plugin_namespaces, f"placebo plugin missing: {plugin_namespaces}")
@@ -928,7 +907,8 @@ def prove_vapoursynth_environment() -> None:
 
     proof(f"vapoursynth_import=ok version=R{version_major} api={api_major}.{api_minor}")
     proof(f"plugin_dir={plugin_dir}")
-    proof(f"extra_plugin_path={extra_plugin_path}")
+    proof(f"canonical_lsmas_plugin=ok path={canonical_lsmas_plugin}")
+    proof("extra_plugin_path=absent")
     proof(f"core_plugins={','.join(plugin_namespaces)}")
 
 

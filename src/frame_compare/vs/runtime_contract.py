@@ -296,16 +296,22 @@ def _scope_components(
                 "token_version": 1,
             },
         }
+    plugin_layout: dict[str, JSONValue] = {
+        "vapoursynth": "site-packages/vapoursynth/plugins",
+    }
+    if profile != "windows-x64":
+        plugin_layout.update(
+            {
+                "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
+                "manifest": "VapourSynth Manifest V1",
+            }
+        )
     return {
         "decoder": _decoder_identity(profile),
         "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         "ffms2": _ffms2_identity(profile),
         "tone_mapping": _tone_mapping_identity(),
-        "plugin_layout": {
-            "vapoursynth": "site-packages/vapoursynth/plugins",
-            "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
-            "manifest": "VapourSynth Manifest V1",
-        },
+        "plugin_layout": plugin_layout,
     }
 
 

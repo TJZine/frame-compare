@@ -57,9 +57,8 @@ and Frame Compare-owned indexes before reuse.
   generated Frame Compare sessions continue to load media through L-SMASH-Works.
 - Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
 - FFMS2 intentionally excluded.
-- Plugins load from deterministic VapourSynth package and extra-plugin paths with
-  `manifest.vs`; the standalone FFmpeg directory is not used for recursive DLL
-  discovery.
+- Plugins load from the deterministic canonical VapourSynth package path; the
+  standalone FFmpeg directory is not used for recursive DLL discovery.
 
 ### Debian Trixie / Docker
 

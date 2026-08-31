@@ -147,6 +147,26 @@ def test_analysis_identity_excludes_tone_mapping_components() -> None:
     assert "l_smash_works" in serialized
 
 
+def test_full_runtime_plugin_layout_is_profile_specific() -> None:
+    windows = media_runtime_identity("full", profile="windows-x64")
+
+    assert windows["components"]["plugin_layout"] == {
+        "vapoursynth": "site-packages/vapoursynth/plugins"
+    }
+    for profile in (
+        "debian-trixie",
+        "unmanaged-windows",
+        "unmanaged-linux",
+        "native-macos",
+    ):
+        identity = media_runtime_identity("full", profile=profile)
+        assert identity["components"]["plugin_layout"] == {
+            "vapoursynth": "site-packages/vapoursynth/plugins",
+            "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
+            "manifest": "VapourSynth Manifest V1",
+        }
+
+
 @pytest.mark.parametrize(
     ("profile", "lineage_constant", "replacement", "analysis_changes"),
     [

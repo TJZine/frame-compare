@@ -6,14 +6,14 @@
     "vs_ref": "R79",
     "python_version": "3.13.15",
     "ffmpeg_policy": "lgpl-only",
-    "plugin_layout": "R74+ site-packages/vapoursynth/plugins plus VAPOURSYNTH_EXTRA_PLUGIN_PATH",
-    "notes": "Deterministic Windows media runtime contract. Native media components are not present in code-only update ZIPs; installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
+    "plugin_layout": "R74+ site-packages/vapoursynth/plugins only",
+    "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory; native media components are not present in code-only update ZIPs, so installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
       "analysis": "312f6703ff00e5f518f6c768d74bbe30c17fd07ee5f7079b71aec0f78e7ca039",
       "probe": "2165b8dd875be09a5631f612a683c32106b65f74398db6eec68e37839e471c77",
       "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
       "index": "56c451f754fda35c6f39c1ec4d698e596b580660ca08c6cf40f45114d15a7e1c",
-      "full": "6b09db7e3f3d388c4b61b2495b325968b336e4c84bc1b846d90afa5a125ee7a1"
+      "full": "dc440dadfd2f1bfee3038a9b522aa5d2bc0fc864c6325bba9a067d0e5c892a54"
     }
   },
   "artifacts": [
@@ -181,12 +181,9 @@
         "notes": "The upstream 1310 Windows wheel DLL statically incorporates the release-declared media libraries below. The bundle preserves each corresponding source and license notice; PE import validation permits only Windows/UCRT system DLL dependencies."
       },
       "install": {
-        "type": "copy_file",
-        "source_path": "vapoursynth/plugins/LSMASHSource.dll",
-        "destination": "vs/extra-plugins/lsmas/libvslsmashsource.dll",
-        "manifest": "libvslsmashsource"
+        "type": "python_wheel"
       },
-      "notes": "Official non-yanked 1310.0.0.0 Windows wheel from the 1310 native release lineage. Its plugin DLL statically incorporates the release-declared media libraries and imports only Windows/UCRT system libraries; unlike the 1310 release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. Installed into the deterministic extra-plugin directory; FFMS2 remains excluded from Windows.",
+      "notes": "Official non-yanked 1310.0.0.0 Windows wheel from the 1310 native release lineage. Its plugin DLL statically incorporates the release-declared media libraries and imports only Windows/UCRT system libraries; unlike the 1310 release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. Installed by the manifest-owned wheel into app/site-packages/vapoursynth/plugins; FFMS2 remains excluded from Windows.",
       "release_date": "2026-08-23",
       "source_kind": "release",
       "source_ref": "1310.0.0.0",

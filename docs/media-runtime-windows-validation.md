@@ -35,7 +35,7 @@ The expected candidate profile is:
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
 | FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `6b09db7e3f3d388c4b61b2495b325968b336e4c84bc1b846d90afa5a125ee7a1` |
+| Full runtime fingerprint | `dc440dadfd2f1bfee3038a9b522aa5d2bc0fc864c6325bba9a067d0e5c892a54` |
 | L-SMASH index token | `lsw1310-56c451f754fd` |
 
 ## 1. Exact source and repository gates
@@ -199,7 +199,7 @@ Inspect `doctor-candidate.json`. Required results:
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
 - `ffmpeg` and `ffprobe` resolve inside the bundle and report the selected BtbN build.
-- Plugin loading uses deterministic package/extra-plugin paths.
+- Plugin loading uses only the deterministic canonical package plugin path.
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 

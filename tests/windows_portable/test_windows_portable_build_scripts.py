@@ -74,6 +74,11 @@ def test_windows_portable_bundle_launcher_restores_process_environment(repo_root
         'Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
         "-Value $originalVsPluginPath"
     ) in build_script
+    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
+    assert (
+        'Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" '
+        "-Value $originalVsExtraPluginPath"
+    ) in build_script
 
 
 def test_windows_portable_bundle_launcher_uses_cli_package_entry(repo_root: Path) -> None:
@@ -254,8 +259,7 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
 
     lsmas = artifacts["vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel"]
     assert lsmas["version"] == "1310.0.0.0"
-    assert lsmas["install"]["type"] == "copy_file"
-    assert lsmas["install"]["source_path"] == "vapoursynth/plugins/LSMASHSource.dll"
+    assert lsmas["install"] == {"type": "python_wheel"}
     assert lsmas["url"].endswith("vapoursynth_lsmas-1310.0.0.0-py3-none-win_amd64.whl")
     assert lsmas["bytes"] == 11530241
     assert lsmas["sha256"] == ("8197e2c901ff7b9ac651a66819986bfd993767a0b656a8d11c8f5b53829d2f6b")
@@ -264,8 +268,6 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         "d529128e2d13763cbb56c21f0fd534191380530de6042907cbdae366b23ba2e5"
     )
     assert lsmas["source_commit"] == "7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67"
-    assert lsmas["install"]["destination"] == "vs/extra-plugins/lsmas/libvslsmashsource.dll"
-    assert lsmas["install"]["manifest"] == "libvslsmashsource"
 
     placebo = artifacts["vs-plugin-vs-placebo-2.0.4-win-amd64-wheel"]
     assert placebo["version"] == "2.0.4"
@@ -294,7 +296,9 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
 
-    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
+    assert "--no-emit-package vapoursynth-lsmas" in build_script
+    assert "$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH =" not in build_script
+    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
     assert "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue" in build_script
     assert '$sitePackages = Join-Path $BundleRoot "app\\\\site-packages"' in build_script
     assert '$vsPackage = Join-Path $sitePackages "vapoursynth"' in build_script
@@ -306,7 +310,6 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
     assert "expected R79 package layout" in build_script
     assert 'Join-Path $sitePackages "vapoursynth.dll"' not in build_script
     assert 'Join-Path $sitePackages "Lib\\\\site-packages\\\\vapoursynth.dll"' not in build_script
-    assert "manifest.vs" in build_script
     assert "Install-PythonWheelArtifacts" in build_script
     assert "Expand-ArchiveFile" in build_script
     assert "7z extract" in build_script
@@ -502,6 +505,11 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
         'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
         "-Value $originalVsPluginPath"
     ) in build_script
+    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
+    assert (
+        'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" '
+        "-Value $originalVsExtraPluginPath"
+    ) in runtime_validation
     for name in (
         "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT",
         "FRAME_COMPARE_RUNTIME_KIND",
@@ -657,8 +665,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert '"--no-settings"' in launch_proof
     assert '$env:QT_QPA_PLATFORM = "offscreen"' in launch_proof
     assert '$env:NO_COLOR = "1"' in launch_proof
-    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in launch_proof
-    assert 'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"' in launch_proof
+    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" not in launch_proof
     assert "$process.WaitForExit(20000)" in launch_proof
     assert "Stop-Process -Id $process.Id -Force" in launch_proof
     assert "$process.WaitForExit(10000)" in launch_proof
@@ -1714,10 +1721,8 @@ def test_windows_portable_manifest_schema_models_current_install_shapes(repo_roo
     assert "oneOf" in install_def
 
     variants = {variant["properties"]["type"]["const"]: variant for variant in install_def["oneOf"]}
-    assert set(variants) == {"extract", "copy_file", "python_wheel"}
+    assert set(variants) == {"extract", "python_wheel"}
     assert variants["extract"]["required"] == ["type", "destination"]
-    assert variants["copy_file"]["required"] == ["type", "destination", "source_path"]
-    assert "manifest" in variants["copy_file"]["properties"]
     assert variants["python_wheel"]["required"] == ["type"]
     assert "destination" not in variants["python_wheel"]["properties"]
 
@@ -1788,6 +1793,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "shiboken6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "VapourSynth": ("79", "LGPL-2.1-or-later"),
         "vapoursynth-bestsource": ("21.0", "MIT"),
+        "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "vspackrgb": ("1.4.0", "MIT"),
         "VSView": ("0.10.3", "EUPL-1.2"),
@@ -1903,6 +1909,7 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         "shiboken6",
         "vapoursynth",
         "vapoursynth-bestsource",
+        "vapoursynth-lsmas",
         "vs-placebo",
         "vspackrgb",
         "vsview",
