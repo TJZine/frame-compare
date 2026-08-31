@@ -10,10 +10,10 @@ A version shown here is supported only as part of the complete profile described
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
 | VapourSynth | R78 | **R79**, commit `acabf605b2205b32d65859bb2736405719d2fafd` | 2026-08-07 | Formal stable release | Latest non-prerelease release. It supplies CPython 3.13-compatible ABI3 wheels, keeps API R4.2, and improves cache cycling, `vspipe` MKV output, and zimg API validation. |
-| VSView | Retired legacy viewer | **0.10.3** | 2026-08-16 | Stable Python release | Maintained next-generation viewer. Frame Compare uses its documented `set_output` API and named outputs with the base extra only; the `recommended`/`full` extras are not part of the supported graph. |
+| VSView | Previous viewer integration | **0.10.3** | 2026-08-16 | Stable Python release | Maintained native viewer. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
 | PySide6 | Previous Qt binding | **6.11.2** | Resolved 2026-08-30 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
 | VSJetEngine | 1.2.0 | **1.7.0** | 2026-08-21 | Stable Python release | Current locked VSView dependency resolution. |
-| VSView support graph | Retired viewer dependency graph | **jetpytools 3.1.1; vsjetengine 1.7.0; BestSource 21.0; vspackrgb 1.4.0** | Resolved 2026-08-30 | Locked Python resolution | Accepted base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. |
+| VSView support graph | Previous viewer dependency graph | **jetpytools 3.1.1; vsjetengine 1.7.0; BestSource 21.0; vspackrgb 1.4.0** | Resolved 2026-08-30 | Locked Python resolution | Accepted base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
 | Windows L-SMASH-Works package | 1296.0.0.1 | **vapoursynth-lsmas 1310.0.0.0** | 2026-08-23 | Non-yanked official PyPI wheel | Official wheel for the 1310 native lineage. Its plugin DLL imports only Windows/UCRT system libraries; unlike the release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. |
 | L-SMASH | commit `84740c5d960ab622f4c08b971dc59192bc27ef74` | commit **`d186eb95388710a7a91f6fd353169b457ebbb9db`** | 2026-07-28 | Pinned maintainer-fork commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1310. No newer appropriate formal stable tag supersedes it. |
@@ -53,8 +53,11 @@ and Frame Compare-owned indexes before reuse.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
 - VSView 0.10.3 with its base dependency graph, PySide6 6.11.2, BestSource,
-  and vspackrgb for the optional interactive UI. BestSource remains UI-only;
-  generated Frame Compare sessions continue to load media through L-SMASH-Works.
+  vspackrgb, and the packaged `frame-compare-alignment-review` panel entry point
+  for optional native interactive review. The runtime and panel metadata must come
+  from the same environment; a PATH-only VSView executable is unsupported. BestSource
+  remains UI-only; generated Frame Compare sessions continue to load media through
+  L-SMASH-Works.
 - Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
 - FFMS2 intentionally excluded.
 - Plugins load from the deterministic canonical VapourSynth package path; the
@@ -73,11 +76,16 @@ and Frame Compare-owned indexes before reuse.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
 - Software Vulkan through Mesa is the canonical headless validation path.
 
-VSView is optional for native and Docker workflows. Its base package is the supported
-choice; the upstream `recommended` and `full` extras add unrelated graph features and
-are intentionally excluded. Frame Compare's generated sessions retain L-SMASH-Works
-source loading and owned index paths. VSView's BestSource workspace is not a migration
-of Frame Compare's analysis, probe, render, index, or cache-key source loader.
+VSView and the native Frame Compare alignment panel are optional for native and Docker
+workflows. Its base package is the supported choice; the upstream `recommended` and
+`full` extras add unrelated graph features and are intentionally excluded. Install
+`frame-compare[vsview]` in the same environment as Frame Compare so the exact
+`frame-compare-alignment-review` entry point is discoverable and loads
+`AlignmentReviewPanel`. Generated Frame Compare sessions retain L-SMASH-Works source
+loading and owned index paths; the panel reads only their trusted metadata and writes
+an atomic typed sibling result sidecar. VSView's BestSource workspace is not a
+migration of Frame Compare's analysis, probe, render, index, or cache-key source
+loader.
 
 The Linux build retains L-SMASH-Works' narrow VapourSynth-only Meson path even
 though upstream marks Meson deprecated. The upstream CMake build enables several
@@ -226,16 +234,23 @@ and the exact [Debian Trixie package copyright record](https://sources.debian.or
 
 ## Validation boundary
 
-GitHub-hosted Linux, Docker, and Windows validation proves packaging, plugin loading,
-generated fixtures, runtime identities, updater compatibility, and deterministic
-layout. For generated HDR fixtures, `ffprobe` is the encoded stream-signal authority;
+GitHub-hosted Linux, Docker, and Windows validation is the gate for proving packaging,
+plugin loading, generated fixtures, runtime identities, updater compatibility, and
+deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
+stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. The current Linux GUI verifier additionally proves that the VSView
-0.10.3 image can load a production-generated L-SMASH session, register named
-`Reference`/`Comparison 1` outputs, and render frame 0 for both outputs under its
-offscreen path. That is not visible X11 desktop proof and does not replace final
-validation on the supported physical Windows system.
+frame property. The Linux GUI verifier contract requires the VSView 0.10.3 image to
+discover and load the exact native panel entry point, construct its inactive panel
+offscreen, load a production-generated L-SMASH session, register named
+`Reference`/`Comparison 1` outputs, render frame 0 for both outputs, and round-trip a
+typed sibling result while rejecting malformed data. This feature run has static
+contract proof only; execution remains unavailable/unverified until a compatible
+Linux/X11 host runs it. That contract is not visible X11 desktop proof and does not
+replace final validation on the supported physical Windows system.
+macOS offscreen or synthetic-panel proof exercises the Python/Qt/plugin contract only;
+when the host does not provide `core.lsmas`, it is not native L-SMASH media proof and
+must not be reported as such.
 Before merge, that pass must still cover the RTX/Vulkan path, HDR10 and Dolby Vision
 real media, perceptual comparisons, timing/VFR/interlacing/repeated-field cases, alpha
 where available, audio synchronization, old/new index behavior, and an actual

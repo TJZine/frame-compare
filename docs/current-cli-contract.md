@@ -16,7 +16,7 @@ It is intentionally about current behavior, not desired future behavior.
 - [CLI Flag To Config Mapping](#cli-flag-to-config-mapping)
 - [Config-Only Analysis Surface](#config-only-analysis-surface)
 - [Config-Only slow.pics Surface](#config-only-slowpics-surface)
-- [VSView Interactive Diagnostics](#vsview-interactive-diagnostics)
+- [VSView Native Alignment Diagnostics](#vsview-native-alignment-diagnostics)
 - [Config-Only Screenshot Surface](#config-only-screenshot-surface)
 - [Config Validation, Logging, And Migration](#config-validation-logging-and-migration)
 - [Config-Only Audio Alignment Surface](#config-only-audio-alignment-surface)
@@ -363,7 +363,7 @@ unchanged.
   Report-confirmed upload confirmation status is also not emitted; the success
   schema remains unchanged and `slowpics_url` remains the only machine-readable
   slow.pics result field.
-- `--json` is incompatible with interactive alignment. If the effective config enables
+- `--json` is incompatible with native VSView panel review. If the effective config enables
   `audio_alignment.use_vsview` or `audio_alignment.force_interactive`, the CLI exits
   with the standard config-error payload and exit code before entering the runtime
   pipeline.
@@ -496,7 +496,7 @@ unchanged.
 - Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
-  VSView review is labeled `ALIGN | Interactive verification`.
+  native VSView panel review is labeled `ALIGN | Native VSView review`.
 - Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
@@ -659,7 +659,7 @@ recovery requirement.
   Generated VSView sessions pass this same owned, runtime-versioned path as the
   `cachefile` for the reference and every comparison; a missing index may be created
   there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
-  rejects that index location during VSView loading, the external VSView child does
+  rejects that index location during VSView loading, the managed VSView child does
   not remove or rebuild the parent-owned index; it retries that source cache-free and
   preserves the original construction error if the fallback also fails.
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -1156,16 +1156,17 @@ The JSON output schema remains unchanged by report-confirmed upload:
 There are no current slow.pics config fields for image format or optimization
 toggles or tags.
 
-## VSView Interactive Diagnostics
+## VSView Native Alignment Diagnostics
 
-VSView 0.10.3 parent telemetry, generated Frame Compare session diagnostics, preview
-assumptions, ready text, and terminal confirmation prompts use stderr as the single
-human diagnostic stream. The VSView child process is launched with inherited stdout
-and stderr so native carriage-return progress (including L-SMASH index creation)
-refreshes in place. Frame Compare-owned generated script diagnostics are written to
-stderr.
+VSView 0.10.3 parent telemetry and generated Frame Compare session diagnostics use
+stderr as the single human diagnostic stream. The native VSView panel is the sole
+human alignment-review interface: the terminal never reads review input, parses a
+confirmation response, or writes a result. The VSView child process is launched with
+inherited stdout and stderr so native carriage-return progress (including L-SMASH
+index creation) refreshes in place. Frame Compare-owned generated script diagnostics
+are written to stderr.
 
-When interactive alignment launches a generated VSView session, the diagnostic order
+When native VSView panel review launches a generated session, the diagnostic order
 is:
 
 1. parent `VSView Session` telemetry
@@ -1174,18 +1175,32 @@ is:
 3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
    paired truthful named-output mappings
 4. generated `[WARN] VSView Display Assumptions`, only when assumptions exist
-5. generated `[OK] VSView Ready` with a directly nested operator action
-6. parent `[WAIT] VSView Confirmation` with nested instructions and prompts
+5. generated `[OK] VSView Ready` with the instruction to open **Frame Compare
+   Alignment Review** from VSView's Tool Panel
+6. parent waits for the bounded VSView process to close, then reports whether the
+   trusted result sidecar was accepted or retained the current alignment
 
 Normal VSView labels reuse the release-aware presentation identities prepared by the
 typed alignment request. Paths and stems remain the internal source, suggested
-offset, confirmation, manual-override, and alignment-result identities. Confirmation
-asks the operator to find the same visible moment, then enter its untrimmed reference
-and comparison source-frame indices in that order. The prompt shows the audio-derived
-matching pair and which source it would trim; `skip` leaves the current audio result
-unchanged when one is available. Confirmation calculates the offset as reference
-minus comparison. Generated and parent no-color output retain the literal lifecycle
-markers. Native source/index diagnostics remain inherited without buffering.
+offset, manual-override, and alignment-result identities. In the native panel, the
+operator inspects synchronized `Reference`/`Comparison N` outputs, captures or enters
+untrimmed source-frame indices, confirms each pair, or explicitly keeps the current
+offset. The panel calculates reference minus comparison and shows the trim direction;
+finishing writes the typed sibling result sidecar atomically. Closing without
+finishing produces no result. Generated and parent no-color output retain the literal
+lifecycle markers. Native source/index diagnostics remain inherited without buffering.
+
+The generated session carries an explicit UUID session identity, pair order, roles,
+presentation names, and bounded audio suggestions in each output's typed metadata;
+the metadata does not carry source-frame counts. The panel derives display bounds from
+the public output clip lengths, while the alignment service validates raw result
+indices against the authoritative `AlignmentClipRequest.source_frame_count` facts.
+Frame Compare derives the sibling result path from the trusted generated script path,
+then rejects missing, malformed, stale, mixed-session, duplicate, incomplete, or
+out-of-bounds results. It never trusts panel-supplied paths or counts.
+`audio_alignment.use_vsview = true` is optional; forced mode fails closed when
+readiness, process exit, cancellation, or result validation fails. Optional mode
+retains the computed/current alignment and reports an actionable diagnostic.
 
 Frame Compare registers outputs through VSView's documented
 `from vsview import set_output` API with explicit `Reference` and `Comparison N`
@@ -1324,11 +1339,11 @@ comparison source frame`. A positive offset trims that many frames from the refe
 a negative offset trims the absolute value from the comparison. Correlation lag is
 converted to this sign convention before consensus evidence, hints, caching, and trims.
 
-- `use_vsview` is a boolean, defaulting to `false`, that enables optional VSView
-  confirmation after computed alignment. `force_interactive` is a boolean, defaulting
-  to `false`, that requires the interactive review to succeed; it also enables
+- `use_vsview` is a boolean, defaulting to `false`, that enables optional native VSView
+  panel review after computed alignment. `force_interactive` is a boolean, defaulting
+  to `false`, that requires the native panel review to succeed; it also enables
   `use_vsview` through `--force-interactive-alignment` when that flag is supplied.
-  These settings affect only the interactive verification route, not correlation,
+  These settings affect only the native VSView review route, not correlation,
   source loading, rendering, or report generation.
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and

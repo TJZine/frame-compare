@@ -20,8 +20,8 @@ flowchart TD
     K --> L{"Reusable accepted offset available?"}
     L -->|Yes| M["Apply accepted alignment"]
     L -->|No| N["Audio correlation"]
-    N --> O{"Interactive verification enabled or required?"}
-    O -->|Yes| P["VSView review"]
+    N --> O{"Native VSView review enabled or required?"}
+    O -->|Yes| P["Native VSView alignment panel"]
     O -->|No| Q["Apply computed alignment"]
     P --> R["Apply verified alignment"]
     M --> S["Finalize shared aligned overlap and frame mapping"]
@@ -73,8 +73,10 @@ arrays. Selection counts and quantile choices are applied after metrics are avai
 
 The initial source-frame plan is normalized into the aligned comparison domain.
 Automatic audio correlation can estimate offsets when sources begin at different times
-or contain different trims. Previously accepted offsets can be reused, and an
-interactive route can open VSView when verification is enabled or required.
+or contain different trims. Previously accepted offsets can be reused, and the
+native VSView alignment panel can open when verification is enabled or required. The
+panel is available only from the same environment as Frame Compare and is inert for
+ordinary VSView sessions.
 
 Correlation is evidence, not certainty. Silence, replaced music, substantially different
 edits, or unrelated audio streams can produce weak or misleading matches. Review motion,
@@ -110,6 +112,7 @@ A local comparison does not require either integration.
 | `run_info.toml` | Record the reserved run identity and runtime provenance |
 | `run_result.toml` | Record the completed or failed lifecycle result used by history commands |
 | `report.html` and `screenshots/` | Preserve the reviewable comparison |
+| Native alignment result sidecar | Store the typed, session-bound panel decision beside the generated VSView script; malformed, stale, mixed, duplicate, incomplete, and out-of-bounds results are rejected |
 
 For implementation ownership and exact phase boundaries, see
 [Current Architecture](../current-architecture.md). For exact command, configuration,

@@ -2,10 +2,11 @@
 
 The Windows portable bundle is the recommended Frame Compare distribution for Windows
 10/11 x64. It includes the supported Python and media runtime, VSView 0.10.3 with its
-PySide6 backend for interactive alignment, the installer, and signed code-only update
-and rollback tooling.
+PySide6 backend and native Frame Compare alignment panel for review, the
+installer, and signed code-only update and rollback tooling.
 
-The portable graph pins the base `vsview==0.10.3` package only; its upstream
+The portable graph pins the base `vsview==0.10.3` package and the Frame Compare panel
+entry point; its upstream
 `recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
 VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
 through L-SMASH-Works and Frame Compare-owned indexes.
@@ -154,6 +155,41 @@ report before enabling any publication integration.
 See [Your First Comparison](guides/first-comparison.md) for the expected output and
 review checklist.
 
+## Native VSView alignment review
+
+The portable bundle includes VSView 0.10.3, PySide6, and the packaged
+`frame-compare-alignment-review` panel entry point in one self-contained Python
+environment. Frame Compare launches VSView through that same environment; a
+PATH-only VSView executable or a separate Python installation is not supported.
+
+When `audio_alignment.use_vsview = true` (or
+`--force-interactive-alignment`) is enabled, Frame Compare generates a session under
+`generated/.../vsview_sessions/`, validates bounded startup readiness, and opens the
+VSView child. Open **Frame Compare Alignment Review** from VSView's Tool Panel. The
+panel is inert for ordinary VSView sessions and does not take over or hide unrelated
+workspaces.
+
+Review the synchronized `Reference` and `Comparison N` outputs. For each pair, inspect
+the same visible moment, capture or enter untrimmed source-frame indices, and choose
+**Confirm pair** or **Keep current offset**. The panel shows the signed
+`reference - comparison` equation, trim direction, suggestion markers, and completion
+status. **Finish review** writes one typed, atomic sibling sidecar named
+`vsview_*.alignment-result.json`; its session UUID and ordered comparison keys are
+checked by Frame Compare, while raw source-frame indices are validated against the
+authoritative generated alignment request before any confirmed offset is applied.
+Closing VSView without finishing writes no result. Missing, malformed,
+stale, mixed-session, duplicate, incomplete, and out-of-bounds results fail closed.
+
+Optional review failures retain the computed/current alignment and print an actionable
+diagnostic. Forced review fails when the same-environment entry point is unavailable,
+startup readiness times out, the child process fails or times out, the review is
+cancelled without a complete result, or result validation fails. The former terminal
+frame-entry prompt, stdin protocol, executable/PATH discovery, and viewer compatibility
+fallbacks are removed. The native panel adds synchronized outputs, current-frame
+context, markers, explicit keep/confirm status, and a typed trust boundary; the tradeoff
+is that closing without **Finish review** does not preserve a manual decision and no
+external viewer fallback is available.
+
 ## Inspect previous runs
 
 ```powershell
@@ -231,6 +267,40 @@ revisions in the build manifest and generated inventory remain authoritative.
 | Doctor reports an optional/network warning | Review it against the intended workflow; disabled integrations need no setup |
 | Doctor reports a required media component failure | Reinstall the complete bundle rather than mixing unmanaged replacement DLLs into it |
 | Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
+| Doctor reports the alignment panel is missing | Reinstall the complete bundle or rebuild it; the VSView runtime and `frame-compare-alignment-review` entry point must come from the same environment |
+| Alignment panel is inactive | Open the Frame Compare-generated session; ordinary sessions and untrusted/mixed metadata intentionally remain inert |
+| Panel closes before **Finish review** | No result sidecar was written; reopen the generated session and complete each pair, or keep the computed/current alignment in optional mode |
+| Native review result is rejected | Generate a fresh session; Frame Compare rejects missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds sidecars |
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 
 For broader diagnosis, see [Troubleshooting](guides/troubleshooting.md).
+
+## Physical Windows handoff
+
+Hosted Windows verification is required to prove the exact package, embedded runtime,
+same-environment entry-point discovery/loading, offscreen panel construction,
+generated-session metadata, atomic result round trip, and fail-closed result
+validation. This feature run has not executed hosted Windows proof. After that proof
+passes, record these remaining interactive checks on a physical Windows 10/11 x64
+system:
+
+- open a real Frame Compare-generated session through the installed portable launcher;
+- verify the panel is discoverable from VSView's Tool Panel and remains inert in an
+  ordinary VSView session;
+- verify synchronized `Reference`/`Comparison N` tabs, current-frame context, bounded
+  suggestion markers, source-frame bounds, signed equation, and trim-direction text;
+- capture/enter an untrimmed frame pair, confirm it, mark another pair **Keep current
+  offset**, finish all pairs, close VSView, and verify Frame Compare applies only the
+  validated confirmed offsets;
+- close or cancel before finishing and verify optional mode retains the current result
+  while forced mode fails with an actionable diagnostic;
+- exercise missing/malformed/stale/mixed/duplicate/incomplete/out-of-bounds sidecars,
+  bounded readiness failure, child-process failure, and timeout behavior;
+- use real L-SMASH-backed media to verify native decoder/index diagnostics, then inspect
+  early, middle, late, and final shared-content evidence for drift or edit changes;
+- on the production GPU, verify Vulkan/HDR behavior and compare report output against
+  the prior supported bundle where the release changes runtime behavior.
+
+Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
+screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
+as physical Windows desktop acceptance.

@@ -53,20 +53,24 @@ RUN HISTORY:
   frame-compare history list
   frame-compare history open <run-name>
 
-OPTIONAL (Interactive Audio Alignment / VSView):
-  The full portable bundle includes VSView + PySide6. If you set:
+OPTIONAL (Native VSView Alignment Review):
+  The full portable bundle includes VSView + PySide6 + the native Frame Compare
+  alignment-review panel. Frame Compare and VSView run from the same bundled Python
+  environment; a PATH-only VSView executable is unsupported. If you set:
     [audio_alignment]
     use_vsview = true
-  interactive alignment can run out of the box.
+  native panel review can run out of the box.
   If you run the repository's Python environment directly instead of using the
   built portable bundle, install optional deps with:
     uv sync --group dev --extra vsview --frozen
   or:
     pip install -e ".[vsview]"
-  The hosted Windows release build starts the managed VSView launcher offscreen
-  against a generated two-output session, requires script/load/frame-0 evidence,
-  and terminates it after the expected steady-state GUI timeout. This is a native
-  runtime gate, not a substitute for later visible-UI acceptance on Windows.
+  The hosted Windows release build is required to discover and load the exact panel
+  entry point, construct it offscreen, start the managed VSView launcher against a
+  generated two-output session, require metadata/result round-trip plus
+  script/load/frame-0 evidence, and terminate it after the expected steady-state GUI
+  timeout. This is a native runtime gate, not a substitute for later visible-UI
+  acceptance on Windows; no hosted result is claimed by this local proof.
 
 UPDATING (Code-Only Update Package):
   Apply an update zip:

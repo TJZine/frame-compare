@@ -291,8 +291,8 @@ recovery requirement.
   failure is warned and an unusable index location falls back to a cache-free source
   open. Generated VSView sessions reuse this exact owned path for reference and
   comparison source loads, allowing L-SMASH-Works to create it there when missing.
-  The self-contained external preview child leaves rejected parent-owned indexes
-  untouched and retries only index-construction failures cache-free.
+  The self-contained VSView child leaves rejected parent-owned indexes untouched and
+  retries only index-construction failures cache-free.
 - `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
   immediately after every run-folder reservation. It stores creation time, final
   folder name, naming source, source filenames, Frame Compare version, the full
@@ -316,6 +316,14 @@ recovery requirement.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
   (VSView's BestSource workspace is not a Frame Compare source-loader change)
+- `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
+  session-scoped native alignment-review result sidecar. It is written atomically by
+  the VSView panel only after every comparison is explicitly confirmed or marked
+  `keep_current`. Frame Compare derives this sibling path from the trusted generated
+  session script, checks the UUID/session identity and ordered comparison set, and
+  validates raw source-frame bounds before applying any confirmed offset. Missing,
+  malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds results
+  are rejected; panel metadata never supplies the result path or frame counts.
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
@@ -385,7 +393,10 @@ The align phase uses a typed orchestration-to-services request seam:
 state, the workspace-level shared alignment cache path, reference/comparison
 labels, source identity facts, trims, effective FPS values, selected reference
 relationship, selected audio streams, cache-identity settings, and preserved
-frame props. Orchestration also supplies presentation-only common-content and
+frame props. For native review it also carries the untrimmed raw
+`source_frame_count` for every clip in the typed `AlignmentClipRequest`; this is the
+authoritative bound used when validating a panel result. Orchestration also supplies
+presentation-only common-content and
 per-source display strings as optional primitives for the reuse prompt; alignment
 services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
@@ -415,6 +426,20 @@ write-source provenance such as `computed_this_run`,
 computed or interactively confirmed provenance rather than inferring eligibility from
 the final flattened `AlignmentResult.source`.
 
+Native alignment review is deliberately split across the existing owners. The
+`frame_compare.vsview.session_script` owner generates the complete ordered output
+pair set and serializes session/role/key/ordinal/name/suggestion metadata. The typed
+`frame_compare.vsview.alignment_review_contract` owns the session identity, trusted
+sibling-sidecar path, atomic result write, and fail-closed parse/validation boundary.
+`frame_compare.vsview.alignment_review_panel` is the sole human review surface inside
+VSView: it remains inert for ordinary sessions, respects VSView synchronization, and
+writes only the typed sidecar after an explicit finish. `alignment_vsview` owns
+availability policy, expected-comparison construction from raw source counts, result
+acceptance, and applying confirmed offsets; it does not parse terminal input. The
+`frame_compare.vsview.adapter` remains the composition boundary for the current
+interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
+child-process lifetime.
+
 ## External Boundaries
 
 External runtime boundaries:
@@ -429,6 +454,7 @@ External runtime boundaries:
 - clipboard integration for slow.pics URLs in interactive CLI runs
 - Docker build/test runtime
 - Windows PowerShell installer and updater scripts
+- VSView public plugin API and event-loop/threading contract
 
 Current Docker capability contract:
 
@@ -437,7 +463,7 @@ Current Docker capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; offscreen VSView/session/render proof passes, while visible X11 launch remains unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
 | Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
 
 Keep these integrations at their current owners:
@@ -493,14 +519,20 @@ owners. Its explicit X11 contract is:
 - optional host `XAUTHORITY` cookie file mount when required by the desktop
 - container process UID/GID aligned to the host user for narrow local-user X11 permission flows
 
-The optional GUI proof is non-CI and non-default. Its current offscreen proof passes:
-the `gui-linux` image loads a production-generated L-SMASH session with VSView 0.10.3,
-registers `Reference` and `Comparison 1`, and renders frame 0 for both outputs. This
-proves dependency availability, generated-session loading, named-output registration,
-and offscreen rendering without requiring a real desktop launch. It does not prove
-visible X11 launch, Qt ergonomics, native Windows behavior, or physical-Windows
-acceptance. Any real UI launch remains a manual Linux desktop action outside the
-default Docker verification gate, and visible X11 remains unverified.
+The optional GUI proof is non-CI and non-default. Its verifier contract requires the
+`gui-linux` image to discover and load the exact Frame Compare VSView entry point,
+construct the panel in its inert ordinary-session state, load a production-generated
+L-SMASH session with VSView 0.10.3, register `Reference` and `Comparison 1`, render
+frame 0 for both outputs, and round-trip/validate the sibling result sidecar. This
+feature run has static contract proof only; execution remains unavailable/unverified
+until a compatible Linux/X11 host runs it. The contract covers dependency
+availability, plugin discovery, panel construction, generated metadata/result
+integration, named-output registration, and offscreen rendering without requiring a
+real desktop launch. It does not prove visible X11 launch, Qt ergonomics, native
+Windows behavior, or physical-Windows acceptance. Any real UI launch remains a manual
+Linux desktop action outside the default Docker verification gate.
+macOS offscreen or synthetic-panel checks are UI/plugin proof only; if the host lacks
+`core.lsmas`, they do not prove native L-SMASH media loading.
 
 The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser
@@ -780,7 +812,9 @@ Runtime ownership matrix:
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
-| Alignment-specific VSView verification display and override policy | `frame_compare.services.alignment_vsview` |
+| Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
+| Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
+| Native VSView alignment-review panel, synchronization markers, decisions, and finish/cancel behavior | `frame_compare.vsview.alignment_review_panel` |
 | VSView availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
@@ -814,6 +848,15 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/vsview/adapter.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
+
+Native alignment-review hotspot dispositions for the current implementation:
+
+| Hotspot | Disposition |
+| --- | --- |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it still owns deterministic generated VSView scripts, source loading, output registration, and now the explicit contract metadata required by the panel. |
+| `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
+| `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
+| `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |
 
 ## Working Rules That Follow From The Codebase
 

@@ -1,9 +1,9 @@
 # Audio alignment and VSView
 
 Frame Compare can estimate timing offsets between the reference and comparison sources,
-reuse a previously accepted source relationship, and optionally open VSView for
-manual verification. Alignment changes which source frames are compared; it does not
-retime or rewrite the input files.
+reuse a previously accepted source relationship, and optionally open the native VSView
+alignment-review panel for human verification. Alignment changes which source frames
+are compared; it does not retime or rewrite the input files.
 
 ## When alignment helps
 
@@ -22,8 +22,9 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 1. Let automatic alignment compute an offset.
 2. Review confidence and warnings.
-3. Use VSView for optional interactive verification when the route is available and
-   the evidence needs manual confirmation. It is not part of automatic correlation.
+3. Use the native VSView panel for optional alignment review when the route is
+   available and the evidence needs manual confirmation. It is not part of automatic
+   correlation.
 4. Verify dialogue, cuts, and motion in the final report.
 5. Reuse an accepted result only while the same source identities and alignment-affecting
    settings remain valid.
@@ -59,15 +60,19 @@ convention. Schema-v1 entries are ignored and recomputed; there is no cache migr
 or compatibility path. Run-local `manual_overrides.toml` remains a v1 file with the
 same path and offset semantics.
 
-## Interactive verification with VSView
+## Native VSView alignment review
 
-VSView 0.10.3 is included in the Windows portable bundle and is optional in native
-installations through the base `vsview` extra. The upstream `recommended` and `full`
-extras are intentionally not selected. The default Docker route does not provide an
-interactive desktop session. The Linux X11 profile has an offscreen VSView/session/
-render proof, but visible desktop launch remains host-dependent and unverified.
+VSView 0.10.3 and the Frame Compare alignment panel are included in the Windows
+portable bundle and are optional in native installations through the
+`frame-compare[vsview]` extra. The panel entry point and VSView runtime must be
+installed in the same Python environment; a PATH-only VSView executable is not
+supported. The upstream `recommended` and `full` extras are intentionally not
+selected. The default Docker route does not provide an interactive desktop session.
+The Linux X11 profile has a verifier contract for offscreen VSView/session/metadata/
+result proof; this feature run has static contract proof only, and execution plus
+visible desktop launch remain host-dependent and unverified.
 
-Set `audio_alignment.use_vsview = true` to request optional interactive verification,
+Set `audio_alignment.use_vsview = true` to request optional native panel review,
 or use `--force-interactive-alignment` when a successful review is required. Normal
 mode keeps launch and startup-failure presentation concise. Use `--verbose` for the
 generated command and bounded startup diagnostics. If optional VSView verification
@@ -81,29 +86,34 @@ uses documented `from vsview import set_output` registration with explicit `Refe
 and `Comparison N` names, while preserving source order, multi-comparison behavior,
 Frame Compare overlays, and BT.709 preview defaults.
 
-The interactive terminal flow remains nested under `ALIGN` and stages the operator
-through `[RUN] VSView Bootstrap`, `[OK] VSView Ready`, and `[WAIT] VSView Confirmation`.
-Normal labels use the same prepared release-aware source identities as the rest of
-Frame Compare, while paths and filename stems remain internal alignment identities.
-These literal markers remain present with color disabled. Ready gives a directly
-nested next action, and confirmation instructions and prompts are visibly nested
-beneath the blocking `[WAIT]` state. Missing modern `_Range` is reported once but
-remains unset, preserving VSView's native range inference; other native diagnostics
-remain inherited.
+The terminal reports only the generated session, bounded readiness, inherited decoder
+diagnostics, and the final review outcome. It does not prompt for frames or read
+review input. Open **Frame Compare Alignment Review** from VSView's Tool Panel. For
+each synchronized reference/comparison pair, inspect the same visible moment, capture
+or enter untrimmed source-frame indices, then choose **Confirm pair** or **Keep current
+offset**. The panel shows `reference - comparison`, the trim direction, bounded
+suggestion markers, and completion status. **Finish review** writes the typed result
+atomically to the trusted sibling sidecar; closing VSView without finishing writes no
+result. Missing, malformed, stale, mixed-session, duplicate, incomplete, or
+out-of-bounds sidecars are rejected before any offset is applied. Missing modern
+`_Range` is reported once but remains unset, preserving VSView's native range
+inference; other native diagnostics remain inherited.
 
-The migration gains a maintained viewer, named outputs, synchronized multi-output
-review, and current frame/property surfaces. It intentionally removes the retired
-viewer-specific config key, package extra, imports, generated session path, symbolic
-names, and compatibility mutations. Existing v1 shared alignment entries are not
-reused; they are rebuilt as schema v2.
+The native-panel workflow gains a maintained viewer, named outputs, synchronized
+multi-output review, current frame/property surfaces, explicit status/equation/trim
+guidance, and a typed fail-closed result boundary. It intentionally removes the
+retired terminal confirmation flow, executable discovery/PATH fallback, viewer
+compatibility aliases, and speculative compatibility mutations. Existing v1 shared
+alignment entries are not reused; they are rebuilt as schema v2.
 
-Confirmation uses untrimmed source-frame indices. Find the same visible moment in the
-reference and comparison, then enter the reference frame followed by the comparison
-frame; Frame Compare calculates the offset and required trim. The audio hint shows an
-equivalent source-frame pair and the source it would trim. `skip` leaves the current
-audio result unchanged when one is available. Every signed offset is reference minus
-comparison: positive trims the reference, negative trims the comparison. Native decoder
-and index diagnostics remain visible between Frame Compare-owned status rows.
+Panel confirmation uses untrimmed source-frame indices. Find the same visible moment in
+the reference and comparison, then enter or capture the reference frame followed by
+the comparison frame; Frame Compare calculates the offset and required trim. The audio
+hint shows an equivalent source-frame pair and the source it would trim. **Keep current
+offset** leaves the current audio result unchanged when one is available. Every signed
+offset is reference minus comparison: positive trims the reference, negative trims the
+comparison. Native decoder and index diagnostics remain visible between Frame
+Compare-owned status rows.
 
 No alignment screenshot is embedded here until the physical-Windows VSView acceptance
 pass supplies a current, provenance-recorded capture. macOS and headless Docker proof
@@ -126,7 +136,10 @@ different edit.
 | --- | --- | --- |
 | Low or unstable correlation | Silence, replaced music, wrong stream, or different edit | Select corresponding audio, increase evidence, or verify manually |
 | Good early match but later drift | FPS or timing mismatch | Recheck effective FPS and source structure; do not treat a constant offset as sufficient |
-| VSView cannot launch | Missing optional UI dependencies or desktop/runtime issue | Run `doctor`, use the Windows portable bundle or a valid native VSView installation, or continue without interactive verification |
+| VSView/panel cannot launch | Missing same-environment UI dependencies or desktop/runtime issue | Run `doctor`, install `frame-compare[vsview]` in the environment that runs Frame Compare, use the Windows portable bundle, or continue without optional review |
+| Panel stays inactive | The session is ordinary, metadata is malformed/mixed, or the generated script/result identity is not trusted | Generate a fresh session through Frame Compare; do not open a hand-authored script or provide a PATH-only VSView executable |
+| Panel closes before **Finish review** | No complete typed result sidecar was written | Reopen the generated session and finish every comparison, or keep the computed/current alignment in optional mode |
+| Review result is rejected | Sidecar is missing, malformed, stale, duplicated, incomplete, or outside raw source-frame bounds | Discard the sidecar, generate a fresh session, and repeat the panel review; forced mode fails closed |
 | Reused offset no longer looks correct | Source or runtime changed outside the reusable identity assumptions | Reject reuse, clear the alignment cache entry, and recompute |
 | Selected frames disappear after alignment | Shared overlap is smaller than the initial reference-domain plan | Reduce trims or requested counts and review the warning/error context |
 

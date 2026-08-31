@@ -21,7 +21,11 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Duplicate or confusing source labels | Use explicit per-source labels; duplicate explicit labels are rejected |
 | Doctor reports VapourSynth or L-SMASH-Works missing | Use Docker or Windows portable, or repair the native supported runtime; the default renderer requires VapourSynth |
 | Doctor reports vs-placebo or Vulkan unavailable | Repair the selected plugin/driver path or use the supported Docker software-Vulkan route for headless work |
-| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify manually with VSView when available |
+| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify with the native Frame Compare VSView panel when available |
+| Doctor reports the Frame Compare alignment panel is missing | Install `frame-compare[vsview]` in the same Python environment that runs Frame Compare; PATH-only VSView discovery is unsupported |
+| The native alignment panel is inactive | Open a Frame Compare-generated session; ordinary VSView sessions and malformed/mixed output metadata intentionally remain inert |
+| The panel closed before **Finish review** | No typed result sidecar was written; reopen the generated session and finish every comparison, or retain the computed/current alignment in optional mode |
+| Native review result was rejected | The sidecar is missing, malformed, stale, mixed-session, duplicated, incomplete, or outside raw source bounds; generate a fresh session and review again |
 | Requested frames cannot survive alignment | Reduce trims or frame counts and inspect the final shared overlap; user frames are not silently replaced |
 | Docker cannot write config or generated data | Export host UID/GID values and pre-create `config`, `comparison_videos`, and `generated` as the host user |
 | Docker report did not open | Expected across the container boundary; use the host helper and exact path printed by the run |

@@ -23,7 +23,7 @@ opt-ins.
 - **Repeatable frame selection** — combine exact user frames with deterministic random,
   dark, bright, and motion selections.
 - **Alignment-aware comparisons** — use automatic audio correlation, prior accepted
-  offsets, and optional VSView verification.
+  offsets, and optional native VSView panel review.
 - **HDR-aware rendering** — tonemap HDR sources through VapourSynth and vs-placebo when
   required, with configurable overlays and diagnostics.
 - **A serious offline viewer** — inspect slider, overlay, diff, blink, and grid views;
