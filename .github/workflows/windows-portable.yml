@@ -29,7 +29,7 @@ on:
         required: false
         type: string
       expected_sha:
-        description: Exact 40-character source commit SHA (release operation only)
+        description: Exact 40-character source commit SHA (verify or release operation)
         required: false
         type: string
 
@@ -55,7 +55,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/windows-portable-build.yml
     with:
-      expected_sha: ${{ github.sha }}
+      expected_sha: ${{ inputs.expected_sha || github.sha }}
       release_tag: ""
       require_signing: true
       prepare_release_assets: false

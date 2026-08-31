@@ -82,6 +82,15 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
     assert 'entry.get("available")' not in script
     assert "check_vsview_availability" in script
     assert "launch_alignment_verification_session" in script
+    assert 'entry_point.name == "frame-compare-alignment-review"' in script
+    assert 'entry_point.value == "frame_compare.vsview.alignment_review_panel"' in script
+    assert "entry_points[0].load()" in script
+    assert "AlignmentReviewPanel" in script
+    assert "DOCKER_GUI_PROOF vsview_entry_point=ok" in script
+    assert "DOCKER_GUI_PROOF panel_offscreen=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_metadata=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_result_roundtrip=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_result_validation=ok" in script
     assert "from vsview import set_output" in script
     assert "color=c=black:size=64x48:rate=1:duration=1" in script
     assert "color=c=white:size=64x48:rate=1:duration=1" in script
@@ -122,7 +131,7 @@ python() {
 
 frame-compare() {
   if [[ "${1:-}" == "doctor" ]]; then
-    printf '{"doctor":{"checks":[{"id":"vsview","status":"pass","message":"VSView is available for interactive alignment"}]}}\n'
+  printf '{"doctor":{"checks":[{"id":"vsview","status":"pass","message":"VSView and the Frame Compare alignment panel are available"}]}}\n'
   fi
 }
 

@@ -123,7 +123,12 @@ jobs:
             "vsview_deep_imports=ok",
             "qt_ffmpeg_runtime=ok",
             "qt_webengine_runtime=absent deployment=excluded",
+            "project_entrypoint=ok source=app/src",
+            "alignment_panel=ok state=inactive platform=offscreen",
             "bestsource_frame=ok",
+            "alignment_metadata=ok outputs=Reference,Comparison_1",
+            "alignment_result_roundtrip=ok",
+            "alignment_result_validation=ok malformed=rejected",
             "generated_vsview_session=ok",
             "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
           )) {

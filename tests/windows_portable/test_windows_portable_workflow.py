@@ -32,6 +32,33 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     assert "-CommandTimeoutSeconds 300" in verify_step["run"]
 
 
+def test_windows_portable_workflow_requires_native_alignment_package_proof(
+    repo_root: Path,
+) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable-build.yml")
+    build_step = _step_by_name(workflow["jobs"]["build"], "Build portable bundle")
+    for marker in (
+        "project_entrypoint=ok source=app/src",
+        "alignment_panel=ok state=inactive platform=offscreen",
+        "alignment_metadata=ok outputs=Reference,Comparison_1",
+        "alignment_result_roundtrip=ok",
+        "alignment_result_validation=ok malformed=rejected",
+    ):
+        assert marker in build_step["run"]
+
+
+def test_windows_portable_manual_verify_accepts_exact_sha_input(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    source = workflow_path.read_text(encoding="utf-8")
+    assert "Exact 40-character source commit SHA (verify or release operation)" in source
+    assert "expected_sha: ${{ inputs.expected_sha || github.sha }}" in source
+    workflow = _load_workflow(workflow_path)
+    assert (
+        workflow["jobs"]["verify_manual"]["with"]["expected_sha"]
+        == "${{ inputs.expected_sha || github.sha }}"
+    )
+
+
 def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Path) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable-build.yml")
     build = workflow["jobs"]["build"]

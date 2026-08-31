@@ -130,7 +130,7 @@ if vsview_entry is None:
     raise SystemExit("doctor JSON did not include a vsview check entry")
 if vsview_entry.get("status") != "pass":
     raise SystemExit(f"unexpected vsview status: {vsview_entry.get('status')!r}")
-if vsview_entry.get("message") != "VSView is available for interactive alignment":
+if vsview_entry.get("message") != "VSView and the Frame Compare alignment panel are available":
     raise SystemExit(f"unexpected vsview message: {vsview_entry.get('message')!r}")
 print("DOCKER_GUI_PROOF doctor_vsview=ok")
 PY
@@ -157,11 +157,14 @@ PY
   python - "$proof_dir" "$script_path_file" <<'PY'
 from __future__ import annotations
 
+import importlib.metadata
+import os
 import sys
 import types
 from pathlib import Path
 
 import vapoursynth as vs
+from PySide6.QtWidgets import QApplication, QWidget
 
 from frame_compare.vs.source import source_index_path
 from frame_compare.vsview.adapter import (
@@ -169,13 +172,24 @@ from frame_compare.vsview.adapter import (
     VSViewSessionRequest,
     launch_alignment_verification_session,
 )
+from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewContractError,
+    AlignmentReviewExpectedComparison,
+    AlignmentReviewOutputCandidate,
+    AlignmentReviewResult,
+    KeepCurrentAlignmentReviewDecision,
+    parse_alignment_review_workspace_metadata,
+    read_alignment_review_result,
+    write_alignment_review_result,
+)
+from frame_compare.vsview.alignment_review_panel import AlignmentReviewPanel
 from vsview.api.output import get_outputs
 
 proof_dir = Path(sys.argv[1])
 reference = proof_dir / "reference.mkv"
 comparison = proof_dir / "comparison.mkv"
 unspecified_color_props = {"_Matrix": 2, "_Transfer": 2, "_Primaries": 2}
-script_path = launch_alignment_verification_session(
+session = launch_alignment_verification_session(
     VSViewSessionRequest(
         reference=reference,
         comparisons=[comparison],
@@ -188,6 +202,7 @@ script_path = launch_alignment_verification_session(
     ),
     VSViewConfig(enabled=False),
 )
+script_path = session.script_path
 script_text = script_path.read_text(encoding="utf-8")
 compiled = compile(script_text, str(script_path), "exec")
 assert "from vsview import set_output" in script_text
@@ -204,6 +219,29 @@ if actual_names != expected_names:
     raise SystemExit(f"unexpected VSView output metadata: {actual_names!r}")
 print("DOCKER_GUI_PROOF named_outputs=ok")
 
+entry_points = tuple(
+    entry_point
+    for entry_point in importlib.metadata.entry_points(group="vsview")
+    if entry_point.name == "frame-compare-alignment-review"
+    and entry_point.value == "frame_compare.vsview.alignment_review_panel"
+)
+if len(entry_points) != 1:
+    raise SystemExit(f"unexpected Frame Compare VSView entry points: {entry_points!r}")
+if getattr(entry_points[0].load(), "AlignmentReviewPanel", None) is not AlignmentReviewPanel:
+    raise SystemExit("Frame Compare VSView entry point did not load the native alignment panel")
+print("DOCKER_GUI_PROOF vsview_entry_point=ok")
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+app = QApplication.instance() or QApplication([])
+panel_parent = QWidget()
+panel = AlignmentReviewPanel(panel_parent, types.SimpleNamespace(file_path=None))
+if "Inactive" not in panel.progress_label.text():
+    raise SystemExit("native alignment panel was not inert outside a generated session")
+panel.setParent(None)
+panel_parent.deleteLater()
+app.processEvents()
+print("DOCKER_GUI_PROOF panel_offscreen=ok")
+
 outputs = vs.get_outputs()
 if set(outputs) != set(expected_names):
     raise SystemExit(f"unexpected VapourSynth output indexes: {sorted(outputs)!r}")
@@ -215,6 +253,49 @@ index_paths = [source_index_path(reference), source_index_path(comparison)]
 if not all(path.is_file() and path.stat().st_size > 0 for path in index_paths):
     raise SystemExit(f"missing L-SMASH indexes: {index_paths!r}")
 print("DOCKER_GUI_PROOF lsmash_indexes=ok")
+
+candidates = tuple(
+    AlignmentReviewOutputCandidate(
+        output_id=index,
+        source_frame_count=output.clip.num_frames,
+        metadata=metadata[index].kwargs,
+    )
+    for index, output in sorted(outputs.items())
+)
+workspace = parse_alignment_review_workspace_metadata(candidates)
+if workspace.session_id != session.session_id:
+    raise SystemExit("generated VSView metadata/session identity mismatch")
+expected = tuple(
+    AlignmentReviewExpectedComparison(
+        pair.comparison_key,
+        pair.reference.source_frame_count,
+        pair.comparison.source_frame_count,
+    )
+    for pair in workspace.comparisons
+)
+write_alignment_review_result(
+    session,
+    AlignmentReviewResult(
+        session_id=session.session_id,
+        decisions=tuple(
+            KeepCurrentAlignmentReviewDecision(pair.comparison_key)
+            for pair in workspace.comparisons
+        ),
+    ),
+)
+if len(read_alignment_review_result(session, expected).decisions) != len(expected):
+    raise SystemExit("alignment result sidecar round trip was incomplete")
+print("DOCKER_GUI_PROOF alignment_metadata=ok")
+print("DOCKER_GUI_PROOF alignment_result_roundtrip=ok")
+session.result_path.write_text("{}\n", encoding="utf-8")
+try:
+    read_alignment_review_result(session, expected)
+except AlignmentReviewContractError:
+    pass
+else:
+    raise SystemExit("malformed alignment result was accepted")
+print("DOCKER_GUI_PROOF alignment_result_validation=ok")
+session.result_path.unlink(missing_ok=True)
 
 Path(sys.argv[2]).write_text(str(script_path), encoding="utf-8")
 print("DOCKER_GUI_PROOF session_script=ok")

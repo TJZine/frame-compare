@@ -545,6 +545,40 @@ def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:
     assert "requirements.lock.txt" in build_script
 
 
+def test_windows_portable_build_installs_only_project_dist_info_entrypoint(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    metadata_start = build_script.index("function Install-ProjectDistributionMetadata")
+    metadata_end = build_script.index("function Install-PythonDeps", metadata_start)
+    metadata_block = build_script[metadata_start:metadata_end]
+
+    assert "uv build --wheel --out-dir $wheelBuildDir" in metadata_block
+    assert "Expected exactly one Frame Compare project wheel" in metadata_block
+    assert "Expand-ArchiveFile -ArchivePath $wheelCandidates[0].FullName" in metadata_block
+    assert "^frame_compare-[^\\\\/]+\\.dist-info$" in metadata_block
+    assert "Expected exactly one top-level Frame Compare dist-info directory" in metadata_block
+    assert (
+        "frame-compare-alignment-review = frame_compare.vsview.alignment_review_panel"
+        in metadata_block
+    )
+    assert 'trimmedLine -ceq "[vsview]"' in metadata_block
+    assert "$entryPointMatches -ne 1" in metadata_block
+    assert 'Join-Path $wheelBuildDir "extract"' in metadata_block
+    assert "Join-Path $sitePackages $distInfoDirectory.Name" in metadata_block
+    assert 'Join-Path $appRoot "src\\frame_compare"' in metadata_block
+    assert 'Join-Path $sitePackages "frame_compare"' in metadata_block
+    assert (
+        "Copy-Item -Recurse -LiteralPath $distInfoDirectory.FullName -Destination $sitePackages"
+        in (metadata_block)
+    )
+    assert "ZipFile" not in metadata_block
+    assert "FileMode]::CreateNew" not in metadata_block
+    assert "Remove-Item -Recurse -Force -LiteralPath $wheelBuildDir" in metadata_block
+    assert "WINDOWS_BUNDLE_PROOF project_metadata=ok" in metadata_block
+    assert "source=app/src" in metadata_block
+    assert "Install-ProjectDistributionMetadata -BundleRoot $BundleRoot" in build_script
+
+
 def test_windows_portable_build_installs_manifest_wheels_dependency_closed(
     repo_root: Path,
 ) -> None:
