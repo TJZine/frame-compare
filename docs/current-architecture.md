@@ -845,7 +845,8 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
-- `src/frame_compare/vsview/adapter.py`
+- `src/frame_compare/vsview/adapter.py`, `session_script.py`,
+  `alignment_review_contract.py`, and `alignment_review_panel.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
 
@@ -854,6 +855,8 @@ Native alignment-review hotspot dispositions for the current implementation:
 | Hotspot | Disposition |
 | --- | --- |
 | `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it still owns deterministic generated VSView scripts, source loading, output registration, and now the explicit contract metadata required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session/output/result identity, strict untrusted metadata and sidecar validation, and atomic result persistence. |
+| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, public VSView hooks, frame decisions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
 | `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |

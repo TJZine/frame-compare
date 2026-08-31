@@ -199,7 +199,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             )
             if session.session_id != workspace.session_id:
                 raise AlignmentReviewContractError("alignment review session identity mismatch")
-        except (AlignmentReviewContractError, OSError, AttributeError, TypeError):
+        except AlignmentReviewContractError as exc:
+            self.error_label.setText(f"Alignment review rejected: {exc}")
+            return
+        except (OSError, AttributeError, TypeError):
             return
         self._workspace = workspace
         self._session = session

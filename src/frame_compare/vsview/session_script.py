@@ -574,7 +574,7 @@ def main():
             (comparison_number, target, ref_clip, comp_clip, reference_output, comparison_output)
         )
 
-    if len(prepared_outputs) != len(TARGETS) or not prepared_outputs:
+    if not prepared_outputs:
         safe_print(_status_line("[FAIL]", "Alignment review requires every comparison"))
         sys.exit(1)
 

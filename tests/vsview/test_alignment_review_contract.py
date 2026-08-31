@@ -29,6 +29,19 @@ from frame_compare.vsview.alignment_review_contract import (
 _SESSION_ID = "12345678123456781234567812345678"
 
 
+@pytest.fixture
+def symlinks_supported(tmp_path: Path) -> None:
+    target = tmp_path / "symlink-probe-target"
+    link = tmp_path / "symlink-probe"
+    target.touch()
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symbolic links unavailable: {type(exc).__name__}")
+    else:
+        link.unlink()
+
+
 def _output(
     output_id: int,
     ordinal: int,
@@ -284,14 +297,17 @@ def test_result_requires_exact_regular_sibling(tmp_path: Path) -> None:
     with pytest.raises(AlignmentReviewContractError, match="missing"):
         read_alignment_review_result(session, _expected())
 
-    outside = tmp_path / "outside.json"
-    outside.write_text("{}", encoding="utf-8")
-    session.result_path.symlink_to(outside)
+    session.result_path.mkdir()
     with pytest.raises(AlignmentReviewContractError, match="regular file"):
         read_alignment_review_result(session, _expected())
 
-    session.result_path.unlink()
-    session.result_path.mkdir()
+
+def test_result_rejects_symlink_sibling(tmp_path: Path, symlinks_supported: None) -> None:
+    session = _session(tmp_path)
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    session.result_path.symlink_to(outside)
+
     with pytest.raises(AlignmentReviewContractError, match="regular file"):
         read_alignment_review_result(session, _expected())
 
@@ -310,8 +326,15 @@ def test_session_requires_owned_regular_uuid_named_script(tmp_path: Path) -> Non
     with pytest.raises(AlignmentReviewContractError, match="identifier"):
         alignment_review_session_from_script(invalid, sessions_dir=sessions_dir)
 
+
+def test_session_rejects_symlinked_script(tmp_path: Path, symlinks_supported: None) -> None:
+    sessions_dir = tmp_path / "vsview_sessions"
+    sessions_dir.mkdir()
+    outside = tmp_path / f"vsview_ref_20260831T120000Z_{_SESSION_ID}.py"
+    outside.write_text("# session", encoding="utf-8")
     linked = sessions_dir / f"vsview_ref_20260831T120000Z_{_SESSION_ID}.py"
     linked.symlink_to(outside)
+
     with pytest.raises(AlignmentReviewContractError, match="regular file"):
         alignment_review_session_from_script(linked, sessions_dir=sessions_dir)
 

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
-from inspect import unwrap
+from collections.abc import Callable, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -12,8 +11,13 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+pytest.importorskip("PySide6")
+pytest.importorskip("vsview")
+
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
+from vsengine.loops import get_loop, set_loop
+from vsview.vsenv import QtEventLoop
 
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
@@ -33,8 +37,19 @@ _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _qt_event_loop() -> Generator[None]:
+    previous = get_loop()
+    set_loop(QtEventLoop(_APP))
+    try:
+        yield
+    finally:
+        set_loop(previous)
+
+
 def _call_hook(method: Callable[..., object], *args: object) -> None:
-    cast(Callable[..., None], unwrap(method))(*args)
+    method(*args)
+    _APP.processEvents()
 
 
 class _Timeline:
@@ -108,9 +123,9 @@ def _panel(
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
     panel.setParent(None)
-    _call_hook(panel.on_workspace_loaded, panel)
+    _call_hook(panel.on_workspace_loaded)
     if initialize_output:
-        _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 0)
+        _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
     return panel, api, script
 
 
@@ -122,7 +137,7 @@ def test_workspace_activation_waits_for_public_output_lifecycle(tmp_path: Path) 
     assert not panel.seek_button.isEnabled()
     assert panel.context_label.text() == ""
 
-    _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 0)
+    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
 
     assert api.timeline.added[-1][0:2] == ("frame_compare_alignment_review", 12)
     assert panel.capture_button.isEnabled()
@@ -137,7 +152,7 @@ def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
 
-    _call_hook(panel.on_workspace_loaded, panel)
+    _call_hook(panel.on_workspace_loaded)
 
     assert "Inactive" in panel.progress_label.text()
     assert not panel.capture_button.isEnabled()
@@ -163,13 +178,39 @@ def test_malformed_output_proxy_keeps_panel_inert(tmp_path: Path) -> None:
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
 
-    _call_hook(panel.on_workspace_loaded, panel)
+    _call_hook(panel.on_workspace_loaded)
 
     assert "Inactive" in panel.progress_label.text()
     assert timeline.cleared == [("frame_compare_alignment_review", True)]
     assert timeline.added == []
     assert playback.sought == []
     assert not script.with_name(f"{script.stem}.alignment-result.json").exists()
+
+
+def test_contract_rejection_is_explained_without_untrusted_values(tmp_path: Path) -> None:
+    sessions = tmp_path / "vsview_sessions"
+    sessions.mkdir()
+    script = sessions / f"alignment_{_SESSION_ID}.py"
+    script.write_text("# session\n", encoding="utf-8")
+    malformed = _output(0, "reference")
+    malformed.kwargs[ALIGNMENT_REVIEW_METADATA_NAME_KEY] = ""
+    api = SimpleNamespace(
+        file_path=script,
+        voutputs=[malformed],
+        timeline=_Timeline(),
+    )
+    parent = QWidget()
+    panel = AlignmentReviewPanel(parent, cast(Any, api))
+    panel.setParent(None)
+
+    _call_hook(panel.on_workspace_loaded)
+
+    assert panel.error_label.text() == (
+        "Alignment review rejected: alignment review output presentation name is invalid"
+    )
+    assert "Inactive" in panel.progress_label.text()
+    assert not panel.capture_button.isEnabled()
+    assert str(tmp_path) not in panel.error_label.text()
 
 
 def test_plugin_hook_registers_one_stable_tool_panel() -> None:
@@ -260,7 +301,7 @@ def test_deactivation_clears_only_owned_marker_group_with_update(
     else:
         api.voutputs = [SimpleNamespace(vs_index=0, kwargs={})]
 
-    _call_hook(panel.on_workspace_loaded, panel)
+    _call_hook(panel.on_workspace_loaded)
 
     assert api.timeline.cleared[before:] == [("frame_compare_alignment_review", True)]
     assert {identifier for identifier, _update in api.timeline.cleared} == {
@@ -275,8 +316,8 @@ def test_unavailable_suggestion_transition_publishes_owned_marker_clear(tmp_path
     for output in api.voutputs:
         output.kwargs[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY] = None
 
-    _call_hook(panel.on_workspace_loaded, panel)
-    _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 0)
+    _call_hook(panel.on_workspace_loaded)
+    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
 
     assert api.timeline.cleared[before:] == [
         ("frame_compare_alignment_review", True),
@@ -314,7 +355,7 @@ def test_panel_capture_confirm_keep_and_finish_writes_result(tmp_path: Path) -> 
     panel.capture_button.click()
     api.current_voutput = api.voutputs[1]
     api.current_frame = 5
-    _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 1)
+    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 1)
     assert "Comparison 1 (comparison), frame 5" in panel.context_label.text()
     assert api.timeline.added[-1][0:2] == ("frame_compare_alignment_review", 0)
     assert "suggested comparison frame 0" in str(api.timeline.added[-1][3])
