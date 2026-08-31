@@ -32,6 +32,13 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
     assert "-CommandTimeoutSeconds 300" in verify_step["run"]
 
 
+def test_windows_portable_workflow_installs_native_vsview_extra(repo_root: Path) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable-build.yml")
+    install_step = _step_by_name(workflow["jobs"]["build"], "Install dev dependencies (frozen)")
+
+    assert install_step["run"] == "uv sync --all-groups --extra vsview --frozen"
+
+
 def test_windows_portable_workflow_requires_native_alignment_package_proof(
     repo_root: Path,
 ) -> None:

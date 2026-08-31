@@ -60,7 +60,7 @@ jobs:
           enable-cache: ${{ inputs.require_signing }}
 
       - name: Install dev dependencies (frozen)
-        run: uv sync --group dev --frozen
+        run: uv sync --all-groups --extra vsview --frozen
 
       - name: Unit tests (mocked VS)
         run: uv run --no-sync pytest -q
