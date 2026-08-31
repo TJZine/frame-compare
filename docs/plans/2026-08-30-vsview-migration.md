@@ -275,21 +275,145 @@ compliance gate is complete; then mark the plan Historical in the same final com
 - [ ] Verify the old dependency fingerprint refuses the new code-only update and directs
       the user to a complete portable reinstall.
 
+Hosted status on 2026-08-31: **pending**. The local Windows host does not have the
+GitHub CLI (`Get-Command gh` returned no command), so no hosted workflow run can be
+claimed for `ab4174d7bdb9ff2475dadaf028832b5c57521242`. Owner: maintainer/hosted CI.
+Release impact: blocking. Revisit when the Windows portable workflow is run against
+that tested source commit (or a deliberately rebuilt successor) and its retained
+artifacts/logs are available.
+
+The local equivalent passed without satisfying the hosted checkbox: the canonical ZIP
+and fresh extracted verifier were built from committed source
+`ab4174d7bdb9ff2475dadaf028832b5c57521242`. The verifier retained its extraction at
+`C:\Users\zinez\AppData\Local\Temp\frame-compare-ab4174d7-zip-ce9a1ff1b7304681ad2d30ae7daba537`
+and reported `result=ok`, including managed VapourSynth preload before Qt/VSView,
+offscreen `QApplication`, VSView/vspackrgb native imports, `core.bs`, named outputs,
+both frame-zero renders, exact-process cleanup, provenance, install, and installed-shim
+parity. The repository-side final gate transcript is retained at
+`.tmp/windows-validation-5b373c8c/repository-gates-ab4174d7.log`.
+
 ### Phase 4: Physical Windows acceptance
 
-- [ ] Record the exact commit, bundle hash, Windows build, CPU/GPU/driver, Qt/runtime
+- [x] Record the exact commit, bundle hash, Windows build, CPU/GPU/driver, Qt/runtime
       versions, and previous VSPreview bundle identity.
 - [ ] Launch the bundled VSView GUI with representative multi-comparison Frame Compare
       media and verify names/order, tab switching, link-by-frame/time, seeking, exact
       frame indices, overlays, properties, and clean child close.
-- [ ] Verify terminal confirmation, confirmed offsets, skip/fallback behavior, and the
+- [x] Verify terminal confirmation, confirmed offsets, skip/fallback behavior, and the
       subsequent render/report outcome.
-- [ ] Exercise SDR, 10-bit HDR10, Dolby Vision fallback where supported, VFR,
+- [x] Exercise SDR, 10-bit HDR10, Dolby Vision fallback where supported, VFR,
       full/limited range, and representative real-media frame properties.
 - [ ] Verify clean-machine Qt/DLL/plugin resolution, D3D12 rendering, cache/index
       transitions, complete reinstall, compatible code-only update, and rollback.
 - [ ] Recapture a VSView alignment screenshot only if active documentation still needs
       one, then mark this plan historical.
+
+Physical evidence recorded on 2026-08-31:
+
+- Tested source commit: `ab4174d7bdb9ff2475dadaf028832b5c57521242` on
+  `merge/cleanup-into-pre-release`. Canonical ZIP:
+  `dist/frame-compare-portable-win-x64.zip`, 525,592,597 bytes, SHA-256
+  `dcbc6f2af8e17cc4a55c382af5cd68fb8c591695e1aa8c674d758315368a713f`.
+  Requirements hash:
+  `aa84ec2c17ab2396283f58f37e649a181de38aae8dcd2cb3f8092cde23d898b1`.
+  Full runtime fingerprint:
+  `6b09db7e3f3d388c4b61b2495b325968b336e4c84bc1b846d90afa5a125ee7a1`.
+- Host: Windows 10 Home x64 build 19045; Ryzen 9 5900X (12 cores/24 threads);
+  34,263,650,304 bytes RAM; NVIDIA GeForce RTX 5080; driver
+  `32.0.16.1656` dated 2026-08-20 locally (DxDiag 2026-08-19); Vulkan loader
+  1.4.341/device API 1.4.351; Direct3D feature levels 12_1 and 12_0. Both attached
+  displays report HDR support, but the active color space was SDR
+  `DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709`, so no native-HDR-display perceptual pass
+  is claimed. DxDiag evidence:
+  `.tmp/windows-validation-5b373c8c/dxdiag-ab4174d7.txt`.
+- Runtime: bundled Python 3.13.15 (repository validation Python 3.13.7),
+  VapourSynth R79/API 4.2, L-SMASH-Works 1310.0.0.0, VSView 0.10.3,
+  VSView CLI 1.2.0, PySide6/Addons/Essentials and Shiboken6 6.11.2,
+  BestSource 21.0, vspackrgb 1.4.0, vsjetengine 1.7.0, vs-placebo 2.0.4,
+  and Qt Multimedia FFmpeg lineage 7.1.5.
+- The final repository validation commands all exited zero: lock check, frozen all-group
+  VSView sync, Ruff check/format, Pyright (`0 errors, 0 warnings`), Bandit (no
+  medium/high findings), Import Linter (2 contracts kept), pytest (`2868 passed,
+  32 skipped`), API-doc check, strict Zensical build, and `uv build`. The ignored
+  local legacy config was held only for pytest and restored in `finally`; no retired
+  alias was added.
+- Generated fixtures and L-SMASH proof are under
+  `.tmp/windows-validation-5b373c8c/fixtures` and
+  `.tmp/windows-validation-5b373c8c/fixture-lsmas-proof.json`: SDR H.264 limited and
+  full range, 10-bit HEVC HDR10, VFR H.264, AV1, and top-field metadata all opened at
+  first/middle/last frames with owned indexes. A true-interlaced fixture is
+  **unavailable** because the bundled FFmpeg reports `No such filter: tinterlace`;
+  owner: Windows runtime maintainer; release impact: does not invalidate the
+  repeated/field-metadata fallback but leaves true-interlace acceptance open; revisit
+  when the selected FFmpeg exposes a suitable generator or private interlaced media is
+  supplied.
+- Index migration passed under the path recorded in
+  `.tmp/windows-validation-5b373c8c/index-migration-root.txt`: legacy `.lwi` preserved,
+  exact `frame-compare-lsw1310-56c451f754fd.lwi` creation, unchanged warm hash/mtime,
+  corrupt owned-index regeneration, foreign-profile preservation, and cache-free open
+  when the owned index path was unavailable. Application-cache evidence under
+  `.tmp/windows-validation-5b373c8c/cache-matrix-ab4174d7` proves stale-only
+  `--from-cache-only` refusal (exit 5), cold miss, warm hit, cache-only hit with stable
+  selected frames, and `--no-cache` leaving the cache tree byte-identical.
+- The retained predecessor is
+  `dist/frame-compare-portable-win-x64-030e72b4`, version 0.1.0, fingerprint
+  `59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd`.
+  Candidate code-only ZIP
+  `dist/frame-compare-update-win-x64-0.5.0-ab4174d7.zip` is 638,801 bytes with SHA-256
+  `6eef6937de00ef19506c952752c8992a9c57630e0c7e9377124cd7306b7f5e20`.
+  The predecessor refused it before replacement, left 185 code hashes unchanged, made
+  no backup, and directed the operator to install the complete bundle. Complete
+  candidate installation preserved an external generated-data sentinel. A matching
+  local unsigned-confirmation update created backup `20260831001010`; rollback restored
+  all 186 code hashes and the external sentinel exactly. Missing, malformed, and legacy
+  fingerprint cases all failed closed without backup; retained results:
+  `.tmp/windows-validation-5b373c8c/updater-metadata-cases/results.json`.
+- Visible terminal-attached SDR evidence is under
+  `.tmp/windows-validation-5b373c8c/e2e-visible-sdr-ab4174d7`. Four named-output tabs
+  matched the generated order (`Reference`, `Comparison 1`, `Reference`,
+  `Comparison 2`); the frame-properties panel was present; UI status reported 287
+  frames and 640x360 YUV420P8 at 23.976 fps. Frame 0-to-1 seeking changed time from
+  0.000 to 0.042 seconds, switching to output four retained frame 1, and returning left
+  reached exact frame 0. Confirmations `0 0` produced `+0f` for both comparisons and
+  rendered frames 0, 72, and 144; a separate `skip`/`s` pass retained the same computed
+  offsets and completed the report. Warm evidence and skip evidence are in
+  `warm-visible-terminal-transcript.txt` and `skip-visible-terminal-transcript.txt`.
+- The GUI screenshot helper could not use Windows Graphics Capture on this OS
+  (`SetIsBorderRequired` failed with `0x80004002`), so no automation screenshot is
+  claimed. While that accessibility hook was attached, VSView also emitted Windows
+  exception `0x8001010d` from its Qt event loop before close, then continued, returned
+  to both confirmation prompts, rendered, and exited with no remaining VSView window.
+  Owner: maintainer/Windows UI harness. Release impact: the clean-close checkbox stays
+  open. Revisit with an uninstrumented visible/manual close and screenshot capture on a
+  supported Windows capture host; treat reproduction without the hook as a VSView
+  integration defect.
+- Real DV/HDR evidence is under `.tmp/windows-validation-5b373c8c/real-dv-ab4174d7`.
+  Two copied 10-bit HEVC profile-8 DV/HDR10 sources rendered frames 0, 24, and 48 through
+  libplacebo on the RTX/Vulkan path with limited-range BT.2020/PQ, DV RPU, BT.2390 to
+  203 nits, dynamic peak detection, and 16-bit-or-higher intermediates. The report
+  records MaxCLL/FALL 347/50 and 10000/92 and six 3600x2160 diagnostic PNGs. Visual
+  inspection found preserved dark forest/shadow detail and muted saturated greens
+  without obvious clipping or banding; sources were different shots, so no pixel
+  equality is claimed. D3D12VA separately decoded the same DV source on RTX 5080 to
+  P010 with zero decode errors; log:
+  `.tmp/windows-validation-5b373c8c/d3d12va-dv-frame.log`.
+- Clean extraction from the ZIP passed all bundle/shim/doctor checks, but this is not a
+  newly provisioned clean Windows installation. Clean-machine DLL/plugin resolution
+  therefore remains open; owner: release operator; revisit on a clean Windows VM/host.
+  The runtime also prints an informational duplicate L-SMASH discovery diagnostic in
+  parent CLI probes while selecting the packaged plugin; no missing DLL or external
+  FFmpeg-plugin resolution occurred.
+- The PySide6/Qt distribution-compliance gate remains **open**. The current inventory
+  and 99 copied license records do not establish the exact Qt WebEngine/Chromium notice
+  set, matching SBOM/provenance, complete FFmpeg lineage, a distributor-controlled
+  corresponding-source offer, or legal adjudication. Owner: distributor/legal and
+  release maintainer. Release impact: blocking. Revisit only when all five artifacts
+  are retained and adjudicated together.
+
+Decision: keep this plan **Active** and the release **blocked**. Hosted Windows,
+uninstrumented clean GUI close/screenshot, clean-machine resolution, true-interlace
+coverage, native-HDR-display perceptual review, and PySide6/Qt distribution compliance
+are not passed and must not be inferred from the successful local subcases.
 
 ## Verification record
 
