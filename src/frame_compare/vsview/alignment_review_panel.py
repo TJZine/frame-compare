@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +39,8 @@ _TIMELINE_GROUP = "frame_compare_alignment_review"
 
 @dataclass(slots=True)
 class _ReviewDecision:
+    reference_text: str = ""
+    comparison_text: str = ""
     reference_frame: int | None = None
     comparison_frame: int | None = None
     action: Literal["confirmed", "keep_current"] | None = None
@@ -68,7 +70,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._decisions = list[_ReviewDecision]()
         self._saved = False
         self._build_ui()
-        self._show_inactive()
+        self._show_inactive(clear_marker=False)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -105,12 +107,12 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
 
         frames_group = QGroupBox("Matching source frames", self)
         frames_form = QFormLayout(frames_group)
-        self.reference_spin = self._frame_spin(frames_group, "Reference source frame")
-        self.comparison_spin = self._frame_spin(frames_group, "Comparison source frame")
-        self.reference_spin.valueChanged.connect(self._reference_changed)
-        self.comparison_spin.valueChanged.connect(self._comparison_changed)
-        frames_form.addRow("Reference frame:", self.reference_spin)
-        frames_form.addRow("Comparison frame:", self.comparison_spin)
+        self.reference_input = self._frame_input(frames_group, "Reference source frame")
+        self.comparison_input = self._frame_input(frames_group, "Comparison source frame")
+        self.reference_input.textChanged.connect(self._reference_changed)
+        self.comparison_input.textChanged.connect(self._comparison_changed)
+        frames_form.addRow("Reference frame:", self.reference_input)
+        frames_form.addRow("Comparison frame:", self.comparison_input)
         layout.addWidget(frames_group)
 
         self.equation_label = QLabel(self)
@@ -154,13 +156,11 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         layout.addStretch()
 
     @staticmethod
-    def _frame_spin(parent: QWidget, accessible_name: str) -> QSpinBox:
-        spin = QSpinBox(parent)
-        spin.setMinimum(-1)
-        spin.setSpecialValueText("Unset")
-        spin.setAccessibleName(accessible_name)
-        spin.setKeyboardTracking(False)
-        return spin
+    def _frame_input(parent: QWidget, accessible_name: str) -> QLineEdit:
+        field = QLineEdit(parent)
+        field.setPlaceholderText("Unset")
+        field.setAccessibleName(accessible_name)
+        return field
 
     @override
     @run_in_loop(return_future=False)
@@ -215,7 +215,9 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._show_comparison(0)
         self._refresh_active_output()
 
-    def _show_inactive(self) -> None:
+    def _show_inactive(self, *, clear_marker: bool = True) -> None:
+        if clear_marker:
+            self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self._workspace = None
         self._session = None
         self._decisions.clear()
@@ -235,8 +237,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
     def _set_review_controls_enabled(self, enabled: bool) -> None:
         for widget in (
             self.comparison_selector,
-            self.reference_spin,
-            self.comparison_spin,
+            self.reference_input,
+            self.comparison_input,
             self.capture_button,
             self.seek_button,
             self.confirm_button,
@@ -252,18 +254,12 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         decision = self._decisions[index]
         self.reference_name_label.setText(pair.reference.presentation_name)
         self.comparison_name_label.setText(pair.comparison.presentation_name)
-        self.reference_spin.setMaximum(pair.reference.source_frame_count - 1)
-        self.comparison_spin.setMaximum(pair.comparison.source_frame_count - 1)
-        self.reference_spin.blockSignals(True)
-        self.comparison_spin.blockSignals(True)
-        self.reference_spin.setValue(
-            -1 if decision.reference_frame is None else decision.reference_frame
-        )
-        self.comparison_spin.setValue(
-            -1 if decision.comparison_frame is None else decision.comparison_frame
-        )
-        self.reference_spin.blockSignals(False)
-        self.comparison_spin.blockSignals(False)
+        self.reference_input.blockSignals(True)
+        self.comparison_input.blockSignals(True)
+        self.reference_input.setText(decision.reference_text)
+        self.comparison_input.setText(decision.comparison_text)
+        self.reference_input.blockSignals(False)
+        self.comparison_input.blockSignals(False)
         if pair.suggested_offset is None:
             self.suggestion_label.setText("Audio-derived suggestion unavailable.")
         else:
@@ -280,26 +276,39 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._update_equation()
         self._update_progress()
 
-    def _reference_changed(self, value: int) -> None:
+    def _reference_changed(self, value: str) -> None:
         self._change_frame("reference", value)
 
-    def _comparison_changed(self, value: int) -> None:
+    def _comparison_changed(self, value: str) -> None:
         self._change_frame("comparison", value)
 
-    def _change_frame(self, role: Literal["reference", "comparison"], value: int) -> None:
+    def _change_frame(self, role: Literal["reference", "comparison"], value: str) -> None:
         if self._workspace is None:
             return
-        decision = self._decisions[self.comparison_selector.currentIndex()]
-        setattr(decision, f"{role}_frame", None if value < 0 else value)
+        index = self.comparison_selector.currentIndex()
+        pair = self._workspace.comparisons[index]
+        decision = self._decisions[index]
+        output = pair.reference if role == "reference" else pair.comparison
+        frame, _error = _parse_frame_text(value, role, output.source_frame_count)
+        setattr(decision, f"{role}_text", value)
+        setattr(decision, f"{role}_frame", frame)
         decision.action = None
-        self.error_label.clear()
         self._update_equation()
         self._update_progress()
 
     def _update_equation(self) -> None:
         if self._workspace is None:
             return
-        decision = self._decisions[self.comparison_selector.currentIndex()]
+        index = self.comparison_selector.currentIndex()
+        pair = self._workspace.comparisons[index]
+        decision = self._decisions[index]
+        error = _decision_error(decision, pair)
+        self.error_label.setText("" if error is None else error)
+        if error is not None:
+            self.equation_label.setText("Correct the frame entry to calculate the offset.")
+            self.trim_label.clear()
+            self.confirm_button.setEnabled(False)
+            return
         if decision.reference_frame is None or decision.comparison_frame is None:
             self.equation_label.setText("Set both source frames to calculate the offset.")
             self.trim_label.clear()
@@ -354,15 +363,17 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.context_label.setText(
             f"Current output: {getattr(pair, role).presentation_name} ({role}), frame {frame}."
         )
-        self.api.timeline.clear_notches(_TIMELINE_GROUP, update=False)
         suggestion = _bounded_suggestion_for_role(pair, role)
         if suggestion is not None:
+            self.api.timeline.clear_notches(_TIMELINE_GROUP, update=False)
             self.api.timeline.add_notch(
                 _TIMELINE_GROUP,
                 suggestion,
                 "#d79b35" if role == "comparison" else "#3daee9",
                 f"{pair.comparison.presentation_name}: suggested {role} frame {suggestion}",
             )
+        else:
+            self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self.seek_button.setEnabled(suggestion is not None and not self._saved)
         self.capture_button.setEnabled(not self._saved)
         if self.comparison_selector.currentIndex() != index:
@@ -374,8 +385,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             return
         index, _pair, role = active
         self.comparison_selector.setCurrentIndex(index)
-        spin = self.reference_spin if role == "reference" else self.comparison_spin
-        spin.setValue(int(self.api.current_frame))
+        field = self.reference_input if role == "reference" else self.comparison_input
+        field.setText(str(int(self.api.current_frame)))
 
     def _seek_suggestion(self) -> None:
         active = self._active_pair_and_role()
@@ -392,6 +403,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         index = self.comparison_selector.currentIndex()
         pair = self._workspace.comparisons[index]
         decision = self._decisions[index]
+        error = _decision_error(decision, pair)
+        if error is not None:
+            self.error_label.setText(error)
+            return
         if decision.reference_frame is None or decision.comparison_frame is None:
             self.error_label.setText("Enter both source frames before confirming this pair.")
             return
@@ -457,6 +472,8 @@ def _initial_decision(pair: AlignmentReviewComparisonMetadata) -> _ReviewDecisio
         return _ReviewDecision()
     reference, comparison = _suggested_pair(pair.suggested_offset)
     return _ReviewDecision(
+        reference_text=str(reference) if reference < pair.reference.source_frame_count else "",
+        comparison_text=str(comparison) if comparison < pair.comparison.source_frame_count else "",
         reference_frame=reference if reference < pair.reference.source_frame_count else None,
         comparison_frame=comparison if comparison < pair.comparison.source_frame_count else None,
     )
@@ -503,6 +520,44 @@ def _selector_text(
         "keep_current": "keeping current",
     }[action]
     return f"{pair.comparison.presentation_name} — {status}"
+
+
+def _parse_frame_text(
+    text: str,
+    role: Literal["reference", "comparison"],
+    source_frame_count: int,
+) -> tuple[int | None, str | None]:
+    label = role.title()
+    if not text:
+        return None, None
+    if text.startswith("-") and text[1:].isdecimal():
+        return None, f'{label} frame must be non-negative; entered "{text}".'
+    if not text.isdecimal():
+        return None, f'{label} frame must be a whole number; entered "{text}".'
+    try:
+        frame = int(text)
+    except ValueError:
+        return None, f'{label} frame must be a whole number; entered "{text}".'
+    if frame >= source_frame_count:
+        return (
+            None,
+            f'{label} frame must be between 0 and {source_frame_count - 1}; entered "{text}".',
+        )
+    return frame, None
+
+
+def _decision_error(
+    decision: _ReviewDecision, pair: AlignmentReviewComparisonMetadata
+) -> str | None:
+    fields: tuple[tuple[str, Literal["reference", "comparison"], int], ...] = (
+        (decision.reference_text, "reference", pair.reference.source_frame_count),
+        (decision.comparison_text, "comparison", pair.comparison.source_frame_count),
+    )
+    for text, role, frame_count in fields:
+        _frame, error = _parse_frame_text(text, role, frame_count)
+        if error is not None:
+            return error
+    return None
 
 
 def _trim_explanation(offset: int) -> str:
