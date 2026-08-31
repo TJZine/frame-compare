@@ -1,4 +1,4 @@
-"""Alignment-specific VSPreview launch policy."""
+"""Alignment-specific VSView launch policy."""
 
 from __future__ import annotations
 
@@ -9,27 +9,27 @@ from pathlib import Path
 
 import structlog
 
+from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
-from frame_compare.vspreview.adapter import (
-    VSPreviewAvailabilityStatus,
-    VSPreviewConfig,
-    VSPreviewSessionRequest,
-    check_vspreview_availability,
+from frame_compare.vsview.adapter import (
+    VSViewAvailabilityStatus,
+    VSViewConfig,
+    VSViewSessionRequest,
+    check_vsview_availability,
     launch_alignment_verification_session,
 )
-from frame_compare.vspreview.errors import VSPreviewError
-from frame_compare.vspreview.output import (
-    print_vspreview_confirmation_footer,
-    print_vspreview_confirmation_header,
-    print_vspreview_failure_details,
-    print_vspreview_input_hint,
-    print_vspreview_unavailable,
-    write_vspreview_prompt,
+from frame_compare.vsview.errors import VSViewError
+from frame_compare.vsview.output import (
+    print_vsview_confirmation_footer,
+    print_vsview_confirmation_header,
+    print_vsview_failure_details,
+    print_vsview_input_hint,
+    print_vsview_unavailable,
+    write_vsview_prompt,
 )
-from frame_compare.vspreview.overrides import ManualOverride, save_manual_override
 
 log = structlog.get_logger()
 
@@ -55,39 +55,39 @@ def _current_tty_status() -> _TTYStatus:
     )
 
 
-def _raise_for_forced_unavailable(availability: VSPreviewAvailabilityStatus) -> None:
-    if availability == VSPreviewAvailabilityStatus.PROBE_FAILED:
+def _raise_for_forced_unavailable(availability: VSViewAvailabilityStatus) -> None:
+    if availability == VSViewAvailabilityStatus.PROBE_FAILED:
         raise AudioAlignmentError(
-            "Interactive alignment requested but VSPreview availability probe failed."
+            "Interactive alignment requested but VSView availability probe failed."
         )
-    raise AudioAlignmentError("Interactive alignment requested but VSPreview is not available.")
+    raise AudioAlignmentError("Interactive alignment requested but VSView is not available.")
 
 
 def _launch_requested(config: AlignmentConfig) -> bool:
-    return bool(config.use_vspreview or config.force_interactive)
+    return bool(config.use_vsview or config.force_interactive)
 
 
 def _ensure_forced_availability(
     *,
-    status: VSPreviewAvailabilityStatus,
+    status: VSViewAvailabilityStatus,
     is_available: bool,
     probe_failure_reason: str,
 ) -> None:
     if is_available:
         return
-    if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+    if status == VSViewAvailabilityStatus.PROBE_FAILED:
         raise AudioAlignmentError(
-            f"Interactive alignment requested but VSPreview {probe_failure_reason}."
+            f"Interactive alignment requested but VSView {probe_failure_reason}."
         )
     _raise_for_forced_unavailable(status)
 
 
 def _log_optional_unavailable(
     *,
-    status: VSPreviewAvailabilityStatus,
+    status: VSViewAvailabilityStatus,
     hint: str | None,
     error_details: dict[str, str] | None,
-    use_vspreview: bool,
+    use_vsview: bool,
     force_interactive: bool,
     probe_failure_reason: str,
     probe_failure_details: dict[str, str],
@@ -96,43 +96,41 @@ def _log_optional_unavailable(
 ) -> None:
     if tty_status.stderr:
         reason = {
-            VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE: "VSPreview is not installed.",
-            VSPreviewAvailabilityStatus.MISSING_QT_BACKEND: (
-                "Missing optional VSPreview Qt backend."
-            ),
-            VSPreviewAvailabilityStatus.PROBE_FAILED: ("VSPreview availability check failed."),
-        }.get(status, "VSPreview is unavailable.")
-        print_vspreview_unavailable(reason=reason, no_color=no_color)
+            VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE: "VSView is not installed.",
+            VSViewAvailabilityStatus.MISSING_QT_BACKEND: ("Missing optional VSView Qt backend."),
+            VSViewAvailabilityStatus.PROBE_FAILED: ("VSView availability check failed."),
+        }.get(status, "VSView is unavailable.")
+        print_vsview_unavailable(reason=reason, no_color=no_color)
         log_method = log.debug
     else:
         log_method = log.warning
-    if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+    if status == VSViewAvailabilityStatus.PROBE_FAILED:
         log_method(
-            "vspreview_availability_probe_failed",
+            "vsview_availability_probe_failed",
             reason=probe_failure_reason,
             exception_type=probe_failure_details.get("exception_type"),
             hint=hint,
-            use_vspreview=use_vspreview,
+            use_vsview=use_vsview,
             force_interactive=force_interactive,
         )
         if error_details:
             log.debug(
-                "vspreview_availability_probe_failed_debug",
+                "vsview_availability_probe_failed_debug",
                 error_details=error_details,
             )
-    elif use_vspreview and not force_interactive:
+    elif use_vsview and not force_interactive:
         log_method(
-            "vspreview_unavailable",
+            "vsview_unavailable",
             hint=hint,
-            use_vspreview=use_vspreview,
+            use_vsview=use_vsview,
             force_interactive=force_interactive,
         )
 
 
 def _log_no_tty(script_path: Path, tty_status: _TTYStatus) -> None:
     log.warning(
-        "vspreview_no_tty",
-        hint="Cannot launch VSPreview without an interactive terminal (TTY)",
+        "vsview_no_tty",
+        hint="Cannot launch VSView without an interactive terminal (TTY)",
         script_path=str(script_path),
         stdin_tty=tty_status.stdin,
         stdout_tty=tty_status.stdout,
@@ -141,16 +139,16 @@ def _log_no_tty(script_path: Path, tty_status: _TTYStatus) -> None:
 
 
 def _present_optional_launch_failed(
-    exc: VSPreviewError,
+    exc: VSViewError,
     config: AlignmentConfig,
     *,
     verbose: bool,
     tty_status: _TTYStatus,
 ) -> None:
     if tty_status.stderr:
-        print_vspreview_unavailable(reason=exc.public_reason, no_color=config.no_color)
+        print_vsview_unavailable(reason=exc.public_reason, no_color=config.no_color)
         if verbose and exc.command:
-            print_vspreview_failure_details(
+            print_vsview_failure_details(
                 command=exc.command,
                 reason=exc.public_reason,
                 returncode=exc.returncode,
@@ -158,29 +156,29 @@ def _present_optional_launch_failed(
                 no_color=config.no_color,
             )
         log.debug(
-            "vspreview_optional_launch_failed",
+            "vsview_optional_launch_failed",
             reason=exc.context.message,
             code=exc.code,
             force_interactive=config.force_interactive,
-            use_vspreview=config.use_vspreview,
+            use_vsview=config.use_vsview,
         )
         return
     log.warning(
-        "vspreview_optional_launch_failed",
+        "vsview_optional_launch_failed",
         reason=exc.context.message,
         code=exc.code,
         force_interactive=config.force_interactive,
-        use_vspreview=config.use_vspreview,
+        use_vsview=config.use_vsview,
     )
 
 
-def _read_vspreview_prompt(
+def _read_vsview_prompt(
     *,
     label: str,
     suggested_offset: int | None,
     no_color: bool,
 ) -> str:
-    write_vspreview_prompt(
+    write_vsview_prompt(
         label=label,
         suggested_offset=suggested_offset,
         no_color=no_color,
@@ -212,7 +210,7 @@ def _prompt_for_confirmed_offsets(
         return {}
 
     presentation_names = presentation_names_by_stem or {}
-    print_vspreview_confirmation_header(
+    print_vsview_confirmation_header(
         reference_name=presentation_names.get(reference.stem, reference.stem),
         no_color=no_color,
     )
@@ -223,7 +221,7 @@ def _prompt_for_confirmed_offsets(
         suggested_offset = offsets_by_key.get(key)
         while True:
             try:
-                raw_value = _read_vspreview_prompt(
+                raw_value = _read_vsview_prompt(
                     label=(
                         f"Comparison {comparison_number} | "
                         f"{presentation_names.get(comparison.stem, comparison.stem)}"
@@ -232,13 +230,13 @@ def _prompt_for_confirmed_offsets(
                     no_color=no_color,
                 ).strip()
             except (EOFError, OSError):
-                print_vspreview_input_hint(
+                print_vsview_input_hint(
                     "No terminal input available; keeping current offsets.",
                     no_color=no_color,
                 )
                 return None
             if raw_value == "":
-                print_vspreview_input_hint(
+                print_vsview_input_hint(
                     "Enter both source frames, for example '120 108', or 'skip'.",
                     no_color=no_color,
                 )
@@ -247,7 +245,7 @@ def _prompt_for_confirmed_offsets(
                 break
             source_frames = _parse_source_frame_pair(raw_value)
             if source_frames is None:
-                print_vspreview_input_hint(
+                print_vsview_input_hint(
                     "Enter two non-negative integer source frames, for example '120 108', "
                     "or 'skip'.",
                     no_color=no_color,
@@ -256,7 +254,7 @@ def _prompt_for_confirmed_offsets(
             reference_source_frame, comparison_source_frame = source_frames
             confirmed[key] = reference_source_frame - comparison_source_frame
             break
-    print_vspreview_confirmation_footer(no_color=no_color)
+    print_vsview_confirmation_footer(no_color=no_color)
     return confirmed
 
 
@@ -306,7 +304,7 @@ def _resolve_launch_decision(
     )
 
 
-def maybe_launch_alignment_vspreview(
+def maybe_launch_alignment_vsview(
     *,
     reference: Path,
     comparisons: list[Path],
@@ -318,7 +316,7 @@ def maybe_launch_alignment_vspreview(
     presentation_names_by_stem: dict[str, str] | None = None,
     verbose: bool = False,
 ) -> dict[str, int] | None:
-    """Best-effort VSPreview alignment verification.
+    """Best-effort VSView alignment verification.
 
     This is intended for interactive verification/inspection only. Actual offsets
     used by the pipeline are still sourced from:
@@ -326,10 +324,10 @@ def maybe_launch_alignment_vspreview(
       2) cached offsets
       3) computed offsets (cross-correlation)
     """
-    if not (config.use_vspreview or config.force_interactive):
+    if not (config.use_vsview or config.force_interactive):
         return None
 
-    availability = check_vspreview_availability()
+    availability = check_vsview_availability()
 
     if config.force_interactive:
         _ensure_forced_availability(
@@ -344,7 +342,7 @@ def maybe_launch_alignment_vspreview(
             status=availability.status,
             hint=availability.hint,
             error_details=availability.error_details,
-            use_vspreview=config.use_vspreview,
+            use_vsview=config.use_vsview,
             force_interactive=config.force_interactive,
             probe_failure_reason=availability.public_probe_failure_reason(),
             probe_failure_details=availability.public_probe_failure_details(),
@@ -370,7 +368,7 @@ def maybe_launch_alignment_vspreview(
     progress_suspended = _suspend_progress_for_interaction(interactive_progress)
     try:
         script_path = launch_alignment_verification_session(
-            request=VSPreviewSessionRequest(
+            request=VSViewSessionRequest(
                 reference=reference,
                 comparisons=comparisons,
                 suggested_offsets_by_key=offsets_by_key,
@@ -378,7 +376,7 @@ def maybe_launch_alignment_vspreview(
                 frame_props_by_stem=frame_props_by_stem,
                 presentation_names_by_stem=presentation_names_by_stem,
             ),
-            config=VSPreviewConfig(
+            config=VSViewConfig(
                 enabled=launch_decision.enabled,
                 no_color=config.no_color,
                 verbose=verbose,
@@ -404,7 +402,7 @@ def maybe_launch_alignment_vspreview(
             confirmed_offsets_by_key=confirmed_offsets,
         )
         return confirmed_offsets
-    except VSPreviewError as exc:
+    except VSViewError as exc:
         if config.force_interactive:
             raise
         _present_optional_launch_failed(

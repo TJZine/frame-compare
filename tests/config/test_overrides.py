@@ -124,17 +124,17 @@ def test_apply_cli_overrides_accepts_enum_cli_values() -> None:
     assert new_config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
 
 
-def test_apply_cli_overrides_force_interactive_alignment_sets_force_and_use_vspreview() -> None:
-    """Test force_interactive_alignment implies use_vspreview."""
+def test_apply_cli_overrides_force_interactive_alignment_sets_force_and_use_vsview() -> None:
+    """Test force_interactive_alignment implies use_vsview."""
     config = get_default_config()
     assert config.audio_alignment.force_interactive is False
-    assert config.audio_alignment.use_vspreview is False
+    assert config.audio_alignment.use_vsview is False
 
     cli_args = CLIConfigOverrides(force_interactive_alignment=True)
     new_config = apply_cli_overrides(config, cli_args)
 
     assert new_config.audio_alignment.force_interactive is True
-    assert new_config.audio_alignment.use_vspreview is True
+    assert new_config.audio_alignment.use_vsview is True
 
 
 def test_apply_cli_overrides_input_dir_maps_to_paths_input_dir() -> None:

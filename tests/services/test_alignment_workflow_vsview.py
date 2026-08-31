@@ -1,4 +1,4 @@
-"""Audio alignment workflow VSPreview orchestration tests."""
+"""Audio alignment workflow VSView orchestration tests."""
 
 import io
 from fractions import Fraction
@@ -11,19 +11,19 @@ import pytest
 
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
-from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.vspreview.adapter import (
-    VSPreviewAvailability,
-    VSPreviewAvailabilityStatus,
-    VSPreviewSessionRequest,
-)
-from frame_compare.vspreview.errors import VSPreviewError
-from frame_compare.vspreview.overrides import (
+from frame_compare.services.alignment_manual_overrides import (
     ManualOverride,
     load_manual_overrides,
     save_manual_override,
 )
+from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.vsview.adapter import (
+    VSViewAvailability,
+    VSViewAvailabilityStatus,
+    VSViewSessionRequest,
+)
+from frame_compare.vsview.errors import VSViewError
 from tests.services.alignment_request_test_support import alignment_request
 
 
@@ -72,18 +72,18 @@ def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) 
 
     monkeypatch.setattr(sys, "stdin", io.StringIO(user_input))
     monkeypatch.setattr(
-        "frame_compare.services.alignment_vspreview._current_tty_status",
+        "frame_compare.services.alignment_vsview._current_tty_status",
         lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
     )
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_alignment_launches_vspreview_when_enabled(
+def test_alignment_launches_vsview_when_enabled(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -93,7 +93,7 @@ def test_alignment_launches_vspreview_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """When configured, alignment should generate/launch a VSPreview verification session."""
+    """When configured, alignment should generate/launch a VSView verification session."""
     _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
@@ -107,19 +107,19 @@ def test_alignment_launches_vspreview_when_enabled(
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, 2.0)
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
-    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=False)
+    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=False)
     _run_alignment(ref, [comp_a, comp_b], config, tmp_path)
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
     request = kwargs["request"]
-    assert isinstance(request, VSPreviewSessionRequest)
+    assert isinstance(request, VSViewSessionRequest)
     assert request.reference == ref
     assert request.comparisons == [comp_a, comp_b]
     suggested = request.suggested_offsets_by_key
@@ -127,13 +127,13 @@ def test_alignment_launches_vspreview_when_enabled(
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_alignment_rejected_computed_result_passes_none_hint_to_vspreview(
+def test_alignment_rejected_computed_result_passes_none_hint_to_vsview(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -163,16 +163,16 @@ def test_alignment_rejected_computed_result_passes_none_hint_to_vspreview(
         1.0,
         1.0,
     )
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
     results = _run_alignment(
         ref,
         [comp],
-        AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
+        AlignmentConfig(enable=True, use_vsview=True, cache_results=False),
         tmp_path,
     )
 
@@ -182,17 +182,17 @@ def test_alignment_rejected_computed_result_passes_none_hint_to_vspreview(
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
     request = kwargs["request"]
-    assert isinstance(request, VSPreviewSessionRequest)
+    assert isinstance(request, VSViewSessionRequest)
     assert request.suggested_offsets_by_key == {"ref:comp": None}
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
-def test_alignment_full_manual_override_still_launches_vspreview_when_enabled(
+def test_alignment_full_manual_override_still_launches_vsview_when_enabled(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
     mock_probe: MagicMock,
@@ -201,7 +201,7 @@ def test_alignment_full_manual_override_still_launches_vspreview_when_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Manual-only runs should still build/launch VSPreview verification."""
+    """Manual-only runs should still build/launch VSView verification."""
     _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
@@ -218,13 +218,13 @@ def test_alignment_full_manual_override_still_launches_vspreview_when_enabled(
     mock_probe.side_effect = AssertionError("should not be called")
     mock_extract_reference.side_effect = AssertionError("should not be called")
     mock_extract_matching.side_effect = AssertionError("should not be called")
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
-    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
     results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
@@ -232,19 +232,19 @@ def test_alignment_full_manual_override_still_launches_vspreview_when_enabled(
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
     request = kwargs["request"]
-    assert isinstance(request, VSPreviewSessionRequest)
+    assert isinstance(request, VSViewSessionRequest)
     assert request.suggested_offsets_by_key == {"ref:comp": 12}
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_alignment_force_interactive_raises_when_vspreview_unavailable(
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
+def test_alignment_force_interactive_raises_when_vsview_unavailable(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """Force-interactive mode must fail fast if VSPreview is unavailable."""
+    """Force-interactive mode must fail fast if VSView is unavailable."""
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -256,14 +256,14 @@ def test_alignment_force_interactive_raises_when_vspreview_unavailable(
         frame_offset=2,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
         message="missing",
     )
 
     config = AlignmentConfig(
         enable=True,
-        use_vspreview=True,
+        use_vsview=True,
         force_interactive=True,
         cache_results=True,
     )
@@ -273,14 +273,14 @@ def test_alignment_force_interactive_raises_when_vspreview_unavailable(
     mock_launch.assert_not_called()
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_alignment_vspreview_unavailable_generates_script_without_launch(
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
+def test_alignment_vsview_unavailable_generates_script_without_launch(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """When optional VSPreview is unavailable, adapter should be called with enabled=False."""
+    """When optional VSView is unavailable, adapter should be called with enabled=False."""
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -292,13 +292,13 @@ def test_alignment_vspreview_unavailable_generates_script_without_launch(
         frame_offset=7,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
         message="missing",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
-    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
     _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert mock_launch.call_count == 1
@@ -306,8 +306,8 @@ def test_alignment_vspreview_unavailable_generates_script_without_launch(
     assert kwargs["config"].enabled is False
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
@@ -319,7 +319,7 @@ def test_alignment_vspreview_unavailable_generates_script_without_launch(
         ("108 120\n", -12),
     ],
 )
-def test_alignment_vspreview_confirmed_offset_is_saved_and_applied(
+def test_alignment_interactive_confirmed_offset_is_saved_and_applied(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -342,16 +342,16 @@ def test_alignment_vspreview_confirmed_offset_is_saved_and_applied(
     mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
     mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
     mock_estimate.return_value = AlignmentConsensus(3, 0.99, True, "accepted", 1, 1, 1.0, 2.0)
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
     results = _run_alignment(
         ref,
         [comp],
-        AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
+        AlignmentConfig(enable=True, use_vsview=True, cache_results=False),
         tmp_path,
     )
 
@@ -361,13 +361,13 @@ def test_alignment_vspreview_confirmed_offset_is_saved_and_applied(
     assert manual_overrides["ref:comp"].frame_offset == expected_offset
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_matching_audio")
 @patch("frame_compare.services.alignment._extract_reference_audio")
 @patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_alignment_vspreview_confirm_skip_confirm_keeps_prior_and_later_offsets(
+def test_alignment_vsview_confirm_skip_confirm_keeps_prior_and_later_offsets(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -394,16 +394,16 @@ def test_alignment_vspreview_confirm_skip_confirm_keeps_prior_and_later_offsets(
         AlignmentConsensus(2667, 0.98, True, "accepted", 1, 1, 1.0, 2.0),
         AlignmentConsensus(-2, 0.97, True, "accepted", 1, 1, 1.0, 2.0),
     ]
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
     results = _run_alignment(
         ref,
         [zeta, alpha, mid],
-        AlignmentConfig(enable=True, use_vspreview=True, cache_results=False),
+        AlignmentConfig(enable=True, use_vsview=True, cache_results=False),
         tmp_path,
     )
 
@@ -416,16 +416,16 @@ def test_alignment_vspreview_confirm_skip_confirm_keeps_prior_and_later_offsets(
     assert manual_overrides["ref:mid"].frame_offset == -6
 
 
-@patch("frame_compare.services.alignment_vspreview.log.warning")
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_alignment_optional_vspreview_probe_failure_generates_script_without_launch(
+@patch("frame_compare.services.alignment_vsview.log.warning")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
+def test_alignment_optional_vsview_probe_failure_generates_script_without_launch(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """Optional VSPreview probe failures should be visible but non-fatal."""
+    """Optional VSView probe failures should be visible but non-fatal."""
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -437,21 +437,21 @@ def test_alignment_optional_vspreview_probe_failure_generates_script_without_lau
         frame_offset=7,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.PROBE_FAILED,
-        message="VSPreview availability probe failed",
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.PROBE_FAILED,
+        message="VSView availability probe failed",
         error_details={"exception_type": "RuntimeError", "exception": "broken import metadata"},
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
-    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
     results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 7
     mock_warn.assert_called_once()
     warn_args, warn_kwargs = mock_warn.call_args
-    assert warn_args == ("vspreview_availability_probe_failed",)
+    assert warn_args == ("vsview_availability_probe_failed",)
     assert warn_kwargs["reason"] == "availability probe failed (RuntimeError)"
     assert warn_kwargs["exception_type"] == "RuntimeError"
     mock_launch.assert_called_once()
@@ -459,15 +459,15 @@ def test_alignment_optional_vspreview_probe_failure_generates_script_without_lau
     assert launch_kwargs["config"].enabled is False
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_alignment_force_interactive_launches_when_vspreview_available(
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
+def test_alignment_force_interactive_launches_when_vsview_available(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Force-interactive mode should launch VSPreview when available."""
+    """Force-interactive mode should launch VSView when available."""
     _set_interactive_terminal(monkeypatch, "skip\n")
 
     ref = tmp_path / "ref.mkv"
@@ -481,15 +481,15 @@ def test_alignment_force_interactive_launches_when_vspreview_available(
         frame_offset=3,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.return_value = tmp_path / "vspreview_script.py"
+    mock_launch.return_value = tmp_path / "vsview_script.py"
 
     config = AlignmentConfig(
         enable=True,
-        use_vspreview=False,
+        use_vsview=False,
         force_interactive=True,
         cache_results=True,
     )
@@ -502,8 +502,8 @@ def test_alignment_force_interactive_launches_when_vspreview_available(
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
 def test_alignment_force_interactive_probe_failure_raises_alignment_error(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -521,15 +521,15 @@ def test_alignment_force_interactive_probe_failure_raises_alignment_error(
         frame_offset=3,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.PROBE_FAILED,
-        message="VSPreview availability probe failed",
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.PROBE_FAILED,
+        message="VSView availability probe failed",
         error_details={"exception_type": "RuntimeError", "exception": "broken import metadata"},
     )
 
     config = AlignmentConfig(
         enable=True,
-        use_vspreview=False,
+        use_vsview=False,
         force_interactive=True,
         cache_results=True,
     )
@@ -539,16 +539,16 @@ def test_alignment_force_interactive_probe_failure_raises_alignment_error(
     mock_launch.assert_not_called()
 
 
-@patch("frame_compare.services.alignment_vspreview.log.warning")
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_alignment_vspreview_errors_are_warning_only_when_not_forced(
+@patch("frame_compare.services.alignment_vsview.log.warning")
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
+def test_alignment_vsview_errors_are_warning_only_when_not_forced(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """Adapter launch failures are warning-only for optional VSPreview mode."""
+    """Adapter launch failures are warning-only for optional VSView mode."""
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -560,27 +560,27 @@ def test_alignment_vspreview_errors_are_warning_only_when_not_forced(
         frame_offset=1,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.side_effect = VSPreviewError("launch exited with code 7")
+    mock_launch.side_effect = VSViewError("launch exited with code 7")
 
-    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
     results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
 
     assert len(results) == 1
     assert results[0].frame_offset == 1
     mock_warn.assert_called_once()
     _, kwargs = mock_warn.call_args
-    assert kwargs["reason"] == "VSPreview failed: launch exited with code 7"
+    assert kwargs["reason"] == "VSView failed: launch exited with code 7"
     assert kwargs["code"] == "FC-4019"
     assert kwargs["force_interactive"] is False
 
 
-@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
-def test_alignment_vspreview_errors_raise_when_force_interactive(
+@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
+def test_alignment_vsview_errors_raise_when_force_interactive(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -604,17 +604,17 @@ def test_alignment_vspreview_errors_raise_when_force_interactive(
         frame_offset=1,
     )
 
-    mock_check_availability.return_value = VSPreviewAvailability(
-        status=VSPreviewAvailabilityStatus.AVAILABLE,
+    mock_check_availability.return_value = VSViewAvailability(
+        status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.side_effect = VSPreviewError("launch exited with code 7")
+    mock_launch.side_effect = VSViewError("launch exited with code 7")
 
     config = AlignmentConfig(
         enable=True,
-        use_vspreview=False,
+        use_vsview=False,
         force_interactive=True,
         cache_results=True,
     )
-    with pytest.raises(VSPreviewError, match="launch exited with code 7"):
+    with pytest.raises(VSViewError, match="launch exited with code 7"):
         _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))

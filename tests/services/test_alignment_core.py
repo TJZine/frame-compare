@@ -44,7 +44,7 @@ def test_alignment_config_defaults():
     assert cfg.enable is True
     assert cfg.sample_rate == 8000
     assert cfg.max_offset_seconds == 30.0
-    assert cfg.use_vspreview is False
+    assert cfg.use_vsview is False
     assert cfg.force_interactive is False
     assert cfg.cache_results is True
     assert cfg.correlation_mode == "raw_fft"

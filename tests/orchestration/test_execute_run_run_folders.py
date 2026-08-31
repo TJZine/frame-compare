@@ -30,9 +30,9 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
+from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from frame_compare.services.run_folder import RunFolderReservation, reserve_run_folder
 from frame_compare.vs.types import SourceInfo
-from frame_compare.vspreview.overrides import MANUAL_OVERRIDES_FILE
 
 from .execute_run_helpers import (
     RUN_FOLDERS_CONFIG,

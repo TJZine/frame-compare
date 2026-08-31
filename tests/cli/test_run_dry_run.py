@@ -100,7 +100,7 @@ api_key = "sentinel-api-key"
             "run_folder_reservation_or_metadata_writes",
             "render_or_report_generation",
             "network_publishing_or_metadata",
-            "browser_clipboard_or_vspreview",
+            "browser_clipboard_or_vsview",
         ],
         "dry_run": True,
         "input": {
@@ -567,7 +567,7 @@ blocked = (
     "frame_compare.orchestration.coordinator",
     "frame_compare.runner",
     "frame_compare.vs",
-    "frame_compare.vspreview",
+    "frame_compare.vsview",
     "frame_compare.services.report",
     "frame_compare.services.metadata",
     "frame_compare.services.publishers",

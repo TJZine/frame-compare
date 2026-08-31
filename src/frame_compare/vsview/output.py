@@ -1,4 +1,4 @@
-"""Human-readable VSPreview CLI diagnostics."""
+"""Human-readable VSView CLI diagnostics."""
 
 from __future__ import annotations
 
@@ -39,13 +39,13 @@ def _status_text(marker: str, message: str, *, style: str) -> Text:
     return Text.assemble(Text(marker, style=style), " ", message)
 
 
-def print_vspreview_session(
+def print_vsview_session(
     *,
     script_path: Path,
     command: list[str],
     no_color: bool = False,
 ) -> None:
-    """Print app-owned VSPreview launch telemetry to stderr."""
+    """Print app-owned VSView launch telemetry to stderr."""
     table = _group_table()
     table.add_row("script", f"[{STYLE_PATH}]{escape(str(script_path))}[/]")
     table.add_row("command", f"[{STYLE_PATH}]{escape(' '.join(command))}[/]")
@@ -53,11 +53,11 @@ def print_vspreview_session(
 
     console = _console(no_color=no_color)
     console.print()
-    console.print(f"[{STYLE_HEADER}]VSPreview Session[/]")
+    console.print(f"[{STYLE_HEADER}]VSView Session[/]")
     console.print(table)
 
 
-def print_vspreview_unavailable(
+def print_vsview_unavailable(
     *,
     reason: str,
     no_color: bool = False,
@@ -65,13 +65,13 @@ def print_vspreview_unavailable(
     """Print the single normal human warning for optional verification failure."""
     console = _console(no_color=no_color)
     console.print()
-    console.print(_status_text("[WARN]", "VSPreview verification unavailable", style="yellow"))
+    console.print(_status_text("[WARN]", "VSView verification unavailable", style="yellow"))
     console.print(f"       {escape(reason)}")
     console.print("       Continuing with computed audio alignment.")
-    console.print("       Hint: Check the VSPreview setup with frame-compare doctor.")
+    console.print("       Hint: Check the VSView setup with frame-compare doctor.")
 
 
-def print_vspreview_failure_details(
+def print_vsview_failure_details(
     *,
     command: tuple[str, ...],
     reason: str,
@@ -88,11 +88,11 @@ def print_vspreview_failure_details(
         table.add_row("stderr", escape(startup_stderr[-_STARTUP_STDERR_LIMIT:]))
     console = _console(no_color=no_color)
     console.print()
-    console.print(f"[{STYLE_HEADER}]VSPreview Failure Details[/]")
+    console.print(f"[{STYLE_HEADER}]VSView Failure Details[/]")
     console.print(table)
 
 
-def print_vspreview_confirmation_header(
+def print_vsview_confirmation_header(
     *,
     reference_name: str,
     no_color: bool = False,
@@ -101,7 +101,7 @@ def print_vspreview_confirmation_header(
     table = _group_table()
     table.add_row("reference", f"[{STYLE_VALUE}]{escape(reference_name)}[/]")
     table.add_row("domain", "Untrimmed source-frame indices")
-    table.add_row("task", "Find the same visible moment in both VSPreview outputs")
+    table.add_row("task", "Find the same visible moment in both VSView outputs")
     table.add_row(
         "enter",
         f"[{STYLE_HINT}]reference_frame comparison_frame[/] (reference first; e.g. 120 108)",
@@ -117,14 +117,14 @@ def print_vspreview_confirmation_header(
     console.print(
         Text.assemble(
             " " * _SECTION_INDENT,
-            _status_text("[WAIT]", "VSPreview Confirmation", style=STYLE_WAIT),
+            _status_text("[WAIT]", "VSView Confirmation", style=STYLE_WAIT),
         )
     )
     console.print(Padding(table, (0, 0, 0, _CONTENT_INDENT)))
     console.print()
 
 
-def write_vspreview_prompt(
+def write_vsview_prompt(
     *,
     label: str,
     suggested_offset: int | None,
@@ -158,11 +158,11 @@ def write_vspreview_prompt(
     sys.stderr.flush()
 
 
-def print_vspreview_input_hint(message: str, *, no_color: bool = False) -> None:
+def print_vsview_input_hint(message: str, *, no_color: bool = False) -> None:
     console = _console(no_color=no_color)
     console.print(f"{' ' * _CONTENT_INDENT}[{STYLE_HINT}]Hint[/] {escape(message)}")
 
 
-def print_vspreview_confirmation_footer(*, no_color: bool = False) -> None:
+def print_vsview_confirmation_footer(*, no_color: bool = False) -> None:
     """Separate the completed blocking workflow from resumed parent progress."""
     _console(no_color=no_color).print()

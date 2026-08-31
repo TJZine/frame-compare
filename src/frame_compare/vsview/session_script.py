@@ -1,4 +1,4 @@
-"""VSPreview session script generation and workspace bootstrapping.
+"""VSView session script generation and workspace bootstrapping.
 
 This module is responsible for construction of the VapourSynth session script
 used for interactive alignment verification, including workspace root detection
@@ -17,7 +17,7 @@ from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER, source_index_path
 
 
-def write_vspreview_session_script(
+def write_vsview_session_script(
     reference: Path,
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int | None],
@@ -25,17 +25,17 @@ def write_vspreview_session_script(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
 ) -> Path:
-    """Generate and write a self-contained VSPreview script.
+    """Generate and write a self-contained VSView script.
 
     Output location:
-        - Directory: `{cache_dir}/vspreview_sessions/` (created if missing)
-        - Filename: `vspreview_{reference_stem}_{timestamp}.py` (UTC timestamp)
+        - Directory: `{cache_dir}/vsview_sessions/` (created if missing)
+        - Filename: `vsview_{reference_stem}_{timestamp}.py` (UTC timestamp)
         - Timestamp format: YYYYMMDDTHHMMSSZ (UTC, seconds precision)
 
     The timestamp MUST appear in the filename only; it MUST NOT appear in the
     script body so that script content remains byte-identical for the same inputs.
     """
-    sessions_dir = cache_dir / "vspreview_sessions"
+    sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
     bootstrap_paths = _resolve_bootstrap_paths(cache_dir)
@@ -54,7 +54,7 @@ def write_vspreview_session_script(
     script_path = None
     for attempt in range(100):
         suffix = f"_{attempt}" if attempt > 0 else ""
-        script_name = f"vspreview_{reference.stem}_{base_timestamp}{suffix}.py"
+        script_name = f"vsview_{reference.stem}_{base_timestamp}{suffix}.py"
         candidate_path = sessions_dir / script_name
         if _reserve_empty_file(candidate_path):
             script_path = candidate_path
@@ -62,7 +62,7 @@ def write_vspreview_session_script(
 
     if script_path is None:
         random_suffix = uuid.uuid4().hex[:8]
-        script_name = f"vspreview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
+        script_name = f"vsview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
         script_path = sessions_dir / script_name
         script_path.touch(exist_ok=False)
 
@@ -82,7 +82,7 @@ def _reserve_empty_file(path: Path) -> bool:
 
 
 def _resolve_bootstrap_paths(cache_dir: Path) -> list[Path]:
-    """Resolve stable bootstrap import roots for generated VSPreview scripts."""
+    """Resolve stable bootstrap import roots for generated VSView scripts."""
     resolved_cache_dir = cache_dir.resolve()
     workspace_root = _find_workspace_root(resolved_cache_dir)
     project_root = _find_project_root(resolved_cache_dir, workspace_root)
@@ -116,7 +116,7 @@ def _find_project_root(cache_dir: Path, workspace_root: Path) -> Path:
 def _build_script_header() -> str:
     return '''\
 #!/usr/bin/env python3
-"""VSPreview alignment verification session.
+"""VSView alignment verification session.
 
 Sign convention:
     + trims reference (comparison starts AFTER reference)
@@ -127,7 +127,6 @@ untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
-import logging
 import os
 import sys
 from pathlib import Path
@@ -218,32 +217,6 @@ def safe_print(*args, **kwargs):
         # Fallback for problematic consoles
         text = " ".join(str(a) for a in args)
         print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
-
-
-_EMPTY_FRAME_ASSUMPTION_BODY = (
-    "The following frame properties had to be assumed for previewing: <>\\n"
-    "You may want to set explicit frame properties instead. "
-    "See https://www.vapoursynth.com/doc/apireference.html#reserved-frame-properties "
-    "for more information."
-)
-
-
-class _VSPreviewWarningFilter(logging.Filter):
-    def filter(self, record):
-        node_label, separator, body = record.getMessage().partition(": ")
-        is_exact_empty_warning = (
-            record.name == "root"
-            and record.levelno == logging.WARNING
-            and bool(separator)
-            and node_label.startswith("Video Node ")
-            and node_label.removeprefix("Video Node ").isdecimal()
-            and body == _EMPTY_FRAME_ASSUMPTION_BODY
-        )
-        return not is_exact_empty_warning
-
-
-def install_vspreview_warning_filter():
-    logging.getLogger().addFilter(_VSPreviewWarningFilter())
 
 
 def resolve_lwlibavsource(core):
@@ -343,7 +316,7 @@ def collect_preview_assumption(label, display_name):
         )
     if range_issue is not None:
         assumption["range"] = (
-            f"Color-range metadata {range_issue}; VSPreview infers preview range"
+            f"Color-range metadata {range_issue}; VSView infers preview range"
         )
     return assumption
 
@@ -452,8 +425,12 @@ def main():
     except ImportError:
         safe_print(_status_line("[FAIL]", "VapourSynth is unavailable"))
         sys.exit(1)
+    try:
+        from vsview import set_output
+    except ImportError:
+        safe_print(_status_line("[FAIL]", "VSView output API is unavailable"))
+        sys.exit(1)
     core = vs.core
-    install_vspreview_warning_filter()
     try:
         load_source = resolve_lwlibavsource(core)
     except RuntimeError as e:
@@ -466,7 +443,7 @@ def main():
         sys.exit(1)
 
     safe_print("")
-    safe_print(_status_line("[RUN]", "VSPreview Bootstrap"))
+    safe_print(_status_line("[RUN]", "VSView Bootstrap"))
     safe_print(f"    {_key('reference')}     {_value(REFERENCE['display_name'])}")
 
     try:
@@ -567,8 +544,8 @@ def main():
         safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
         reference_output = loaded_comparison_count * 2
         comparison_output = reference_output + 1
-        ref_clip.set_output(reference_output)
-        comp_clip.set_output(comparison_output)
+        set_output(ref_clip, reference_output, "Reference")
+        set_output(comp_clip, comparison_output, f"Comparison {comparison_number}")
         safe_print(
             f"    {_key('outputs')}       "
             f"Reference {reference_output} | Comparison {comparison_number} {comparison_output}"
@@ -580,7 +557,7 @@ def main():
         sys.exit(1)
 
     if preview_assumptions:
-        safe_print("\\n" + _status_line("[WARN]", "VSPreview Display Assumptions"))
+        safe_print("\\n" + _status_line("[WARN]", "VSView Display Assumptions"))
         for assumption_number, assumption in enumerate(preview_assumptions):
             if assumption_number:
                 safe_print()
@@ -594,8 +571,8 @@ def main():
                 f"{_hint('Preview only; source, render, and report unchanged')}"
             )
 
-    safe_print("\\n" + _status_line("[OK]", "VSPreview Ready"))
-    safe_print("    Inspect the untrimmed clips in VSPreview, then return here to confirm frames.")
+    safe_print("\\n" + _status_line("[OK]", "VSView Ready"))
+    safe_print("    Inspect the untrimmed clips in VSView, then return here to confirm frames.")
 
 main()
 """
@@ -609,7 +586,7 @@ def _build_script_content(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
 ) -> str:
-    """Build the script content for VSPreview.
+    """Build the script content for VSView.
 
     This content is deterministic for the same inputs (no timestamp in body).
     """

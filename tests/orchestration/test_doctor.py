@@ -980,7 +980,7 @@ def test_collect_checks_has_canonical_media_runtime_order() -> None:
         "vs_placebo",
         "ffms2",
         "ffmpeg",
-        "vspreview",
+        "vsview",
         "slowpics",
         "tmdb_api_key",
     ]
