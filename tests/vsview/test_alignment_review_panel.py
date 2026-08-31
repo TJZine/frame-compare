@@ -82,7 +82,11 @@ def _output(
 
 
 def _panel(
-    tmp_path: Path, *, suggestion: int | None = 12, comparison_count: int = 1
+    tmp_path: Path,
+    *,
+    suggestion: int | None = 12,
+    comparison_count: int = 1,
+    initialize_output: bool = True,
 ) -> tuple[AlignmentReviewPanel, Any, Path]:
     sessions = tmp_path / "vsview_sessions"
     sessions.mkdir()
@@ -105,7 +109,25 @@ def _panel(
     panel = AlignmentReviewPanel(parent, cast(Any, api))
     panel.setParent(None)
     _call_hook(panel.on_workspace_loaded, panel)
+    if initialize_output:
+        _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 0)
     return panel, api, script
+
+
+def test_workspace_activation_waits_for_public_output_lifecycle(tmp_path: Path) -> None:
+    panel, api, _script = _panel(tmp_path, initialize_output=False)
+
+    assert api.timeline.added == []
+    assert not panel.capture_button.isEnabled()
+    assert not panel.seek_button.isEnabled()
+    assert panel.context_label.text() == ""
+
+    _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 0)
+
+    assert api.timeline.added[-1][0:2] == ("frame_compare_alignment_review", 12)
+    assert panel.capture_button.isEnabled()
+    assert panel.seek_button.isEnabled()
+    assert "Reference 1 (reference), frame 12" in panel.context_label.text()
 
 
 def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
@@ -254,6 +276,7 @@ def test_unavailable_suggestion_transition_publishes_owned_marker_clear(tmp_path
         output.kwargs[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY] = None
 
     _call_hook(panel.on_workspace_loaded, panel)
+    _call_hook(panel.on_current_voutput_changed, panel, api.current_voutput, 0)
 
     assert api.timeline.cleared[before:] == [
         ("frame_compare_alignment_review", True),

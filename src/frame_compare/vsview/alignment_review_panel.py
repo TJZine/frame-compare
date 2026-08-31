@@ -213,7 +213,6 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         )
         self._set_review_controls_enabled(True)
         self._show_comparison(0)
-        self._refresh_active_output()
 
     def _show_inactive(self, *, clear_marker: bool = True) -> None:
         if clear_marker:
@@ -239,12 +238,13 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             self.comparison_selector,
             self.reference_input,
             self.comparison_input,
-            self.capture_button,
-            self.seek_button,
             self.confirm_button,
             self.keep_button,
         ):
             widget.setEnabled(enabled)
+        if not enabled:
+            self.capture_button.setEnabled(False)
+            self.seek_button.setEnabled(False)
         self.finish_button.setEnabled(False)
 
     def _show_comparison(self, index: int) -> None:
