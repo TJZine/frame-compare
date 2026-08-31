@@ -19,11 +19,11 @@ def _load_helper_module(repo_root: Path):
 def test_translates_generated_paths(repo_root: Path, tmp_path: Path) -> None:
     helper = _load_helper_module(repo_root)
     fake_repo = tmp_path / "repo"
-    generated_file = fake_repo / "generated" / "vspreview" / "session.py"
+    generated_file = fake_repo / "generated" / "vsview_sessions" / "session.py"
     generated_file.parent.mkdir(parents=True)
     generated_file.write_text("print('ok')\n", encoding="utf-8")
     translated_generated = helper.translate_container_path(
-        "/workspace/generated/vspreview/session.py",
+        "/workspace/generated/vsview_sessions/session.py",
         repo_root=fake_repo,
     )
 

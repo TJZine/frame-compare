@@ -21,7 +21,7 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Duplicate or confusing source labels | Use explicit per-source labels; duplicate explicit labels are rejected |
 | Doctor reports VapourSynth or L-SMASH-Works missing | Use Docker or Windows portable, or repair the native supported runtime; the default renderer requires VapourSynth |
 | Doctor reports vs-placebo or Vulkan unavailable | Repair the selected plugin/driver path or use the supported Docker software-Vulkan route for headless work |
-| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify manually with VSPreview when available |
+| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify manually with VSView when available |
 | Requested frames cannot survive alignment | Reduce trims or frame counts and inspect the final shared overlap; user frames are not silently replaced |
 | Docker cannot write config or generated data | Export host UID/GID values and pre-create `config`, `comparison_videos`, and `generated` as the host user |
 | Docker report did not open | Expected across the container boundary; use the host helper and exact path printed by the run |

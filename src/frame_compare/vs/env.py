@@ -68,7 +68,6 @@ def _iter_windows_dll_candidates() -> list[str]:
             os.path.join(app_site_packages, "vapoursynth.libs"),
             os.path.join(app_site_packages, "vs_placebo"),
             os.path.join(app_site_packages, "vs_placebo.libs"),
-            os.path.join(bundle_root, "vs", "extra-plugins", "lsmas"),
         ]
     )
     return candidates
@@ -149,17 +148,10 @@ def _get_canonical_plugin_dir() -> str | None:
     return None
 
 
-def _bundle_plugin_dir() -> str:
-    python_dir = os.path.dirname(sys.executable)
-    bundle_root = os.path.dirname(python_dir)
-    return os.path.join(bundle_root, "vs", "plugins")
-
-
 def _candidate_lsmas_filenames() -> list[str]:
-    filenames = ["libvslsmashsource.dll"]
-    if os.name != "nt":
-        filenames = ["libvslsmashsource.so", "libvslsmashsource.dylib", *filenames]
-    return filenames
+    if os.name == "nt":
+        return ["LSMASHSource.dll", "libvslsmashsource.dll"]
+    return ["libvslsmashsource.so", "libvslsmashsource.dylib", "libvslsmashsource.dll"]
 
 
 def _candidate_lsmas_manifest_entries(filenames: list[str]) -> set[str]:
@@ -196,12 +188,11 @@ def _contains_lsmas_plugin_artifacts(plugin_dir: str, filenames: list[str]) -> b
 def _iter_lsmas_search_dirs(plugin_dir: str, source: str, filenames: list[str]) -> list[str]:
     """Expand plugin search dirs for explicit lsmas fallback loading.
 
-    ``VAPOURSYNTH_EXTRA_PLUGIN_PATH`` in the Windows portable bundle points at an
-    extra-plugin root. R75+ optimized plugin installs can place each plugin under
-    a nested directory with ``manifest.vs`` (for example ``extra-plugins/lsmas``),
-    so explicit fallback loading must consider those first-level child dirs in
-    addition to the root itself. Other discovery sources continue using their
-    configured directory directly.
+    R75+ optimized plugin installs can place each plugin under a nested directory
+    with ``manifest.vs``. When an unmanaged or container runtime supplies an
+    extra-plugin root, explicit fallback loading considers those first-level child
+    dirs in addition to the root itself. Other discovery sources continue using
+    their configured directory directly.
     """
 
     search_dirs = [plugin_dir]
@@ -239,8 +230,6 @@ def _iter_candidate_plugin_dirs() -> list[tuple[str, str]]:
     extra_plugin_env = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
     for plugin_dir in _split_plugin_dirs(extra_plugin_env):
         candidates.append((plugin_dir, "VAPOURSYNTH_EXTRA_PLUGIN_PATH"))
-
-    candidates.append((_bundle_plugin_dir(), "bundle_vs_plugins"))
 
     legacy_plugin_env = os.environ.get("VAPOURSYNTH_PLUGIN_PATH", "")
     for plugin_dir in _split_plugin_dirs(legacy_plugin_env):

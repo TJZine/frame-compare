@@ -1,4 +1,4 @@
-"""Direct tests for alignment VSPreview launch policy."""
+"""Direct tests for alignment VSView launch policy."""
 
 import io
 from pathlib import Path
@@ -6,18 +6,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import frame_compare.services.alignment_vspreview as alignment_vspreview
-import frame_compare.vspreview.output as vspreview_output
-from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
+import frame_compare.services.alignment_vsview as alignment_vsview
+import frame_compare.vsview.output as vsview_output
+from frame_compare.services.alignment_manual_overrides import load_manual_overrides
+from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.vspreview.adapter import (
-    VSPreviewAvailability,
-    VSPreviewAvailabilityStatus,
-    VSPreviewSessionRequest,
+from frame_compare.vsview.adapter import (
+    VSViewAvailability,
+    VSViewAvailabilityStatus,
+    VSViewSessionRequest,
 )
-from frame_compare.vspreview.errors import VSPreviewError
-from frame_compare.vspreview.overrides import load_manual_overrides
+from frame_compare.vsview.errors import VSViewError
 
 
 def _call_maybe_launch(
@@ -27,7 +27,7 @@ def _call_maybe_launch(
     progress: object | None = None,
     verbose: bool = False,
 ) -> None:
-    maybe_launch_alignment_vspreview(
+    maybe_launch_alignment_vsview(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
@@ -39,9 +39,9 @@ def _call_maybe_launch(
 
 
 def _set_tty(monkeypatch: pytest.MonkeyPatch, is_tty: bool) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys.stdin, "isatty", lambda: is_tty)
-    monkeypatch.setattr(alignment_vspreview.sys.stdout, "isatty", lambda: is_tty)
-    monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", lambda: is_tty)
+    monkeypatch.setattr(alignment_vsview.sys.stdin, "isatty", lambda: is_tty)
+    monkeypatch.setattr(alignment_vsview.sys.stdout, "isatty", lambda: is_tty)
+    monkeypatch.setattr(alignment_vsview.sys.stderr, "isatty", lambda: is_tty)
 
 
 def _set_tty_streams(
@@ -51,32 +51,32 @@ def _set_tty_streams(
     stdout: bool,
     stderr: bool,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys.stdin, "isatty", lambda: stdin)
-    monkeypatch.setattr(alignment_vspreview.sys.stdout, "isatty", lambda: stdout)
-    monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", lambda: stderr)
+    monkeypatch.setattr(alignment_vsview.sys.stdin, "isatty", lambda: stdin)
+    monkeypatch.setattr(alignment_vsview.sys.stdout, "isatty", lambda: stdout)
+    monkeypatch.setattr(alignment_vsview.sys.stderr, "isatty", lambda: stderr)
 
 
 def _set_broken_tty_streams(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise_closed_stream() -> bool:
         raise ValueError("closed stream")
 
-    monkeypatch.setattr(alignment_vspreview.sys.stdin, "isatty", _raise_closed_stream)
-    monkeypatch.setattr(alignment_vspreview.sys.stdout, "isatty", _raise_closed_stream)
-    monkeypatch.setattr(alignment_vspreview.sys.stderr, "isatty", _raise_closed_stream)
+    monkeypatch.setattr(alignment_vsview.sys.stdin, "isatty", _raise_closed_stream)
+    monkeypatch.setattr(alignment_vsview.sys.stdout, "isatty", _raise_closed_stream)
+    monkeypatch.setattr(alignment_vsview.sys.stderr, "isatty", _raise_closed_stream)
 
 
-def _availability(status: VSPreviewAvailabilityStatus) -> VSPreviewAvailability:
-    if status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-        return VSPreviewAvailability(
+def _availability(status: VSViewAvailabilityStatus) -> VSViewAvailability:
+    if status == VSViewAvailabilityStatus.PROBE_FAILED:
+        return VSViewAvailability(
             status=status,
             message="probe failed",
             hint="check install",
             error_details={"exception_type": "RuntimeError", "exception": "raw detail"},
         )
-    return VSPreviewAvailability(
+    return VSViewAvailability(
         status=status,
         message=status.value,
-        hint="install VSPreview",
+        hint="install VSView",
     )
 
 
@@ -85,17 +85,17 @@ def test_disabled_config_returns_without_availability_or_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
+        alignment_vsview,
+        "check_vsview_availability",
         MagicMock(side_effect=AssertionError("availability should not be checked")),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(side_effect=AssertionError("VSPreview should not launch")),
+        MagicMock(side_effect=AssertionError("VSView should not launch")),
     )
 
-    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=False))
+    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vsview=False))
 
 
 def test_force_interactive_unavailable_raises_without_launch(
@@ -103,19 +103,19 @@ def test_force_interactive_unavailable_raises_without_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
+        alignment_vsview,
+        "check_vsview_availability",
         MagicMock(
-            return_value=_availability(VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE),
+            return_value=_availability(VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE),
         ),
     )
     mock_launch = MagicMock()
-    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", mock_launch)
 
-    with pytest.raises(AudioAlignmentError, match="VSPreview is not available"):
+    with pytest.raises(AudioAlignmentError, match="VSView is not available"):
         _call_maybe_launch(
             tmp_path=tmp_path,
-            config=AlignmentConfig(use_vspreview=True, force_interactive=True),
+            config=AlignmentConfig(use_vsview=True, force_interactive=True),
         )
 
     mock_launch.assert_not_called()
@@ -124,40 +124,40 @@ def test_force_interactive_unavailable_raises_without_launch(
 @pytest.mark.parametrize(
     ("status", "expected_warning"),
     [
-        (VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE, "vspreview_unavailable"),
-        (VSPreviewAvailabilityStatus.PROBE_FAILED, "vspreview_availability_probe_failed"),
+        (VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE, "vsview_unavailable"),
+        (VSViewAvailabilityStatus.PROBE_FAILED, "vsview_availability_probe_failed"),
     ],
 )
 def test_optional_unavailable_generates_script_with_one_human_warning(
-    status: VSPreviewAvailabilityStatus,
+    status: VSViewAvailabilityStatus,
     expected_warning: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
+        alignment_vsview,
+        "check_vsview_availability",
         MagicMock(return_value=_availability(status)),
     )
-    mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
+    mock_launch = MagicMock(return_value=tmp_path / "vsview.py")
     mock_warning = MagicMock()
     mock_human_warning = MagicMock()
-    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
-    monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
-    monkeypatch.setattr(alignment_vspreview, "print_vspreview_unavailable", mock_human_warning)
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", mock_launch)
+    monkeypatch.setattr(alignment_vsview.log, "warning", mock_warning)
+    monkeypatch.setattr(alignment_vsview, "print_vsview_unavailable", mock_human_warning)
 
-    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
+    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vsview=True))
 
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
-    assert isinstance(launch_kwargs["request"], VSPreviewSessionRequest)
+    assert isinstance(launch_kwargs["request"], VSViewSessionRequest)
     assert launch_kwargs["config"].enabled is False
     mock_warning.assert_not_called()
     expected_reason = (
-        "VSPreview availability check failed."
-        if expected_warning == "vspreview_availability_probe_failed"
-        else "VSPreview is not installed."
+        "VSView availability check failed."
+        if expected_warning == "vsview_availability_probe_failed"
+        else "VSView is not installed."
     )
     mock_human_warning.assert_called_once_with(reason=expected_reason, no_color=False)
 
@@ -168,24 +168,24 @@ def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
 ) -> None:
     _set_tty_streams(monkeypatch, stdin=False, stdout=True, stderr=False)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
-    mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
+    mock_launch = MagicMock(return_value=tmp_path / "vsview.py")
     mock_warning = MagicMock()
-    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
-    monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", mock_launch)
+    monkeypatch.setattr(alignment_vsview.log, "warning", mock_warning)
 
-    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
+    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vsview=True))
 
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
-    assert isinstance(launch_kwargs["request"], VSPreviewSessionRequest)
+    assert isinstance(launch_kwargs["request"], VSViewSessionRequest)
     assert launch_kwargs["config"].enabled is False
     mock_warning.assert_called_once()
     warning_args, warning_kwargs = mock_warning.call_args
-    assert warning_args == ("vspreview_no_tty",)
+    assert warning_args == ("vsview_no_tty",)
     assert warning_kwargs["stdin_tty"] is False
     assert warning_kwargs["stdout_tty"] is True
     assert warning_kwargs["stderr_tty"] is False
@@ -197,23 +197,23 @@ def test_available_with_broken_tty_probe_treats_streams_as_non_tty(
 ) -> None:
     _set_broken_tty_streams(monkeypatch)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
-    mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
+    mock_launch = MagicMock(return_value=tmp_path / "vsview.py")
     mock_warning = MagicMock()
-    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
-    monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", mock_launch)
+    monkeypatch.setattr(alignment_vsview.log, "warning", mock_warning)
 
-    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
+    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vsview=True))
 
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
     assert launch_kwargs["config"].enabled is False
     mock_warning.assert_called_once()
     warning_args, warning_kwargs = mock_warning.call_args
-    assert warning_args == ("vspreview_no_tty",)
+    assert warning_args == ("vsview_no_tty",)
     assert warning_kwargs["stdin_tty"] is False
     assert warning_kwargs["stdout_tty"] is False
     assert warning_kwargs["stderr_tty"] is False
@@ -225,17 +225,17 @@ def test_forced_available_without_tty_raises_without_launch(
 ) -> None:
     _set_tty_streams(monkeypatch, stdin=False, stdout=True, stderr=False)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     mock_launch = MagicMock()
-    monkeypatch.setattr(alignment_vspreview, "launch_alignment_verification_session", mock_launch)
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", mock_launch)
 
     with pytest.raises(AudioAlignmentError, match="no interactive terminal"):
         _call_maybe_launch(
             tmp_path=tmp_path,
-            config=AlignmentConfig(use_vspreview=True, force_interactive=True),
+            config=AlignmentConfig(use_vsview=True, force_interactive=True),
         )
 
     mock_launch.assert_not_called()
@@ -247,21 +247,21 @@ def test_optional_launch_error_has_one_human_warning(
 ) -> None:
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(side_effect=VSPreviewError("launch exited with code 7")),
+        MagicMock(side_effect=VSViewError("launch exited with code 7")),
     )
     mock_warning = MagicMock()
     mock_human_warning = MagicMock()
-    monkeypatch.setattr(alignment_vspreview.log, "warning", mock_warning)
-    monkeypatch.setattr(alignment_vspreview, "print_vspreview_unavailable", mock_human_warning)
+    monkeypatch.setattr(alignment_vsview.log, "warning", mock_warning)
+    monkeypatch.setattr(alignment_vsview, "print_vsview_unavailable", mock_human_warning)
 
-    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vspreview=True))
+    _call_maybe_launch(tmp_path=tmp_path, config=AlignmentConfig(use_vsview=True))
 
     mock_warning.assert_not_called()
     mock_human_warning.assert_called_once_with(
@@ -276,35 +276,35 @@ def test_verbose_optional_startup_failure_adds_bounded_forensic_surface(
 ) -> None:
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
         MagicMock(
-            side_effect=VSPreviewError(
-                "Missing optional dependency: vstools.utils.gpu",
-                missing_module="vstools.utils.gpu",
-                command=("python", "-m", "vspreview", "session.py"),
+            side_effect=VSViewError(
+                "Missing optional dependency: vsview_cli",
+                missing_module="vsview_cli",
+                command=("python", "-m", "vsview", "session.py"),
                 returncode=1,
                 startup_stderr="captured traceback tail",
             )
         ),
     )
     details = MagicMock()
-    monkeypatch.setattr(alignment_vspreview, "print_vspreview_failure_details", details)
+    monkeypatch.setattr(alignment_vsview, "print_vsview_failure_details", details)
 
     _call_maybe_launch(
         tmp_path=tmp_path,
-        config=AlignmentConfig(use_vspreview=True),
+        config=AlignmentConfig(use_vsview=True),
         verbose=True,
     )
 
     details.assert_called_once_with(
-        command=("python", "-m", "vspreview", "session.py"),
-        reason="Missing optional dependency: vstools.utils.gpu",
+        command=("python", "-m", "vsview", "session.py"),
+        reason="Missing optional dependency: vsview_cli",
         returncode=1,
         startup_stderr="captured traceback tail",
         no_color=False,
@@ -317,20 +317,20 @@ def test_forced_launch_error_raises(
 ) -> None:
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(side_effect=VSPreviewError("launch exited with code 7")),
+        MagicMock(side_effect=VSViewError("launch exited with code 7")),
     )
 
-    with pytest.raises(VSPreviewError, match="launch exited with code 7"):
+    with pytest.raises(VSViewError, match="launch exited with code 7"):
         _call_maybe_launch(
             tmp_path=tmp_path,
-            config=AlignmentConfig(use_vspreview=False, force_interactive=True),
+            config=AlignmentConfig(use_vsview=False, force_interactive=True),
         )
 
 
@@ -341,9 +341,9 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     capsys: pytest.CaptureFixture[str],
     no_color: bool,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO("120 108\n"))
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
@@ -355,8 +355,8 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
     assert confirmed == {"ref:comp": 12}
     assert captured.out == ""
     lines = captured.err.splitlines()
-    wait_line = next(line for line in lines if "[WAIT] VSPreview Confirmation" in line)
-    assert wait_line == "  [WAIT] VSPreview Confirmation"
+    wait_line = next(line for line in lines if "[WAIT] VSView Confirmation" in line)
+    assert wait_line == "  [WAIT] VSView Confirmation"
     assert "ref" in captured.err
     assert "Comparison 1 | comp" in captured.err
     for key in (
@@ -373,7 +373,7 @@ def test_prompt_for_confirmed_offsets_writes_to_stderr(
         matching_line = next(line for line in lines if line.lstrip().startswith(key))
         assert matching_line.startswith(f"    {key}")
     assert "    domain       Untrimmed source-frame indices" in captured.err
-    assert "Find the same visible moment in both VSPreview outputs" in normalized
+    assert "Find the same visible moment in both VSView outputs" in normalized
     assert "reference_frame comparison_frame" in normalized
     assert "reference first; e.g. 120 108" in normalized
     assert "Frame Compare calculates the offset and required trim" in normalized
@@ -390,9 +390,9 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO("120 108\n"))
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": None},
@@ -414,12 +414,12 @@ def test_prompt_for_confirmed_offsets_does_not_show_numeric_hint_when_absent(
         (0, ("+0f", "Reference 0 <-> Comparison 0", "no trim")),
     ],
 )
-def test_vspreview_prompt_explains_audio_hint_direction(
+def test_vsview_prompt_explains_audio_hint_direction(
     suggested_offset: int,
     expected_fragments: tuple[str, ...],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    vspreview_output.write_vspreview_prompt(
+    vsview_output.write_vsview_prompt(
         label="Comparison 1 | Encode",
         suggested_offset=suggested_offset,
         no_color=True,
@@ -434,9 +434,9 @@ def test_prompt_for_confirmed_offsets_uses_prepared_names_but_keeps_stem_keys(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("120 108\n"))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO("120 108\n"))
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "raw-reference-stem.mkv",
         comparisons=[tmp_path / "raw-comparison-stem.mkv"],
         offsets_by_key={"raw-reference-stem:raw-comparison-stem": 4},
@@ -463,23 +463,23 @@ def test_wait_status_text_styles_only_marker(
     monkeypatch.setenv("FORCE_COLOR", "1")
     monkeypatch.setenv("TERM", "xterm-256color")
 
-    vspreview_output.print_vspreview_confirmation_header(
+    vsview_output.print_vsview_confirmation_header(
         reference_name="Reference",
         no_color=False,
     )
 
     output = capsys.readouterr().err
-    assert "\x1b[35m[WAIT]\x1b[0m VSPreview Confirmation" in output
-    assert "\x1b[35m[WAIT] VSPreview Confirmation\x1b[0m" not in output
+    assert "\x1b[35m[WAIT]\x1b[0m VSView Confirmation" in output
+    assert "\x1b[35m[WAIT] VSView Confirmation\x1b[0m" not in output
 
 
 def test_prompt_for_confirmed_offsets_accepts_zero_source_frame_offset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("42, 42\n"))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO("42, 42\n"))
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
@@ -494,9 +494,9 @@ def test_prompt_for_confirmed_offsets_skip_omits_comparison_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO(user_input))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO(user_input))
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
@@ -509,9 +509,9 @@ def test_prompt_for_confirmed_offsets_eof_returns_none(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO(""))
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
@@ -526,7 +526,7 @@ def test_prompt_for_confirmed_offsets_confirm_skip_confirm_preserves_confirmed_k
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        alignment_vspreview.sys,
+        alignment_vsview.sys,
         "stdin",
         io.StringIO("120 108\nskip\n210 216\n"),
     )
@@ -536,7 +536,7 @@ def test_prompt_for_confirmed_offsets_confirm_skip_confirm_preserves_confirmed_k
         tmp_path / "mid.mkv",
     ]
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=comparisons,
         offsets_by_key={
@@ -561,12 +561,12 @@ def test_prompt_for_confirmed_offsets_reprompts_after_blank_and_malformed_input(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        alignment_vspreview.sys,
+        alignment_vsview.sys,
         "stdin",
         io.StringIO("\n12\n12.5 9\ntrue 9\n-1 9\n120 108\n"),
     )
 
-    confirmed = alignment_vspreview._prompt_for_confirmed_offsets(
+    confirmed = alignment_vsview._prompt_for_confirmed_offsets(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
@@ -581,10 +581,10 @@ def test_prompt_for_confirmed_offsets_reprompts_after_blank_and_malformed_input(
     assert captured.err.count("    Hint") == 5
 
 
-def test_vspreview_input_hint_has_wait_content_indent(
+def test_vsview_input_hint_has_wait_content_indent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    vspreview_output.print_vspreview_input_hint("Retry the frame pair.", no_color=True)
+    vsview_output.print_vsview_input_hint("Retry the frame pair.", no_color=True)
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -595,25 +595,25 @@ def test_maybe_launch_blank_then_valid_source_frames_saves_only_computed_offset(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO("\n120 108\n"))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO("\n120 108\n"))
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(return_value=tmp_path / "vspreview.py"),
+        MagicMock(return_value=tmp_path / "vsview.py"),
     )
 
-    confirmed = maybe_launch_alignment_vspreview(
+    confirmed = maybe_launch_alignment_vsview(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
         cache_dir=tmp_path,
-        config=AlignmentConfig(use_vspreview=True),
+        config=AlignmentConfig(use_vsview=True),
         progress=None,
     )
 
@@ -635,25 +635,25 @@ def test_maybe_launch_skip_or_eof_writes_no_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(alignment_vspreview.sys, "stdin", io.StringIO(user_input))
+    monkeypatch.setattr(alignment_vsview.sys, "stdin", io.StringIO(user_input))
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(return_value=tmp_path / "vspreview.py"),
+        MagicMock(return_value=tmp_path / "vsview.py"),
     )
 
-    confirmed = maybe_launch_alignment_vspreview(
+    confirmed = maybe_launch_alignment_vsview(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
         cache_dir=tmp_path,
-        config=AlignmentConfig(use_vspreview=True),
+        config=AlignmentConfig(use_vsview=True),
         progress=None,
     )
 
@@ -666,23 +666,23 @@ def test_maybe_launch_confirm_skip_confirm_saves_only_confirmed_offsets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        alignment_vspreview.sys,
+        alignment_vsview.sys,
         "stdin",
         io.StringIO("120 108\nskip\n210 216\n"),
     )
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(return_value=tmp_path / "vspreview.py"),
+        MagicMock(return_value=tmp_path / "vsview.py"),
     )
 
-    confirmed = maybe_launch_alignment_vspreview(
+    confirmed = maybe_launch_alignment_vsview(
         reference=tmp_path / "ref.mkv",
         comparisons=[
             tmp_path / "zeta.mkv",
@@ -695,7 +695,7 @@ def test_maybe_launch_confirm_skip_confirm_saves_only_confirmed_offsets(
             "ref:mid": -2,
         },
         cache_dir=tmp_path,
-        config=AlignmentConfig(use_vspreview=True),
+        config=AlignmentConfig(use_vsview=True),
         progress=None,
     )
 
@@ -712,22 +712,22 @@ def test_available_with_tty_suspends_progress_during_launch_and_prompt(
 ) -> None:
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
-        MagicMock(return_value=tmp_path / "vspreview.py"),
+        MagicMock(return_value=tmp_path / "vsview.py"),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "_prompt_for_confirmed_offsets",
         MagicMock(return_value={"ref:comp": 4}),
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "_save_confirmed_offsets",
         MagicMock(),
     )
@@ -735,7 +735,7 @@ def test_available_with_tty_suspends_progress_during_launch_and_prompt(
 
     _call_maybe_launch(
         tmp_path=tmp_path,
-        config=AlignmentConfig(use_vspreview=True),
+        config=AlignmentConfig(use_vsview=True),
         progress=progress,
     )
 
@@ -750,29 +750,29 @@ def test_maybe_launch_propagates_no_color_to_launch_and_prompt(
 ) -> None:
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(
-        alignment_vspreview,
-        "check_vspreview_availability",
-        MagicMock(return_value=_availability(VSPreviewAvailabilityStatus.AVAILABLE)),
+        alignment_vsview,
+        "check_vsview_availability",
+        MagicMock(return_value=_availability(VSViewAvailabilityStatus.AVAILABLE)),
     )
-    mock_launch = MagicMock(return_value=tmp_path / "vspreview.py")
+    mock_launch = MagicMock(return_value=tmp_path / "vsview.py")
     mock_prompt = MagicMock(return_value=None)
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "launch_alignment_verification_session",
         mock_launch,
     )
     monkeypatch.setattr(
-        alignment_vspreview,
+        alignment_vsview,
         "_prompt_for_confirmed_offsets",
         mock_prompt,
     )
 
-    maybe_launch_alignment_vspreview(
+    maybe_launch_alignment_vsview(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comp.mkv"],
         offsets_by_key={"ref:comp": 4},
         cache_dir=tmp_path,
-        config=AlignmentConfig(use_vspreview=True, no_color=True),
+        config=AlignmentConfig(use_vsview=True, no_color=True),
         progress=None,
         frame_props_by_stem={
             "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},

@@ -9,6 +9,9 @@ import tomllib
 from pathlib import Path
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+LEGACY_RELEASE_NOTES_RE = re.compile(
+    r"^Frame Compare v\S+\. See CHANGELOG\.md at the tagged commit\.$"
+)
 STABLE_VERSION_RE = re.compile(r"^(?P<base>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 RC_VERSION_RE = re.compile(
     r"^(?P<base>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))rc"
@@ -28,6 +31,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--main-sha")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--release-notes-output",
+        type=Path,
+        help="Write the validated version section from CHANGELOG.md to this path.",
+    )
     return parser.parse_args()
 
 
@@ -74,12 +82,29 @@ def _expected_tag(channel: str, version: str) -> str:
     return f"v{match.group('base')}-rc.{match.group('number')}"
 
 
-def _validate_changelog(changelog: str, version: str) -> None:
-    heading = re.compile(rf"^## \[{re.escape(version)}\](?:\s|$)", re.MULTILINE)
-    if heading.search(changelog) is None:
+def _extract_release_notes(changelog: str, version: str) -> str:
+    heading = re.compile(rf"^## \[{re.escape(version)}\][^\r\n]*$", re.MULTILINE)
+    matches = list(heading.finditer(changelog))
+    if not matches:
         raise ReleaseContractError(
             f"CHANGELOG.md must contain a level-two [{version}] release heading."
         )
+    if len(matches) != 1:
+        raise ReleaseContractError(
+            f"CHANGELOG.md must contain exactly one level-two [{version}] release heading."
+        )
+
+    start = matches[0].end()
+    next_heading = re.search(r"^## [^\r\n]+$", changelog[start:], re.MULTILINE)
+    end = start + next_heading.start() if next_heading is not None else len(changelog)
+    release_notes = changelog[start:end].strip()
+    if not release_notes:
+        raise ReleaseContractError(f"CHANGELOG.md [{version}] section must contain release notes.")
+    if LEGACY_RELEASE_NOTES_RE.fullmatch(release_notes) is not None:
+        raise ReleaseContractError(
+            f"CHANGELOG.md [{version}] section must not use the legacy release placeholder."
+        )
+    return f"{release_notes}\n"
 
 
 def validate_release_contract(
@@ -90,7 +115,7 @@ def validate_release_contract(
     tag: str,
     expected_sha: str,
     main_sha: str | None,
-) -> None:
+) -> str:
     repo_root = repo_root.resolve()
     if SHA_RE.fullmatch(expected_sha) is None:
         raise ReleaseContractError(
@@ -145,9 +170,8 @@ def validate_release_contract(
         details = ", ".join(f"{owner}={value!r}" for owner, value in versions.items())
         raise ReleaseContractError(f"Release version sources disagree: {details}.")
 
-    _validate_changelog(
-        (repo_root / "CHANGELOG.md").read_text(encoding="utf-8"),
-        version,
+    release_notes = _extract_release_notes(
+        (repo_root / "CHANGELOG.md").read_text(encoding="utf-8"), version
     )
 
     if channel == "stable":
@@ -159,11 +183,13 @@ def validate_release_contract(
                 + "."
             )
 
+    return release_notes
+
 
 def main() -> int:
     args = _parse_args()
     try:
-        validate_release_contract(
+        release_notes = validate_release_contract(
             repo_root=args.repo_root,
             channel=args.channel,
             version=args.version,
@@ -171,6 +197,8 @@ def main() -> int:
             expected_sha=args.expected_sha,
             main_sha=args.main_sha,
         )
+        if args.release_notes_output is not None:
+            args.release_notes_output.write_text(release_notes, encoding="utf-8")
     except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as exc:
         raise SystemExit(f"Release contract validation failed: {exc}") from exc
     except ReleaseContractError as exc:

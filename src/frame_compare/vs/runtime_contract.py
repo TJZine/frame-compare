@@ -60,30 +60,6 @@ VAPOURSYNTH_SOURCE_TREE_SHA256: Final = (
     "f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527"
 )
 
-AKARIN_RELEASE: Final = "1.5.0"
-AKARIN_SOURCE_COMMIT: Final = "a72584a969972b4cfd1b1fd11a4b0e3350f83432"
-AKARIN_SOURCE_TREE_SHA256: Final = (
-    "e8fe3c7dd69447f5515d53060472a42c5301ee927a4bb407e4420d165296d71b"
-)
-AKARIN_WINDOWS_ZSTD_RELEASE: Final = "1.5.7-2"
-AKARIN_WINDOWS_ZSTD_SOURCE_COMMIT: Final = "f8745da6ff1ad1e7bab384bd1f9d742439278e99"
-AKARIN_DEBIAN_ZSTD_RELEASE: Final = "1.4.8+dfsg-3build1"
-AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT: Final = "97a3da1df009d4dc67251de0c4b1c9d7fe286fc1"
-AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256: Final = (
-    "2093b98cdd49f10e86fd493c6ba822109965ebe40c6e69d42cfa5c358e074a68"
-)
-VSZIP_RELEASE: Final = "22.1.0"
-VSZIP_SOURCE_COMMIT: Final = "beb7a0ab0e4166580b76560ae3f7c7f5e376ac90"
-VSZIP_SOURCE_TREE_SHA256: Final = "ca74f1042fb73e081301341218664a6b5fcf70331f64db3c13e6c4313fa06f4a"
-VAPOURSYNTH_ZIG_SOURCE_COMMIT: Final = "b87ff61ce680fa5a4cf7d44a9cb4b605c5037432"
-VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256: Final = (
-    "d54db13419ef61e5f9a7ef3d357c41972bdf59e71536f2787fdddc38736c3f50"
-)
-ZIGIMG_SOURCE_COMMIT: Final = "0bbe201a5591219177f2444371c2897746b47774"
-ZIGIMG_SOURCE_TREE_SHA256: Final = (
-    "5e6162fe73af4df0e1faba425dd7ff7e15a3ffe5449aebea63c45723899f034a"
-)
-
 LSMASH_SOURCE_COMMIT: Final = "d186eb95388710a7a91f6fd353169b457ebbb9db"
 LSMASH_SOURCE_TREE_SHA256: Final = (
     "89c0277c1533c3958fd16f093c2b0bd13a51fcacb748bf88e36f40eff2a7f651"
@@ -134,6 +110,9 @@ WINDOWS_FFMPEG_EXECUTABLE_TOKEN: Final = (
 )
 WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
 WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "a99e8230eae00d1cee38f23076a7a1f55cd984e2"
+WINDOWS_QT_DEPLOYMENT_PROFILE: Final = "pyside6-addons-no-webengine-v1"
+WINDOWS_PYSIDE6_RELEASE: Final = "6.11.2"
+WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE: Final = "7.1.5"
 DEBIAN_FFMPEG_PACKAGE_VERSION: Final = "7:7.1.5-0+deb13u1"
 
 _FINGERPRINT_RE: Final = re.compile(r"[0-9a-f]{64}")
@@ -297,39 +276,14 @@ def _tone_mapping_identity() -> dict[str, JSONValue]:
     }
 
 
-def _bundled_native_plugins_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]:
-    if profile in {"windows-x64", "unmanaged-windows"}:
-        zstd: dict[str, JSONValue] = {
-            "selection_kind": "msys2-clang64-package",
-            "release": AKARIN_WINDOWS_ZSTD_RELEASE,
-            "source_commit": AKARIN_WINDOWS_ZSTD_SOURCE_COMMIT,
-        }
-    elif profile == "debian-trixie":
-        zstd = {
-            "selection_kind": "auditwheel-sbom-package",
-            "release": AKARIN_DEBIAN_ZSTD_RELEASE,
-            "source_commit": AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT,
-        }
-    else:
-        zstd = {"selection_kind": "wheel-platform-specific"}
+def _windows_qt_deployment_identity() -> dict[str, JSONValue]:
     return {
-        "akarin": {
-            "distribution": "vapoursynth-akarin",
-            "release": AKARIN_RELEASE,
-            "source_commit": AKARIN_SOURCE_COMMIT,
-            "plugin_namespace": "akarin",
-            "bundled_dependencies": {"zstd": zstd},
-        },
-        "vszip": {
-            "distribution": "vapoursynth-vszip",
-            "release": VSZIP_RELEASE,
-            "source_commit": VSZIP_SOURCE_COMMIT,
-            "plugin_namespace": "vszip",
-            "bundled_dependencies": {
-                "vapoursynth-zig": {"source_commit": VAPOURSYNTH_ZIG_SOURCE_COMMIT},
-                "zigimg": {"source_commit": ZIGIMG_SOURCE_COMMIT},
-            },
-        },
+        "profile": WINDOWS_QT_DEPLOYMENT_PROFILE,
+        "binding": "PySide6",
+        "binding_release": WINDOWS_PYSIDE6_RELEASE,
+        "required_addon": "QtMultimedia",
+        "multimedia_ffmpeg_release": WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
+        "webengine": "excluded",
     }
 
 
@@ -356,18 +310,26 @@ def _scope_components(
                 "token_version": 1,
             },
         }
-    return {
+    plugin_layout: dict[str, JSONValue] = {
+        "vapoursynth": "site-packages/vapoursynth/plugins",
+    }
+    if profile != "windows-x64":
+        plugin_layout.update(
+            {
+                "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
+                "manifest": "VapourSynth Manifest V1",
+            }
+        )
+    components: dict[str, JSONValue] = {
         "decoder": _decoder_identity(profile),
         "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         "ffms2": _ffms2_identity(profile),
         "tone_mapping": _tone_mapping_identity(),
-        "bundled_native_plugins": _bundled_native_plugins_identity(profile),
-        "plugin_layout": {
-            "vapoursynth": "site-packages/vapoursynth/plugins",
-            "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
-            "manifest": "VapourSynth Manifest V1",
-        },
+        "plugin_layout": plugin_layout,
     }
+    if profile == "windows-x64":
+        components["qt_deployment"] = _windows_qt_deployment_identity()
+    return components
 
 
 def media_runtime_identity(
@@ -423,16 +385,18 @@ def supported_media_runtime_report(
         index=media_runtime_fingerprint("index", profile=selected_profile),
         full=media_runtime_fingerprint("full", profile=selected_profile),
     )
+    components: dict[str, JSONValue] = {
+        "decoder": _decoder_identity(selected_profile),
+        "standalone_ffmpeg": _standalone_ffmpeg_identity(selected_profile),
+        "ffms2": _ffms2_identity(selected_profile),
+        "tone_mapping": _tone_mapping_identity(),
+    }
+    if selected_profile == "windows-x64":
+        components["qt_deployment"] = _windows_qt_deployment_identity()
     return {
         "contract_version": MEDIA_RUNTIME_CONTRACT_VERSION,
         "profile": selected_profile,
-        "components": {
-            "decoder": _decoder_identity(selected_profile),
-            "standalone_ffmpeg": _standalone_ffmpeg_identity(selected_profile),
-            "ffms2": _ffms2_identity(selected_profile),
-            "tone_mapping": _tone_mapping_identity(),
-            "bundled_native_plugins": _bundled_native_plugins_identity(selected_profile),
-        },
+        "components": components,
         "fingerprints": fingerprints,
         "index_cache_token": index_cache_token(profile=selected_profile),
     }
@@ -474,14 +438,6 @@ def runtime_environment_report() -> dict[str, JSONValue]:
 
 
 __all__ = [
-    "AKARIN_RELEASE",
-    "AKARIN_DEBIAN_ZSTD_RELEASE",
-    "AKARIN_DEBIAN_ZSTD_SOURCE_COMMIT",
-    "AKARIN_DEBIAN_ZSTD_SOURCE_TREE_SHA256",
-    "AKARIN_SOURCE_COMMIT",
-    "AKARIN_SOURCE_TREE_SHA256",
-    "AKARIN_WINDOWS_ZSTD_RELEASE",
-    "AKARIN_WINDOWS_ZSTD_SOURCE_COMMIT",
     "DEBIAN_FFMPEG_PACKAGE_VERSION",
     "FFMS2_RELEASE",
     "FFMS2_RUNTIME_VERSION",
@@ -510,21 +466,17 @@ __all__ = [
     "VAPOURSYNTH_RELEASE",
     "VAPOURSYNTH_SOURCE_COMMIT",
     "VAPOURSYNTH_SOURCE_TREE_SHA256",
-    "VAPOURSYNTH_ZIG_SOURCE_COMMIT",
-    "VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256",
     "VS_PLACEBO_RELEASE",
     "VS_PLACEBO_SOURCE_COMMIT",
     "VS_PLACEBO_SOURCE_TREE_SHA256",
-    "VSZIP_RELEASE",
-    "VSZIP_SOURCE_COMMIT",
-    "VSZIP_SOURCE_TREE_SHA256",
-    "ZIGIMG_SOURCE_COMMIT",
-    "ZIGIMG_SOURCE_TREE_SHA256",
     "WINDOWS_FFMPEG_ARTIFACT_ID",
     "WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT",
     "WINDOWS_FFMPEG_EXECUTABLE_TOKEN",
     "WINDOWS_FFMPEG_RELEASE",
     "WINDOWS_FFMPEG_SOURCE_COMMIT",
+    "WINDOWS_PYSIDE6_RELEASE",
+    "WINDOWS_QT_DEPLOYMENT_PROFILE",
+    "WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE",
     "index_cache_token",
     "media_runtime_fingerprint",
     "media_runtime_identity",

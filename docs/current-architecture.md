@@ -144,7 +144,7 @@ High-level layering:
 - `frame_compare.runner`
 - `frame_compare.orchestration`
 - sibling domain modules: `frame_compare.analysis`, `frame_compare.render`, `frame_compare.services`
-- `frame_compare.vspreview`
+- `frame_compare.vsview`
 - `frame_compare.vs`
 - `frame_compare.config`
 - `frame_compare.utils`
@@ -162,7 +162,7 @@ Package-root export policy:
 | `frame_compare.render` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
 | `frame_compare.services` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
 | `frame_compare.utils` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
-| `frame_compare.vspreview` | Namespace-only root with empty `__all__`; import concrete VSPreview owner modules directly. |
+| `frame_compare.vsview` | Namespace-only root with empty `__all__`; import concrete VSView owner modules directly. |
 | `frame_compare.cli`, `frame_compare.services.report`, `frame_compare.render.batch`, `frame_compare.render.backend`, `frame_compare.orchestration.probing` | Nested namespace-only roots with empty `__all__`; import concrete owner modules directly. |
 | `frame_compare.orchestration` | Curated lazy facade for existing run and doctor entry DTOs/functions. |
 | `frame_compare.vs` | Curated lazy facade for selected VapourSynth integration symbols; preserve light imports when VapourSynth is absent. |
@@ -246,18 +246,20 @@ recovery requirement.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
   shared previous alignment offset reuse cache owned by
   `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
-  VSPreview-confirmed offsets keyed by a typed source-set identity, source
+  interactively confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, alignment settings that affect
   computed offsets, and the scoped media-runtime alignment fingerprint. For the
   managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
   lineage change therefore misses cleanly rather than reusing offsets computed by a
-  different decoder/tool build. VSPreview-confirmed
+  different decoder/tool build. Interactively confirmed
   entries may also retain the computed
-  audio alignment result that produced the preview suggestion so a later run can
+  audio alignment result that produced the viewer suggestion so a later run can
   decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Cache schema v1 requires a bounded scalar stability summary for computed
-  entries and embedded computed results; no per-window evidence or audio is persisted.
+  alignment. Cache schema v2 stores only `computed` and `interactive_confirmed`
+  origins, requires a bounded scalar stability summary for computed entries and
+  embedded computed results, and persists no per-window evidence or audio. A v1
+  cache is ignored and recomputed; there is no v1 migration or compatibility reader.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
@@ -287,7 +289,7 @@ recovery requirement.
   changes. Legacy adjacent `<media>.lwi` files are ignored,
   not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
   failure is warned and an unusable index location falls back to a cache-free source
-  open. Generated VSPreview sessions reuse this exact owned path for reference and
+  open. Generated VSView sessions reuse this exact owned path for reference and
   comparison source loads, allowing L-SMASH-Works to create it there when missing.
   The self-contained external preview child leaves rejected parent-owned indexes
   untouched and retries only index-construction failures cache-free.
@@ -309,9 +311,11 @@ recovery requirement.
   root raises a typed actionable history error; the service never creates a missing
   root, falls back, or mutates `run_info.toml`.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
-- `<run-folder>/generated/manual_overrides.toml`: persisted VSPreview-confirmed
+- `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
   manual alignment overrides for the current run
-- generated VSPreview session files under the current generated/run area
+- `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
+  scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
+  (VSView's BestSource workspace is not a Frame Compare source-loader change)
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
@@ -346,7 +350,7 @@ workspace-level `<resolved paths.generated_dir>/cache/alignment` path. The
 
 Normal runs and cache-only runs that proceed reserve a fresh run folder beneath the
 resolved `paths.generated_dir`. Existing run folders are not reused for analysis cache
-hits. Screenshots, slow.pics upload inputs, manual overrides, and VSPreview
+hits. Screenshots, slow.pics upload inputs, manual overrides, and VSView
 artifacts remain scoped to the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache
 so future `--from-cache-only` runs can validate the exact all-source analysis
@@ -397,7 +401,7 @@ orchestration alignment state carries that summary to warning and human-report o
 without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
 previous-offset reuse policy. Exact-match computed audio alignment cache hits are
 treated as deterministic and can be reused independently of the human
-confirmed-offset policy; `previous_offsets` governs only VSPreview-confirmed
+confirmed-offset policy; `previous_offsets` governs only interactively confirmed
 offset reuse.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
@@ -405,10 +409,10 @@ alignment key shared by alignment sequencing and previous-offset policy.
 prompt/table helper, including TTY fallback behavior and no-color rendering.
 `frame_compare.services.types.AlignmentProvenance` carries service-owned
 write-source provenance such as `computed_this_run`,
-`vspreview_confirmed_this_run`, `shared_computed_offsets`,
+`interactive_confirmed_this_run`, `shared_computed_offsets`,
 `shared_previous_offsets`, and
 `preexisting_manual_override`; shared-cache writes consume only current-run
-computed or VSPreview-confirmed provenance rather than inferring eligibility from
+computed or interactively confirmed provenance rather than inferring eligibility from
 the final flattened `AlignmentResult.source`.
 
 ## External Boundaries
@@ -430,11 +434,11 @@ Current Docker capability contract:
 
 | Environment | Current posture |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSPreview GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
+| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; documented-only/unverified until separately proved on a compatible Linux X11 desktop host |
-| Native Windows portable | First-class native runtime with backend rendering, reports, and VSPreview GUI support outside Docker |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; offscreen VSView/session/render proof passes, while visible X11 launch remains unverified until separately proved on a compatible Linux X11 desktop host |
+| Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
 
 Keep these integrations at their current owners:
 
@@ -475,10 +479,10 @@ Current Docker owner seams for optional profiles remain explicit:
   configuration-read-only `frame-compare-run` service with the single persistent
   generated-data mount
 - `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
-- `docker-compose.gui-linux.yml`: opt-in Linux X11/VSPreview override/profile only
+- `docker-compose.gui-linux.yml`: opt-in Linux X11/VSView override/profile only
 - `tools/verify_docker_integration.sh`: canonical default Docker gate
 - `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
-- `tools/verify_docker_gui.sh`: optional Linux X11/VSPreview dependency and session-script proof
+- `tools/verify_docker_gui.sh`: optional Linux X11/VSView dependency and session-script proof
 - `tools/open_docker_host_target.py`: host-side helper for default compose output mounts and explicit `https://slow.pics/...` URLs only
 
 The GUI profile stays container-boundary aware rather than changing CLI/runtime
@@ -489,10 +493,14 @@ owners. Its explicit X11 contract is:
 - optional host `XAUTHORITY` cookie file mount when required by the desktop
 - container process UID/GID aligned to the host user for narrow local-user X11 permission flows
 
-The optional GUI proof is non-CI and non-default. It must prove VSPreview
-availability through the existing doctor/adapter owners and prove session-script
-generation without requiring a real desktop launch. Any real UI launch remains a
-manual Linux desktop action outside the default Docker verification gate.
+The optional GUI proof is non-CI and non-default. Its current offscreen proof passes:
+the `gui-linux` image loads a production-generated L-SMASH session with VSView 0.10.3,
+registers `Reference` and `Comparison 1`, and renders frame 0 for both outputs. This
+proves dependency availability, generated-session loading, named-output registration,
+and offscreen rendering without requiring a real desktop launch. It does not prove
+visible X11 launch, Qt ergonomics, native Windows behavior, or physical-Windows
+acceptance. Any real UI launch remains a manual Linux desktop action outside the
+default Docker verification gate, and visible X11 remains unverified.
 
 The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser
@@ -772,8 +780,8 @@ Runtime ownership matrix:
 | Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
 | Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
-| Alignment-specific VSPreview verification display and override policy | `frame_compare.services.alignment_vspreview` |
-| VSPreview availability, launch adapter, VSJetPack compatibility bootstrap, and managed-Windows media-runtime preload | `frame_compare.vspreview.adapter`, `frame_compare.vspreview.launcher` |
+| Alignment-specific VSView verification display and override policy | `frame_compare.services.alignment_vsview` |
+| VSView availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
@@ -799,11 +807,11 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/cli/entry.py`
 - `src/frame_compare/services/alignment.py` and its focused audio-alignment owners
   (`alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`,
-  `alignment_vspreview.py`)
+  `alignment_vsview.py`)
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
-- `src/frame_compare/vspreview/adapter.py`
+- `src/frame_compare/vsview/adapter.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
 

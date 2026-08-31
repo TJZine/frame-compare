@@ -45,7 +45,7 @@ def _write_fixture_project(*, root: Path, missing_docstring: bool) -> None:
         "src/frame_compare/orchestration/__init__.py",
         "src/frame_compare/render/__init__.py",
         "src/frame_compare/vs/__init__.py",
-        "src/frame_compare/vspreview/__init__.py",
+        "src/frame_compare/vsview/__init__.py",
         "src/frame_compare/runner.py",
     ):
         _write_file(root / rel, minimal_module)

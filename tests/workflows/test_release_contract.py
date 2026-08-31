@@ -92,6 +92,7 @@ def _run_contract(
     tag: str,
     expected_sha: str,
     main_sha: str | None,
+    release_notes_output: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
@@ -109,6 +110,8 @@ def _run_contract(
     ]
     if main_sha is not None:
         command.extend(("--main-sha", main_sha))
+    if release_notes_output is not None:
+        command.extend(("--release-notes-output", str(release_notes_output)))
     return subprocess.run(
         command,
         check=False,
@@ -291,6 +294,103 @@ def test_release_contract_rejects_missing_changelog_version(
 
     assert result.returncode != 0
     assert "[0.1.0]" in result.stderr
+
+
+def test_release_contract_writes_only_requested_changelog_section(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    _write_release_state(tmp_path, version="0.1.0")
+    (tmp_path / "CHANGELOG.md").write_text(
+        """# Changelog
+
+## [Unreleased]
+
+- Future work.
+
+## [0.1.0]
+
+### Added
+
+- Release proof.
+
+## Migration notes
+
+- Not part of the requested release section.
+
+## [0.0.1]
+
+- Older work.
+""",
+        encoding="utf-8",
+    )
+    sha = _commit_release_state(tmp_path)
+    release_notes = tmp_path / "release-notes.md"
+
+    result = _run_contract(
+        repo_root,
+        tmp_path,
+        channel="stable",
+        version="0.1.0",
+        tag="v0.1.0",
+        expected_sha=sha,
+        main_sha=sha,
+        release_notes_output=release_notes,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert release_notes.read_text(encoding="utf-8") == "### Added\n\n- Release proof.\n"
+
+
+def test_release_contract_rejects_empty_changelog_section(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    _write_release_state(tmp_path, version="0.1.0")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [0.1.0]\n\n## [0.0.1]\n\n- Older work.\n",
+        encoding="utf-8",
+    )
+    sha = _commit_release_state(tmp_path)
+
+    result = _run_contract(
+        repo_root,
+        tmp_path,
+        channel="stable",
+        version="0.1.0",
+        tag="v0.1.0",
+        expected_sha=sha,
+        main_sha=sha,
+    )
+
+    assert result.returncode != 0
+    assert "[0.1.0] section must contain release notes" in result.stderr
+
+
+def test_release_contract_rejects_legacy_release_placeholder(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    _write_release_state(tmp_path, version="0.1.0")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [0.1.0]\n\n"
+        "Frame Compare v0.1.0. See CHANGELOG.md at the tagged commit.\n",
+        encoding="utf-8",
+    )
+    sha = _commit_release_state(tmp_path)
+
+    result = _run_contract(
+        repo_root,
+        tmp_path,
+        channel="stable",
+        version="0.1.0",
+        tag="v0.1.0",
+        expected_sha=sha,
+        main_sha=sha,
+    )
+
+    assert result.returncode != 0
+    assert "must not use the legacy release placeholder" in result.stderr
 
 
 def test_release_contract_rejects_checked_out_sha_mismatch(

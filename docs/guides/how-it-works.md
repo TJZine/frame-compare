@@ -21,7 +21,7 @@ flowchart TD
     L -->|Yes| M["Apply accepted alignment"]
     L -->|No| N["Audio correlation"]
     N --> O{"Interactive verification enabled or required?"}
-    O -->|Yes| P["VSPreview review"]
+    O -->|Yes| P["VSView review"]
     O -->|No| Q["Apply computed alignment"]
     P --> R["Apply verified alignment"]
     M --> S["Finalize shared aligned overlap and frame mapping"]
@@ -74,7 +74,7 @@ arrays. Selection counts and quantile choices are applied after metrics are avai
 The initial source-frame plan is normalized into the aligned comparison domain.
 Automatic audio correlation can estimate offsets when sources begin at different times
 or contain different trims. Previously accepted offsets can be reused, and an
-interactive route can open VSPreview when verification is enabled or required.
+interactive route can open VSView when verification is enabled or required.
 
 Correlation is evidence, not certainty. Silence, replaced music, substantially different
 edits, or unrelated audio streams can produce weak or misleading matches. Review motion,
@@ -105,7 +105,7 @@ A local comparison does not require either integration.
 | --- | --- |
 | Analysis cache | Reuse luminance and motion metrics when the relevant source, window, active picture, algorithm, and runtime identity still match |
 | Probe cache | Reuse validated source properties for compatible sources and runtime identity |
-| Alignment reuse cache | Reuse accepted computed or VSPreview-confirmed source offsets |
+| Alignment reuse cache | Reuse accepted computed or interactively confirmed source offsets; schema-v1 entries are ignored after the VSView migration |
 | Frame Compare-owned `.lwi` index | Isolate L-SMASH-Works indexes by selected runtime lineage instead of trusting ambiguous legacy sidecars |
 | `run_info.toml` | Record the reserved run identity and runtime provenance |
 | `run_result.toml` | Record the completed or failed lifecycle result used by history commands |

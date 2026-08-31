@@ -15,16 +15,6 @@ ARG VAPOURSYNTH_SOURCE_COMMIT=acabf605b2205b32d65859bb2736405719d2fafd
 ARG VAPOURSYNTH_SOURCE_TREE_SHA256=f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527
 ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
 ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
-ARG AKARIN_SOURCE_COMMIT=a72584a969972b4cfd1b1fd11a4b0e3350f83432
-ARG AKARIN_SOURCE_TREE_SHA256=e8fe3c7dd69447f5515d53060472a42c5301ee927a4bb407e4420d165296d71b
-ARG AKARIN_ZSTD_SOURCE_COMMIT=97a3da1df009d4dc67251de0c4b1c9d7fe286fc1
-ARG AKARIN_ZSTD_SOURCE_TREE_SHA256=2093b98cdd49f10e86fd493c6ba822109965ebe40c6e69d42cfa5c358e074a68
-ARG VSZIP_SOURCE_COMMIT=beb7a0ab0e4166580b76560ae3f7c7f5e376ac90
-ARG VSZIP_SOURCE_TREE_SHA256=ca74f1042fb73e081301341218664a6b5fcf70331f64db3c13e6c4313fa06f4a
-ARG VAPOURSYNTH_ZIG_SOURCE_COMMIT=b87ff61ce680fa5a4cf7d44a9cb4b605c5037432
-ARG VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256=d54db13419ef61e5f9a7ef3d357c41972bdf59e71536f2787fdddc38736c3f50
-ARG ZIGIMG_SOURCE_COMMIT=0bbe201a5591219177f2444371c2897746b47774
-ARG ZIGIMG_SOURCE_TREE_SHA256=5e6162fe73af4df0e1faba425dd7ff7e15a3ffe5449aebea63c45723899f034a
 ARG LSMASH_COMMIT=d186eb95388710a7a91f6fd353169b457ebbb9db
 ARG LSMASH_SOURCE_TREE_SHA256=89c0277c1533c3958fd16f093c2b0bd13a51fcacb748bf88e36f40eff2a7f651
 ARG OBUPARSE_COMMIT=a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8
@@ -201,47 +191,12 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         "${LIBDOVI_SOURCE_COMMIT}" \
         "${LIBDOVI_SOURCE_TREE_SHA256}" \
         /tmp/libdovi-src && \
-    bash /usr/local/bin/checkout_source_commit.sh \
-        https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin.git \
-        "${AKARIN_SOURCE_COMMIT}" \
-        "${AKARIN_SOURCE_TREE_SHA256}" \
-        /tmp/akarin-src && \
-    bash /usr/local/bin/checkout_source_commit.sh \
-        https://github.com/facebook/zstd.git \
-        "${AKARIN_ZSTD_SOURCE_COMMIT}" \
-        "${AKARIN_ZSTD_SOURCE_TREE_SHA256}" \
-        /tmp/akarin-zstd-src && \
-    bash /usr/local/bin/checkout_source_commit.sh \
-        https://github.com/dnjulek/vapoursynth-zip.git \
-        "${VSZIP_SOURCE_COMMIT}" \
-        "${VSZIP_SOURCE_TREE_SHA256}" \
-        /tmp/vszip-src && \
-    bash /usr/local/bin/checkout_source_commit.sh \
-        https://github.com/dnjulek/vapoursynth-zig.git \
-        "${VAPOURSYNTH_ZIG_SOURCE_COMMIT}" \
-        "${VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256}" \
-        /tmp/vapoursynth-zig-src && \
-    bash /usr/local/bin/checkout_source_commit.sh \
-        https://github.com/zigimg/zigimg.git \
-        "${ZIGIMG_SOURCE_COMMIT}" \
-        "${ZIGIMG_SOURCE_TREE_SHA256}" \
-        /tmp/zigimg-src && \
     cp /tmp/vs-placebo-src/COPYING \
         /opt/media-runtime-licenses/vs-placebo-LGPL-2.1.txt && \
     cp /tmp/libplacebo-src/LICENSE \
         /opt/media-runtime-licenses/libplacebo-LGPL-2.1.txt && \
     cp /tmp/libdovi-src/LICENSE \
         /opt/media-runtime-licenses/libdovi-MIT.txt && \
-    cp /tmp/akarin-src/COPYING.LESSER \
-        /opt/media-runtime-licenses/Akarin-LGPL-3.0.txt && \
-    cp /tmp/akarin-zstd-src/LICENSE \
-        /opt/media-runtime-licenses/Akarin-zstd-BSD-3-Clause.txt && \
-    cp /tmp/vszip-src/LICENSE \
-        /opt/media-runtime-licenses/VSZip-MIT.txt && \
-    cp /tmp/vapoursynth-zig-src/LICENSE \
-        /opt/media-runtime-licenses/VSZip-vapoursynth-zig-LGPL-2.1.txt && \
-    cp /tmp/zigimg-src/LICENSE \
-        /opt/media-runtime-licenses/VSZip-zigimg-MIT.txt && \
     mkdir -p /opt/media-runtime-libs /opt/media-runtime-provenance && \
     cp -a /usr/local/lib/libobuparse.so* /opt/media-runtime-libs/ && \
     cp -a /usr/local/lib/liblsmash.so* /opt/media-runtime-libs/ && \
@@ -258,24 +213,14 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         "    {\"name\":\"Debian FFmpeg\",\"version\":\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\",\"distribution\":\"trixie\",\"selection_kind\":\"debian-package\",\"license\":\"GPL-2.0-or-later\",\"license_path\":\"/usr/local/share/licenses/frame-compare-media-runtime/Debian-FFmpeg-copyright\"}," \
         "    {\"name\":\"vs-placebo\",\"version\":\"2.0.4\",\"source_ref\":\"2.0.4\",\"source_commit\":\"${VS_PLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Lypheo/vs-placebo.git\",\"source_tree_sha256\":\"${VS_PLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
         "    {\"name\":\"libplacebo\",\"version\":\"commit ${LIBPLACEBO_SOURCE_COMMIT}\",\"source_commit\":\"${LIBPLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/haasn/libplacebo.git\",\"source_tree_sha256\":\"${LIBPLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\",\"selection_kind\":\"commit\"}," \
-        "    {\"name\":\"libdovi\",\"version\":\"3.3.2\",\"source_ref\":\"libdovi-3.3.2\",\"source_commit\":\"${LIBDOVI_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/quietvoid/dovi_tool.git\",\"source_tree_sha256\":\"${LIBDOVI_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"tag\"}," \
-        "    {\"name\":\"Akarin\",\"version\":\"1.5.0\",\"source_ref\":\"v1.5.0\",\"source_commit\":\"${AKARIN_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin.git\",\"source_tree_sha256\":\"${AKARIN_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-3.0-only AND BSD-3-Clause\",\"selection_kind\":\"tag\"}," \
-        "    {\"name\":\"Akarin zstd\",\"version\":\"1.4.8+dfsg-3build1\",\"source_ref\":\"v1.4.8\",\"source_commit\":\"${AKARIN_ZSTD_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/facebook/zstd.git\",\"source_tree_sha256\":\"${AKARIN_ZSTD_SOURCE_TREE_SHA256}\",\"license\":\"BSD-3-Clause\",\"selection_kind\":\"auditwheel-sbom-package\"}," \
-        "    {\"name\":\"VSZip\",\"version\":\"22.1.0\",\"source_ref\":\"22.1.0\",\"source_commit\":\"${VSZIP_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/dnjulek/vapoursynth-zip.git\",\"source_tree_sha256\":\"${VSZIP_SOURCE_TREE_SHA256}\",\"license\":\"MIT AND LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
-        "    {\"name\":\"vapoursynth-zig\",\"version\":\"4.0.0\",\"source_commit\":\"${VAPOURSYNTH_ZIG_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/dnjulek/vapoursynth-zig.git\",\"source_tree_sha256\":\"${VAPOURSYNTH_ZIG_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"commit\"}," \
-        "    {\"name\":\"zigimg\",\"version\":\"0.1.0\",\"source_commit\":\"${ZIGIMG_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/zigimg/zigimg.git\",\"source_tree_sha256\":\"${ZIGIMG_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"commit\"}" \
+        "    {\"name\":\"libdovi\",\"version\":\"3.3.2\",\"source_ref\":\"libdovi-3.3.2\",\"source_commit\":\"${LIBDOVI_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/quietvoid/dovi_tool.git\",\"source_tree_sha256\":\"${LIBDOVI_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"tag\"}" \
         '  ]' \
         '}' \
         > /opt/media-runtime-provenance/SOURCES.json && \
     rm -rf \
         /tmp/vs-placebo-src \
         /tmp/libplacebo-src \
-        /tmp/libdovi-src \
-        /tmp/akarin-src \
-        /tmp/akarin-zstd-src \
-        /tmp/vszip-src \
-        /tmp/vapoursynth-zig-src \
-        /tmp/zigimg-src
+        /tmp/libdovi-src
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
@@ -284,16 +229,10 @@ FROM python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68e
 
 ARG VAPOURSYNTH_VERSION=79
 ARG VS_PLACEBO_VERSION=2.0.4
-ARG AKARIN_VERSION=1.5.0
-ARG VSZIP_VERSION=22.1.0
 ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
 ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
 ARG VS_PLACEBO_X86_64_WHEEL_SHA256=d38796b739ae231e12e7b4f9449b3cb29cc4a5fa9cd50e8147fdd9a202797fff
 ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=eb025cb3f8d723eeaa64dc19b26fa1a0a05b948eb0cedeb8645680d9695ba97d
-ARG AKARIN_X86_64_WHEEL_SHA256=3e4473096d4fce9426e40ef7451e87bc96724c24982c82c7f9a268c3f1f875b8
-ARG AKARIN_AARCH64_WHEEL_SHA256=d07965fa5d64eb246fad6a3fefd69712e5923eda5b91f6471128a48635231ec0
-ARG VSZIP_X86_64_WHEEL_SHA256=08650c2b83391301f602dade914c1e698142f8f17b3e0e92bdb3f73c4a805040
-ARG VSZIP_AARCH64_WHEEL_SHA256=dd13b3234d993bafc4ec1333b576cf7e4ee66d8f83b7af0252d6040fd8d908f9
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
 
 COPY --from=uv /uv /uvx /usr/local/bin/
@@ -335,7 +274,7 @@ RUN ldconfig && \
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
     LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=47b602d51fb1016f51ea98075063615f763d3dd9f9c44226d3bf64d519de1926 \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=61e9aac2ad8af8039bd32a455759f803aba63fc2052f4dd2d9a92bea5bf21eb0 \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \
@@ -354,8 +293,6 @@ RUN uv export --frozen --no-dev --no-emit-project --format requirements.txt --ou
     printf '%s\n' \
         "vapoursynth==${VAPOURSYNTH_VERSION} --hash=sha256:${VAPOURSYNTH_X86_64_WHEEL_SHA256} --hash=sha256:${VAPOURSYNTH_AARCH64_WHEEL_SHA256}" \
         "vs-placebo==${VS_PLACEBO_VERSION} --hash=sha256:${VS_PLACEBO_X86_64_WHEEL_SHA256} --hash=sha256:${VS_PLACEBO_AARCH64_WHEEL_SHA256}" \
-        "vapoursynth-akarin==${AKARIN_VERSION} --hash=sha256:${AKARIN_X86_64_WHEEL_SHA256} --hash=sha256:${AKARIN_AARCH64_WHEEL_SHA256}" \
-        "vapoursynth-vszip==${VSZIP_VERSION} --hash=sha256:${VSZIP_X86_64_WHEEL_SHA256} --hash=sha256:${VSZIP_AARCH64_WHEEL_SHA256}" \
         > /tmp/docker-plugin-requirements.txt && \
     python -m pip install --no-cache-dir --user --no-deps --require-hashes --only-binary=:all: \
         -r /tmp/docker-plugin-requirements.txt
@@ -399,7 +336,7 @@ USER framecompare
 WORKDIR /workspace/frame-compare
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 5: Optional Linux X11/VSPreview GUI runtime
+# Stage 5: Optional Linux X11/VSView GUI runtime
 # ─────────────────────────────────────────────────────────────────────────────
 FROM runtime AS gui-linux
 
@@ -425,10 +362,10 @@ RUN apt-get update && \
 USER framecompare
 WORKDIR /home/framecompare/frame-compare
 
-RUN uv export --frozen --no-dev --extra vspreview --no-emit-project --format requirements.txt \
-        --output-file /tmp/requirements.vspreview.lock.txt && \
+RUN uv export --frozen --no-dev --extra vsview --no-emit-project --format requirements.txt \
+        --output-file /tmp/requirements.vsview.lock.txt && \
     python -m pip install --no-cache-dir --user --require-hashes \
-        -r /tmp/requirements.vspreview.lock.txt
+        -r /tmp/requirements.vsview.lock.txt
 
 USER root
 RUN rm -f /usr/local/bin/uv /usr/local/bin/uvx

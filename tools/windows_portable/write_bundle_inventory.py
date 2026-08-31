@@ -13,14 +13,19 @@ from typing import cast
 JsonObject = dict[str, object]
 
 REQUIRED_DISTRIBUTIONS = {
-    "pyqt6",
-    "pyqt6-qt6",
-    "pyqt6-sip",
+    "jetpytools",
+    "pyside6",
+    "pyside6-addons",
+    "pyside6-essentials",
+    "shiboken6",
     "vapoursynth",
-    "vapoursynth-akarin",
-    "vapoursynth-vszip",
+    "vapoursynth-bestsource",
+    "vapoursynth-lsmas",
     "vs-placebo",
-    "vspreview",
+    "vsjetengine",
+    "vspackrgb",
+    "vsview",
+    "vsview-cli",
 }
 SOURCE_SCRIPTS = (
     ".github/workflows/windows-portable-build.yml",

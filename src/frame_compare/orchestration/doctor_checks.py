@@ -48,7 +48,7 @@ _CHECK_ORDER: list[tuple[str, str]] = [
     ("vs_placebo", "optional"),
     ("ffms2", "optional"),
     ("ffmpeg", "optional"),
-    ("vspreview", "optional"),
+    ("vsview", "optional"),
     ("slowpics", "network"),
     ("tmdb_api_key", "network"),
 ]
@@ -548,28 +548,28 @@ def _check_ffmpeg() -> CheckResult:
     )
 
 
-def _check_vspreview() -> CheckResult:
-    """Check VSPreview is available.
+def _check_vsview() -> CheckResult:
+    """Check VSView is available.
 
-    Uses frame_compare.vspreview.adapter.check_vspreview_availability() for consistent detection.
-    Per vspreview spec §6.1, this is an optional check that reports passed=True
-    even when VSPreview is missing or the availability probe itself fails.
+    Uses frame_compare.vsview.adapter.check_vsview_availability() for consistent detection.
+    This is an optional check that reports passed=True even when VSView is missing
+    or the availability probe itself fails.
     """
-    from frame_compare.vspreview.adapter import (
-        VSPreviewAvailabilityStatus,
-        check_vspreview_availability,
+    from frame_compare.vsview.adapter import (
+        VSViewAvailabilityStatus,
+        check_vsview_availability,
     )
 
-    availability = check_vspreview_availability()
+    availability = check_vsview_availability()
 
     if availability.is_available:
         return CheckResult(
             passed=True,
-            message="VSPreview is available for interactive alignment",
+            message="VSView is available for interactive alignment",
             available=True,
         )
 
-    if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+    if availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
         return CheckResult(
             passed=True,
             message=availability.message,
@@ -706,7 +706,7 @@ def collect_checks() -> list[DoctorCheck]:
         3. vs_placebo (optional)
         4. ffms2 (optional)
         5. ffmpeg (optional)
-        6. vspreview (optional)
+        6. vsview (optional)
         7. slowpics (network)
         8. tmdb_api_key (network)
     """
@@ -716,7 +716,7 @@ def collect_checks() -> list[DoctorCheck]:
         "vs_placebo": _check_vs_placebo,
         "ffms2": _check_ffms2,
         "ffmpeg": _check_ffmpeg,
-        "vspreview": _check_vspreview,
+        "vsview": _check_vsview,
         "slowpics": _check_slowpics,
         "tmdb_api_key": _check_tmdb_api_key,
     }

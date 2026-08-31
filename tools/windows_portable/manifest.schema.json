@@ -416,29 +416,6 @@
         {
           "type": "object",
           "required": [
-            "type",
-            "destination",
-            "source_path"
-          ],
-          "properties": {
-            "type": {
-              "const": "copy_file"
-            },
-            "destination": {
-              "type": "string"
-            },
-            "source_path": {
-              "type": "string"
-            },
-            "manifest": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
             "type"
           ],
           "properties": {

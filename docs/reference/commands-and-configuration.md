@@ -64,7 +64,7 @@ Always confirm the installed help text before scripting an option.
 | `[paths]` | Input, config, and generated-data locations |
 | `[sources]` | Reference, analysis source, labels, FPS policy, and per-source overrides |
 | `[analysis]` | User/random/metric frame counts, mode, exclusions, and deterministic seed |
-| `[audio_alignment]` | Audio stream, correlation, consensus, reuse, and VSPreview behavior |
+| `[audio_alignment]` | Audio stream, correlation, consensus, reuse, and VSView behavior |
 | `[screenshots]` | Renderer, active-picture detection, geometry, overlays, PNG writer/compression, and timeouts |
 | `[color]` | HDR-to-SDR tonemapping preset, target luminance, tone curve, lift, and contrast recovery |
 | `[report]` | Static report generation, embedding, and auto-open behavior |
@@ -79,6 +79,13 @@ The former `[diagnostics].per_frame_nits` setting has been removed without repla
 A stale root `[diagnostics]` table is ignored, but should be deleted from maintained
 configuration files. Diagnostic overlays now use observed structured media/render facts;
 they never convert selection scores into luminance claims.
+
+For interactive alignment, set `audio_alignment.use_vsview = true` when optional
+VSView confirmation is desired. The `vsview` package is the supported base extra at
+version 0.10.3; `recommended` and `full` extras are not part of Frame Compare's
+dependency contract. `--force-interactive-alignment` enables the same route and makes
+review failure fatal. The generated session continues to use Frame Compare's
+L-SMASH-Works source/index path; VSView's BestSource workspace is UI-only.
 
 ## Environment variables and secrets
 
@@ -98,7 +105,7 @@ Do not commit a live value.
 
 - [Sources, References, and Labels](../guides/sources-and-labels.md)
 - [Frame Selection and Analysis](../guides/analysis-modes.md)
-- [Audio Alignment and VSPreview](../guides/audio-alignment.md)
+- [Audio Alignment and VSView](../guides/audio-alignment.md)
 - [HDR and Tonemapping](../guides/hdr-tonemapping.md)
 - [Reports and Overlays](../guides/reports-and-overlays.md)
 - [Presets, History, and Generated Data](../guides/presets-history-generated-data.md)

@@ -23,7 +23,7 @@ opt-ins.
 - **Repeatable frame selection** — combine exact user frames with deterministic random,
   dark, bright, and motion selections.
 - **Alignment-aware comparisons** — use automatic audio correlation, prior accepted
-  offsets, and optional VSPreview verification.
+  offsets, and optional VSView verification.
 - **HDR-aware rendering** — tonemap HDR sources through VapourSynth and vs-placebo when
   required, with configurable overlays and diagnostics.
 - **A serious offline viewer** — inspect slider, overlay, diff, blink, and grid views;
@@ -36,7 +36,7 @@ opt-ins.
 
 | Route | Best for | Start here |
 | --- | --- | --- |
-| Windows portable | Windows 10/11 x64 users who want the complete supported runtime, VSPreview, installer, and updater | [Install the Windows portable bundle](docs/windows-portable.md) |
+| Windows portable | Windows 10/11 x64 users who want the complete supported runtime, VSView, installer, and updater | [Install the Windows portable bundle](docs/windows-portable.md) |
 | Docker | Reproducible headless use on macOS or Linux | [Run with Docker](docs/getting-started/docker.md) |
 | Native source | Advanced users who already manage FFmpeg, VapourSynth, source plugins, and Vulkan | [Install from source](docs/getting-started/native.md) |
 
@@ -62,7 +62,7 @@ The exact commands and expected output are in
 - [How the pipeline works](docs/guides/how-it-works.md)
 - [Sources, references, and labels](docs/guides/sources-and-labels.md)
 - [Frame selection and analysis modes](docs/guides/analysis-modes.md)
-- [Audio alignment and VSPreview](docs/guides/audio-alignment.md)
+- [Audio alignment and VSView](docs/guides/audio-alignment.md)
 - [HDR and tonemapping](docs/guides/hdr-tonemapping.md)
 - [Reports and overlays](docs/guides/reports-and-overlays.md)
 - [Configuration recipes](docs/guides/configuration-recipes.md)

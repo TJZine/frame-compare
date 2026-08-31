@@ -37,13 +37,13 @@ _AUDITED_HINTS = (
     "Repair the complete Docker media runtime, then rerun doctor",
     "Repair or reinstall the complete supported media runtime, then rerun doctor",
     "Repair or replace the FFmpeg runtime, then rerun doctor",
-    ("Provide VSPreview; see https://tjzine.github.io/frame-compare/getting-started/native/"),
+    ("Provide VSView; see https://tjzine.github.io/frame-compare/getting-started/native/"),
     (
-        "Provide a supported Qt backend for VSPreview; see "
+        "Provide a supported Qt backend for VSView; see "
         "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
     (
-        "Check the optional VSPreview setup, then rerun doctor; see "
+        "Check the optional VSView setup, then rerun doctor; see "
         "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
     "Review the returned HTTP status before retrying",
@@ -174,13 +174,13 @@ def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyP
             check_fn=lambda: CheckResult(passed=False, message="FFmpeg not found"),
         ),
         DoctorCheck(
-            name="vspreview",
+            name="vsview",
             category="optional",
             check_fn=lambda: CheckResult(
                 passed=True,
                 available=False,
-                message="VSPreview not installed",
-                hint="Install VSPreview, then rerun doctor",
+                message="VSView not installed",
+                hint="Install VSView, then rerun doctor",
             ),
         ),
         DoctorCheck(
@@ -217,7 +217,7 @@ def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyP
     )
     assert "[OK] VapourSynth — VapourSynth available" in result.stdout
     assert "[WARN] FFmpeg — FFmpeg not found" in result.stdout
-    assert "[SKIP] VSPreview — VSPreview not installed" in result.stdout
+    assert "[SKIP] VSView — VSView not installed" in result.stdout
     assert "[OK] slow.pics — slow.pics reachable" in result.stdout
     assert result.stdout.count("Ready for local comparisons") == 1
     assert "Core runtime" not in result.stdout
@@ -337,15 +337,15 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
     assert result.stdout.splitlines()[0].startswith("[WARN] Ready for local comparisons;")
 
 
-def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
+def test_doctor_human_marks_optional_vsview_unavailable_neutrally(
     monkeypatch: MonkeyPatch,
 ) -> None:
     check = DoctorCheck(
-        name="vspreview",
+        name="vsview",
         category="optional",
         check_fn=lambda: CheckResult(
             passed=True,
-            message="VSPreview not installed (optional for manual alignment)",
+            message="VSView not installed (optional for manual alignment)",
             available=False,
         ),
     )
@@ -367,9 +367,9 @@ def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[SKIP] VSPreview — VSPreview not installed" in result.stdout
-    assert "[OK] VSPreview" not in result.stdout
-    assert "[FAIL] VSPreview" not in result.stdout
+    assert "[SKIP] VSView — VSView not installed" in result.stdout
+    assert "[OK] VSView" not in result.stdout
+    assert "[FAIL] VSView" not in result.stdout
     assert result.stdout.splitlines()[0] == (
         "[WARN] Ready for local comparisons; optional or network checks need attention."
     )
@@ -377,20 +377,20 @@ def test_doctor_human_marks_optional_vspreview_unavailable_neutrally(
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
     assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vspreview")
+    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
     assert check_entry["status"] == "pass"
     assert "available" not in check_entry
 
 
-def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
+def test_doctor_human_marks_optional_vsview_probe_failure_neutrally(
     monkeypatch: MonkeyPatch,
 ) -> None:
     check = DoctorCheck(
-        name="vspreview",
+        name="vsview",
         category="optional",
         check_fn=lambda: CheckResult(
             passed=True,
-            message="VSPreview availability probe failed",
+            message="VSView availability probe failed",
             available=False,
         ),
     )
@@ -412,9 +412,9 @@ def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[SKIP] VSPreview — VSPreview availability probe failed" in result.stdout
-    assert "[OK] VSPreview" not in result.stdout
-    assert "[FAIL] VSPreview" not in result.stdout
+    assert "[SKIP] VSView — VSView availability probe failed" in result.stdout
+    assert "[OK] VSView" not in result.stdout
+    assert "[FAIL] VSView" not in result.stdout
     assert result.stdout.splitlines()[0] == (
         "[WARN] Ready for local comparisons; optional or network checks need attention."
     )
@@ -422,20 +422,20 @@ def test_doctor_human_marks_optional_vspreview_probe_failure_neutrally(
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
     assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vspreview")
+    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
     assert check_entry["status"] == "pass"
     assert "available" not in check_entry
 
 
-def test_doctor_human_marks_available_optional_vspreview_as_pass(
+def test_doctor_human_marks_available_optional_vsview_as_pass(
     monkeypatch: MonkeyPatch,
 ) -> None:
     check = DoctorCheck(
-        name="vspreview",
+        name="vsview",
         category="optional",
         check_fn=lambda: CheckResult(
             passed=True,
-            message="VSPreview is available for interactive alignment",
+            message="VSView is available for interactive alignment",
             available=True,
         ),
     )
@@ -457,14 +457,14 @@ def test_doctor_human_marks_available_optional_vspreview_as_pass(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[OK] VSPreview — VSPreview is available" in result.stdout
-    assert "[SKIP] VSPreview" not in result.stdout
+    assert "[OK] VSView — VSView is available" in result.stdout
+    assert "[SKIP] VSView" not in result.stdout
     assert result.stdout.splitlines()[0] == "[OK] Runtime is ready for comparisons."
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
     assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vspreview")
+    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
     assert check_entry["status"] == "pass"
     assert "available" not in check_entry
 

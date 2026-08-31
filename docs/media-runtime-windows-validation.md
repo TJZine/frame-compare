@@ -34,10 +34,8 @@ The expected candidate profile is:
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
-| Akarin | 1.5.0, `akarin` namespace loaded |
-| VSZip | 22.1.0, `vszip` namespace loaded |
 | FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `2c043dabb96a4ad68d51fa46eff7504f9200fe781fe2705a6cbb384d13c18974` |
+| Full runtime fingerprint | `27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7` |
 | L-SMASH index token | `lsw1310-56c451f754fd` |
 
 ## 1. Exact source and repository gates
@@ -87,7 +85,7 @@ the repository-pinned Python and `uv` versions:
 
 ```powershell
 uv lock --check
-uv sync --all-groups --frozen
+uv sync --all-groups --extra vsview --frozen
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync pyright --warnings
@@ -141,6 +139,9 @@ Required evidence:
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
+- PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
+  files are absent and both build/extraction verifiers report the required exclusion
+  markers.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
@@ -201,7 +202,7 @@ Inspect `doctor-candidate.json`. Required results:
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
 - `ffmpeg` and `ffprobe` resolve inside the bundle and report the selected BtbN build.
-- Plugin loading uses deterministic package/extra-plugin paths.
+- Plugin loading uses only the deterministic canonical package plugin path.
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 
@@ -320,7 +321,7 @@ Verify with old and newly generated data:
 ## 8. Portable update boundary
 
 Keep one untouched installation of the immediate predecessor to this 1310 candidate:
-the R79 / L-SMASH-Works 1296 / Akarin 1.4.1 bundle with full runtime fingerprint
+the R79 / L-SMASH-Works 1296 bundle with full runtime fingerprint
 `59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd`.
 
 Required cases:

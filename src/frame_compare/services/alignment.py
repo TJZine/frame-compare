@@ -14,6 +14,7 @@ from frame_compare.services.alignment_audio import (
 )
 from frame_compare.services.alignment_consensus import estimate_consensus_offset
 from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_math import (
     calculate_alignment_trims,
     cross_correlate,
@@ -26,7 +27,7 @@ from frame_compare.services.alignment_previous_offsets import (
     validate_previous_offsets_policy,
 )
 from frame_compare.services.alignment_reuse_cache import comparison_cache_key, save_reusable_offsets
-from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
+from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
@@ -35,7 +36,6 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
-from frame_compare.vspreview.overrides import load_manual_overrides
 
 log = structlog.get_logger()
 
@@ -93,7 +93,7 @@ def _build_offsets_map(
     comparisons: list[Path],
     results_map: dict[str, AlignmentResult],
 ) -> dict[str, int | None]:
-    """Build stable `{reference:comparison -> frame_offset}` map for VSPreview."""
+    """Build stable `{reference:comparison -> frame_offset}` map for VSView."""
     offsets_by_key: dict[str, int | None] = {}
     for comp in comparisons:
         key = _alignment_key(reference, comp)
@@ -102,7 +102,7 @@ def _build_offsets_map(
     return offsets_by_key
 
 
-def _apply_confirmed_vspreview_offsets(
+def _apply_confirmed_vsview_offsets(
     *,
     reference: Path,
     comparisons: list[Path],
@@ -340,7 +340,7 @@ def _request_progress_descriptions(request: AlignmentRequest) -> dict[Path, str]
     }
 
 
-def _record_vspreview_provenance(
+def _record_interactive_provenance(
     *,
     request: AlignmentRequest,
     confirmed_offsets_by_key: dict[str, int] | None,
@@ -367,7 +367,7 @@ def _record_vspreview_provenance(
         provenances[key] = AlignmentProvenance(
             result=result,
             comparison_cache_key=comparison_cache_key(comparison),
-            provenance="vspreview_confirmed_this_run",
+            provenance="interactive_confirmed_this_run",
             computed_result=computed_result,
         )
 
@@ -452,7 +452,7 @@ def align_clips_from_request(
         comparisons=comparisons,
         results_map=results_map,
     )
-    confirmed_offsets = maybe_launch_alignment_vspreview(
+    confirmed_offsets = maybe_launch_alignment_vsview(
         reference=reference,
         comparisons=comparisons,
         offsets_by_key=offsets_by_key,
@@ -471,14 +471,14 @@ def align_clips_from_request(
         },
         verbose=verbose,
     )
-    fps_reference = _apply_confirmed_vspreview_offsets(
+    fps_reference = _apply_confirmed_vsview_offsets(
         reference=reference,
         comparisons=comparisons,
         confirmed_offsets_by_key=confirmed_offsets,
         results_map=results_map,
         fps_reference=fps_reference,
     )
-    _record_vspreview_provenance(
+    _record_interactive_provenance(
         request=request,
         confirmed_offsets_by_key=confirmed_offsets,
         results_map=results_map,

@@ -86,15 +86,13 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
     vapoursynth_libs = app_site_packages / "vapoursynth.libs"
     vs_placebo_package = app_site_packages / "vs_placebo"
     vs_placebo_libs = app_site_packages / "vs_placebo.libs"
-    lsmas_dir = bundle_root / "vs" / "extra-plugins" / "lsmas"
-    qt_bin = app_site_packages / "PyQt6" / "Qt6" / "bin"
+    pyside_package = app_site_packages / "PySide6"
     for directory in (
         vapoursynth_package,
         vapoursynth_libs,
         vs_placebo_package,
         vs_placebo_libs,
-        lsmas_dir,
-        qt_bin,
+        pyside_package,
     ):
         directory.mkdir(parents=True)
     ffmpeg_bin = bundle_root / "ffmpeg" / "bin"
@@ -129,11 +127,10 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
         str(vapoursynth_libs),
         str(vs_placebo_package),
         str(vs_placebo_libs),
-        str(lsmas_dir),
     ]
     assert calls == expected_calls
     assert str(ffmpeg_bin) not in calls
-    assert str(qt_bin) not in calls
+    assert str(pyside_package) not in calls
 
 
 def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(
@@ -184,10 +181,7 @@ def test_candidate_lsmas_plugin_paths_preserves_order_and_deduplicates(
 
     result = candidate_lsmas_plugin_paths()
 
-    assert result == [
-        *_expected_lsmas_candidates(bundle_root / "vs" / "plugins"),
-        *_expected_lsmas_candidates(plugin_dir),
-    ]
+    assert result == _expected_lsmas_candidates(plugin_dir)
 
 
 def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
@@ -211,12 +205,7 @@ def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
 
     result = candidate_lsmas_plugin_paths()
 
-    assert result[: len(_expected_lsmas_candidates(bundle_root / "vs" / "plugins"))] == (
-        _expected_lsmas_candidates(bundle_root / "vs" / "plugins")
-    )
-    assert len(result) == len(_expected_lsmas_candidates(tmp_path / "plugins")) + len(
-        _expected_lsmas_candidates(bundle_root / "vs" / "plugins")
-    )
+    assert result == _expected_lsmas_candidates(tmp_path / "plugins")
 
 
 def os_pathsep_join(parts: list[str]) -> str:
@@ -273,10 +262,6 @@ def test_candidate_lsmas_plugin_path_details_prefers_r74_discovery_order(
     assert (
         first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
         == _expected_lsmas_candidates(extra_dir)[0]
-    )
-    assert (
-        first_for_source["bundle_vs_plugins"]
-        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
     )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 
@@ -388,10 +373,6 @@ def test_candidate_lsmas_plugin_path_details_continues_when_canonical_dir_unusab
         first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
         == _expected_lsmas_candidates(extra_dir)[0]
     )
-    assert (
-        first_for_source["bundle_vs_plugins"]
-        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
-    )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 
 
@@ -422,10 +403,6 @@ def test_candidate_lsmas_plugin_path_details_continues_when_vapoursynth_import_f
     assert (
         first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
         == _expected_lsmas_candidates(extra_dir)[0]
-    )
-    assert (
-        first_for_source["bundle_vs_plugins"]
-        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
     )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 

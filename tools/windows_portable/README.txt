@@ -53,16 +53,20 @@ RUN HISTORY:
   frame-compare history list
   frame-compare history open <run-name>
 
-OPTIONAL (Interactive Audio Alignment / VSPreview):
-  The full portable bundle includes VSPreview + PyQt6. If you set:
+OPTIONAL (Interactive Audio Alignment / VSView):
+  The full portable bundle includes VSView + PySide6. If you set:
     [audio_alignment]
-    use_vspreview = true
+    use_vsview = true
   interactive alignment can run out of the box.
   If you run the repository's Python environment directly instead of using the
   built portable bundle, install optional deps with:
-    uv sync --group dev --extra vspreview --frozen
+    uv sync --group dev --extra vsview --frozen
   or:
-    pip install -e ".[vspreview]"
+    pip install -e ".[vsview]"
+  The hosted Windows release build starts the managed VSView launcher offscreen
+  against a generated two-output session, requires script/load/frame-0 evidence,
+  and terminates it after the expected steady-state GUI timeout. This is a native
+  runtime gate, not a substitute for later visible-UI acceptance on Windows.
 
 UPDATING (Code-Only Update Package):
   Apply an update zip:
@@ -75,8 +79,8 @@ UPDATING (Code-Only Update Package):
 
   Safety behavior:
     - Signature verification defaults to Cancel when missing/invalid.
-    - Dependency fingerprint mismatch defaults to Cancel.
-    - Unsafe apply paths require explicit typed confirmation.
+    - Dependency fingerprint mismatch always refuses a code-only update and requires
+      a complete portable reinstall; there is no bypass.
     - Non-interactive sessions fail safely instead of prompting.
 
 RELEASE SIGNING (Maintainers):
@@ -122,9 +126,6 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:
       .\licenses\
       .\licenses\python\
-      .\licenses\PyQt6\
-      .\licenses\PyQt6-sip\
-      .\licenses\Qt\
       .\bundle_inventory.json
   - Python wheel license files are copied from installed *.dist-info metadata.
   - Third-party runtime licenses that do not reliably ship in extracted bundle
@@ -132,11 +133,12 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
       tools\windows_portable\licenses\
     The build SHA256-verifies those vendored license texts before copying them
     into the bundle.
-  - Qt license/notice files (when present) are copied from:
-      app\site-packages\PyQt6\Qt6\licenses
-    Note: newer PyQt6 wheels may ship additional license texts under individual
-    wheel *.dist-info\licenses directories;
-    the build script copies dist-info license directories when present.
+  - PySide6/Qt LGPL-3.0 and Qt-bundled FFmpeg LGPL notices are copied from
+    manifest-declared, SHA256-verified repository files. Wheel-specific notices
+    under *.dist-info\licenses are copied as well.
+  - VSView requires Qt Multimedia from PySide6 Addons. The portable deployment
+    excludes unused Qt WebEngine/Chromium files and verifies their absence; it does
+    not claim to distribute those excluded components.
   - Deterministic component versions, declared license metadata, copied
     license/notice hashes, requirements-lock fingerprint, exact Frame Compare
     source commit/archive, and build/install script inventory are shipped in:

@@ -19,7 +19,7 @@ from ._helpers import write_valid_config_json as _write_valid_config_json
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
 _NEW_VERSION_CONTENT = '__version__ = "1.0.1"\n'
 _REQ_HASH = "3a0058b73f8a4872c3d0b27b99c017d9a8c087cf283d5f9923b0df35b44bfd82"
-_RUNTIME_HASH = "2c043dabb96a4ad68d51fa46eff7504f9200fe781fe2705a6cbb384d13c18974"
+_RUNTIME_HASH = "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7"
 _POWERSHELL_KEYGEN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
@@ -152,6 +152,7 @@ def _build_update_zip(
     *,
     tmp_path: Path,
     runtime_fingerprint: str = _RUNTIME_HASH,
+    requirements_fingerprint: str = _REQ_HASH,
     archive_name: str = "update.zip",
 ) -> Path:
     update_staging = tmp_path / f"{Path(archive_name).stem}_staging"
@@ -169,7 +170,7 @@ def _build_update_zip(
         "to_app_version": "1.0.1",
         "from_app_version_min": "1.0.0",
         "from_app_version_max": "1.1.0",
-        "expected_requirements_lock_sha256": _REQ_HASH,
+        "expected_requirements_lock_sha256": requirements_fingerprint,
         "expected_media_runtime_fingerprint": runtime_fingerprint,
         "signature_algorithm": "rsa-sha256-pkcs1",
         "signature_file": "update-manifest.sig",
@@ -379,6 +380,33 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     runtime_output = runtime_rejection.stdout + runtime_rejection.stderr
     assert "Media runtime fingerprint mismatch" in runtime_output
     assert "complete portable bundle" in runtime_output
+    assert _snapshot_tree(installed_tree) == original_snapshot
+    assert not (bundle_dir / "app" / ".update_backups").exists()
+    assert _snapshot_bytes(external_generated_root) == external_snapshot
+
+    dependency_mismatch_zip = _build_update_zip(
+        tmp_path=tmp_path,
+        requirements_fingerprint="e" * 64,
+        archive_name="dependency-mismatch.zip",
+    )
+    _sign_update_zip(
+        exe=exe,
+        repo_root=repo_root,
+        update_zip_path=dependency_mismatch_zip,
+        private_key_path=private_key_path,
+        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+    )
+    dependency_rejection = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=dependency_mismatch_zip,
+    )
+    assert dependency_rejection.returncode != 0
+    dependency_output = dependency_rejection.stdout + dependency_rejection.stderr
+    assert "Dependency fingerprint mismatch; code-only update refused" in dependency_output
+    assert "complete Windows portable bundle" in dependency_output
     assert _snapshot_tree(installed_tree) == original_snapshot
     assert not (bundle_dir / "app" / ".update_backups").exists()
     assert _snapshot_bytes(external_generated_root) == external_snapshot

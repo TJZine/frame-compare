@@ -94,9 +94,9 @@ reviews:
     - path: "src/frame_compare/services/**/*.py"
       instructions: |
         Review services for HTTPX client ownership, timeout/status handling, no live-network assumptions in default tests, report generation ownership, slow.pics/TMDB policy, and deterministic filesystem output.
-    - path: "src/frame_compare/vspreview/**/*.py"
+    - path: "src/frame_compare/vsview/**/*.py"
       instructions: |
-        Review VSPreview integration for script/session output, subprocess/launch command clarity, path diagnostics, optional dependency handling, and cleanup. Preserve copy/paste-friendly diagnostics while redacting secrets.
+        Review VSView integration for script/session output, subprocess/launch command clarity, path diagnostics, optional dependency handling, and cleanup. Preserve copy/paste-friendly diagnostics while redacting secrets.
     - path: "src/frame_compare/errors.py"
       instructions: |
         Treat as an error-contract hotspot. Flag exit-code drift, lost sanitized causes, overbroad exception swallowing, and user-facing messages that break JSON or CLI expectations.

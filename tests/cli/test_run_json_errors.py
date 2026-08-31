@@ -156,7 +156,7 @@ def test_run_json_rejects_interactive_alignment_from_config_before_runner(
         root = Path("workspace")
         config_path = _write_minimal_config(root)
         config_path.write_text(
-            MINIMAL_CONFIG + "\n[audio_alignment]\nuse_vspreview = true\n",
+            MINIMAL_CONFIG + "\n[audio_alignment]\nuse_vsview = true\n",
             encoding="utf-8",
         )
 
@@ -180,7 +180,7 @@ def test_run_json_rejects_interactive_alignment_from_config_before_runner(
     assert payload["error"]["details"]["validation_errors"] == [
         {
             "input": True,
-            "loc": ["audio_alignment", "use_vspreview"],
+            "loc": ["audio_alignment", "use_vsview"],
             "msg": "Interactive alignment is not supported with --json.",
             "type": "value_error",
         }
@@ -208,7 +208,7 @@ def test_run_json_rejects_force_interactive_alignment_before_runner(
     assert payload["error"]["message"] == "Interactive alignment is not supported with --json"
     assert {tuple(entry["loc"]) for entry in validation_errors} == {
         ("audio_alignment", "force_interactive"),
-        ("audio_alignment", "use_vspreview"),
+        ("audio_alignment", "use_vsview"),
     }
 
 
@@ -254,7 +254,7 @@ cache_results = false
     assert payload["error"]["message"] == "Interactive alignment is not supported with --json"
     assert {tuple(entry["loc"]) for entry in validation_errors} == {
         ("audio_alignment", "force_interactive"),
-        ("audio_alignment", "use_vspreview"),
+        ("audio_alignment", "use_vsview"),
         ("audio_alignment", "previous_offsets"),
         ("audio_alignment", "cache_results"),
     }

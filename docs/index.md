@@ -1,33 +1,61 @@
-<div class="fc-hero" markdown>
+---
+hide:
+  - toc
+---
+
+<div class="fc-home" markdown>
+
+<section class="fc-hero" markdown>
+
+<div class="fc-hero-copy" markdown>
 
 <p class="fc-kicker">Deterministic video comparison</p>
 
-# Compare sources, not guesswork
+<h1 id="compare-sources-not-guesswork">
+  <span>Compare</span>
+  <span>sources, not</span>
+  <span>guesswork</span>
+</h1>
 
-Frame Compare selects representative frames, aligns source timing, renders HDR-aware
-screenshots, and produces a static review report for local encodes, remasters, and
-archival quality-control workflows.
+Select useful frames, align source timing, render HDR-aware screenshots, and review
+every difference in a portable report.
 
 <div class="fc-actions" markdown>
 
 [Choose an installation](getting-started/index.md){ .md-button .md-button--primary }
-[Run a first comparison](guides/first-comparison.md){ .md-button }
-[Explore the report viewer](guides/reports-and-overlays.md){ .md-button }
+[View the report](guides/reports-and-overlays.md){ .fc-text-link }
 
 </div>
 
 </div>
+
+<figure class="fc-hero-visual">
+  <img
+    src="images/report-viewer-overview.webp"
+    alt="Frame Compare report viewer showing a side-by-side slider comparison"
+    width="1683"
+    height="1080"
+    loading="eager"
+  >
+  <figcaption>One frame. Two sources. Every difference visible.</figcaption>
+</figure>
+
+</section>
 
 ## Start with the route that fits your system
 
-<div class="fc-card-grid" markdown>
+<p class="fc-section-intro">Choose the supported package for your platform or bring your own media toolchain.</p>
+
+<div class="fc-card-grid fc-route-grid" markdown>
 
 <div class="fc-card" markdown>
 
+<p class="fc-card-label">Windows 10/11 · Complete package</p>
+
 ### Windows portable
 
-The complete Windows 10/11 x64 distribution. It includes the supported Python and
-media runtime, VSPreview, installer, updater, and rollback tooling.
+The supported Python and media runtime, VSView, installer, updater, and rollback
+tooling in one distribution.
 
 [Install on Windows](windows-portable.md)
 
@@ -35,10 +63,12 @@ media runtime, VSPreview, installer, updater, and rollback tooling.
 
 <div class="fc-card" markdown>
 
+<p class="fc-card-label">macOS + Linux · Reproducible</p>
+
 ### Docker
 
-The recommended reproducible, headless route for macOS and Linux. It isolates the
-media toolchain and writes reports and cache data to explicit host mounts.
+The recommended headless route, with an isolated media toolchain and explicit host
+mounts for reports and cache data.
 
 [Start with Docker](getting-started/docker.md)
 
@@ -46,10 +76,12 @@ media toolchain and writes reports and cache data to explicit host mounts.
 
 <div class="fc-card" markdown>
 
+<p class="fc-card-label">Advanced · Bring your own runtime</p>
+
 ### Native source
 
-For advanced users who already manage FFmpeg, VapourSynth, source plugins, and a
-compatible Vulkan implementation on the host.
+For users who already manage FFmpeg, VapourSynth, source plugins, and a compatible
+Vulkan implementation.
 
 [Install from source](getting-started/native.md)
 
@@ -57,67 +89,76 @@ compatible Vulkan implementation on the host.
 
 </div>
 
-[Compare route capabilities and support posture](getting-started/route-comparison.md)
+[Compare route capabilities and support posture](getting-started/route-comparison.md){ .fc-inline-cta }
 
-## What a comparison includes
+## What a comparison gives you
 
-- Reproducible user, random, dark, bright, and motion frame selection.
-- Shared-window and active-picture-aware analysis across the selected sources.
-- Automatic audio alignment with optional prior-offset reuse and VSPreview review.
-- HDR-to-SDR tonemapping when required, plus minimal, standard, or diagnostic overlays.
-- A portable offline report experience with slider, overlay, diff, blink, grid,
-  filmstrip, zoom, inspection, and review tools.
-- Optional slow.pics publication and Discord-compatible webhook notification after a
-  local result has been reviewed.
+<div class="fc-capability-grid" markdown>
 
-## Follow a workflow
+<div markdown>
 
-<div class="fc-card-grid" markdown>
+### Frames worth inspecting
 
-<div class="fc-card" markdown>
-
-### Understand the pipeline
-
-See where probing, frame selection, alignment, rendering, caches, and optional network
-outputs fit together.
-
-[How Frame Compare works](guides/how-it-works.md)
+Reproducible user, random, dark, bright, and motion selection focused on shared
+picture content.
 
 </div>
 
-<div class="fc-card" markdown>
+<div markdown>
 
-### Control the comparison
+### Sources that line up
 
-Choose the reference, label sources, handle trims or FPS metadata, and configure frame
-selection without reading the full behavioral contract.
-
-[Sources and labels](guides/sources-and-labels.md) ·
-[Frame selection](guides/analysis-modes.md)
+Shared-window analysis, automatic audio alignment, trim handling, and optional
+VSView review.
 
 </div>
 
-<div class="fc-card" markdown>
+<div markdown>
 
-### Review the result
+### Evidence you can share
 
-Learn the viewer modes, keyboard-oriented review workflow, metadata inspector, and
-portable report layout.
-
-[Reports and overlays](guides/reports-and-overlays.md)
+HDR-aware screenshots and a portable offline report with slider, diff, blink, grid,
+filmstrip, zoom, and inspection tools.
 
 </div>
 
 </div>
+
+## Follow the workflow
+
+<ol class="fc-steps">
+  <li>
+    <span class="fc-step-number">01</span>
+    <h3>Understand the pipeline</h3>
+    <p>See how probing, selection, alignment, rendering, caches, and optional network outputs fit together.</p>
+    <a href="guides/how-it-works/">How Frame Compare works</a>
+  </li>
+  <li>
+    <span class="fc-step-number">02</span>
+    <h3>Control the comparison</h3>
+    <p>Choose the reference, label sources, handle trims or FPS metadata, and configure frame selection.</p>
+    <a href="guides/sources-and-labels/">Sources and labels</a>
+    <span aria-hidden="true"> · </span>
+    <a href="guides/analysis-modes/">Frame selection</a>
+  </li>
+  <li>
+    <span class="fc-step-number">03</span>
+    <h3>Review the result</h3>
+    <p>Learn the viewer modes, keyboard-oriented workflow, metadata inspector, and portable report layout.</p>
+    <a href="guides/reports-and-overlays/">Reports and overlays</a>
+  </li>
+</ol>
 
 ## Find an answer
 
-- Use [Configuration Recipes](guides/configuration-recipes.md) for common outcomes.
-- Start with [Troubleshooting](guides/troubleshooting.md) when a run fails.
-- Use [Commands and Configuration](reference/commands-and-configuration.md) for
-  command discovery and reference links.
-- Consult the [CLI Behavioral Contract](current-cli-contract.md) only when exact
-  precedence, persistence, JSON, stream, or exit behavior matters.
-- Contributors and maintainers should begin with
-  [Contributing](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md)
-  and the [Engineering Runbook](ENGINEERING_RUNBOOK.md).
+<div class="fc-answer-links" markdown>
+
+- [Configuration Recipes](guides/configuration-recipes.md) for common outcomes.
+- [Troubleshooting](guides/troubleshooting.md) when a run fails.
+- [Commands and Configuration](reference/commands-and-configuration.md) for command discovery.
+- [CLI Behavioral Contract](current-cli-contract.md) for exact precedence, persistence, JSON, stream, and exit behavior.
+- [Contributing](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md) and the [Engineering Runbook](ENGINEERING_RUNBOOK.md) for project work.
+
+</div>
+
+</div>

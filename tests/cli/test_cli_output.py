@@ -80,7 +80,7 @@ def _missing_executable(_name: str) -> str:
     raise FileNotFoundError(_name)
 
 
-def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: MonkeyPatch) -> None:
+def test_at_a_glance_prints_key_rows_without_vsview_probe(monkeypatch: MonkeyPatch) -> None:
     def _resolve(command: str) -> str:
         if command not in {"ffmpeg", "ffprobe"}:
             raise FileNotFoundError(command)
@@ -122,7 +122,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     assert "disabled" in _rendered_row_value(output, "slow.pics")
     assert "Public" in _rendered_row_value(output, "slow.pics")
     assert "auto-open=Enabled" in _rendered_row_value(output, "Report")
-    assert "VSPreview" not in output
+    assert "VSView" not in output
 
 
 def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
@@ -287,21 +287,21 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     assert "[cyan]generated[end]" in output
 
 
-def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
+def test_at_a_glance_prints_vsview_availability_when_probe_succeeds(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+    from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 
     config = _config()
-    config.audio_alignment.use_vspreview = True
+    config.audio_alignment.use_vsview = True
     console = _console()
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.check_vspreview_availability",
-        lambda: VSPreviewAvailability(
-            status=VSPreviewAvailabilityStatus.AVAILABLE,
-            message="VSPreview is available for interactive alignment",
+        "frame_compare.vsview.adapter.check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.AVAILABLE,
+            message="VSView is available for interactive alignment",
         ),
     )
 
@@ -314,13 +314,13 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     )
 
     output = _render(console)
-    assert "VSPreview requested" in output
-    assert "VSPreview" in output
+    assert "VSView requested" in output
+    assert "VSView" in output
     assert "available (true)" in output
 
 
-def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) -> None:
-    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+def test_at_a_glance_prints_vsview_probe_failure(monkeypatch: MonkeyPatch) -> None:
+    from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 
     config = _config()
     config.audio_alignment.force_interactive = True
@@ -328,10 +328,10 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.check_vspreview_availability",
-        lambda: VSPreviewAvailability(
-            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
-            message="VSPreview availability probe failed",
+        "frame_compare.vsview.adapter.check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.PROBE_FAILED,
+            message="VSView availability probe failed",
             error_details={
                 "exception_type": "RuntimeError",
                 "exception": "display unavailable",
@@ -348,14 +348,14 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     )
 
     output = _render(console)
-    assert "VSPreview required" in output
-    assert "VSPreview" in output
+    assert "VSView required" in output
+    assert "VSView" in output
     assert "probe failed (RuntimeError)" in output
     assert "display unavailable" not in output
 
 
 def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> None:
-    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+    from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 
     config = _config()
     config.analysis.user_frames = [12, 48]
@@ -372,7 +372,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     config.screenshots.geometry_mode = ScreenshotGeometryMode.ALIGNED
     config.screenshots.active_rect_detection = ScreenshotActiveRectDetection.AUTO
     config.audio_alignment.previous_offsets = "prompt"
-    config.audio_alignment.use_vspreview = True
+    config.audio_alignment.use_vsview = True
     config.report.auto_open = False
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = True
@@ -386,9 +386,9 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
     monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.check_vspreview_availability",
-        lambda: VSPreviewAvailability(
-            status=VSPreviewAvailabilityStatus.AVAILABLE,
+        "frame_compare.vsview.adapter.check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.AVAILABLE,
             message="available",
         ),
     )

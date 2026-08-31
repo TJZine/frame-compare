@@ -173,6 +173,31 @@ jobs:
     environment:
       name: ${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}
     steps:
+      - name: Checkout exact expected commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare validated release notes
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          MAIN_SHA: ${{ needs.preflight.outputs.main_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/validate_release_contract.py \
+            --channel "$RELEASE_CHANNEL" \
+            --version "$RELEASE_VERSION" \
+            --tag "$RELEASE_TAG" \
+            --expected-sha "$EXPECTED_SHA" \
+            --main-sha "$MAIN_SHA" \
+            --release-notes-output "$RUNNER_TEMP/release-notes.md"
+
       - name: Download exact release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -279,12 +304,13 @@ jobs:
           if [[ "$RELEASE_CHANNEL" == "rc" ]]; then
             prerelease="true"
           fi
+          release_body="$(<"${RUNNER_TEMP}/release-notes.md")"
           release_json="$(
             gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
               -f "tag_name=${RELEASE_TAG}" \
               -f "target_commitish=${EXPECTED_SHA}" \
               -f "name=Frame Compare ${RELEASE_TAG}" \
-              -f "body=Frame Compare ${RELEASE_TAG}. See CHANGELOG.md at the tagged commit." \
+              -f "body=${release_body}" \
               -F "draft=true" \
               -F "prerelease=${prerelease}"
           )"
@@ -363,6 +389,8 @@ jobs:
           prerelease="$(gh api "$release_endpoint" --jq '.prerelease')"
           target="$(gh api "$release_endpoint" --jq '.target_commitish')"
           remote_tag="$(gh api "$release_endpoint" --jq '.tag_name')"
+          remote_body="$(gh api "$release_endpoint" --jq '.body')"
+          expected_body="$(<"${RUNNER_TEMP}/release-notes.md")"
           tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
           expected_prerelease="false"
           if [[ "$RELEASE_CHANNEL" == "rc" ]]; then
@@ -372,8 +400,13 @@ jobs:
             echo "Release is not the expected draft/channel state." >&2
             exit 1
           fi
-          if [[ "$remote_tag" != "$RELEASE_TAG" || "$target" != "$EXPECTED_SHA" || "$tag_sha" != "$EXPECTED_SHA" ]]; then
-            echo "Draft release or tag does not target the approved commit." >&2
+          if [[
+            "$remote_tag" != "$RELEASE_TAG" ||
+            "$target" != "$EXPECTED_SHA" ||
+            "$tag_sha" != "$EXPECTED_SHA" ||
+            "$remote_body" != "$expected_body"
+          ]]; then
+            echo "Draft release identity or notes do not match the approved commit." >&2
             exit 1
           fi
           expected=(
@@ -432,13 +465,16 @@ jobs:
           remote_prerelease="$(jq -r '.prerelease' <<<"$release_json")"
           target="$(jq -r '.target_commitish' <<<"$release_json")"
           remote_tag="$(jq -r '.tag_name' <<<"$release_json")"
+          remote_body="$(jq -r '.body' <<<"$release_json")"
+          expected_body="$(<"${RUNNER_TEMP}/release-notes.md")"
           tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
           if [[
             "$draft" != "true" ||
             "$remote_prerelease" != "$prerelease" ||
             "$target" != "$EXPECTED_SHA" ||
             "$remote_tag" != "$RELEASE_TAG" ||
-            "$tag_sha" != "$EXPECTED_SHA"
+            "$tag_sha" != "$EXPECTED_SHA" ||
+            "$remote_body" != "$expected_body"
           ]]; then
             echo "Release, tag, or draft target changed before publication." >&2
             exit 1
@@ -489,6 +525,8 @@ jobs:
           prerelease="$(jq -r '.prerelease' <<<"$release_json")"
           target="$(jq -r '.target_commitish' <<<"$release_json")"
           remote_tag="$(jq -r '.tag_name' <<<"$release_json")"
+          remote_body="$(jq -r '.body' <<<"$release_json")"
+          expected_body="$(<"${RUNNER_TEMP}/release-notes.md")"
           tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
           expected_prerelease="false"
           if [[ "$RELEASE_CHANNEL" == "rc" ]]; then
@@ -506,7 +544,8 @@ jobs:
             "$prerelease" != "$expected_prerelease" ||
             "$remote_tag" != "$RELEASE_TAG" ||
             "$target" != "$EXPECTED_SHA" ||
-            "$tag_sha" != "$EXPECTED_SHA"
+            "$tag_sha" != "$EXPECTED_SHA" ||
+            "$remote_body" != "$expected_body"
           ]]; then
             echo "Release did not reach the expected final publication state." >&2
             exit 1

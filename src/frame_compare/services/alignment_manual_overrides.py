@@ -1,4 +1,4 @@
-"""Manual override cache schema and persistence helpers.
+"""Manual alignment override schema and run-scoped persistence.
 
 This module provides persistence for user-provided alignment overrides
 stored in `{cache_dir}/manual_overrides.toml`.
@@ -24,7 +24,7 @@ log = structlog.get_logger()
 
 @dataclass(frozen=True)
 class ManualOverride:
-    """User-provided alignment override from VSPreview session.
+    """User-confirmed alignment override from an interactive review session.
 
     Attributes:
         reference_clip: Path stem of reference clip

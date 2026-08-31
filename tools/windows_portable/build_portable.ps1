@@ -217,27 +217,6 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
     return
   }
 
-  if ($type -eq "copy_file") {
-    $sourcePath = Get-RequiredStringProperty -Object $install -Name "source_path" -Context "artifact '$artifactId' install"
-    $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
-    Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $tmp
-    $sourcePathNorm = ($sourcePath -replace "/", "\\").TrimStart("\\")
-    $src = Join-Path $tmp $sourcePathNorm
-    if (!(Test-Path -LiteralPath $src)) {
-      throw "Expected file not found in archive: $sourcePath (artifact $artifactId)"
-    }
-    Ensure-Directory -Path (Split-Path -Parent $dest)
-    Copy-Item -Force -LiteralPath $src -Destination $dest
-    $manifestEntry = Get-OptionalStringProperty -Object $install -Name "manifest"
-    if ($manifestEntry -ne "") {
-      $manifestPath = Join-Path (Split-Path -Parent $dest) "manifest.vs"
-      $manifestContent = "[VapourSynth Manifest V1]`r`n$manifestEntry`r`n"
-      Set-Content -LiteralPath $manifestPath -Value $manifestContent -Encoding ASCII
-    }
-    Remove-Item -Recurse -Force -LiteralPath $tmp
-    return
-  }
-
   throw "Unknown install.type '$type' for artifact $artifactId"
 }
 
@@ -309,7 +288,7 @@ try {
   $env:PYTHONUTF8 = "1"
   $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$bundleRoot\app\src;$bundleRoot\app\site-packages"
-  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$bundleRoot\vs\extra-plugins"
+  Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
   $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
   $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
@@ -326,8 +305,7 @@ try {
     (Join-Path $vsPackage "plugins"),
     (Join-Path $sitePackages "vapoursynth.libs"),
     (Join-Path $sitePackages "vs_placebo"),
-    (Join-Path $sitePackages "vs_placebo.libs"),
-    (Join-Path $bundleRoot "vs\extra-plugins\lsmas")
+    (Join-Path $sitePackages "vs_placebo.libs")
   )
   $existingPathEntries = @(
     $pathEntries |
@@ -530,7 +508,7 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   Push-Location $RepoRoot
   try {
     # Export pinned, hashed requirements from uv.lock (exclude project itself; we run from app/src via PYTHONPATH).
-    uv export --frozen --no-dev --no-emit-project --extra vspreview --format requirements.txt --output-file $reqFile | Out-Null
+    uv export --frozen --no-dev --no-emit-project --no-emit-package vapoursynth-lsmas --extra vsview --format requirements.txt --output-file $reqFile | Out-Null
     Assert-LastExitCode -CommandLabel "uv export"
   } finally {
     Pop-Location
@@ -585,18 +563,56 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
     Assert-LastExitCode -CommandLabel "uv pip install $artifactId"
   }
 
-  $akarinArtifact = $Artifacts | Where-Object { $_.id -eq "vs-plugin-akarin-1.5.0-win-amd64-wheel" }
-  $zstd = @(Get-RequiredProperty -Object $akarinArtifact -Name "bundled_dependencies" -Context "Akarin artifact") |
-    Where-Object { $_.name -eq "zstd" }
-  if ($zstd.Count -ne 1) {
-    throw "Akarin artifact must declare exactly one bundled zstd dependency."
+}
+
+function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
+  $sitePackages = Join-Path $BundleRoot "app\site-packages"
+  $pySideRoot = [System.IO.Path]::Combine($sitePackages, "PySide6")
+  if (!(Test-Path -LiteralPath $pySideRoot -PathType Container)) {
+    throw "PySide6 package directory not found: $pySideRoot"
   }
-  $zstdRelativePath = Get-RequiredStringProperty -Object $zstd -Name "binary_path" -Context "Akarin zstd dependency"
-  $zstdPath = Join-Path $sitePackages $zstdRelativePath
-  $zstdBytes = [int64](Get-RequiredProperty -Object $zstd -Name "binary_bytes" -Context "Akarin zstd dependency")
-  $zstdSha256 = Get-RequiredStringProperty -Object $zstd -Name "binary_sha256" -Context "Akarin zstd dependency"
-  Assert-FileSize -FilePath $zstdPath -ExpectedBytes $zstdBytes
-  Assert-Sha256 -FilePath $zstdPath -ExpectedHex $zstdSha256
+
+  $resolvedSitePackages = [System.IO.Path]::GetFullPath($sitePackages)
+  $resolvedPySideRoot = (Resolve-Path -LiteralPath $pySideRoot).Path
+  $sitePackagesPrefix = $resolvedSitePackages.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  ) + [System.IO.Path]::DirectorySeparatorChar
+  if (!$resolvedPySideRoot.StartsWith($sitePackagesPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to trim Qt runtime outside bundle site-packages: $resolvedPySideRoot"
+  }
+
+  $chromiumRuntimeNames = @(
+    "icudtl.dat",
+    "v8_context_snapshot.bin",
+    "v8_context_snapshot.debug.bin"
+  )
+  $excludedFiles = @(
+    Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
+      Where-Object {
+        $_.FullName -match "(?i)webengine" -or
+        ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
+      }
+  )
+  $excludedBytes = [int64](($excludedFiles | Measure-Object -Property Length -Sum).Sum)
+  if ($excludedFiles.Count -ne 123 -or $excludedBytes -ne 359205252) {
+    throw "Unexpected Qt WebEngine deployment surface: files=$($excludedFiles.Count) bytes=$excludedBytes"
+  }
+  foreach ($file in $excludedFiles) {
+    Remove-Item -Force -LiteralPath $file.FullName
+  }
+
+  $remainingFiles = @(
+    Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
+      Where-Object {
+        $_.FullName -match "(?i)webengine" -or
+        ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
+      }
+  )
+  if ($remainingFiles.Count -ne 0) {
+    throw "Qt WebEngine deployment exclusion was incomplete: $($remainingFiles.FullName -join ', ')"
+  }
+  Write-Host "WINDOWS_BUNDLE_PROOF qt_webengine_deployment=excluded files=$($excludedFiles.Count) bytes=$excludedBytes"
 }
 
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
@@ -613,7 +629,7 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   $env:PYTHONUTF8 = "1"
   $env:PYTHONDONTWRITEBYTECODE = "1"
   $env:PYTHONPATH = "$BundleRoot\app\src;$BundleRoot\app\site-packages"
-  $env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "$BundleRoot\vs\extra-plugins"
+  Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
   $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
   $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
@@ -630,8 +646,7 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
     (Join-Path $vsPackage "plugins"),
     (Join-Path $sitePackages "vapoursynth.libs"),
     (Join-Path $sitePackages "vs_placebo"),
-    (Join-Path $sitePackages "vs_placebo.libs"),
-    (Join-Path $BundleRoot "vs\extra-plugins\lsmas")
+    (Join-Path $sitePackages "vs_placebo.libs")
   )
   $existingEntries = @(
     $pathEntries |
@@ -718,6 +733,70 @@ function Invoke-BundleRuntimeProof(
   Write-Host "WINDOWS_BUNDLE_PROOF phase=$Phase ok"
 }
 
+function Invoke-VSViewOffscreenLaunchProof(
+  [string]$Python,
+  [string]$SessionPath,
+  [string]$BundleRoot
+) {
+  $stdoutPath = Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log"
+  $stderrPath = Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log"
+  $originalQtPlatform = Get-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM"
+  $originalNoColor = Get-ProcessEnvironmentValue -Name "NO_COLOR"
+  $process = $null
+  $timedOut = $false
+  try {
+    $env:QT_QPA_PLATFORM = "offscreen"
+    $env:NO_COLOR = "1"
+    $quotedSessionPath = '"' + $SessionPath + '"'
+    $process = Start-Process -FilePath $Python -ArgumentList @(
+      "-m",
+      "frame_compare.vsview.launcher",
+      "-vv",
+      "--no-settings",
+      $quotedSessionPath
+    ) -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    $timedOut = -not $process.WaitForExit(20000)
+  } finally {
+    if ($null -ne $process -and -not $process.HasExited) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      if (-not $process.WaitForExit(10000)) {
+        throw "VSView offscreen proof process did not terminate after forced cleanup."
+      }
+    }
+    Restore-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM" -Value $originalQtPlatform
+    Restore-ProcessEnvironmentValue -Name "NO_COLOR" -Value $originalNoColor
+  }
+
+  $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
+  $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+  $combined = "$stdout`n$stderr"
+  $normalizedCombined = ($combined -replace "\s+", " ").Trim()
+  Write-Host $combined
+
+  if (-not $timedOut) {
+    throw "VSView offscreen proof exited before the expected steady-state GUI timeout."
+  }
+  foreach ($marker in @(
+    "[RUN] VSView Bootstrap",
+    "[OK] VSView Ready",
+    "Script execution completed",
+    "Content loaded successfully",
+    "Frame 0 rendered"
+  )) {
+    if (-not $normalizedCombined.Contains($marker)) {
+      throw "VSView offscreen proof marker missing: $marker"
+    }
+  }
+  $errorLines = @($combined -split "`r?`n" | Where-Object { $_ -match "(?i)\bERROR\b" })
+  if ($errorLines.Count -gt 0) {
+    throw "VSView offscreen proof emitted ERROR output: $($errorLines -join ' | ')"
+  }
+  if ($null -ne $process -and -not $process.HasExited) {
+    throw "VSView offscreen proof left its process running."
+  }
+  Write-Host "WINDOWS_BUNDLE_PROOF vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
+}
+
 function Assert-BundleRuntime([string]$BundleRoot) {
   $python = Join-Path $BundleRoot "python\python.exe"
   if (!(Test-Path -LiteralPath $python)) {
@@ -749,7 +828,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
       throw "Bundled FFmpeg executable not found: $ffmpeg"
     }
-    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=64x64:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
     Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
 
     $smokeScript = @'
@@ -759,6 +838,7 @@ import importlib.metadata
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 
@@ -780,12 +860,46 @@ def prove_package_imports() -> None:
     proof("package_imports=ok modules=frame_compare,rich,tomli_w,typer")
 
 
+def prove_vsview_distribution_contract() -> None:
+    expected = {
+        "jetpytools": "3.1.1",
+        "pyside6": "6.11.2",
+        "pyside6-addons": "6.11.2",
+        "pyside6-essentials": "6.11.2",
+        "shiboken6": "6.11.2",
+        "vapoursynth-bestsource": "21.0",
+        "vapoursynth-lsmas": "1310.0.0.0",
+        "vspackrgb": "1.4.0",
+        "vsview": "0.10.3",
+        "vsview-cli": "1.2.0",
+        "vsjetengine": "1.7.0",
+    }
+    observed = {name: importlib.metadata.version(name) for name in expected}
+    assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
+    proof("vsview_distributions=ok " + ",".join(f"{name}={version}" for name, version in observed.items()))
+
+
+def prove_qt_webengine_excluded() -> None:
+    site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
+    pyside_root = site_packages / "PySide6"
+    chromium_runtime_names = {"icudtl.dat", "v8_context_snapshot.bin", "v8_context_snapshot.debug.bin"}
+    forbidden = [
+        path
+        for path in pyside_root.rglob("*")
+        if path.is_file()
+        and (
+            "webengine" in str(path).lower()
+            or (path.parent.name == "resources" and path.name in chromium_runtime_names)
+        )
+    ]
+    assert_true(not forbidden, f"Qt WebEngine deployment files remain: {forbidden}")
+    proof("qt_webengine_runtime=absent deployment=excluded")
+
+
 def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
-        AKARIN_RELEASE,
         VS_PLACEBO_RELEASE,
-        VSZIP_RELEASE,
         WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
         media_runtime_fingerprint,
         supported_media_runtime_report,
@@ -797,8 +911,6 @@ def prove_runtime_contract() -> None:
     assert_true(os.environ.get("FRAME_COMPARE_RUNTIME_KIND") == "windows-portable", "runtime kind mismatch")
     assert_true(os.environ.get("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED") == "0", "Windows FFMS2 policy mismatch")
     assert_true(importlib.metadata.version("vs-placebo") == VS_PLACEBO_RELEASE, "vs-placebo distribution mismatch")
-    assert_true(importlib.metadata.version("vapoursynth-akarin") == AKARIN_RELEASE, "Akarin distribution mismatch")
-    assert_true(importlib.metadata.version("vapoursynth-vszip") == VSZIP_RELEASE, "VSZip distribution mismatch")
 
     bundle_root = Path(sys.executable).resolve().parent.parent
     bundled_ffmpeg_bin = os.path.normcase(os.path.normpath(str(bundle_root / "ffmpeg" / "bin")))
@@ -833,8 +945,6 @@ def prove_runtime_contract() -> None:
 def prove_vapoursynth_environment() -> None:
     import vapoursynth as vs
 
-    from frame_compare.vs.runtime_contract import AKARIN_WINDOWS_ZSTD_RELEASE
-
     core = vs.core
     version = getattr(vs, "__version__", None)
     api_version = getattr(vs, "__api_version__", None)
@@ -843,7 +953,6 @@ def prove_vapoursynth_environment() -> None:
     api_major = getattr(api_version, "api_major", None)
     api_minor = getattr(api_version, "api_minor", None)
     plugin_dir = Path(vs.get_plugin_dir())
-    extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
@@ -852,27 +961,22 @@ def prove_vapoursynth_environment() -> None:
     assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
     assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
-    assert_true(extra_plugin_path, "VAPOURSYNTH_EXTRA_PLUGIN_PATH is not set")
+    canonical_lsmas_plugin = plugin_dir / "LSMASHSource.dll"
+    assert_true(canonical_lsmas_plugin.is_file(), f"canonical L-SMASH plugin missing: {canonical_lsmas_plugin}")
+    assert_true(
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH" not in os.environ,
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH should not be set",
+    )
     assert_true("VAPOURSYNTH_PLUGIN_PATH" not in os.environ, "legacy VAPOURSYNTH_PLUGIN_PATH should not be set")
     assert_true("lsmas" in plugin_namespaces, f"lsmas plugin missing: {plugin_namespaces}")
     assert_true("placebo" in plugin_namespaces, f"placebo plugin missing: {plugin_namespaces}")
-    assert_true("akarin" in plugin_namespaces, f"Akarin plugin missing: {plugin_namespaces}")
-    assert_true("vszip" in plugin_namespaces, f"VSZip plugin missing: {plugin_namespaces}")
     assert_true("ffms2" not in plugin_namespaces, "FFMS2 must remain excluded from the Windows baseline")
-
-    akarin_functions = sorted(function.name for function in core.akarin.functions())
-    vszip_functions = sorted(function.name for function in core.vszip.functions())
-    assert_true(akarin_functions, "Akarin loaded without functions")
-    assert_true(vszip_functions, "VSZip loaded without functions")
 
     proof(f"vapoursynth_import=ok version=R{version_major} api={api_major}.{api_minor}")
     proof(f"plugin_dir={plugin_dir}")
-    proof(f"extra_plugin_path={extra_plugin_path}")
+    proof(f"canonical_lsmas_plugin=ok path={canonical_lsmas_plugin}")
+    proof("extra_plugin_path=absent")
     proof(f"core_plugins={','.join(plugin_namespaces)}")
-    proof(
-        f"bundled_native_plugins=ok akarin={','.join(akarin_functions)} "
-        f"zstd={AKARIN_WINDOWS_ZSTD_RELEASE} vszip={','.join(vszip_functions)}"
-    )
 
 
 def prove_lwlibavsource(media_path: Path) -> None:
@@ -894,7 +998,7 @@ def prove_lwlibavsource(media_path: Path) -> None:
     if media_path.is_file():
         source = load_source(media_path, core=core)
         frame = source.clip.get_frame(0)
-        assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+        assert_true(frame.width == 64 and frame.height == 64, "LWLibavSource frame render failed")
         assert_true(source.num_frames == 1, f"unexpected source frame count: {source.num_frames}")
         owned_index = source_index_path(media_path)
         assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
@@ -974,30 +1078,91 @@ def prove_apply_tonemap_frame() -> None:
     )
 
 
-def prove_qt_media_runtime(media_path: Path) -> None:
-    from frame_compare.vspreview.launcher import (
-        preload_vapoursynth_runtime,
-        prepare_vspreview_compatibility,
+def prove_bestsource_frame(media_path: Path) -> None:
+    import vapoursynth as vs
+
+    core = vs.core
+    assert_true(hasattr(core, "bs"), "core.bs namespace missing")
+    source = core.bs.VideoSource(source=str(media_path))
+    frame = source.get_frame(0)
+    assert_true(frame.width == 64 and frame.height == 64, "BestSource frame render failed")
+    proof("bestsource_frame=ok namespace=bs")
+
+
+def prove_generated_vsview_session(media_path: Path) -> None:
+    import vapoursynth as vs
+
+    from frame_compare.vsview.session_script import write_vsview_session_script
+    from vsview.api import get_outputs
+
+    cache_dir = media_path.parent / "runtime-smoke-cache"
+    script_path = write_vsview_session_script(
+        reference=media_path,
+        comparisons=[media_path],
+        suggested_offsets_by_key={f"{media_path.stem}:{media_path.stem}": 0},
+        cache_dir=cache_dir,
+        frame_props_by_stem={media_path.stem: {"_Matrix": 2, "_Range": 2}},
     )
+    script_text = script_path.read_text(encoding="utf-8")
+    assert_true(
+        "Color metadata incomplete; using standard display defaults (BT.709)" in script_text,
+        "generated VSView session omitted BT.709 preview defaults",
+    )
+    script_module = types.ModuleType("__vsview__")
+    script_module.__file__ = str(script_path)
+    sys.modules["__vsview__"] = script_module
+    try:
+        exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
+        outputs = get_outputs()
+        names = [output.name for output in outputs.values()]
+        assert_true(names == ["Reference", "Comparison 1"], f"unexpected VSView outputs: {names}")
+        assert_true(sorted(vs.get_outputs()) == [0, 1], "generated session did not register outputs 0 and 1")
+        for output in vs.get_outputs().values():
+            frame = output.clip.get_frame(0)
+            assert_true(frame.width == 64 and frame.height == 64, "generated VSView output failed")
+    finally:
+        sys.modules.pop("__vsview__", None)
+        vs.clear_outputs()
+    proof("generated_vsview_session=ok outputs=Reference,Comparison_1 color_defaults=BT709")
+
+
+def prove_vsview_runtime(media_path: Path) -> None:
+    from frame_compare.vsview.launcher import preload_vapoursynth_runtime
 
     preload_vapoursynth_runtime()
-    proof("qt_media_runtime_preload=ok")
+    proof("vsview_runtime_preload=ok")
 
-    import PyQt6  # noqa: F401
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
 
-    proof("pyqt6_import=ok")
+    app = QApplication.instance() or QApplication([])
+    QTimer.singleShot(0, app.quit)
+    assert_true(app.exec() == 0, "controlled Qt event loop failed")
+    proof("pyside6_event_loop=ok platform=offscreen")
 
-    prepare_vspreview_compatibility()
-    import vspreview.init  # noqa: F401
+    import vspackrgb.cython  # noqa: F401
+    import vsview  # noqa: F401
+    import vsview.main  # noqa: F401
+    import vsview_cli._cli  # noqa: F401
+    from vsview import set_output  # noqa: F401
 
-    proof("vspreview_pyqt6_compatibility=ok")
+    proof("vsview_deep_imports=ok modules=vsview.main,vsview_cli._cli,vspackrgb.cython")
+    site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
+    qt_ffmpeg_dlls = [site_packages / "PySide6" / name for name in ("avcodec-61.dll", "avformat-61.dll", "avutil-59.dll")]
+    assert_true(all(path.is_file() for path in qt_ffmpeg_dlls), f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}")
+    proof("qt_ffmpeg_runtime=ok lineage=7.1.5 dlls=avcodec-61,avformat-61,avutil-59")
+    prove_qt_webengine_excluded()
+    prove_vsview_distribution_contract()
     prove_runtime_contract()
     prove_vapoursynth_environment()
+    prove_bestsource_frame(media_path)
     prove_lwlibavsource(media_path)
+    prove_generated_vsview_session(media_path)
     prove_placebo_tonemap_api()
     prove_apply_tonemap_frame()
     prove_placebo_tonemap_frame()
-    proof("qt_media_runtime=ok")
+    proof("vsview_runtime=ok")
 
 
 phase = sys.argv[1]
@@ -1016,8 +1181,8 @@ elif phase == "apply_tonemap_frame":
     prove_apply_tonemap_frame()
 elif phase == "placebo_tonemap_frame":
     prove_placebo_tonemap_frame()
-elif phase == "qt_media_runtime":
-    prove_qt_media_runtime(media_path)
+elif phase == "vsview_runtime":
+    prove_vsview_runtime(media_path)
 else:
     raise AssertionError(f"unknown runtime proof phase: {phase}")
 '@
@@ -1029,13 +1194,23 @@ else:
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true
     Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true
-    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "qt_media_runtime" -MediaPath $mediaPath -Required $true
+    Invoke-BundleRuntimeProof -Python $python -SmokePath $smokePath -Phase "vsview_runtime" -MediaPath $mediaPath -Required $true
+    $sessionPaths = @(
+      Get-ChildItem -LiteralPath (Join-Path $BundleRoot "runtime-smoke-cache\vsview_sessions") -Filter "vsview_*.py" -File
+    )
+    if ($sessionPaths.Count -ne 1) {
+      throw "Expected exactly one generated VSView smoke session, found $($sessionPaths.Count)."
+    }
+    Invoke-VSViewOffscreenLaunchProof -Python $python -SessionPath $sessionPaths[0].FullName -BundleRoot $BundleRoot
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log") -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log") -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
     Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
       Remove-Item -Force -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-cache") -ErrorAction SilentlyContinue
     if ($locationPushed) {
       Pop-Location
     }
@@ -1074,10 +1249,6 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
     }
   }
 
-  $qtLicenses = Join-Path $SitePackages "PyQt6\\Qt6\\licenses"
-  if (Test-Path -LiteralPath $qtLicenses) {
-    Copy-Item -Recurse -Force -LiteralPath $qtLicenses -Destination (Join-Path $LicensesPythonDir "PyQt6-Qt-licenses")
-  }
 }
 
 function Remove-PythonBytecodeCaches([string]$BundleRoot) {
@@ -1137,12 +1308,7 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
     "FFmpeg source: https://ffmpeg.org/download.html",
     "VapourSynth source: https://github.com/vapoursynth/vapoursynth",
     "L-SMASH-Works source: https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works",
-    "vs-placebo source: https://github.com/Lypheo/vs-placebo",
-    "Akarin source: https://github.com/Jaded-Encoding-Thaumaturgy/akarin-vapoursynth-plugin",
-    "Akarin zstd source: https://github.com/facebook/zstd",
-    "VSZip source: https://github.com/dnjulek/vapoursynth-zip",
-    "vapoursynth-zig source: https://github.com/dnjulek/vapoursynth-zig",
-    "zigimg source: https://github.com/zigimg/zigimg"
+    "vs-placebo source: https://github.com/Lypheo/vs-placebo"
   )
   Set-Content -LiteralPath (Join-Path $licensesDir "SOURCE_URLS.txt") -Value ($sourceUrls -join "`r`n") -Encoding ASCII
 
@@ -1176,36 +1342,31 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   }
 }
 
-function Copy-RequiredQtLicenseDirectories([string]$BundleRoot) {
+function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
   $sitePackages = Join-Path $BundleRoot "app\\site-packages"
   $licensesDir = Join-Path $BundleRoot "licenses"
-  $required = @(
-    @{ Pattern = "pyqt6-*.dist-info"; Destination = "PyQt6" },
-    @{ Pattern = "pyqt6_qt6-*.dist-info"; Destination = "Qt" },
-    @{ Pattern = "pyqt6_sip-*.dist-info"; Destination = "PyQt6-sip" }
+  $requiredPatterns = @(
+    "pyside6-*.dist-info",
+    "pyside6_addons-*.dist-info",
+    "pyside6_essentials-*.dist-info",
+    "shiboken6-*.dist-info"
   )
 
-  foreach ($entry in $required) {
-    $licenseOwners = @(
-      Get-ChildItem -LiteralPath $sitePackages -Directory -Filter $entry.Pattern
-    )
-    if ($licenseOwners.Count -ne 1) {
-      throw "Expected exactly one $($entry.Pattern) license owner, found $($licenseOwners.Count)."
+  foreach ($pattern in $requiredPatterns) {
+    $owners = @(Get-ChildItem -LiteralPath $sitePackages -Directory -Filter $pattern)
+    if ($owners.Count -ne 1) {
+      throw "Expected exactly one $pattern license owner, found $($owners.Count)."
     }
-    $licenseCandidates = @(
-      @(
-        (Join-Path $licenseOwners[0].FullName "LICENSE"),
-        (Join-Path $licenseOwners[0].FullName "licenses\\LICENSE")
-      ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
-    )
-    if ($licenseCandidates.Count -ne 1) {
-      throw "Expected exactly one license file for $($entry.Pattern), found $($licenseCandidates.Count)."
+    $metadataPath = Join-Path $owners[0].FullName "METADATA"
+    $metadata = Get-Content -LiteralPath $metadataPath -Raw
+    if ($metadata -notmatch "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only") {
+      throw "Unexpected open-source license metadata for $pattern."
     }
-    $destination = Join-Path $licensesDir $entry.Destination
-    Ensure-Directory -Path $destination
-    Copy-Item -Force -LiteralPath $licenseCandidates[0] -Destination (
-      Join-Path $destination "LICENSE.txt"
-    )
+  }
+
+  $lgplNotices = @(Get-ChildItem -LiteralPath $licensesDir -File -Filter "*LGPL-3.0*.txt")
+  if ($lgplNotices.Count -lt 4) {
+    throw "Expected manifest-verified LGPL-3.0 notices for every PySide6 wheel."
   }
 }
 
@@ -1264,6 +1425,7 @@ function Main() {
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
   Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
+  Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir
   Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir
@@ -1282,7 +1444,7 @@ function Main() {
 
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
-  Copy-RequiredQtLicenseDirectories -BundleRoot $OutDir
+  Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
   Write-BundleInventory -BundleRoot $OutDir
 
   Write-Host "OK: portable bundle assembled at $OutDir"

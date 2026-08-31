@@ -25,7 +25,7 @@ from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
-CACHE_VERSION = "1"
+CACHE_VERSION = "2"
 CACHE_FILE_NAME = "alignment_reuse.toml"
 
 log = structlog.get_logger()
@@ -173,8 +173,8 @@ def _entry_origin(entry: dict[str, object]) -> AlignmentReuseCacheOrigin:
     origin = entry.get("origin")
     if origin == "computed":
         return "computed"
-    if origin == "vspreview_confirmed":
-        return "vspreview_confirmed"
+    if origin == "interactive_confirmed":
+        return "interactive_confirmed"
     raise ValueError("unsupported shared alignment cache origin")
 
 
@@ -473,8 +473,8 @@ def load_reusable_offset_entries(
 def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCacheOrigin | None:
     if provenance.provenance in {"computed_this_run", "shared_computed_offsets"}:
         return "computed"
-    if provenance.provenance == "vspreview_confirmed_this_run":
-        return "vspreview_confirmed"
+    if provenance.provenance == "interactive_confirmed_this_run":
+        return "interactive_confirmed"
     return None
 
 

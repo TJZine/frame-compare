@@ -150,8 +150,8 @@ def json_interactive_alignment_contract_errors(
         return []
 
     interactive_fields: list[tuple[str, str]] = []
-    if config.audio_alignment.use_vspreview:
-        interactive_fields.append(("audio_alignment", "use_vspreview"))
+    if config.audio_alignment.use_vsview:
+        interactive_fields.append(("audio_alignment", "use_vsview"))
     if config.audio_alignment.force_interactive:
         interactive_fields.append(("audio_alignment", "force_interactive"))
     if not interactive_fields:
@@ -314,7 +314,7 @@ def validation_error_message(failures: frozenset[RunContractFailure]) -> str:
 def validation_error_hint(failures: frozenset[RunContractFailure]) -> str:
     if RunContractFailure.JSON_INTERACTIVE_ALIGNMENT in failures:
         return (
-            "Disable audio_alignment.use_vspreview and "
+            "Disable audio_alignment.use_vsview and "
             "audio_alignment.force_interactive, or run without --json"
         )
     if RunContractFailure.PREVIOUS_OFFSETS in failures:

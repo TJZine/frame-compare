@@ -1,8 +1,14 @@
 # Windows portable
 
 The Windows portable bundle is the recommended Frame Compare distribution for Windows
-10/11 x64. It includes the supported Python and media runtime, VSPreview and PyQt6 for
-interactive alignment, the installer, and signed code-only update and rollback tooling.
+10/11 x64. It includes the supported Python and media runtime, VSView 0.10.3 with its
+PySide6 backend for interactive alignment, the installer, and signed code-only update
+and rollback tooling.
+
+The portable graph pins the base `vsview==0.10.3` package only; its upstream
+`recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
+VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
+through L-SMASH-Works and Frame Compare-owned indexes.
 
 ## Install from a published release
 
@@ -56,6 +62,11 @@ if ($actual -ne $expected) {
 
 The expected and actual hashes must match exactly. Delete and download both files again
 if verification fails; do not bypass the mismatch.
+
+The first VSView bundle transition is a complete-runtime migration. Reinstall the full
+portable ZIP rather than applying a code-only update to a bundle built with the retired
+viewer dependency graph. The updater must fail closed when the installed and update
+runtime fingerprints are missing, legacy, malformed, or different.
 
 Extract the ZIP, open the extracted bundle folder, and run:
 
@@ -159,7 +170,7 @@ Frame Compare has two Windows update boundaries:
 
 | Update type | Replaces | Use it when |
 | --- | --- | --- |
-| Complete portable ZIP | Application plus Python, FFmpeg, VapourSynth, plugins, manifests, and native license payloads | The release changes the media-runtime fingerprint or a clean reinstall is required |
+| Complete portable ZIP | Application plus Python, FFmpeg, VapourSynth, VSView/PySide6, plugins, manifests, and native license payloads | The release changes the media-runtime/dependency fingerprint or a clean reinstall is required |
 | Signed code-only ZIP | Application code and packaged Python project files only | The installed complete bundle already carries the exact required media-runtime fingerprint |
 
 Apply a code-only update:

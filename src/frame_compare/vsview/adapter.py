@@ -1,7 +1,7 @@
-"""VSPreview availability detection and launch orchestration wrapper.
+"""VSView availability detection and launch orchestration wrapper.
 
 This module provides the adapter between Frame Compare and the optional
-VSPreview application for interactive alignment verification. It handles
+VSView application for interactive alignment verification. It handles
 availability probing, launch command resolution, TTY constraints, and subprocess
 management.
 """
@@ -21,15 +21,14 @@ from pathlib import Path
 import structlog
 
 from frame_compare.vs.runtime_contract import runtime_kind
-from frame_compare.vspreview.errors import VSPreviewError, VSPreviewNotFoundError
-from frame_compare.vspreview.output import print_vspreview_session
-from frame_compare.vspreview.session_script import write_vspreview_session_script
+from frame_compare.vsview.errors import VSViewError, VSViewNotFoundError
+from frame_compare.vsview.output import print_vsview_session
+from frame_compare.vsview.session_script import write_vsview_session_script
 
 log = structlog.get_logger()
 
 _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
 _STARTUP_STDERR_LIMIT = 4000
-_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER = "ignore:Starting from R74:SyntaxWarning:vstools.enums.color"
 _MISSING_MODULE_PATTERN = re.compile(
     r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
 )
@@ -40,8 +39,8 @@ _SENSITIVE_ENV_KEY_PATTERN = re.compile(
 )
 
 
-class VSPreviewAvailabilityStatus(Enum):
-    """Status enum for VSPreview availability."""
+class VSViewAvailabilityStatus(Enum):
+    """Status enum for VSView availability."""
 
     AVAILABLE = "available"
     MISSING_EXEC_AND_MODULE = "missing_exec_and_module"
@@ -50,21 +49,21 @@ class VSPreviewAvailabilityStatus(Enum):
 
 
 @dataclass(frozen=True)
-class VSPreviewAvailability:
-    """Detailed report of VSPreview availability."""
+class VSViewAvailability:
+    """Detailed report of VSView availability."""
 
-    status: VSPreviewAvailabilityStatus
+    status: VSViewAvailabilityStatus
     message: str
     hint: str | None = None
     error_details: dict[str, str] | None = None
 
     @property
     def is_available(self) -> bool:
-        return self.status == VSPreviewAvailabilityStatus.AVAILABLE
+        return self.status == VSViewAvailabilityStatus.AVAILABLE
 
     def public_probe_failure_details(self) -> dict[str, str]:
         """Return a redacted probe-failure payload safe for public diagnostics."""
-        if self.status != VSPreviewAvailabilityStatus.PROBE_FAILED or not self.error_details:
+        if self.status != VSViewAvailabilityStatus.PROBE_FAILED or not self.error_details:
             return {}
 
         exception_type = self.error_details.get("exception_type")
@@ -90,59 +89,57 @@ class VSPreviewAvailability:
         return f"availability probe failed ({exception_type})"
 
 
-def check_vspreview_availability() -> VSPreviewAvailability:
-    """Check if VSPreview is available, returning a structured availability report.
+def check_vsview_availability() -> VSViewAvailability:
+    """Check if VSView is available, returning a structured availability report.
 
     Availability rules:
-        - Return AVAILABLE if `shutil.which("vspreview")` is non-None, OR
-        - `importlib.util.find_spec("vspreview")` is non-None AND
-          (`find_spec("PyQt6")` OR `find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
+        - Return AVAILABLE if `shutil.which("vsview")` is non-None, OR
+        - `importlib.util.find_spec("vsview")` is non-None AND
+        `find_spec("PySide6")` is non-None.
     """
     try:
-        # Priority 1: Check if vspreview executable exists in PATH
-        if shutil.which("vspreview") is not None:
-            return VSPreviewAvailability(
-                status=VSPreviewAvailabilityStatus.AVAILABLE,
-                message="VSPreview is available for interactive alignment",
+        # Priority 1: Check if vsview executable exists in PATH
+        if shutil.which("vsview") is not None:
+            return VSViewAvailability(
+                status=VSViewAvailabilityStatus.AVAILABLE,
+                message="VSView is available for interactive alignment",
             )
 
-        # Priority 2: Check if vspreview module is importable + Qt backend
-        vspreview_spec = importlib.util.find_spec("vspreview")
-        if vspreview_spec is None:
-            return VSPreviewAvailability(
-                status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
-                message="VSPreview not installed (optional for manual alignment)",
+        # Priority 2: Check if vsview module is importable + Qt backend
+        vsview_spec = importlib.util.find_spec("vsview")
+        if vsview_spec is None:
+            return VSViewAvailability(
+                status=VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+                message="VSView not installed (optional for manual alignment)",
                 hint=(
-                    "Provide VSPreview; see "
+                    "Provide VSView; see "
                     "https://tjzine.github.io/frame-compare/getting-started/native/"
                 ),
             )
 
-        # Need at least one Qt backend
-        pyqt6_spec = importlib.util.find_spec("PyQt6")
+        # VSView 0.10.x uses its documented PySide6 backend.
         pyside6_spec = importlib.util.find_spec("PySide6")
-        pyqt5_spec = importlib.util.find_spec("PyQt5")
 
-        if pyqt6_spec is not None or pyside6_spec is not None or pyqt5_spec is not None:
-            return VSPreviewAvailability(
-                status=VSPreviewAvailabilityStatus.AVAILABLE,
-                message="VSPreview is available for interactive alignment",
+        if pyside6_spec is not None:
+            return VSViewAvailability(
+                status=VSViewAvailabilityStatus.AVAILABLE,
+                message="VSView is available for interactive alignment",
             )
 
-        return VSPreviewAvailability(
-            status=VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
-            message="Qt backend missing for VSPreview (optional for manual alignment)",
+        return VSViewAvailability(
+            status=VSViewAvailabilityStatus.MISSING_QT_BACKEND,
+            message="Qt backend missing for VSView (optional for manual alignment)",
             hint=(
-                "Provide a supported Qt backend for VSPreview; see "
+                "Provide a supported Qt backend for VSView; see "
                 "https://tjzine.github.io/frame-compare/getting-started/native/"
             ),
         )
     except Exception as exc:
-        return VSPreviewAvailability(
-            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
-            message="VSPreview availability probe failed (optional for manual alignment)",
+        return VSViewAvailability(
+            status=VSViewAvailabilityStatus.PROBE_FAILED,
+            message="VSView availability probe failed (optional for manual alignment)",
             hint=(
-                "Check the optional VSPreview setup, then rerun doctor; see "
+                "Check the optional VSView setup, then rerun doctor; see "
                 "https://tjzine.github.io/frame-compare/getting-started/native/"
             ),
             error_details={
@@ -153,11 +150,11 @@ def check_vspreview_availability() -> VSPreviewAvailability:
 
 
 @dataclass(frozen=True)
-class VSPreviewConfig:
-    """Configuration for VSPreview integration.
+class VSViewConfig:
+    """Configuration for VSView integration.
 
     Attributes:
-        enabled: Whether to launch VSPreview for verification
+        enabled: Whether to launch VSView for verification
         no_color: Whether diagnostics should omit terminal color
         verbose: Whether to print launch diagnostics
     """
@@ -168,8 +165,8 @@ class VSPreviewConfig:
 
 
 @dataclass(frozen=True)
-class VSPreviewSessionRequest:
-    """Inputs needed to build an alignment VSPreview session."""
+class VSViewSessionRequest:
+    """Inputs needed to build an alignment VSView session."""
 
     reference: Path
     comparisons: list[Path]
@@ -180,50 +177,50 @@ class VSPreviewSessionRequest:
 
 
 def launch_alignment_verification_session(
-    request: VSPreviewSessionRequest,
-    config: VSPreviewConfig,
+    request: VSViewSessionRequest,
+    config: VSViewConfig,
 ) -> Path:
-    """Generate and optionally launch a VSPreview session script."""
-    script_path = _write_vspreview_session_script(request)
+    """Generate and optionally launch a VSView session script."""
+    script_path = _write_vsview_session_script(request)
 
     if not config.enabled:
         log.info(
-            "vspreview_script_generated",
+            "vsview_script_generated",
             script_path=str(script_path),
             enabled=False,
         )
         return script_path
 
-    availability = check_vspreview_availability()
+    availability = check_vsview_availability()
     if not availability.is_available:
-        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            raise VSPreviewError(availability.public_probe_failure_reason())
+        if availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
+            raise VSViewError(availability.public_probe_failure_reason())
         else:
-            raise VSPreviewNotFoundError()
+            raise VSViewNotFoundError()
 
     command = _resolve_launch_command(script_path)
 
     if config.verbose:
-        print_vspreview_session(
+        print_vsview_session(
             script_path=script_path,
             command=command,
             no_color=config.no_color,
         )
 
     try:
-        env = _build_vspreview_child_env(no_color=config.no_color)
+        env = _build_vsview_child_env(no_color=config.no_color)
         _check_startup_readiness(command, env=env)
-        returncode = _run_vspreview_command(command, env=env)
+        returncode = _run_vsview_command(command, env=env)
     except FileNotFoundError as e:
-        raise VSPreviewError("launcher command was not found") from e
-    except VSPreviewError:
+        raise VSViewError("launcher command was not found") from e
+    except VSViewError:
         raise
     except Exception as e:
-        raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
+        raise VSViewError(f"unexpected launch error ({type(e).__name__})") from e
 
     if returncode != 0:
         public_reason = f"launch exited with code {returncode}"
-        raise VSPreviewError(
+        raise VSViewError(
             public_reason,
             command=tuple(command),
             returncode=returncode,
@@ -232,15 +229,9 @@ def launch_alignment_verification_session(
     return script_path
 
 
-def _build_vspreview_child_env(*, no_color: bool) -> dict[str, str]:
-    """Build the child-only environment, preserving later user warning policy."""
+def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
+    """Build the child-only environment without changing the parent process."""
     env = os.environ.copy()
-    existing_filters = env.get("PYTHONWARNINGS")
-    env["PYTHONWARNINGS"] = (
-        f"{_VSTOOLS_COLOR_SYNTAX_WARNING_FILTER},{existing_filters}"
-        if existing_filters
-        else _VSTOOLS_COLOR_SYNTAX_WARNING_FILTER
-    )
     if no_color:
         env["NO_COLOR"] = "1"
     return env
@@ -250,13 +241,10 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
     """Probe imports once when the resolved launcher uses this interpreter."""
     if not command or Path(command[0]).resolve() != Path(sys.executable).resolve():
         return
-    probe_code = (
-        "from frame_compare.vspreview.launcher import prepare_vspreview_compatibility; "
-        "prepare_vspreview_compatibility(); import vspreview.init"
-    )
+    probe_code = "import PySide6; import vsview; from vsview import set_output"
     if runtime_kind().casefold() == "windows-portable":
         probe_code = (
-            "from frame_compare.vspreview.launcher import preload_vapoursynth_runtime; "
+            "from frame_compare.vsview.launcher import preload_vapoursynth_runtime; "
             f"preload_vapoursynth_runtime(); {probe_code}"
         )
     probe_command = [sys.executable, "-c", probe_code]
@@ -278,7 +266,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
             timeout_output = raw_timeout_output
         elif isinstance(raw_timeout_output, bytes):
             timeout_output = raw_timeout_output.decode("utf-8", errors="replace")
-        raise VSPreviewError(
+        raise VSViewError(
             "startup dependency check timed out",
             command=tuple(command),
             startup_stderr=(
@@ -288,7 +276,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
             ),
         ) from exc
     except OSError as exc:
-        raise VSPreviewError(
+        raise VSViewError(
             "startup dependency check could not run",
             command=tuple(command),
         ) from exc
@@ -300,9 +288,9 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
     public_reason = (
         f"Missing optional dependency: {missing_module}"
         if missing_module is not None
-        else "VSPreview failed its startup dependency check."
+        else "VSView failed its startup dependency check."
     )
-    raise VSPreviewError(
+    raise VSViewError(
         public_reason,
         missing_module=missing_module,
         command=tuple(command),
@@ -321,7 +309,7 @@ def _redact_inherited_secrets(text: str, env: dict[str, str]) -> str:
     return text
 
 
-def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
+def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
     # command is a list from _resolve_launch_command; shell=True is never used.
     with subprocess.Popen(  # nosec B603
         command,
@@ -333,8 +321,8 @@ def _run_vspreview_command(command: list[str], *, env: dict[str, str]) -> int:
         return process.wait()
 
 
-def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
-    return write_vspreview_session_script(
+def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
+    return write_vsview_session_script(
         reference=request.reference,
         comparisons=request.comparisons,
         suggested_offsets_by_key=request.suggested_offsets_by_key,
@@ -345,25 +333,24 @@ def _write_vspreview_session_script(request: VSPreviewSessionRequest) -> Path:
 
 
 def _resolve_launch_command(script_path: Path) -> list[str]:
-    """Resolve the launch command for VSPreview.
+    """Resolve the launch command for VSView.
 
-    The current interpreter uses Frame Compare's compatibility bootstrap. The
-    managed Windows runtime additionally preloads VapourSynth before Qt can
-    register its private native runtime. An external launcher remains the fallback
-    when VSPreview is not installed in the current interpreter.
+    The managed Windows runtime uses a small launcher that preloads VapourSynth
+    before Qt registers its private native runtime. An external executable remains
+    the fallback when VSView is not installed in the current interpreter.
     """
     if (
         runtime_kind().casefold() == "windows-portable"
-        or importlib.util.find_spec("vspreview") is not None
+        or importlib.util.find_spec("vsview") is not None
     ):
         return [
             sys.executable,
             "-m",
-            "frame_compare.vspreview.launcher",
+            "frame_compare.vsview.launcher",
             str(script_path),
         ]
 
-    vspreview_path = shutil.which("vspreview")
-    if vspreview_path is not None:
-        return [vspreview_path, str(script_path)]
-    return [sys.executable, "-m", "vspreview", str(script_path)]
+    vsview_path = shutil.which("vsview")
+    if vsview_path is not None:
+        return [vsview_path, str(script_path)]
+    return [sys.executable, "-m", "vsview", str(script_path)]

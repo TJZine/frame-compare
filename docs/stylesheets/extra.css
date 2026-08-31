@@ -1,77 +1,244 @@
-/*
- * Frame Compare documentation presentation layer.
- *
- * Keep this deliberately small and based on theme variables. Brand colors and the
- * permanent logo will be selected in a separate design pass.
- */
+/* Frame Compare documentation presentation layer. */
 
 :root {
-  --fc-radius: 0.65rem;
+  --fc-accent: #995000;
+  --fc-accent-text: #fff;
+  --fc-radius: 0.7rem;
   --fc-space: 1rem;
+  --fc-warm-surface: rgb(153 80 0 / 7%);
+}
+
+[data-md-color-scheme="slate"] {
+  --fc-accent: #ffb454;
+  --fc-accent-text: #17120c;
+  --fc-warm-surface: rgb(255 180 84 / 8%);
+}
+
+.md-typeset {
+  font-size: 0.84rem;
+  line-height: 1.72;
+}
+
+.md-typeset p > a:not(.md-button),
+.md-typeset li > a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentcolor 35%, transparent);
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.14em;
+}
+
+.md-typeset p > a:not(.md-button):hover,
+.md-typeset li > a:hover {
+  text-decoration-color: currentcolor;
+}
+
+.md-typeset .fc-home > h2 {
+  margin-top: clamp(2.8rem, 6vw, 4.5rem);
+  margin-bottom: 0.35rem;
+  font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+  letter-spacing: -0.02em;
+}
+
+.md-typeset .fc-section-intro {
+  max-width: 62ch;
+  margin-top: 0;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.95rem;
+}
+
+.md-content__inner:has(.fc-home) > .md-content__button {
+  display: none;
 }
 
 .md-typeset .fc-hero {
-  margin: 0 0 2rem;
-  padding: clamp(1.35rem, 3vw, 2.5rem);
-  border: 0.05rem solid var(--md-default-fg-color--lightest);
-  border-radius: var(--fc-radius);
-  background:
-    radial-gradient(circle at top right, var(--md-accent-fg-color--transparent, transparent), transparent 45%),
-    var(--md-code-bg-color);
+  display: grid;
+  grid-template-columns: minmax(20rem, 0.95fr) minmax(22rem, 1.2fr);
+  gap: clamp(1.5rem, 4vw, 3.2rem);
+  align-items: center;
+  margin: 0 0 clamp(3rem, 7vw, 5.5rem);
+  padding: clamp(0.5rem, 1.5vw, 1.25rem) 0 clamp(2.5rem, 5vw, 4rem);
+  border-bottom: 0.05rem solid var(--md-default-fg-color--lightest);
 }
 
 .md-typeset .fc-hero h1 {
-  max-width: 18ch;
-  margin-top: 0.2rem;
-  margin-bottom: 0.65rem;
-  font-size: clamp(2rem, 5vw, 3.4rem);
-  line-height: 1.05;
-  letter-spacing: -0.025em;
+  margin: 0.3rem 0 0.8rem;
+  font-size: clamp(2.5rem, 5vw, 3.7rem);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
 }
 
-.md-typeset .fc-hero > p:not(.fc-kicker) {
-  max-width: 70ch;
-  font-size: 1.05rem;
+.md-typeset .fc-hero h1 span {
+  display: block;
+  white-space: nowrap;
 }
 
-.md-typeset .fc-kicker {
+.md-typeset .fc-hero-copy > p:not(.fc-kicker) {
+  max-width: 54ch;
+  margin-bottom: 0;
+  color: var(--md-default-fg-color--light);
+  font-size: clamp(0.95rem, 1.6vw, 1.08rem);
+  line-height: 1.65;
+}
+
+.md-typeset .fc-kicker,
+.md-typeset .fc-card-label {
   margin: 0;
-  color: var(--md-accent-fg-color);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  color: var(--fc-accent);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
 }
 
 .md-typeset .fc-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-top: 1.25rem;
+  gap: 0.8rem 1rem;
+  align-items: center;
+  margin-top: 1.4rem;
+}
+
+.md-typeset .fc-actions .md-button--primary {
+  border-color: var(--fc-accent);
+  background: var(--fc-accent);
+  color: var(--fc-accent-text);
+}
+
+.md-typeset .fc-actions .md-button--primary:is(:hover, :focus-visible) {
+  border-color: var(--fc-accent);
+  background: var(--fc-accent);
+  color: var(--fc-accent-text);
+  filter: brightness(1.08);
+  transform: translateY(-0.08rem);
+}
+
+.md-typeset .fc-text-link,
+.md-typeset .fc-inline-cta {
+  font-weight: 650;
+  text-underline-offset: 0.18em;
+}
+
+.md-typeset .fc-text-link {
+  white-space: nowrap;
+}
+
+.md-typeset .fc-hero-visual {
+  position: relative;
+  margin: 0;
+}
+
+.md-typeset .fc-hero-visual::before {
+  position: absolute;
+  z-index: -1;
+  inset: 8% 0 -7% 12%;
+  border-radius: 50%;
+  background: var(--fc-warm-surface);
+  filter: blur(1.5rem);
+  content: "";
+}
+
+.md-typeset .fc-hero-visual img {
+  display: block;
+  width: 100%;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: calc(var(--fc-radius) + 0.15rem);
+  box-shadow: 0 1.2rem 3rem rgb(0 0 0 / 18%);
+}
+
+.md-typeset .fc-hero-visual figcaption {
+  margin-top: 0.65rem;
+  color: var(--md-default-fg-color--light);
+  font-size: 0.72rem;
+  text-align: right;
 }
 
 .md-typeset .fc-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
   gap: var(--fc-space);
-  margin: 1rem 0 1.5rem;
+  margin: 1.2rem 0 1rem;
+}
+
+.md-typeset .fc-route-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .md-typeset .fc-card {
   min-width: 0;
-  padding: 1rem 1.05rem;
-  border: 0.05rem solid var(--md-default-fg-color--lightest);
-  border-radius: var(--fc-radius);
-  background: var(--md-default-bg-color);
-  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 4%);
+  padding: 1.1rem 1.15rem 1.2rem;
+  border-top: 0.14rem solid var(--fc-accent);
+  border-radius: 0 0 var(--fc-radius) var(--fc-radius);
+  background: var(--fc-warm-surface);
 }
 
-.md-typeset .fc-card > :first-child {
-  margin-top: 0;
+.md-typeset .fc-card h3 {
+  margin: 0.35rem 0 0.45rem;
 }
 
 .md-typeset .fc-card > :last-child {
   margin-bottom: 0;
+}
+
+.md-typeset .fc-card a {
+  font-weight: 650;
+}
+
+.md-typeset .fc-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(1.25rem, 3vw, 2.4rem);
+  margin-top: 1.4rem;
+}
+
+.md-typeset .fc-capability-grid > div {
+  padding-left: 1rem;
+  border-left: 0.12rem solid var(--fc-accent);
+}
+
+.md-typeset .fc-capability-grid h3 {
+  margin: 0 0 0.35rem;
+}
+
+.md-typeset .fc-capability-grid p {
+  margin: 0;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset ol.fc-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(1.3rem, 3vw, 2.4rem);
+  margin: 1.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.md-typeset .fc-steps li {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 0.05rem solid var(--md-default-fg-color--lightest);
+}
+
+.md-typeset .fc-step-number {
+  color: var(--fc-accent);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.md-typeset .fc-steps h3 {
+  margin: 0.25rem 0 0.4rem;
+}
+
+.md-typeset .fc-steps p {
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .fc-answer-links ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 2rem;
+  margin-top: 1.2rem;
 }
 
 .md-typeset figure.fc-doc-figure {
@@ -93,18 +260,45 @@
   text-align: center;
 }
 
-
 .md-typeset kbd {
   white-space: nowrap;
 }
 
-@media screen and (max-width: 44.984375em) {
+@media screen and (max-width: 60rem) {
   .md-typeset .fc-hero {
-    padding: 1.2rem;
+    grid-template-columns: 1fr;
+  }
+
+  .md-typeset .fc-hero-copy {
+    max-width: 42rem;
+  }
+}
+
+@media screen and (max-width: 44.984375em) {
+  .md-typeset {
+    font-size: 0.82rem;
+  }
+
+  .md-typeset .fc-hero {
+    gap: 1.5rem;
+    padding-top: 1rem;
+  }
+
+  .md-typeset .fc-route-grid,
+  .md-typeset .fc-capability-grid,
+  .md-typeset ol.fc-steps,
+  .md-typeset .fc-answer-links ul {
+    grid-template-columns: 1fr;
   }
 
   .md-typeset .fc-actions .md-button {
     width: 100%;
     text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-typeset .fc-actions .md-button--primary {
+    transition: none;
   }
 }
