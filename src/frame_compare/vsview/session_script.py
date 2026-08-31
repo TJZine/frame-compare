@@ -15,6 +15,16 @@ from pathlib import Path
 
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER, source_index_path
+from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+    ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+    ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
+    ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+    ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+    ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+    ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    ALIGNMENT_REVIEW_SCHEMA_VERSION,
+)
 
 
 def write_vsview_session_script(
@@ -349,27 +359,37 @@ def _build_clip_data_section(
     presentation_names = presentation_names_by_stem or {}
     targets_lines: list[str] = []
     for comp in comparisons:
+        comparison_key = f"{reference.stem}:{comp.stem}"
+        suggested_offset = suggested_offsets_by_key.get(comparison_key)
+        suggested_offset_value = "None" if suggested_offset is None else str(suggested_offset)
         targets_lines.append(
             f"    {json.dumps(comp.stem)}: {{"
             f'"path": {json.dumps(str(comp))}, '
             f'"index_path": {json.dumps(str(source_index_path(comp)))}, '
-            f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}'
+            f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}, '
+            f'"comparison_key": {json.dumps(comparison_key)}, '
+            f'"suggested_offset": {suggested_offset_value}'
             "},"
         )
 
-    offset_lines: list[str] = []
-    for key in sorted(suggested_offsets_by_key.keys()):
-        offset = suggested_offsets_by_key[key]
-        offset_value = "None" if offset is None else str(int(offset))
-        offset_lines.append(f"    {json.dumps(key)}: {offset_value},")
-
     targets_content = "\n".join(targets_lines)
-    offset_content = "\n".join(offset_lines)
     frame_props_content = json.dumps(
         _preview_frame_props_for_script(frame_props_by_stem),
         sort_keys=True,
         indent=4,
         allow_nan=False,
+    )
+    metadata_keys_content = json.dumps(
+        {
+            "version": ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+            "session_id": ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+            "alignment_key": ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+            "ordinal": ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
+            "role": ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+            "name": ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+            "suggested_offset": ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+        },
+        sort_keys=True,
     )
 
     return f"""\
@@ -385,12 +405,9 @@ TARGETS = {{
 {targets_content}
 }}
 
-# Suggested offsets keyed by "{{ref_stem}}:{{comp_stem}}"
-suggested_offsets_by_key = {{
-{offset_content}
-}}
-
 FRAME_PROPS_BY_LABEL = {frame_props_content}
+REVIEW_SCHEMA_VERSION = {ALIGNMENT_REVIEW_SCHEMA_VERSION}
+REVIEW_METADATA_KEYS = {metadata_keys_content}
 """
 
 
@@ -417,6 +434,18 @@ def _preview_frame_props_for_script(
 def _build_main_execution_section() -> str:
     return """\
 # ─── Main ─────────────────────────────────────────────────────────────────────
+def _review_metadata(session_id, target, comparison_number, role, presentation_name):
+    return {
+        REVIEW_METADATA_KEYS["version"]: REVIEW_SCHEMA_VERSION,
+        REVIEW_METADATA_KEYS["session_id"]: session_id,
+        REVIEW_METADATA_KEYS["alignment_key"]: target["comparison_key"],
+        REVIEW_METADATA_KEYS["ordinal"]: comparison_number,
+        REVIEW_METADATA_KEYS["role"]: role,
+        REVIEW_METADATA_KEYS["name"]: presentation_name,
+        REVIEW_METADATA_KEYS["suggested_offset"]: target["suggested_offset"],
+    }
+
+
 def main():
     try:
         import vapoursynth as vs
@@ -477,7 +506,7 @@ def main():
     except Exception:
         safe_print(_status_line("[WARN]", "Could not apply reference text overlay"))
 
-    loaded_comparison_count = 0
+    prepared_outputs = []
 
     for comparison_number, (label, target) in enumerate(TARGETS.items(), start=1):
         comp_path = Path(target["path"])
@@ -485,8 +514,8 @@ def main():
         safe_print("")
         safe_print(f"    {_key(f'comparison {comparison_number}')}  {_value(display_name)}")
         if not comp_path.exists():
-            safe_print(_status_line("[WARN]", f"Comparison source not found: {comp_path}"))
-            continue
+            safe_print(_status_line("[FAIL]", f"Comparison source not found: {comp_path}"))
+            sys.exit(1)
 
         try:
             comp_clip = load_preview_source(
@@ -496,8 +525,8 @@ def main():
                 display_name,
             )
         except Exception as e:
-            safe_print(_status_line("[WARN]", f"Comparison source could not be loaded: {e}"))
-            continue
+            safe_print(_status_line("[FAIL]", f"Comparison source could not be loaded: {e}"))
+            sys.exit(1)
 
         comp_assumption = collect_preview_assumption(label, display_name)
         if comp_assumption is not None:
@@ -507,8 +536,7 @@ def main():
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
         comp_clip = apply_preview_defaults(core, comp_clip, label)
 
-        key = f"{REFERENCE['label']}:{label}"
-        suggested_offset = suggested_offsets_by_key.get(key)
+        suggested_offset = target["suggested_offset"]
         if suggested_offset is None:
             audio_hint = "no trusted audio hint"
             hint_pair = "Suggested match: unavailable"
@@ -540,19 +568,68 @@ def main():
             safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
 
         safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
-        reference_output = loaded_comparison_count * 2
+        reference_output = (comparison_number - 1) * 2
         comparison_output = reference_output + 1
-        set_output(ref_clip, reference_output, "Reference")
-        set_output(comp_clip, comparison_output, f"Comparison {comparison_number}")
+        prepared_outputs.append(
+            (comparison_number, target, ref_clip, comp_clip, reference_output, comparison_output)
+        )
+
+    if len(prepared_outputs) != len(TARGETS) or not prepared_outputs:
+        safe_print(_status_line("[FAIL]", "Alignment review requires every comparison"))
+        sys.exit(1)
+
+    session_id = Path(__file__).stem.rpartition("_")[2]
+    try:
+        for (
+            comparison_number,
+            target,
+            reference_clip,
+            comparison_clip,
+            reference_output,
+            comparison_output,
+        ) in prepared_outputs:
+            set_output(
+                reference_clip,
+                reference_output,
+                "Reference",
+                **_review_metadata(
+                    session_id,
+                    target,
+                    comparison_number,
+                    "reference",
+                    REFERENCE["display_name"],
+                ),
+            )
+            set_output(
+                comparison_clip,
+                comparison_output,
+                f"Comparison {comparison_number}",
+                **_review_metadata(
+                    session_id,
+                    target,
+                    comparison_number,
+                    "comparison",
+                    target["display_name"],
+                ),
+            )
+    except Exception as e:
+        safe_print(
+            _status_line("[FAIL]", f"Alignment review outputs could not be registered: {e}")
+        )
+        sys.exit(1)
+
+    for (
+        comparison_number,
+        _target,
+        _reference_clip,
+        _comparison_clip,
+        reference_output,
+        comparison_output,
+    ) in prepared_outputs:
         safe_print(
             f"    {_key('outputs')}       "
             f"Reference {reference_output} | Comparison {comparison_number} {comparison_output}"
         )
-        loaded_comparison_count += 1
-
-    if loaded_comparison_count == 0:
-        safe_print(_status_line("[FAIL]", "No comparison clips loaded successfully"))
-        sys.exit(1)
 
     if preview_assumptions:
         safe_print("\\n" + _status_line("[WARN]", "VSView Display Assumptions"))
@@ -570,7 +647,8 @@ def main():
             )
 
     safe_print("\\n" + _status_line("[OK]", "VSView Ready"))
-    safe_print("    Inspect the untrimmed clips in VSView, then return here to confirm frames.")
+    safe_print("    Open Frame Compare Alignment Review from VSView's Tool Panel control.")
+    safe_print("    Finish the review in VSView, then close VSView to continue Frame Compare.")
 
 main()
 """

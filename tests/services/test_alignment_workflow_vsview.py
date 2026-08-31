@@ -1,620 +1,207 @@
-"""Audio alignment workflow VSView orchestration tests."""
+"""Audio-alignment workflow integration with native VSView review results."""
 
-import io
+from __future__ import annotations
+
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
+import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
-from frame_compare.services.alignment_manual_overrides import (
-    ManualOverride,
-    load_manual_overrides,
-    save_manual_override,
-)
+from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.vsview.adapter import (
-    VSViewAvailability,
-    VSViewAvailabilityStatus,
-    VSViewSessionRequest,
+from frame_compare.services.types import AlignmentConfig
+from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
+from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewResult,
+    ConfirmedAlignmentReviewDecision,
+    KeepCurrentAlignmentReviewDecision,
+    alignment_review_session_from_script,
+    write_alignment_review_result,
 )
-from frame_compare.vsview.errors import VSViewError
 from tests.services.alignment_request_test_support import alignment_request
 
+_SESSION_ID = "12345678123456781234567812345678"
 
-def _run_alignment(
-    reference: Path,
-    comparisons: list[Path],
-    config: AlignmentConfig,
-    generated_dir: Path,
-    *,
-    reference_fps: Fraction | None = None,
-) -> list[AlignmentResult]:
-    request = alignment_request(
-        reference=reference,
-        comparisons=comparisons,
-        config=config,
-        generated_dir=generated_dir,
+
+def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int = 1000) -> None:
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._probe_fps", lambda _path: Fraction(24, 1)
     )
-    return align_clips_from_request(
-        request,
-        config,
-        reference_fps=reference_fps,
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._extract_reference_audio",
+        lambda *_args, **_kwargs: (np.ones(10, dtype=np.float32), object()),
     )
-
-
-def _write_manual_override_offset(
-    workspace: Path,
-    *,
-    reference: Path,
-    comparison: Path,
-    frame_offset: int,
-) -> None:
-    save_manual_override(
-        workspace,
-        ManualOverride(
-            reference_clip=reference.stem,
-            comparison_clip=comparison.stem,
-            frame_offset=frame_offset,
-            timestamp="2026-06-07T00:00:00Z",
-            confirmed=True,
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._extract_matching_audio",
+        lambda *_args, **_kwargs: np.ones(10, dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_consensus_offset",
+        lambda *_args, **_kwargs: AlignmentConsensus(
+            offset, 0.99, True, "accepted", 1, 1, 1.0, 2.0
         ),
     )
-
-
-def _set_interactive_terminal(monkeypatch: pytest.MonkeyPatch, user_input: str) -> None:
-    import sys
-
-    monkeypatch.setattr(sys, "stdin", io.StringIO(user_input))
     monkeypatch.setattr(
-        "frame_compare.services.alignment_vsview._current_tty_status",
+        alignment_vsview,
+        "check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        alignment_vsview,
+        "_current_tty_status",
         lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
     )
 
 
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_alignment_launches_vsview_when_enabled(
-    mock_estimate: MagicMock,
-    mock_extract_reference: MagicMock,
-    mock_extract_matching: MagicMock,
-    mock_probe: MagicMock,
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """When configured, alignment should generate/launch a VSView verification session."""
-    _set_interactive_terminal(monkeypatch, "skip\n")
+def _session(tmp_path: Path):
+    sessions_dir = tmp_path / "vsview_sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    script = sessions_dir / f"vsview_ref_20260831T000000Z_{_SESSION_ID}.py"
+    script.write_text("# generated\n", encoding="utf-8")
+    return alignment_review_session_from_script(script, require_result_absent=True)
 
-    ref = tmp_path / "ref.mkv"
-    comp_a = tmp_path / "comp_a.mkv"
-    comp_b = tmp_path / "comp_b.mkv"
-    ref.touch()
-    comp_a.touch()
-    comp_b.touch()
 
-    mock_probe.return_value = Fraction(24, 1)
-    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
-    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, 2.0)
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
+def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentConfig):
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    _configure_computed_alignment(monkeypatch)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
     )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=False)
-    _run_alignment(ref, [comp_a, comp_b], config, tmp_path)
-
-    assert mock_launch.call_count == 1
-    _, kwargs = mock_launch.call_args
-    request = kwargs["request"]
-    assert isinstance(request, VSViewSessionRequest)
-    assert request.reference == ref
-    assert request.comparisons == [comp_a, comp_b]
-    suggested = request.suggested_offsets_by_key
-    assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
-    assert kwargs["config"].enabled is True
+    return align_clips_from_request(request, config)
 
 
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_alignment_rejected_computed_result_passes_none_hint_to_vsview(
-    mock_estimate: MagicMock,
-    mock_extract_reference: MagicMock,
-    mock_extract_matching: MagicMock,
-    mock_probe: MagicMock,
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_confirmed_native_pair_replaces_computed_offset_and_persists_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _set_interactive_terminal(monkeypatch, "skip\n")
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(
+                    ConfirmedAlignmentReviewDecision(
+                        comparison_key="ref:comparison",
+                        reference_source_frame=80,
+                        comparison_source_frame=68,
+                    ),
+                ),
+            ),
+        )
+        return session
 
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    mock_probe.return_value = Fraction(24, 1)
-    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
-    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_estimate.return_value = AlignmentConsensus(
-        None,
-        0.2,
-        False,
-        "low_confidence",
-        1,
-        1,
-        1.0,
-        1.0,
-    )
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    results = _run_alignment(
-        ref,
-        [comp],
-        AlignmentConfig(enable=True, use_vsview=True, cache_results=False),
+    results = _run(
         tmp_path,
+        monkeypatch,
+        config=AlignmentConfig(use_vsview=True, cache_results=False),
     )
 
-    assert len(results) == 1
-    assert results[0].applied is False
-    assert results[0].frame_offset is None
-    assert mock_launch.call_count == 1
-    _, kwargs = mock_launch.call_args
-    request = kwargs["request"]
-    assert isinstance(request, VSViewSessionRequest)
-    assert request.suggested_offsets_by_key == {"ref:comp": None}
-    assert kwargs["config"].enabled is True
-
-
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-def test_alignment_full_manual_override_still_launches_vsview_when_enabled(
-    mock_extract_reference: MagicMock,
-    mock_extract_matching: MagicMock,
-    mock_probe: MagicMock,
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Manual-only runs should still build/launch VSView verification."""
-    _set_interactive_terminal(monkeypatch, "skip\n")
-
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
-        tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=12,
-    )
-
-    mock_probe.side_effect = AssertionError("should not be called")
-    mock_extract_reference.side_effect = AssertionError("should not be called")
-    mock_extract_matching.side_effect = AssertionError("should not be called")
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
-    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    assert len(results) == 1
     assert results[0].frame_offset == 12
-    assert mock_launch.call_count == 1
-    _, kwargs = mock_launch.call_args
-    request = kwargs["request"]
-    assert isinstance(request, VSViewSessionRequest)
-    assert request.suggested_offsets_by_key == {"ref:comp": 12}
-    assert kwargs["config"].enabled is True
-
-
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_force_interactive_raises_when_vsview_unavailable(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-) -> None:
-    """Force-interactive mode must fail fast if VSView is unavailable."""
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
-        tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=2,
-    )
-
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
-        message="missing",
-    )
-
-    config = AlignmentConfig(
-        enable=True,
-        use_vsview=True,
-        force_interactive=True,
-        cache_results=True,
-    )
-    with pytest.raises(AudioAlignmentError, match="Interactive alignment requested"):
-        _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    mock_launch.assert_not_called()
-
-
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_vsview_unavailable_generates_script_without_launch(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-) -> None:
-    """When optional VSView is unavailable, adapter should be called with enabled=False."""
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
-        tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=7,
-    )
-
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
-        message="missing",
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
-    _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    assert mock_launch.call_count == 1
-    _, kwargs = mock_launch.call_args
-    assert kwargs["config"].enabled is False
-
-
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
-@pytest.mark.parametrize(
-    ("user_input", "expected_offset"),
-    [
-        ("120 108\n", 12),
-        ("108 120\n", -12),
-    ],
-)
-def test_alignment_interactive_confirmed_offset_is_saved_and_applied(
-    mock_estimate: MagicMock,
-    mock_extract_reference: MagicMock,
-    mock_extract_matching: MagicMock,
-    mock_probe: MagicMock,
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    user_input: str,
-    expected_offset: int,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_interactive_terminal(monkeypatch, user_input)
-
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-
-    mock_probe.return_value = Fraction(24, 1)
-    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
-    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_estimate.return_value = AlignmentConsensus(3, 0.99, True, "accepted", 1, 1, 1.0, 2.0)
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    results = _run_alignment(
-        ref,
-        [comp],
-        AlignmentConfig(enable=True, use_vsview=True, cache_results=False),
-        tmp_path,
-    )
-
-    assert results[0].frame_offset == expected_offset
     assert results[0].source == "manual"
-    manual_overrides = load_manual_overrides(tmp_path)
-    assert manual_overrides["ref:comp"].frame_offset == expected_offset
+    assert load_manual_overrides(tmp_path)["ref:comparison"].frame_offset == 12
 
 
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
-def test_alignment_vsview_confirm_skip_confirm_keeps_prior_and_later_offsets(
-    mock_estimate: MagicMock,
-    mock_extract_reference: MagicMock,
-    mock_extract_matching: MagicMock,
-    mock_probe: MagicMock,
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_keep_current_native_decision_retains_computed_offset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _set_interactive_terminal(monkeypatch, "120 108\nskip\n210 216\n")
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
+            ),
+        )
+        return session
 
-    ref = tmp_path / "ref.mkv"
-    zeta = tmp_path / "zeta.mkv"
-    alpha = tmp_path / "alpha.mkv"
-    mid = tmp_path / "mid.mkv"
-    for path in (ref, zeta, alpha, mid):
-        path.touch()
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    mock_probe.return_value = Fraction(24, 1)
-    mock_extract_reference.return_value = (np.ones(10, dtype=np.float32), object())
-    mock_extract_matching.return_value = np.ones(10, dtype=np.float32)
-    mock_estimate.side_effect = [
-        AlignmentConsensus(4, 0.99, True, "accepted", 1, 1, 1.0, 2.0),
-        AlignmentConsensus(2667, 0.98, True, "accepted", 1, 1, 1.0, 2.0),
-        AlignmentConsensus(-2, 0.97, True, "accepted", 1, 1, 1.0, 2.0),
-    ]
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    results = _run_alignment(
-        ref,
-        [zeta, alpha, mid],
-        AlignmentConfig(enable=True, use_vsview=True, cache_results=False),
+    results = _run(
         tmp_path,
+        monkeypatch,
+        config=AlignmentConfig(use_vsview=True, cache_results=False),
     )
 
-    assert [result.comparison_clip for result in results] == ["zeta.mkv", "alpha.mkv", "mid.mkv"]
-    assert [result.frame_offset for result in results] == [12, 8, -6]
-    assert [result.source for result in results] == ["manual", "computed", "manual"]
-    manual_overrides = load_manual_overrides(tmp_path)
-    assert set(manual_overrides) == {"ref:zeta", "ref:mid"}
-    assert manual_overrides["ref:zeta"].frame_offset == 12
-    assert manual_overrides["ref:mid"].frame_offset == -6
-
-
-@patch("frame_compare.services.alignment_vsview.log.warning")
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_optional_vsview_probe_failure_generates_script_without_launch(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    mock_warn: MagicMock,
-    tmp_path: Path,
-) -> None:
-    """Optional VSView probe failures should be visible but non-fatal."""
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
-        tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=7,
-    )
-
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.PROBE_FAILED,
-        message="VSView availability probe failed",
-        error_details={"exception_type": "RuntimeError", "exception": "broken import metadata"},
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
-    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    assert len(results) == 1
-    assert results[0].frame_offset == 7
-    mock_warn.assert_called_once()
-    warn_args, warn_kwargs = mock_warn.call_args
-    assert warn_args == ("vsview_availability_probe_failed",)
-    assert warn_kwargs["reason"] == "availability probe failed (RuntimeError)"
-    assert warn_kwargs["exception_type"] == "RuntimeError"
-    mock_launch.assert_called_once()
-    _, launch_kwargs = mock_launch.call_args
-    assert launch_kwargs["config"].enabled is False
-
-
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_force_interactive_launches_when_vsview_available(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Force-interactive mode should launch VSView when available."""
-    _set_interactive_terminal(monkeypatch, "skip\n")
-
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
-        tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=3,
-    )
-
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.return_value = tmp_path / "vsview_script.py"
-
-    config = AlignmentConfig(
-        enable=True,
-        use_vsview=False,
-        force_interactive=True,
-        cache_results=True,
-    )
-    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    assert len(results) == 1
     assert results[0].frame_offset == 3
-    assert mock_launch.call_count == 1
-    _, kwargs = mock_launch.call_args
-    assert kwargs["config"].enabled is True
+    assert results[0].source == "computed"
+    assert load_manual_overrides(tmp_path) == {}
 
 
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_force_interactive_probe_failure_raises_alignment_error(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
+def test_optional_missing_result_retains_computed_offset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Forced interactive mode should fail deliberately when availability cannot be checked."""
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
+    monkeypatch.setattr(
+        alignment_vsview,
+        "launch_alignment_verification_session",
+        lambda *_args, **_kwargs: _session(tmp_path),
+    )
+
+    results = _run(
         tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=3,
+        monkeypatch,
+        config=AlignmentConfig(use_vsview=True, cache_results=False),
     )
 
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.PROBE_FAILED,
-        message="VSView availability probe failed",
-        error_details={"exception_type": "RuntimeError", "exception": "broken import metadata"},
-    )
-
-    config = AlignmentConfig(
-        enable=True,
-        use_vsview=False,
-        force_interactive=True,
-        cache_results=True,
-    )
-    with pytest.raises(AudioAlignmentError, match=r"availability probe failed \(RuntimeError\)"):
-        _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    mock_launch.assert_not_called()
+    assert results[0].frame_offset == 3
+    assert results[0].source == "computed"
 
 
-@patch("frame_compare.services.alignment_vsview.log.warning")
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_vsview_errors_are_warning_only_when_not_forced(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    mock_warn: MagicMock,
-    tmp_path: Path,
+def test_forced_missing_result_stops_alignment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Adapter launch failures are warning-only for optional VSView mode."""
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
-        tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=1,
+    monkeypatch.setattr(
+        alignment_vsview,
+        "launch_alignment_verification_session",
+        lambda *_args, **_kwargs: _session(tmp_path),
     )
 
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.side_effect = VSViewError("launch exited with code 7")
-
-    config = AlignmentConfig(enable=True, use_vsview=True, cache_results=True)
-    results = _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
-
-    assert len(results) == 1
-    assert results[0].frame_offset == 1
-    mock_warn.assert_called_once()
-    _, kwargs = mock_warn.call_args
-    assert kwargs["reason"] == "VSView failed: launch exited with code 7"
-    assert kwargs["code"] == "FC-4019"
-    assert kwargs["force_interactive"] is False
+    with pytest.raises(AudioAlignmentError, match="did not return a valid VSView review result"):
+        _run(
+            tmp_path,
+            monkeypatch,
+            config=AlignmentConfig(
+                use_vsview=True,
+                force_interactive=True,
+                cache_results=False,
+            ),
+        )
 
 
-@patch("frame_compare.services.alignment_vsview.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment_vsview.check_vsview_availability")
-def test_alignment_vsview_errors_raise_when_force_interactive(
-    mock_check_availability: MagicMock,
-    mock_launch: MagicMock,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_alignment_passes_complete_native_session_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Adapter launch failures should fail-fast in force-interactive mode."""
-    import sys
+    launch = MagicMock(side_effect=lambda *_args, **_kwargs: _session(tmp_path))
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
-
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    _write_manual_override_offset(
+    _run(
         tmp_path,
-        reference=ref,
-        comparison=comp,
-        frame_offset=1,
+        monkeypatch,
+        config=AlignmentConfig(use_vsview=True, cache_results=False),
     )
 
-    mock_check_availability.return_value = VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
-    )
-    mock_launch.side_effect = VSViewError("launch exited with code 7")
-
-    config = AlignmentConfig(
-        enable=True,
-        use_vsview=False,
-        force_interactive=True,
-        cache_results=True,
-    )
-    with pytest.raises(VSViewError, match="launch exited with code 7"):
-        _run_alignment(ref, [comp], config, tmp_path, reference_fps=Fraction(24, 1))
+    request = launch.call_args.kwargs["request"]
+    assert request.reference == tmp_path / "ref.mkv"
+    assert request.comparisons == [tmp_path / "comparison.mkv"]
+    assert request.suggested_offsets_by_key == {"ref:comparison": 3}
+    assert request.presentation_names_by_stem == {
+        "ref": "ref",
+        "comparison": "comparison",
+    }

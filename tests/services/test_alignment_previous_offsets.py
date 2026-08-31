@@ -229,10 +229,12 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
     assert launch.call_args.kwargs["offsets_by_key"] == {
         "raw-reference-stem:raw-comparison-stem": 0
     }
-    assert launch.call_args.kwargs["presentation_names_by_stem"] == {
-        "raw-reference-stem": "PMTP WEB-DL | DV HDR10+ | Kitsune",
-        "raw-comparison-stem": "ATV WEB-DL | DV HDR10+ | Kitsune",
-    }
+    assert launch.call_args.kwargs["reference"].presentation_name == (
+        "PMTP WEB-DL | DV HDR10+ | Kitsune"
+    )
+    assert [clip.presentation_name for clip in launch.call_args.kwargs["comparisons"]] == [
+        "ATV WEB-DL | DV HDR10+ | Kitsune"
+    ]
     assert results[0].reference_clip == reference.name
     assert results[0].comparison_clip == comparison.name
 

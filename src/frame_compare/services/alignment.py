@@ -453,22 +453,13 @@ def align_clips_from_request(
         results_map=results_map,
     )
     confirmed_offsets = maybe_launch_alignment_vsview(
-        reference=reference,
-        comparisons=comparisons,
+        reference=request.reference,
+        comparisons=request.comparisons,
         offsets_by_key=offsets_by_key,
         cache_dir=request.generated_dir,
         config=config,
         progress=progress,
         frame_props_by_stem=frame_props_by_stem,
-        presentation_names_by_stem={
-            request.reference.path.stem: (
-                request.reference.presentation_name or request.reference.path.stem
-            ),
-            **{
-                comparison.path.stem: (comparison.presentation_name or comparison.path.stem)
-                for comparison in request.comparisons
-            },
-        },
         verbose=verbose,
     )
     fps_reference = _apply_confirmed_vsview_offsets(

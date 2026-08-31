@@ -22,6 +22,7 @@ from frame_compare.vsview.adapter import (
     _build_vsview_child_env,
     _check_startup_readiness,
     _resolve_launch_command,
+    _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
@@ -44,7 +45,8 @@ class _FakeVSViewProcess:
     def __exit__(self, *_exc_info: object) -> None:
         return None
 
-    def wait(self) -> int:
+    def wait(self, *, timeout: float) -> int:
+        assert timeout > 0
         return self.returncode
 
 
@@ -70,18 +72,18 @@ def test_child_environment_isolated_and_preserves_warning_policy(
 
 
 @pytest.mark.parametrize(
-    ("executable", "modules", "expected"),
+    ("modules", "has_plugin", "expected"),
     [
-        ("/usr/bin/vsview", frozenset(), VSViewAvailabilityStatus.AVAILABLE),
-        (None, frozenset({"vsview", "PySide6"}), VSViewAvailabilityStatus.AVAILABLE),
-        (None, frozenset({"vsview"}), VSViewAvailabilityStatus.MISSING_QT_BACKEND),
-        (None, frozenset(), VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE),
+        (frozenset({"vsview", "PySide6"}), True, VSViewAvailabilityStatus.AVAILABLE),
+        (frozenset({"vsview", "PySide6"}), False, VSViewAvailabilityStatus.MISSING_PLUGIN),
+        (frozenset({"vsview"}), True, VSViewAvailabilityStatus.MISSING_RUNTIME),
+        (frozenset(), True, VSViewAvailabilityStatus.MISSING_RUNTIME),
     ],
 )
-def test_check_vsview_availability_uses_only_documented_backend(
+def test_check_vsview_availability_requires_same_environment_panel(
     monkeypatch: pytest.MonkeyPatch,
-    executable: str | None,
     modules: frozenset[str],
+    has_plugin: bool,
     expected: VSViewAvailabilityStatus,
 ) -> None:
     calls: list[str] = []
@@ -90,21 +92,26 @@ def test_check_vsview_availability_uses_only_documented_backend(
         calls.append(name)
         return object() if name in modules else None
 
-    monkeypatch.setattr("frame_compare.vsview.adapter.shutil.which", lambda _: executable)
     monkeypatch.setattr("frame_compare.vsview.adapter.importlib.util.find_spec", fake_find_spec)
+    entry_point = SimpleNamespace(
+        name="frame-compare-alignment-review",
+        value="frame_compare.vsview.alignment_review_panel",
+    )
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.importlib.metadata.entry_points",
+        lambda **_kwargs: [entry_point] if has_plugin else [],
+    )
 
     result = check_vsview_availability()
 
     assert result.status is expected
     assert result.is_available is (expected is VSViewAvailabilityStatus.AVAILABLE)
-    if executable is None and "PySide6" in modules:
-        assert calls == ["vsview", "PySide6"]
+    assert calls == ["vsview", "PySide6"]
 
 
 def test_check_vsview_availability_redacts_probe_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("frame_compare.vsview.adapter.shutil.which", lambda _: None)
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.importlib.util.find_spec",
         MagicMock(side_effect=ValueError("private details")),
@@ -131,7 +138,29 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     assert "import PySide6" in probe_code
     assert "import vsview" in probe_code
     assert "from vsview import set_output" in probe_code
+    assert "frame-compare-alignment-review" in probe_code
+    assert "eps[0].load()" in probe_code
+    assert "raise RuntimeError" in probe_code
     assert "compat" not in probe_code
+
+
+def test_startup_readiness_rejects_missing_panel_entry_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.run",
+        MagicMock(
+            return_value=subprocess.CompletedProcess(
+                [],
+                1,
+                "",
+                "RuntimeError: Frame Compare alignment panel entry point is unavailable",
+            )
+        ),
+    )
+
+    with pytest.raises(VSViewError, match="startup dependency check"):
+        _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
 
 
 def test_windows_startup_readiness_preloads_before_vsview(
@@ -145,17 +174,6 @@ def test_windows_startup_readiness_preloads_before_vsview(
 
     probe_code = mock_run.call_args.args[0][2]
     assert probe_code.index("preload_vapoursynth_runtime()") < probe_code.index("import PySide6")
-
-
-def test_startup_readiness_does_not_probe_external_launcher(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mock_run = MagicMock()
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-
-    _check_startup_readiness(["external-vsview", "session.py"], env={})
-
-    mock_run.assert_not_called()
 
 
 def test_startup_failure_is_bounded_redacted_and_prevents_launch(
@@ -196,35 +214,11 @@ def test_startup_failure_is_bounded_redacted_and_prevents_launch(
     popen.assert_not_called()
 
 
-def test_resolve_launch_command_uses_native_launcher_for_managed_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("frame_compare.vsview.adapter.runtime_kind", lambda: "windows-portable")
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.shutil.which",
-        lambda _: pytest.fail("managed runtime must not use an external executable"),
-    )
-
+def test_resolve_launch_command_always_uses_current_interpreter() -> None:
     assert _resolve_launch_command(Path("generated/session.py")) == [
         sys.executable,
         "-m",
         "frame_compare.vsview.launcher",
-        str(Path("generated/session.py")),
-    ]
-
-
-def test_resolve_launch_command_uses_external_executable_when_module_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("frame_compare.vsview.adapter.runtime_kind", lambda: "unmanaged")
-    monkeypatch.setattr("frame_compare.vsview.adapter.importlib.util.find_spec", lambda _: None)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.shutil.which",
-        lambda command: "/usr/local/bin/vsview" if command == "vsview" else None,
-    )
-
-    assert _resolve_launch_command(Path("generated/session.py")) == [
-        "/usr/local/bin/vsview",
         str(Path("generated/session.py")),
     ]
 
@@ -236,7 +230,7 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     availability = MagicMock(side_effect=AssertionError("disabled launch must not probe"))
     monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", availability)
 
-    script_path = launch_alignment_verification_session(
+    session = launch_alignment_verification_session(
         VSViewSessionRequest(
             reference=tmp_path / "ref.mkv",
             comparisons=[tmp_path / "comparison.mkv"],
@@ -246,12 +240,27 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
         VSViewConfig(enabled=False),
     )
 
-    assert script_path.parent == tmp_path / "vsview_sessions"
-    assert script_path.name.startswith("vsview_ref_")
-    script = script_path.read_text(encoding="utf-8")
+    assert session.script_path.parent == tmp_path / "vsview_sessions"
+    assert session.script_path.name.startswith("vsview_ref_")
+    assert session.result_path.name.endswith(".alignment-result.json")
+    script = session.script_path.read_text(encoding="utf-8")
     assert "from vsview import set_output" in script
-    assert 'set_output(ref_clip, reference_output, "Reference")' in script
-    assert "set_output(comp_clip, comparison_output" in script
+    assert "**_review_metadata(" in script
+
+
+def test_review_process_timeout_terminates_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = MagicMock()
+    process.__enter__.return_value = process
+    process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1), 0]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(VSViewError, match="timed out"):
+        _run_vsview_command([sys.executable, "-m", "vsview", "session.py"], env={})
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_not_called()
 
 
 def _execute_generated_script(
@@ -264,8 +273,10 @@ def _execute_generated_script(
     presentation_names_by_stem: dict[str, str] | None = None,
     unusable_index_stems: set[str] | None = None,
     cache_free_failure_stems: set[str] | None = None,
+    output_sink: list[tuple[str, int, str]] | None = None,
 ) -> tuple[
     list[tuple[str, int, str]],
+    list[dict[str, object]],
     dict[str, dict[str, int]],
     list[tuple[str, str | None, int | None]],
 ]:
@@ -275,7 +286,8 @@ def _execute_generated_script(
     for comparison in comparisons:
         comparison.touch()
 
-    output_calls: list[tuple[str, int, str]] = []
+    output_calls = output_sink if output_sink is not None else []
+    output_metadata: list[dict[str, object]] = []
     applied_props: dict[str, dict[str, int]] = {}
     loader_calls: list[tuple[str, str | None, int | None]] = []
     default_props: dict[str, dict[str, str | int | float]] = {
@@ -328,8 +340,9 @@ def _execute_generated_script(
     fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
     fake_vsview = types.ModuleType("vsview")
 
-    def set_output(clip: FakeClip, index: int, name: str) -> None:
+    def set_output(clip: FakeClip, index: int, name: str, **kwargs: object) -> None:
         output_calls.append((clip.stem, index, name))
+        output_metadata.append(kwargs)
 
     fake_vsview.set_output = set_output  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
@@ -345,16 +358,19 @@ def _execute_generated_script(
     )
     exec(
         compile(script, "<vsview-generated>", "exec"),
-        {"__name__": "vsview_loaded_script", "__file__": str(tmp_path / "session.py")},
+        {
+            "__name__": "vsview_loaded_script",
+            "__file__": str(tmp_path / f"session_{'1' * 32}.py"),
+        },
     )
-    return output_calls, applied_props, loader_calls
+    return output_calls, output_metadata, applied_props, loader_calls
 
 
 def test_generated_session_registers_named_outputs_in_input_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output_calls, _props, _loader_calls = _execute_generated_script(
+    output_calls, output_metadata, _props, _loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("zeta", "alpha"),
@@ -367,6 +383,19 @@ def test_generated_session_registers_named_outputs_in_input_order(
         ("ref", 2, "Reference"),
         ("alpha", 3, "Comparison 2"),
     ]
+    assert [metadata["frame_compare_output_role"] for metadata in output_metadata] == [
+        "reference",
+        "comparison",
+        "reference",
+        "comparison",
+    ]
+    assert [metadata["frame_compare_comparison_ordinal"] for metadata in output_metadata] == [
+        1,
+        1,
+        2,
+        2,
+    ]
+    assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
 
 
 def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failures(
@@ -374,7 +403,7 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    output_calls, _props, loader_calls = _execute_generated_script(
+    output_calls, _metadata, _props, loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("a",),
@@ -392,11 +421,32 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
     assert capsys.readouterr().err.count("without an L-SMASH index cache") == 2
 
 
+def test_generated_session_load_failure_registers_no_partial_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_calls: list[tuple[str, int, str]] = []
+
+    with pytest.raises(SystemExit) as excinfo:
+        _execute_generated_script(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            comparison_stems=("a", "b"),
+            suggested_offsets_by_key={"ref:a": 0, "ref:b": 1},
+            unusable_index_stems={"b"},
+            cache_free_failure_stems={"b"},
+            output_sink=output_calls,
+        )
+
+    assert excinfo.value.code == 1
+    assert output_calls == []
+
+
 def test_generated_session_keeps_bt709_defaults_and_overlay_hints(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output_calls, applied_props, _loader_calls = _execute_generated_script(
+    output_calls, _metadata, applied_props, _loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("a",),

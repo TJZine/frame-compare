@@ -565,7 +565,7 @@ def _check_vsview() -> CheckResult:
     if availability.is_available:
         return CheckResult(
             passed=True,
-            message="VSView is available for interactive alignment",
+            message="VSView and the Frame Compare alignment panel are available",
             available=True,
         )
 

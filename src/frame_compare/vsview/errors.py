@@ -11,10 +11,10 @@ class VSViewNotFoundError(DependencyError):
             ErrorContext(
                 code="FC-2008",
                 name="VSVIEW_NOT_FOUND",
-                message="VSView not installed",
+                message="VSView alignment-review environment is unavailable",
                 hint=(
-                    "Install vsview (which provides the PySide6 backend) for "
-                    "interactive alignment verification"
+                    "Install frame-compare[vsview] so VSView, PySide6, and the "
+                    "Frame Compare panel share one Python environment"
                 ),
             )
         )
@@ -42,6 +42,9 @@ class VSViewError(ProcessingError):
                 code="FC-4019",
                 name="VSVIEW_ERROR",
                 message=f"VSView failed: {reason}",
-                hint="Install vsview and ensure a GUI backend is available",
+                hint=(
+                    "Install frame-compare[vsview] in this environment and ensure a GUI "
+                    "backend is available"
+                ),
             )
         )
