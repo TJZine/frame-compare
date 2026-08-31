@@ -29,11 +29,12 @@ def write_vsview_session_script(
 
     Output location:
         - Directory: `{cache_dir}/vsview_sessions/` (created if missing)
-        - Filename: `vsview_{reference_stem}_{timestamp}.py` (UTC timestamp)
+        - Filename: `vsview_{reference_stem}_{timestamp}_{session_uuid}.py`
         - Timestamp format: YYYYMMDDTHHMMSSZ (UTC, seconds precision)
+        - Session UUID format: 32 lowercase hexadecimal characters
 
-    The timestamp MUST appear in the filename only; it MUST NOT appear in the
-    script body so that script content remains byte-identical for the same inputs.
+    The timestamp and session UUID MUST appear in the filename only; neither may
+    appear in the script body, so content remains byte-identical for the same inputs.
     """
     sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -52,19 +53,16 @@ def write_vsview_session_script(
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     script_path = None
-    for attempt in range(100):
-        suffix = f"_{attempt}" if attempt > 0 else ""
-        script_name = f"vsview_{reference.stem}_{base_timestamp}{suffix}.py"
+    for _attempt in range(100):
+        session_id = uuid.uuid4().hex
+        script_name = f"vsview_{reference.stem}_{base_timestamp}_{session_id}.py"
         candidate_path = sessions_dir / script_name
         if _reserve_empty_file(candidate_path):
             script_path = candidate_path
             break
 
     if script_path is None:
-        random_suffix = uuid.uuid4().hex[:8]
-        script_name = f"vsview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
-        script_path = sessions_dir / script_name
-        script_path.touch(exist_ok=False)
+        raise FileExistsError("could not reserve a unique VSView session script path")
 
     write_text_atomic(script_path, script_content, encoding="utf-8")
     return script_path

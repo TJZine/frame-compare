@@ -60,6 +60,7 @@ def _clip(path: Path, *, label: str) -> AlignmentClipRequest:
         trim_end_frame_inclusive=None,
         effective_fps_num=24000,
         effective_fps_den=1001,
+        source_frame_count=100,
     )
 
 
@@ -492,6 +493,7 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
             trim_end_frame_inclusive=request.reference.trim_end_frame_inclusive,
             effective_fps_num=request.reference.effective_fps_num,
             effective_fps_den=request.reference.effective_fps_den,
+            source_frame_count=request.reference.source_frame_count,
             selected_audio_stream=request.reference.selected_audio_stream,
         ),
         selected_reference_relationship=request.selected_reference_relationship,
@@ -504,6 +506,7 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
                 trim_end_frame_inclusive=request.comparisons[0].trim_end_frame_inclusive,
                 effective_fps_num=request.comparisons[0].effective_fps_num,
                 effective_fps_den=request.comparisons[0].effective_fps_den,
+                source_frame_count=request.comparisons[0].source_frame_count,
                 selected_audio_stream=request.comparisons[0].selected_audio_stream,
             ),
             request.comparisons[1],

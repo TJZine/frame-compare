@@ -35,6 +35,7 @@ def alignment_request(
             trim_end_frame_inclusive=None,
             effective_fps_num=fps_num,
             effective_fps_den=fps_den,
+            source_frame_count=100,
             selected_audio_stream=selected_audio_stream,
         )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import types
@@ -440,4 +441,39 @@ def test_write_vsview_session_script_is_atomic_and_deterministic_body(
     assert calls == [first, second]
     assert first.parent.name == "vsview_sessions"
     assert first.name.startswith("vsview_ref_")
+    assert re.fullmatch(r"vsview_ref_\d{8}T\d{6}Z_[0-9a-f]{32}\.py", first.name)
+    assert re.fullmatch(r"vsview_ref_\d{8}T\d{6}Z_[0-9a-f]{32}\.py", second.name)
+    assert first != second
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
+
+
+def test_write_vsview_session_script_retries_uuid_path_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_ids = iter(("1" * 32, "2" * 32))
+    attempts: list[Path] = []
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_script.uuid.uuid4",
+        lambda: SimpleNamespace(hex=next(session_ids)),
+    )
+
+    def reserve(path: Path) -> bool:
+        attempts.append(path)
+        if len(attempts) == 1:
+            return False
+        path.touch(exist_ok=False)
+        return True
+
+    monkeypatch.setattr("frame_compare.vsview.session_script._reserve_empty_file", reserve)
+
+    script = write_vsview_session_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={"ref:a": 1},
+        cache_dir=tmp_path,
+    )
+
+    assert len(attempts) == 2
+    assert attempts[0].name.endswith(f"_{'1' * 32}.py")
+    assert script.name.endswith(f"_{'2' * 32}.py")
