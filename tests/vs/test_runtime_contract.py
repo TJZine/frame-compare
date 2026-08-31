@@ -26,6 +26,9 @@ from frame_compare.vs.runtime_contract import (
     WINDOWS_FFMPEG_ARTIFACT_ID,
     WINDOWS_FFMPEG_EXECUTABLE_TOKEN,
     WINDOWS_FFMPEG_RELEASE,
+    WINDOWS_PYSIDE6_RELEASE,
+    WINDOWS_QT_DEPLOYMENT_PROFILE,
+    WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
     index_cache_token,
     media_runtime_fingerprint,
     media_runtime_identity,
@@ -165,6 +168,30 @@ def test_full_runtime_plugin_layout_is_profile_specific() -> None:
             "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
             "manifest": "VapourSynth Manifest V1",
         }
+
+
+def test_windows_full_runtime_tracks_qt_deployment_profile_only() -> None:
+    windows = media_runtime_identity("full", profile="windows-x64")
+
+    assert windows["components"]["qt_deployment"] == {
+        "profile": WINDOWS_QT_DEPLOYMENT_PROFILE,
+        "binding": "PySide6",
+        "binding_release": WINDOWS_PYSIDE6_RELEASE,
+        "required_addon": "QtMultimedia",
+        "multimedia_ffmpeg_release": WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
+        "webengine": "excluded",
+    }
+    assert (
+        "qt_deployment" not in media_runtime_identity("full", profile="debian-trixie")["components"]
+    )
+    for scope in ("analysis", "probe", "alignment", "index"):
+        assert (
+            "qt_deployment"
+            not in media_runtime_identity(scope, profile="windows-x64")["components"]
+        )
+
+    report = supported_media_runtime_report(profile="windows-x64")
+    assert report["components"]["qt_deployment"] == windows["components"]["qt_deployment"]
 
 
 @pytest.mark.parametrize(

@@ -110,6 +110,9 @@ WINDOWS_FFMPEG_EXECUTABLE_TOKEN: Final = (
 )
 WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
 WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "a99e8230eae00d1cee38f23076a7a1f55cd984e2"
+WINDOWS_QT_DEPLOYMENT_PROFILE: Final = "pyside6-addons-no-webengine-v1"
+WINDOWS_PYSIDE6_RELEASE: Final = "6.11.2"
+WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE: Final = "7.1.5"
 DEBIAN_FFMPEG_PACKAGE_VERSION: Final = "7:7.1.5-0+deb13u1"
 
 _FINGERPRINT_RE: Final = re.compile(r"[0-9a-f]{64}")
@@ -273,6 +276,17 @@ def _tone_mapping_identity() -> dict[str, JSONValue]:
     }
 
 
+def _windows_qt_deployment_identity() -> dict[str, JSONValue]:
+    return {
+        "profile": WINDOWS_QT_DEPLOYMENT_PROFILE,
+        "binding": "PySide6",
+        "binding_release": WINDOWS_PYSIDE6_RELEASE,
+        "required_addon": "QtMultimedia",
+        "multimedia_ffmpeg_release": WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
+        "webengine": "excluded",
+    }
+
+
 def _scope_components(
     scope: MediaRuntimeScope,
     profile: MediaRuntimeProfile,
@@ -306,13 +320,16 @@ def _scope_components(
                 "manifest": "VapourSynth Manifest V1",
             }
         )
-    return {
+    components: dict[str, JSONValue] = {
         "decoder": _decoder_identity(profile),
         "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         "ffms2": _ffms2_identity(profile),
         "tone_mapping": _tone_mapping_identity(),
         "plugin_layout": plugin_layout,
     }
+    if profile == "windows-x64":
+        components["qt_deployment"] = _windows_qt_deployment_identity()
+    return components
 
 
 def media_runtime_identity(
@@ -368,15 +385,18 @@ def supported_media_runtime_report(
         index=media_runtime_fingerprint("index", profile=selected_profile),
         full=media_runtime_fingerprint("full", profile=selected_profile),
     )
+    components: dict[str, JSONValue] = {
+        "decoder": _decoder_identity(selected_profile),
+        "standalone_ffmpeg": _standalone_ffmpeg_identity(selected_profile),
+        "ffms2": _ffms2_identity(selected_profile),
+        "tone_mapping": _tone_mapping_identity(),
+    }
+    if selected_profile == "windows-x64":
+        components["qt_deployment"] = _windows_qt_deployment_identity()
     return {
         "contract_version": MEDIA_RUNTIME_CONTRACT_VERSION,
         "profile": selected_profile,
-        "components": {
-            "decoder": _decoder_identity(selected_profile),
-            "standalone_ffmpeg": _standalone_ffmpeg_identity(selected_profile),
-            "ffms2": _ffms2_identity(selected_profile),
-            "tone_mapping": _tone_mapping_identity(),
-        },
+        "components": components,
         "fingerprints": fingerprints,
         "index_cache_token": index_cache_token(profile=selected_profile),
     }
@@ -454,6 +474,9 @@ __all__ = [
     "WINDOWS_FFMPEG_EXECUTABLE_TOKEN",
     "WINDOWS_FFMPEG_RELEASE",
     "WINDOWS_FFMPEG_SOURCE_COMMIT",
+    "WINDOWS_PYSIDE6_RELEASE",
+    "WINDOWS_QT_DEPLOYMENT_PROFILE",
+    "WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE",
     "index_cache_token",
     "media_runtime_fingerprint",
     "media_runtime_identity",

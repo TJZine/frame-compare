@@ -19,7 +19,7 @@ from ._helpers import write_valid_config_json as _write_valid_config_json
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
 _NEW_VERSION_CONTENT = '__version__ = "1.0.1"\n'
 _REQ_HASH = "3a0058b73f8a4872c3d0b27b99c017d9a8c087cf283d5f9923b0df35b44bfd82"
-_RUNTIME_HASH = "dc440dadfd2f1bfee3038a9b522aa5d2bc0fc864c6325bba9a067d0e5c892a54"
+_RUNTIME_HASH = "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7"
 _POWERSHELL_KEYGEN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0

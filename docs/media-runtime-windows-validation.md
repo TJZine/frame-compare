@@ -35,7 +35,7 @@ The expected candidate profile is:
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
 | FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `dc440dadfd2f1bfee3038a9b522aa5d2bc0fc864c6325bba9a067d0e5c892a54` |
+| Full runtime fingerprint | `27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7` |
 | L-SMASH index token | `lsw1310-56c451f754fd` |
 
 ## 1. Exact source and repository gates
