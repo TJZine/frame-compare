@@ -174,16 +174,18 @@ ergonomics or the managed Windows bundle.
 - The exact PySide6 6.11.2 Windows wheels are pinned and hashed, but each wheel archive
   ships only `LicenseRef-Qt-Commercial.txt`; it does not include the LGPL/GPL text,
   third-party notices, an SBOM, or corresponding source.
-- `PySide6_Addons` includes Qt WebEngine/Chromium resources and Qt Multimedia's FFmpeg
-  DLLs. The provisional manifest records Qt, PySide, and FFmpeg source archives, but it
-  does not yet enumerate the complete Qt WebEngine/Chromium third-party notice surface.
+- The upstream `PySide6_Addons` wheel includes Qt WebEngine/Chromium resources and Qt
+  Multimedia's FFmpeg DLLs. VSView 0.10.3 requires Qt Multimedia, so the Addons
+  distribution remains installed; the Windows deployment excludes the unused
+  WebEngine/Chromium files and verifies their absence from both the built and extracted
+  bundle. A fresh canonical bundle must retain that proof before release.
 - Exact official Qt 6.11.2, PySide 6.11.2, and FFmpeg 7.1.5 source archives and hashes
   are known. Before release, publish a distributor-controlled corresponding-source
-  offer, add the version-matched notice/SBOM evidence, and adjudicate the FFmpeg lineage
+  offer, add the version-matched notice/SBOM evidence for the deployed Qt surface, and adjudicate the FFmpeg lineage
   against the built Windows wheel. An upstream-only source link is not treated as a
   completed distribution obligation; see Qt's
   [LGPL obligations guidance](https://www.qt.io/development/open-source-lgpl-obligations)
-  and [Qt WebEngine licensing guidance](https://doc.qt.io/qt-6/qtwebengine-licensing.html).
+  and [Qt for Python deployment guidance](https://doc.qt.io/qtforpython-6/deployment/deployment-pyside6-deploy.html).
 - Hosted and physical Windows must still prove the extracted dependency inventory,
   native preload, offscreen and visible viewer behavior, GPU/HDR paths, clean-machine
   DLL resolution, complete reinstall, and fail-closed updater behavior.
@@ -250,9 +252,10 @@ The VSView-specific continuation must additionally:
    D3D12/Vulkan behavior, clean-machine DLL/plugin resolution, old/new indexes and
    caches, complete reinstall, matching code-only update/rollback, and pre-VSView
    code-only update refusal before replacement;
-6. keep the PySide6/Qt distribution-compliance gate open until the exact Qt
-   WebEngine/Chromium notices, matching SBOM/provenance, FFmpeg lineage, and a
-   distributor-controlled corresponding-source offer are recorded and adjudicated.
+6. keep the PySide6/Qt distribution-compliance gate open until the built and extracted
+   bundles prove WebEngine/Chromium absent and the matching deployed-surface
+   SBOM/provenance, Qt Multimedia FFmpeg lineage, distributor-controlled
+   corresponding-source offer, and legal adjudication are recorded.
 
 For every failure, skip, or unavailable case, record the command, exit code, retained
 log/artifact, owner, reason, whether it blocks release, and the exact revisit condition.
@@ -418,12 +421,23 @@ Physical evidence recorded on 2026-08-31:
   from `ab4174d7`, perform a final physical spot-check with a `df45b624`-or-later
   bundle before release; do not repeat already-covered behavioral cases unless the
   canonical bundle diverges.
+- An isolated Windows deployment experiment proved why Essentials-only is not a valid
+  dependency correction: importing VSView 0.10.3 reaches its audio-output module and
+  fails without `PySide6.QtMultimedia`. A second non-destructive staging experiment
+  retained Addons/Multimedia while excluding 129 WebEngine-related wheel entries;
+  VSView loaded a two-output session offscreen, reported successful content loading
+  without a render error, loaded no WebEngine/Chromium module, and was terminated by
+  exact PID. The production builder now fail-closes on the pinned 123-file,
+  359,205,252-byte extracted WebEngine/Chromium surface, excludes it, and requires
+  built/extracted absence markers. This is focused diagnostic evidence, not a substitute
+  for rebuilding and re-verifying the canonical portable ZIP.
 - The PySide6/Qt distribution-compliance gate remains **open**. The current inventory
-  and 99 copied license records do not establish the exact Qt WebEngine/Chromium notice
-  set, matching SBOM/provenance, complete FFmpeg lineage, a distributor-controlled
+  and 99 copied license records do not yet establish a matching SBOM/provenance for the
+  deployed Qt subset, complete Qt Multimedia FFmpeg lineage, a distributor-controlled
   corresponding-source offer, or legal adjudication. Owner: distributor/legal and
-  release maintainer. Release impact: blocking. Revisit only when all five artifacts
-  are retained and adjudicated together.
+  release maintainer. Release impact: blocking. Revisit only after the fresh portable
+  ZIP proves WebEngine/Chromium absent and the remaining artifacts are retained and
+  adjudicated together.
 
 Decision: keep this plan **Active** and the release **blocked**. A physical spot-check
 of the canonical single-copy bundle, uninstrumented clean GUI close/screenshot,

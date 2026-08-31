@@ -139,6 +139,9 @@ Required evidence:
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
+- PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
+  files are absent and both build/extraction verifiers report the required exclusion
+  markers.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT

@@ -122,6 +122,7 @@ jobs:
             "pyside6_event_loop=ok",
             "vsview_deep_imports=ok",
             "qt_ffmpeg_runtime=ok",
+            "qt_webengine_runtime=absent deployment=excluded",
             "bestsource_frame=ok",
             "generated_vsview_session=ok",
             "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
@@ -235,6 +236,7 @@ jobs:
           foreach ($marker in @(
             "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
             "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
+            "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
             "WINDOWS_EXTRACTED_PROOF result=ok"
           )) {
             if ($extractedProof -notmatch [regex]::Escape($marker)) {

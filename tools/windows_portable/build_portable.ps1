@@ -565,6 +565,56 @@ function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Ar
 
 }
 
+function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
+  $sitePackages = Join-Path $BundleRoot "app\site-packages"
+  $pySideRoot = [System.IO.Path]::Combine($sitePackages, "PySide6")
+  if (!(Test-Path -LiteralPath $pySideRoot -PathType Container)) {
+    throw "PySide6 package directory not found: $pySideRoot"
+  }
+
+  $resolvedSitePackages = [System.IO.Path]::GetFullPath($sitePackages)
+  $resolvedPySideRoot = (Resolve-Path -LiteralPath $pySideRoot).Path
+  $sitePackagesPrefix = $resolvedSitePackages.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  ) + [System.IO.Path]::DirectorySeparatorChar
+  if (!$resolvedPySideRoot.StartsWith($sitePackagesPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to trim Qt runtime outside bundle site-packages: $resolvedPySideRoot"
+  }
+
+  $chromiumRuntimeNames = @(
+    "icudtl.dat",
+    "v8_context_snapshot.bin",
+    "v8_context_snapshot.debug.bin"
+  )
+  $excludedFiles = @(
+    Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
+      Where-Object {
+        $_.FullName -match "(?i)webengine" -or
+        ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
+      }
+  )
+  $excludedBytes = [int64](($excludedFiles | Measure-Object -Property Length -Sum).Sum)
+  if ($excludedFiles.Count -ne 123 -or $excludedBytes -ne 359205252) {
+    throw "Unexpected Qt WebEngine deployment surface: files=$($excludedFiles.Count) bytes=$excludedBytes"
+  }
+  foreach ($file in $excludedFiles) {
+    Remove-Item -Force -LiteralPath $file.FullName
+  }
+
+  $remainingFiles = @(
+    Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
+      Where-Object {
+        $_.FullName -match "(?i)webengine" -or
+        ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
+      }
+  )
+  if ($remainingFiles.Count -ne 0) {
+    throw "Qt WebEngine deployment exclusion was incomplete: $($remainingFiles.FullName -join ', ')"
+  }
+  Write-Host "WINDOWS_BUNDLE_PROOF qt_webengine_deployment=excluded files=$($excludedFiles.Count) bytes=$excludedBytes"
+}
+
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   $bundleInfoPath = Join-Path $BundleRoot "bundle_info.json"
   if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
@@ -829,6 +879,23 @@ def prove_vsview_distribution_contract() -> None:
     proof("vsview_distributions=ok " + ",".join(f"{name}={version}" for name, version in observed.items()))
 
 
+def prove_qt_webengine_excluded() -> None:
+    site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
+    pyside_root = site_packages / "PySide6"
+    chromium_runtime_names = {"icudtl.dat", "v8_context_snapshot.bin", "v8_context_snapshot.debug.bin"}
+    forbidden = [
+        path
+        for path in pyside_root.rglob("*")
+        if path.is_file()
+        and (
+            "webengine" in str(path).lower()
+            or (path.parent.name == "resources" and path.name in chromium_runtime_names)
+        )
+    ]
+    assert_true(not forbidden, f"Qt WebEngine deployment files remain: {forbidden}")
+    proof("qt_webengine_runtime=absent deployment=excluded")
+
+
 def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
@@ -1085,6 +1152,7 @@ def prove_vsview_runtime(media_path: Path) -> None:
     qt_ffmpeg_dlls = [site_packages / "PySide6" / name for name in ("avcodec-61.dll", "avformat-61.dll", "avutil-59.dll")]
     assert_true(all(path.is_file() for path in qt_ffmpeg_dlls), f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}")
     proof("qt_ffmpeg_runtime=ok lineage=7.1.5 dlls=avcodec-61,avformat-61,avutil-59")
+    prove_qt_webengine_excluded()
     prove_vsview_distribution_contract()
     prove_runtime_contract()
     prove_vapoursynth_environment()
@@ -1357,6 +1425,7 @@ function Main() {
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
   Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
+  Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir
   Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir

@@ -213,11 +213,13 @@ paths, and hashes. The Docker image also retains Debian FFmpeg's package copyrig
 file and records its GPL-2.0-or-later profile in runtime provenance.
 
 The VSView Windows candidate is not release-ready solely because these top-level
-expressions and source URLs are recorded. The PySide6 Addons wheel contains Qt
-WebEngine/Chromium and Qt Multimedia payloads but does not ship a complete open-source
-notice set or SBOM. Release remains blocked until the exact third-party notices,
-Qt/FFmpeg lineage, distributor-controlled corresponding-source offer, and hosted
-Windows artifact inventory are completed and adjudicated.
+expressions and source URLs are recorded. VSView requires Qt Multimedia from the
+PySide6 Addons distribution, but does not use Qt WebEngine; the portable deployment
+therefore excludes the pinned wheel's WebEngine/Chromium files and verifies their
+absence from both the built and extracted bundle. Release remains blocked until that
+absence is proved in the canonical ZIP and the deployed Qt subset has matching
+third-party notices and SBOM/provenance, complete Qt Multimedia FFmpeg lineage, a
+distributor-controlled corresponding-source offer, and legal adjudication.
 
 This classification follows [FFmpeg's GPL configuration rule](https://ffmpeg.org/doxygen/7.1/md_LICENSE.html)
 and the exact [Debian Trixie package copyright record](https://sources.debian.org/copyright/license/ffmpeg/7%3A7.1.5-0%2Bdeb13u1/).

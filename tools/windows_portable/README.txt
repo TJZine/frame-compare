@@ -136,6 +136,9 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - PySide6/Qt LGPL-3.0 and Qt-bundled FFmpeg LGPL notices are copied from
     manifest-declared, SHA256-verified repository files. Wheel-specific notices
     under *.dist-info\licenses are copied as well.
+  - VSView requires Qt Multimedia from PySide6 Addons. The portable deployment
+    excludes unused Qt WebEngine/Chromium files and verifies their absence; it does
+    not claim to distribute those excluded components.
   - Deterministic component versions, declared license metadata, copied
     license/notice hashes, requirements-lock fingerprint, exact Frame Compare
     source commit/archive, and build/install script inventory are shipped in:

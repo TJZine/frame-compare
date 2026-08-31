@@ -623,6 +623,7 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     for required_proof in (
         "preload_vapoursynth_runtime()",
         "app.exec()",
+        "prove_qt_webengine_excluded()",
         "prove_vsview_distribution_contract()",
         "prove_runtime_contract()",
         "prove_vapoursynth_environment()",
@@ -643,8 +644,29 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "vsview_runtime_preload=ok" in combined_proof
     assert "pyside6_event_loop=ok" in combined_proof
     assert "qt_ffmpeg_runtime=ok lineage=7.1.5" in combined_proof
+    assert "qt_webengine_runtime=absent deployment=excluded" in build_script
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
+
+
+def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: Path) -> None:
+    build_script = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    )
+    exclusion = build_script[
+        build_script.index("function Remove-UnusedQtWebEngineRuntime") : build_script.index(
+            "function Set-BundleRuntimeEnvironment"
+        )
+    ]
+
+    assert '$_.FullName -match "(?i)webengine"' in exclusion
+    assert '"icudtl.dat"' in exclusion
+    assert '"v8_context_snapshot.bin"' in exclusion
+    assert "$excludedFiles.Count -ne 123" in exclusion
+    assert "$excludedBytes -ne 359205252" in exclusion
+    assert "Refusing to trim Qt runtime outside bundle site-packages" in exclusion
+    assert "Qt WebEngine deployment exclusion was incomplete" in exclusion
+    assert "Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir" in build_script
 
 
 def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
@@ -920,6 +942,7 @@ def _write_extracted_verifier_fixture(
     (bundle / "comparison_videos").mkdir()
     (bundle / "licenses").mkdir()
     (bundle / "shim").mkdir()
+    (bundle / "app" / "site-packages" / "PySide6").mkdir(parents=True)
     (bundle / "frame-compare.ps1").write_text(candidate_launcher, encoding="utf-8")
     (bundle / "install.ps1").write_text(installer, encoding="utf-8")
     (bundle / "install.cmd").write_text(
@@ -1185,6 +1208,7 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
         ("wrong_commit", "commit does not match expected checkout"),
         ("runtime_mismatch", "Media-runtime fingerprint mismatch"),
         ("missing_source_provenance", "missing required provenance entry"),
+        ("webengine_runtime", "unexpectedly contains Qt WebEngine/Chromium runtime files"),
     ],
 )
 def test_extracted_bundle_verifier_rejects_incomplete_or_mismatched_provenance(
@@ -1221,6 +1245,10 @@ def test_extracted_bundle_verifier_rejects_incomplete_or_mismatched_provenance(
     elif mutation == "missing_source_provenance":
         inventory["source_build_install_scripts"].remove(
             "tools/windows_portable/build_portable.ps1"
+        )
+    elif mutation == "webengine_runtime":
+        (bundle / "app" / "site-packages" / "PySide6" / "Qt6WebEngineCore.dll").write_bytes(
+            b"forbidden-webengine-runtime"
         )
     else:
         raise AssertionError(mutation)
@@ -1634,6 +1662,8 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "$validatedEntries +=" not in verifier
     assert "Expand-Archive" not in verifier
     assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verifier
+    assert "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded" in verifier
+    assert "Extracted bundle unexpectedly contains Qt WebEngine/Chromium runtime files" in verifier
     assert "Bundle inventory must cover every extracted license file exactly once" in verifier
     assert "Bundle inventory commit does not match expected checkout" in verifier
     assert "Media-runtime fingerprint mismatch for scope" in verifier

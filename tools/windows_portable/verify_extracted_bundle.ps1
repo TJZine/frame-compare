@@ -788,6 +788,24 @@ foreach ($entry in $requiredVsViewDistributions.GetEnumerator()) {
 }
 Write-Host "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok"
 
+$pySideRoot = Join-Path $bundle "app\site-packages\PySide6"
+$chromiumRuntimeNames = @(
+  "icudtl.dat",
+  "v8_context_snapshot.bin",
+  "v8_context_snapshot.debug.bin"
+)
+$qtWebEngineFiles = @(
+  Get-ChildItem -LiteralPath $pySideRoot -Recurse -File |
+    Where-Object {
+      $_.FullName -match "(?i)webengine" -or
+      ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
+    }
+)
+if ($qtWebEngineFiles.Count -ne 0) {
+  throw "Extracted bundle unexpectedly contains Qt WebEngine/Chromium runtime files: $($qtWebEngineFiles.FullName -join ', ')"
+}
+Write-Host "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded"
+
 $manifestSources = Get-RequiredArray $manifest "corresponding_sources" "manifest"
 $inventorySources = Get-RequiredArray $inventory "corresponding_sources" "bundle_inventory"
 if ($manifestSources.Count -ne $inventorySources.Count) {
