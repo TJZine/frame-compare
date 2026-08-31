@@ -67,6 +67,8 @@ def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) 
     assert "self-contained Python" in docs
     assert "PATH-only VSView executable" in docs
     assert "typed, atomic sibling sidecar" in docs
+    assert "bundle_info.schema_version` 3" in docs
+    assert "pre-native-panel schema-2 bundles" in docs
     assert "Missing, malformed," in docs
     assert "stale, mixed-session, duplicate, incomplete" in docs
     assert "## Physical Windows handoff" in docs

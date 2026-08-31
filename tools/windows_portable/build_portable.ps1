@@ -783,7 +783,7 @@ function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
 
   $requirementsLockSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $requirementsLockPath).Hash.ToLowerInvariant()
   $bundleInfo = [ordered]@{
-    schema_version = 2
+    schema_version = 3
     bundle_kind = "full"
     app_version = $AppVersion
     requirements_lock_sha256 = $requirementsLockSha256

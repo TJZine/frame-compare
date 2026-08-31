@@ -83,6 +83,8 @@ UPDATING (Code-Only Update Package):
 
   Safety behavior:
     - Signature verification defaults to Cancel when missing/invalid.
+    - Pre-native-panel bundles with bundle_info schema_version 2 are refused and
+      require a complete portable reinstall; there is no bypass.
     - Dependency fingerprint mismatch always refuses a code-only update and requires
       a complete portable reinstall; there is no bypass.
     - Non-interactive sessions fail safely instead of prompting.

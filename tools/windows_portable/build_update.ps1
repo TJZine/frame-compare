@@ -59,9 +59,9 @@ function Get-BundleCompatibilityContract([string]$ResolvedBundleDir) {
     $null -eq $schemaProp -or
     $null -eq $schemaProp.Value -or
     -not [int]::TryParse([string]$schemaProp.Value, [ref]$schemaVersion) -or
-    $schemaVersion -ne 2
+    $schemaVersion -ne 3
   ) {
-    throw "Code-only updates require bundle_info schema_version 2; rebuild the complete portable bundle."
+    throw "Code-only updates require native-panel-capable bundle_info schema_version 3; a complete portable reinstall is required."
   }
 
   foreach ($requiredValue in @(

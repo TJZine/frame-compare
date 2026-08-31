@@ -136,11 +136,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update
 The Windows commands require a Windows host with PowerShell and the expected
 toolchain. In non-Windows environments, treat them as documented-only unless a
 compatible runner is available. A code-only update does not carry native media
-artifacts. `build_update.ps1` must copy the complete bundle's required
-media-runtime fingerprint into the signed update manifest, and the installed
-updater must refuse a missing, legacy, malformed, or different fingerprint before
-any unsafe dependency override. Crossing a media-runtime fingerprint requires a
-complete portable bundle reinstall.
+artifacts. `build_update.ps1` accepts only a native-panel-capable full bundle with
+`bundle_info.schema_version` 3, and copies the complete bundle's required
+media-runtime fingerprint into the signed update manifest. The installed updater
+refuses pre-native-panel schema-2 bundles, as well as missing, legacy, malformed,
+or different fingerprints, before any unsafe dependency override; each refusal
+requires a complete portable bundle reinstall. Crossing a media-runtime
+fingerprint also requires a complete portable bundle reinstall.
 
 Locked runtime dependency audit (PowerShell):
 
@@ -327,10 +329,11 @@ Canonical verification path:
    and does not replace the separate physical-Windows GPU proof.
 5. Build the code-only update ZIP when updater logic changes and prove both a
    matching-runtime apply/rollback and a mismatched media-runtime or requirements-
-   fingerprint fail-closed refusal. Every pre-VSView bundle requires a complete
-   portable reinstall; a code-only update must not mix its old UI/native dependency
-   graph with the new application code, even when the media-runtime fingerprint and
-   L-SMASH index token are unchanged.
+   fingerprint fail-closed refusal. Every pre-native-panel schema-2 bundle must be
+   refused and fully reinstalled; a code-only update must not mix its old UI/native
+   dependency graph with the new application code, even when the media-runtime
+   fingerprint and L-SMASH index token are unchanged. The current full bundle
+   advertises `bundle_info.schema_version` 3.
 6. Sign the update ZIP when updater or release-package logic changes.
 7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
    For an exact hosted verification of a candidate SHA, dispatch the default-branch

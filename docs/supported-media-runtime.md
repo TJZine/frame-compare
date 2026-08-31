@@ -185,10 +185,10 @@ installed bundle's full runtime fingerprint with the signed update manifest befo
 changing files. A missing, legacy, malformed, or different fingerprint fails closed,
 even when an unsafe Python-dependency override was requested.
 
-A pre-VSView portable bundle differs in its full media-runtime fingerprint and
-Python/UI requirements fingerprint. It requires a complete portable bundle reinstall;
-a code-only update must fail closed rather than mix the old dependency graph with the
-new application code.
+A pre-native-panel portable bundle may have matching runtime fingerprints but lacks
+the native-panel capability recorded by `bundle_info.schema_version` 3. It requires
+a complete portable bundle reinstall; a code-only update must fail closed rather than
+mix the old dependency graph with the new application code.
 Generated data should remain outside the bundle when it must survive replacement.
 
 ## Licensing and corresponding source

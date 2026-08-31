@@ -64,10 +64,10 @@ if ($actual -ne $expected) {
 The expected and actual hashes must match exactly. Delete and download both files again
 if verification fails; do not bypass the mismatch.
 
-The first VSView bundle transition is a complete-runtime migration. Reinstall the full
-portable ZIP rather than applying a code-only update to a bundle built with the retired
-viewer dependency graph. The updater must fail closed when the installed and update
-runtime fingerprints are missing, legacy, malformed, or different.
+The first native-panel bundle transition is a complete-runtime migration. Reinstall the
+full portable ZIP rather than applying a code-only update to a pre-native-panel bundle.
+The updater must fail closed when the installed bundle is schema 2, or when the
+installed and update runtime fingerprints are missing, legacy, malformed, or different.
 
 Extract the ZIP, open the extracted bundle folder, and run:
 
@@ -215,10 +215,12 @@ Apply a code-only update:
 frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
-The updater verifies the signature and every payload hash before replacement. It refuses
-legacy, missing, malformed, or different media-runtime fingerprints before applying any
-change. That refusal cannot be overridden safely because a code-only ZIP does not carry
-replacement native media components.
+The updater verifies the signature and every payload hash before replacement. It accepts
+only a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
+pre-native-panel schema-2 bundles, as well as missing, malformed, or different
+media-runtime fingerprints, before applying any change. That refusal cannot be
+overridden safely because a code-only ZIP does not carry replacement native media
+components; install the complete portable ZIP instead.
 
 When the fingerprint differs, install the complete portable ZIP for that release. Keep
 **Generated data location** external when reports and reusable state must survive that

@@ -769,7 +769,7 @@ def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None
     assert "requirements_lock_sha256" in build_script
     assert "bundle_kind" in build_script
     assert "platform" in build_script
-    assert "schema_version = 2" in build_script
+    assert "schema_version = 3" in build_script
     assert "manifest_version = $manifestVersion" in build_script
     assert "media_runtime_fingerprint" in build_script
     assert "media_runtime_fingerprints" in build_script
@@ -1052,7 +1052,7 @@ def _write_extracted_verifier_fixture(
     (bundle / "bundle_info.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "bundle_kind": "full",
                 "app_version": "1.2.3",
                 "requirements_lock_sha256": requirements_sha,
@@ -1701,6 +1701,7 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "Bundle inventory must cover every extracted license file exactly once" in verifier
     assert "Bundle inventory commit does not match expected checkout" in verifier
     assert "Media-runtime fingerprint mismatch for scope" in verifier
+    assert '"schema_version" "bundle_info") -ne 3' in verifier
     assert "Installed state points to the wrong bundle" in verifier
     assert "Installed shim version output does not match the candidate launcher" in verifier
 
@@ -1726,6 +1727,8 @@ def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
         repo_root / "docs" / "media-runtime-windows-validation.md"
     )
 
+    assert "bundle_info.schema_version` is 3" in physical_checklist
+    assert "otherwise matching candidate fingerprints" in physical_checklist
     assert "refs/pull/$PrNumber/head" in physical_checklist
     assert "refs/remotes/origin/pr/$PrNumber/head" in physical_checklist
     assert 'git fetch --no-tags origin "+${PrHeadRef}:${LocalPrHeadRef}"' in physical_checklist
@@ -1902,7 +1905,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     (bundle / "bundle_info.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "bundle_kind": "full",
                 "app_version": "0.1.0",
                 "requirements_lock_sha256": "a" * 64,

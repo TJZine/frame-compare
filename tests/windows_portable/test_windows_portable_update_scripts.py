@@ -400,11 +400,32 @@ def test_windows_portable_update_contract_requires_media_runtime_identity(
     file_schema = update_schema["properties"]["files"]["items"]
     assert "bytes" in file_schema["required"]
 
-    assert bundle_schema["properties"]["schema_version"]["const"] == 2
+    assert bundle_schema["properties"]["schema_version"]["const"] == 3
     assert bundle_schema["properties"]["bundle_kind"]["const"] == "full"
     assert bundle_schema["properties"]["manifest_version"]["const"] == 2
     assert "media_runtime_fingerprint" in bundle_schema["required"]
     assert "media_runtime_fingerprints" in bundle_schema["required"]
+
+
+def test_windows_portable_code_only_updates_require_native_panel_capable_bundle(
+    repo_root: Path,
+) -> None:
+    build_update = _read_text_or_fail(repo_root / "tools" / "windows_portable" / "build_update.ps1")
+    updater = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    )
+    verifier = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "verify_extracted_bundle.ps1"
+    )
+
+    assert "$schemaVersion -ne 3" in build_update
+    assert "native-panel-capable bundle_info schema_version 3" in build_update
+    assert "a complete portable reinstall is required" in build_update
+    assert "$schemaVersion -ne 3" in updater
+    assert "native VSView alignment-panel capability" in updater
+    assert "bundle_info schema_version 3 required" in updater
+    assert "A complete portable reinstall is required; code-only update refused." in updater
+    assert '"schema_version" "bundle_info") -ne 3' in verifier
 
 
 def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: Path) -> None:
@@ -554,11 +575,26 @@ def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Pa
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("runtime_fingerprint", ["b" * 64, None, "invalid", "B" * 64])
+@pytest.mark.parametrize(
+    ("runtime_fingerprint", "bundle_schema_version", "expected_error"),
+    [
+        ("b" * 64, 3, None),
+        (None, 3, "media_runtime_fingerprint is missing or invalid"),
+        ("invalid", 3, "media_runtime_fingerprint is missing or invalid"),
+        ("B" * 64, 3, "media_runtime_fingerprint is missing or invalid"),
+        (
+            "b" * 64,
+            2,
+            "native-panel-capable bundle_info schema_version 3",
+        ),
+    ],
+)
 def test_windows_portable_build_update_validates_runtime_metadata_at_process_boundary(
     tmp_path: Path,
     repo_root: Path,
     runtime_fingerprint: str | None,
+    bundle_schema_version: int,
+    expected_error: str | None,
 ) -> None:
     exe = _powershell_exe()
     if exe is None:
@@ -576,7 +612,7 @@ def test_windows_portable_build_update_validates_runtime_metadata_at_process_bou
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     bundle_info: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": bundle_schema_version,
         "bundle_kind": "full",
         "app_version": "1.2.3",
         "requirements_lock_sha256": "a" * 64,
@@ -621,9 +657,9 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
         text=True,
         timeout=30.0,
     )
-    if runtime_fingerprint != "b" * 64:
+    if expected_error is not None:
         assert result.returncode != 0
-        assert "media_runtime_fingerprint is missing or invalid" in result.stderr
+        assert expected_error in result.stderr
         assert not update_zip.exists()
         return
 
