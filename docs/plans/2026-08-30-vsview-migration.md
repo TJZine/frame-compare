@@ -266,21 +266,26 @@ compliance gate is complete; then mark the plan Historical in the same final com
 
 ### Phase 3: Hosted Windows proof
 
-- [ ] Build the complete portable bundle from the tested commit.
+- [x] Build the complete portable bundle from the tested commit.
 - [ ] Verify exact wheel/native hashes, bytes, distribution inventory, license/source
       notices, SBOM/provenance, and dependency fingerprint.
-- [ ] Prove managed VapourSynth preload before PySide6/VSView, a controlled
+- [x] Prove managed VapourSynth preload before PySide6/VSView, a controlled
       `QApplication`, VSView CLI/native extensions, `core.bs`, vspackrgb, and generated
       session loading through the extracted bundle.
-- [ ] Verify the old dependency fingerprint refuses the new code-only update and directs
+- [x] Verify the old dependency fingerprint refuses the new code-only update and directs
       the user to a complete portable reinstall.
 
-Hosted status on 2026-08-31: **pending**. The local Windows host does not have the
-GitHub CLI (`Get-Command gh` returned no command), so no hosted workflow run can be
-claimed for `ab4174d7bdb9ff2475dadaf028832b5c57521242`. Owner: maintainer/hosted CI.
-Release impact: blocking. Revisit when the Windows portable workflow is run against
-that tested source commit (or a deliberately rebuilt successor) and its retained
-artifacts/logs are available.
+Hosted status on 2026-08-31: the unsigned Windows portable workflow passed for
+`df45b62483235b4f06d476099d8f32cde6756333` in
+[run 33357877518](https://github.com/TJZine/frame-compare/actions/runs/33357877518)
+([build job 99383382216](https://github.com/TJZine/frame-compare/actions/runs/33357877518/job/99383382216)).
+The run passed the complete Windows unit suite, built and packaged the portable ZIP,
+required L-SMASH only at `app/site-packages/vapoursynth/plugins/LSMASHSource.dll`,
+rejected any `vs/extra-plugins` tree, launched the real bundle, verified a fresh
+extraction with VSView frame-zero rendering, proved the code-only update layout and
+updater process boundary, and uploaded both unsigned artifacts. The PR workflow
+intentionally skipped signing, release-asset attestation, and guarded release jobs;
+this evidence therefore does not close the distribution-compliance checkbox above.
 
 The local equivalent passed without satisfying the hosted checkbox: the canonical ZIP
 and fresh extracted verifier were built from committed source
@@ -403,6 +408,16 @@ Physical evidence recorded on 2026-08-31:
   The runtime also prints an informational duplicate L-SMASH discovery diagnostic in
   parent CLI probes while selecting the packaged plugin; no missing DLL or external
   FFmpeg-plugin resolution occurred.
+- Successor commit `df45b62483235b4f06d476099d8f32cde6756333` removes that duplicate
+  installation at its owner: `vapoursynth-lsmas` is excluded from the exported
+  requirements and installed once from the manifest-owned, hash-verified wheel into
+  the canonical package plugin directory. The hosted Windows proof above passed with
+  the new full runtime fingerprint
+  `dc440dadfd2f1bfee3038a9b522aa5d2bc0fc864c6325bba9a067d0e5c892a54` and no
+  extra-plugin environment or tree. Because the visible/manual evidence was captured
+  from `ab4174d7`, perform a final physical spot-check with a `df45b624`-or-later
+  bundle before release; do not repeat already-covered behavioral cases unless the
+  canonical bundle diverges.
 - The PySide6/Qt distribution-compliance gate remains **open**. The current inventory
   and 99 copied license records do not establish the exact Qt WebEngine/Chromium notice
   set, matching SBOM/provenance, complete FFmpeg lineage, a distributor-controlled
@@ -410,10 +425,11 @@ Physical evidence recorded on 2026-08-31:
   release maintainer. Release impact: blocking. Revisit only when all five artifacts
   are retained and adjudicated together.
 
-Decision: keep this plan **Active** and the release **blocked**. Hosted Windows,
-uninstrumented clean GUI close/screenshot, clean-machine resolution, true-interlace
-coverage, native-HDR-display perceptual review, and PySide6/Qt distribution compliance
-are not passed and must not be inferred from the successful local subcases.
+Decision: keep this plan **Active** and the release **blocked**. A physical spot-check
+of the canonical single-copy bundle, uninstrumented clean GUI close/screenshot,
+clean-machine resolution, true-interlace coverage, native-HDR-display perceptual
+review, and PySide6/Qt distribution compliance are not passed and must not be inferred
+from the successful hosted or local subcases.
 
 ## Verification record
 
