@@ -715,11 +715,13 @@ function Invoke-VSViewOffscreenLaunchProof(
   $stderrPath = Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log"
   $originalQtPlatform = Get-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM"
   $originalNoColor = Get-ProcessEnvironmentValue -Name "NO_COLOR"
+  $originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
   $process = $null
   $timedOut = $false
   try {
     $env:QT_QPA_PLATFORM = "offscreen"
     $env:NO_COLOR = "1"
+    Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
     $quotedSessionPath = '"' + $SessionPath + '"'
     $process = Start-Process -FilePath $Python -ArgumentList @(
       "-m",
@@ -738,6 +740,7 @@ function Invoke-VSViewOffscreenLaunchProof(
     }
     Restore-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM" -Value $originalQtPlatform
     Restore-ProcessEnvironmentValue -Name "NO_COLOR" -Value $originalNoColor
+    Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
   }
 
   $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }

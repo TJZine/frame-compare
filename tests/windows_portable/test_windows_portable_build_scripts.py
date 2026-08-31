@@ -657,6 +657,8 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert '"--no-settings"' in launch_proof
     assert '$env:QT_QPA_PLATFORM = "offscreen"' in launch_proof
     assert '$env:NO_COLOR = "1"' in launch_proof
+    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in launch_proof
+    assert 'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"' in launch_proof
     assert "$process.WaitForExit(20000)" in launch_proof
     assert "Stop-Process -Id $process.Id -Force" in launch_proof
     assert "$process.WaitForExit(10000)" in launch_proof

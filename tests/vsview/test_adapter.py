@@ -68,6 +68,18 @@ def test_child_environment_isolated_and_preserves_warning_policy(
     assert os.environ == parent_env
 
 
+def test_windows_child_environment_uses_canonical_plugin_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "bundle-extra-plugins")
+    monkeypatch.setattr("frame_compare.vsview.adapter.runtime_kind", lambda: "windows-portable")
+
+    child_env = _build_vsview_child_env(no_color=False)
+
+    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" not in child_env
+    assert os.environ["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "bundle-extra-plugins"
+
+
 @pytest.mark.parametrize(
     ("executable", "modules", "expected"),
     [

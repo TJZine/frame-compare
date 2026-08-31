@@ -232,6 +232,8 @@ def launch_alignment_verification_session(
 def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
     """Build the child-only environment without changing the parent process."""
     env = os.environ.copy()
+    if runtime_kind().casefold() == "windows-portable":
+        env.pop("VAPOURSYNTH_EXTRA_PLUGIN_PATH", None)
     if no_color:
         env["NO_COLOR"] = "1"
     return env
