@@ -608,6 +608,7 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "import vsview_cli._cli" in build_script
     assert "import vspackrgb.cython" in build_script
     assert "from PySide6.QtWidgets import QApplication" in build_script
+    assert '"testsrc2=size=64x64:rate=1:duration=1"' in build_script
     combined_proof = build_script[
         build_script.index("def prove_vsview_runtime") : build_script.index("phase = sys.argv[1]")
     ]

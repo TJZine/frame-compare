@@ -800,7 +800,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
       throw "Bundled FFmpeg executable not found: $ffmpeg"
     }
-    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=32x32:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=64x64:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
     Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
 
     $smokeScript = @'
@@ -947,7 +947,7 @@ def prove_lwlibavsource(media_path: Path) -> None:
     if media_path.is_file():
         source = load_source(media_path, core=core)
         frame = source.clip.get_frame(0)
-        assert_true(frame.width == 32 and frame.height == 32, "LWLibavSource frame render failed")
+        assert_true(frame.width == 64 and frame.height == 64, "LWLibavSource frame render failed")
         assert_true(source.num_frames == 1, f"unexpected source frame count: {source.num_frames}")
         owned_index = source_index_path(media_path)
         assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
@@ -1034,7 +1034,7 @@ def prove_bestsource_frame(media_path: Path) -> None:
     assert_true(hasattr(core, "bs"), "core.bs namespace missing")
     source = core.bs.VideoSource(source=str(media_path))
     frame = source.get_frame(0)
-    assert_true(frame.width == 32 and frame.height == 32, "BestSource frame render failed")
+    assert_true(frame.width == 64 and frame.height == 64, "BestSource frame render failed")
     proof("bestsource_frame=ok namespace=bs")
 
 
@@ -1068,7 +1068,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         assert_true(sorted(vs.get_outputs()) == [0, 1], "generated session did not register outputs 0 and 1")
         for output in vs.get_outputs().values():
             frame = output.clip.get_frame(0)
-            assert_true(frame.width == 32 and frame.height == 32, "generated VSView output failed")
+            assert_true(frame.width == 64 and frame.height == 64, "generated VSView output failed")
     finally:
         sys.modules.pop("__vsview__", None)
         vs.clear_outputs()
