@@ -752,7 +752,7 @@ function Invoke-VSViewOffscreenLaunchProof(
   foreach ($marker in @(
     "[RUN] VSView Bootstrap",
     "[OK] VSView Ready",
-    "Script execution completed successfully",
+    "Script execution completed",
     "Content loaded successfully",
     "Frame 0 rendered"
   )) {

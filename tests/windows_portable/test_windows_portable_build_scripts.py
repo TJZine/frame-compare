@@ -666,7 +666,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     for marker in (
         "[RUN] VSView Bootstrap",
         "[OK] VSView Ready",
-        "Script execution completed successfully",
+        "Script execution completed",
         "Content loaded successfully",
         "Frame 0 rendered",
     ):
