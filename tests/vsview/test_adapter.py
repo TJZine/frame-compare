@@ -15,14 +15,11 @@ import pytest
 
 from frame_compare.vs.source import source_index_path
 from frame_compare.vsview.adapter import (
-    VSViewAvailability,
     VSViewAvailabilityStatus,
     VSViewConfig,
     VSViewSessionRequest,
     _build_vsview_child_env,
     _check_startup_readiness,
-    _resolve_launch_command,
-    _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
@@ -35,25 +32,27 @@ from frame_compare.vsview.session_script import (
 )
 
 
-class _FakeVSViewProcess:
-    def __init__(self, returncode: int = 0) -> None:
-        self.returncode = returncode
-
-    def __enter__(self) -> _FakeVSViewProcess:
-        return self
-
-    def __exit__(self, *_exc_info: object) -> None:
-        return None
-
-    def wait(self, *, timeout: float) -> int:
-        assert timeout > 0
-        return self.returncode
+def _session_request(tmp_path: Path) -> VSViewSessionRequest:
+    return VSViewSessionRequest(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "comparison.mkv"],
+        suggested_offsets_by_key={"ref:comparison": 4},
+        cache_dir=tmp_path,
+    )
 
 
-def _available() -> VSViewAvailability:
-    return VSViewAvailability(
-        status=VSViewAvailabilityStatus.AVAILABLE,
-        message="available",
+def _mock_available_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.importlib.util.find_spec",
+        lambda _name: object(),
+    )
+    entry_point = SimpleNamespace(
+        name="frame-compare-alignment-review",
+        value="frame_compare.vsview.alignment_review_panel",
+    )
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.importlib.metadata.entry_points",
+        lambda **_kwargs: [entry_point],
     )
 
 
@@ -144,9 +143,11 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     assert "compat" not in probe_code
 
 
-def test_startup_readiness_rejects_missing_panel_entry_point(
+def test_launch_rejects_missing_panel_entry_point(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _mock_available_runtime(monkeypatch)
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.run",
         MagicMock(
@@ -158,9 +159,18 @@ def test_startup_readiness_rejects_missing_panel_entry_point(
             )
         ),
     )
+    popen = MagicMock()
+    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
 
-    with pytest.raises(VSViewError, match="startup dependency check"):
-        _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
+    with pytest.raises(VSViewError) as excinfo:
+        launch_alignment_verification_session(
+            _session_request(tmp_path),
+            VSViewConfig(enabled=True),
+        )
+
+    assert excinfo.value.public_reason == "VSView failed its startup dependency check."
+    assert "entry point is unavailable" in (excinfo.value.startup_stderr or "")
+    popen.assert_not_called()
 
 
 def test_windows_startup_readiness_preloads_before_vsview(
@@ -182,11 +192,7 @@ def test_startup_failure_is_bounded_redacted_and_prevents_launch(
 ) -> None:
     secret = "timeout-secret-token"
     monkeypatch.setenv("FRAME_COMPARE_SECRET", secret)
-    monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", _available)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter._resolve_launch_command",
-        lambda script_path: [sys.executable, "-m", "vsview", str(script_path)],
-    )
+    _mock_available_runtime(monkeypatch)
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.run",
         MagicMock(
@@ -200,12 +206,7 @@ def test_startup_failure_is_bounded_redacted_and_prevents_launch(
 
     with pytest.raises(VSViewError) as excinfo:
         launch_alignment_verification_session(
-            VSViewSessionRequest(
-                reference=Path("ref.mkv"),
-                comparisons=[Path("a.mkv")],
-                suggested_offsets_by_key={},
-                cache_dir=tmp_path,
-            ),
+            _session_request(tmp_path),
             VSViewConfig(enabled=True),
         )
 
@@ -214,12 +215,31 @@ def test_startup_failure_is_bounded_redacted_and_prevents_launch(
     popen.assert_not_called()
 
 
-def test_resolve_launch_command_always_uses_current_interpreter() -> None:
-    assert _resolve_launch_command(Path("generated/session.py")) == [
+def test_launch_uses_managed_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
+    )
+    process = MagicMock()
+    process.__enter__.return_value = process
+    process.wait.return_value = 0
+    popen = MagicMock(return_value=process)
+    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
+
+    session = launch_alignment_verification_session(
+        _session_request(tmp_path),
+        VSViewConfig(enabled=True),
+    )
+
+    assert popen.call_args.args[0] == [
         sys.executable,
         "-m",
         "frame_compare.vsview.launcher",
-        str(Path("generated/session.py")),
+        str(session.script_path),
     ]
 
 
@@ -231,12 +251,7 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", availability)
 
     session = launch_alignment_verification_session(
-        VSViewSessionRequest(
-            reference=tmp_path / "ref.mkv",
-            comparisons=[tmp_path / "comparison.mkv"],
-            suggested_offsets_by_key={"ref:comparison": 4},
-            cache_dir=tmp_path,
-        ),
+        _session_request(tmp_path),
         VSViewConfig(enabled=False),
     )
 
@@ -248,7 +263,15 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     assert "**_review_metadata(" in script
 
 
-def test_review_process_timeout_terminates_child(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_launch_timeout_terminates_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
+    )
     process = MagicMock()
     process.__enter__.return_value = process
     process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1), 0]
@@ -257,7 +280,10 @@ def test_review_process_timeout_terminates_child(monkeypatch: pytest.MonkeyPatch
     )
 
     with pytest.raises(VSViewError, match="timed out"):
-        _run_vsview_command([sys.executable, "-m", "vsview", "session.py"], env={})
+        launch_alignment_verification_session(
+            _session_request(tmp_path),
+            VSViewConfig(enabled=True),
+        )
 
     process.terminate.assert_called_once_with()
     process.kill.assert_not_called()

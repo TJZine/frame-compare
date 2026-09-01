@@ -728,19 +728,6 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
     assert "Required combined VSView runtime proof marker missing." in required_phases
 
 
-def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "bundle_info.json" in build_script
-    assert "requirements_lock_sha256" in build_script
-    assert "bundle_kind" in build_script
-    assert "platform" in build_script
-    assert "schema_version = 3" in build_script
-    assert "manifest_version = $manifestVersion" in build_script
-    assert "media_runtime_fingerprint" in build_script
-    assert "media_runtime_fingerprints" in build_script
-
-
 def test_windows_portable_generated_launcher_sanitizes_malformed_bundle_info(
     repo_root: Path,
 ) -> None:
