@@ -281,6 +281,9 @@ def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
     tmp_path: Path,
 ) -> None:
     panel, _api, _script = _panel(tmp_path, comparison_count=4)
+    font = panel.font()
+    font.setPointSize(font.pointSize() + 8)
+    panel.setFont(font)
     panel.manual_toggle.click()
     panel.resize(320, 600)
     panel.show()

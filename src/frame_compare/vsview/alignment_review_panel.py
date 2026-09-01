@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -116,6 +117,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.body_scroll.setAccessibleName("Alignment source lineup and manual inputs")
         self.body_widget = QWidget(self.body_scroll)
+        self.body_widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         body_layout = QVBoxLayout(self.body_widget)
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(8)
