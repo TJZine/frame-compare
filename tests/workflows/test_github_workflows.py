@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from tests.workflow_helpers import load_workflow as _load_workflow
+from tests.workflows._helpers import bash_executable_or_skip as _bash_executable_or_skip
 
 _SCRIPT_TIMEOUT_SECONDS = 10.0
 
@@ -288,9 +289,10 @@ def test_release_preflight_ref_validation_fails_closed(
         for candidate in workflow["jobs"]["preflight"]["steps"]
         if candidate.get("name") == "Validate release channel, versions, tag, and SHA"
     )
+    bash = _bash_executable_or_skip()
 
     completed = subprocess.run(
-        ["bash", "-c", step["run"]],
+        [bash, "-c", step["run"]],
         check=False,
         capture_output=True,
         text=True,

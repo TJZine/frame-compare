@@ -8,6 +8,8 @@ import pytest
 
 from tests.workflow_helpers import load_workflow as _load_workflow
 from tests.workflow_helpers import step_by_name as _step_by_name
+from tests.workflows._helpers import bash_executable_or_skip as _bash_executable_or_skip
+from tests.workflows._helpers import bash_path_or_skip as _bash_path_or_skip
 
 _SCRIPT_TIMEOUT_SECONDS = 10.0
 
@@ -112,9 +114,10 @@ def test_windows_portable_manual_sha_validation_fails_closed(
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable.yml")
     script = workflow["jobs"]["validate_manual"]["steps"][0]["run"]
     output = tmp_path / "github-output"
+    bash = _bash_executable_or_skip()
 
     completed = subprocess.run(
-        ["bash", "-c", script],
+        [bash, "-c", script],
         check=False,
         capture_output=True,
         text=True,
@@ -126,7 +129,7 @@ def test_windows_portable_manual_sha_validation_fails_closed(
             "DISPATCH_REF_TYPE": ref_type,
             "DISPATCH_SHA": dispatch_sha,
             "EXPECTED_SHA": expected_sha,
-            "GITHUB_OUTPUT": str(output),
+            "GITHUB_OUTPUT": _bash_path_or_skip(bash, output),
         },
     )
 
