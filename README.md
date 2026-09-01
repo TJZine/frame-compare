@@ -37,7 +37,7 @@ opt-ins.
 | Route | Best for | Start here |
 | --- | --- | --- |
 | Windows portable | Windows 10/11 x64 users who want the complete supported runtime, VSView, installer, and updater | [Install the Windows portable bundle](docs/windows-portable.md) |
-| Docker | Reproducible headless use on macOS or Linux | [Run with Docker](docs/getting-started/docker.md) |
+| Docker | Reproducible headless use on macOS or Linux, including HDR software tonemapping | [Run with Docker](docs/getting-started/docker.md) |
 | Native source | Advanced users who already manage FFmpeg, VapourSynth, source plugins, and Vulkan | [Install from source](docs/getting-started/native.md) |
 
 Not sure which route fits? Use the

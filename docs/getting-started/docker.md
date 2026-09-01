@@ -1,9 +1,11 @@
 # Docker
 
 Docker is the recommended reproducible, headless route for macOS and Linux. Run the
-following commands from a cloned repository. Copy at least two supported video files
-into `comparison_videos/` before the wizard; supported extensions are `.mkv`, `.mp4`,
-`.avi`, `.m2ts`, and `.ts` (case-insensitive).
+following commands from a cloned repository. On macOS Docker Desktop, HDR tonemapping
+is supported through the CPU-backed software-Vulkan path and does not require GPU
+passthrough. Copy at least two supported video files into `comparison_videos/` before
+the wizard; supported extensions are `.mkv`, `.mp4`, `.avi`, `.m2ts`, and `.ts`
+(case-insensitive).
 
 The UID and GID variables make container-created bind-mount files belong to the
 current host user. Pre-creating the directories keeps ownership predictable.
