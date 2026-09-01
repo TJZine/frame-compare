@@ -412,7 +412,10 @@ def _parse_decision(raw: object) -> AlignmentReviewDecision:
         key = strict["comparison_key"]
         if not isinstance(key, str):
             raise AlignmentReviewContractError("comparison key must be a string")
-        return KeepCurrentAlignmentReviewDecision(comparison_key=key)
+        try:
+            return KeepCurrentAlignmentReviewDecision(comparison_key=key)
+        except ValueError as exc:
+            raise AlignmentReviewContractError(str(exc)) from exc
     if action == "confirmed":
         strict = _strict_dict(
             data,

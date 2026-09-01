@@ -44,7 +44,14 @@ def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int =
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_consensus_offset",
         lambda *_args, **_kwargs: AlignmentConsensus(
-            offset, 0.99, True, "accepted", 1, 1, 1.0, 2.0
+            sample_offset=offset,
+            score=0.99,
+            applied=True,
+            diagnostic="accepted",
+            valid_windows=1,
+            consensus_windows=1,
+            consensus_ratio=1.0,
+            ambiguity_ratio=2.0,
         ),
     )
     monkeypatch.setattr(

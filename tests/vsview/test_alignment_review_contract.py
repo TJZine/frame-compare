@@ -204,6 +204,11 @@ def test_result_write_is_atomic_and_propagates_failure(
         {
             "schema_version": 1,
             "session_id": _SESSION_ID,
+            "decisions": [{"comparison_key": "", "action": "keep_current"}],
+        },
+        {
+            "schema_version": 1,
+            "session_id": _SESSION_ID,
             "decisions": [
                 {
                     "comparison_key": "ref:a",

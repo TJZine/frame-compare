@@ -293,8 +293,12 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         decision = self._decisions[index]
         output = pair.reference if role == "reference" else pair.comparison
         frame, _error = _parse_frame_text(value, role, output.source_frame_count)
-        setattr(decision, f"{role}_text", value)
-        setattr(decision, f"{role}_frame", frame)
+        if role == "reference":
+            decision.reference_text = value
+            decision.reference_frame = frame
+        else:
+            decision.comparison_text = value
+            decision.comparison_frame = frame
         decision.action = None
         self._update_equation()
         self._update_progress()
