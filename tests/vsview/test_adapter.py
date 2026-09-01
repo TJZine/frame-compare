@@ -260,7 +260,8 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     assert session.result_path.name.endswith(".alignment-result.json")
     script = session.script_path.read_text(encoding="utf-8")
     assert "from vsview import set_output" in script
-    assert "**_review_metadata(" in script
+    assert "**_reference_metadata(" in script
+    assert "**_comparison_metadata(" in script
 
 
 def test_launch_timeout_terminates_child(
@@ -396,7 +397,7 @@ def test_generated_session_registers_named_outputs_in_input_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output_calls, output_metadata, _props, _loader_calls = _execute_generated_script(
+    output_calls, output_metadata, _props, loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("zeta", "alpha"),
@@ -406,22 +407,23 @@ def test_generated_session_registers_named_outputs_in_input_order(
     assert output_calls == [
         ("ref", 0, "Reference"),
         ("zeta", 1, "Comparison 1"),
-        ("ref", 2, "Reference"),
-        ("alpha", 3, "Comparison 2"),
+        ("alpha", 2, "Comparison 2"),
     ]
     assert [metadata["frame_compare_output_role"] for metadata in output_metadata] == [
         "reference",
         "comparison",
-        "reference",
         "comparison",
     ]
-    assert [metadata["frame_compare_comparison_ordinal"] for metadata in output_metadata] == [
+    assert "frame_compare_comparison_ordinal" not in output_metadata[0]
+    assert "frame_compare_alignment_key" not in output_metadata[0]
+    assert "frame_compare_suggested_offset" not in output_metadata[0]
+    assert [metadata["frame_compare_comparison_ordinal"] for metadata in output_metadata[1:]] == [
         1,
-        1,
-        2,
         2,
     ]
+    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {1}
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
+    assert [stem for stem, _cachefile, _cache in loader_calls].count("ref") == 1
 
 
 def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failures(
@@ -488,6 +490,20 @@ def test_generated_script_header_and_helpers_are_self_contained() -> None:
     generated = _build_script_header() + _build_helpers_section()
 
     assert "import logging" not in generated
+
+
+def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
+    tmp_path: Path,
+) -> None:
+    generated = _build_script_content(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "a.mkv"],
+        suggested_offsets_by_key={"ref:a": 0},
+        bootstrap_paths=[tmp_path],
+    )
+
+    assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 3
+    assert generated.count("Unlink playheads") == 3
 
 
 def test_write_vsview_session_script_is_atomic_and_deterministic_body(

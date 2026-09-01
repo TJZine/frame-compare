@@ -23,7 +23,15 @@ ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY = "frame_compare_comparison_ordinal"
 ALIGNMENT_REVIEW_METADATA_ROLE_KEY = "frame_compare_output_role"
 ALIGNMENT_REVIEW_METADATA_NAME_KEY = "frame_compare_presentation_name"
 ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY = "frame_compare_suggested_offset"
-ALIGNMENT_REVIEW_METADATA_KEYS = frozenset(
+ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS = frozenset(
+    {
+        ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+        ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+        ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+        ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+    }
+)
+ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS = frozenset(
     {
         ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
         ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
@@ -75,29 +83,28 @@ class AlignmentReviewOutputCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class AlignmentReviewOutputMetadata:
+class AlignmentReviewReferenceMetadata:
+    output_id: int
+    source_frame_count: int
+    session_id: str
+    presentation_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewComparisonMetadata:
     output_id: int
     source_frame_count: int
     session_id: str
     comparison_key: str
     comparison_ordinal: int
-    role: Literal["reference", "comparison"]
     presentation_name: str
     suggested_offset: int | None
 
 
 @dataclass(frozen=True, slots=True)
-class AlignmentReviewComparisonMetadata:
-    comparison_key: str
-    comparison_ordinal: int
-    suggested_offset: int | None
-    reference: AlignmentReviewOutputMetadata
-    comparison: AlignmentReviewOutputMetadata
-
-
-@dataclass(frozen=True, slots=True)
 class AlignmentReviewWorkspaceMetadata:
     session_id: str
+    reference: AlignmentReviewReferenceMetadata
     comparisons: tuple[AlignmentReviewComparisonMetadata, ...]
 
 
@@ -114,42 +121,32 @@ def parse_alignment_review_workspace_metadata(
     if len({output.output_id for output in outputs}) != len(outputs):
         raise AlignmentReviewContractError("alignment review output identifiers are duplicated")
 
-    by_ordinal = dict[int, list[AlignmentReviewOutputMetadata]]()
-    for output in outputs:
-        by_ordinal.setdefault(output.comparison_ordinal, []).append(output)
-    if sorted(by_ordinal) != list(range(1, len(by_ordinal) + 1)):
-        raise AlignmentReviewContractError("alignment review comparison ordinals are incomplete")
-
-    comparisons = list[AlignmentReviewComparisonMetadata]()
-    keys = set[str]()
-    for ordinal in sorted(by_ordinal):
-        pair = by_ordinal[ordinal]
-        if len(pair) != 2 or {output.role for output in pair} != {"reference", "comparison"}:
-            raise AlignmentReviewContractError(
-                "alignment review comparison output pair is incomplete"
-            )
-        reference = next(output for output in pair if output.role == "reference")
-        comparison = next(output for output in pair if output.role == "comparison")
-        if (
-            reference.comparison_key != comparison.comparison_key
-            or reference.suggested_offset != comparison.suggested_offset
-        ):
-            raise AlignmentReviewContractError(
-                "alignment review comparison output pair is mismatched"
-            )
-        if reference.comparison_key in keys:
-            raise AlignmentReviewContractError("alignment review comparison keys are duplicated")
-        keys.add(reference.comparison_key)
-        comparisons.append(
-            AlignmentReviewComparisonMetadata(
-                comparison_key=reference.comparison_key,
-                comparison_ordinal=ordinal,
-                suggested_offset=reference.suggested_offset,
-                reference=reference,
-                comparison=comparison,
-            )
+    references = tuple(
+        output for output in outputs if isinstance(output, AlignmentReviewReferenceMetadata)
+    )
+    if len(references) != 1:
+        raise AlignmentReviewContractError(
+            "alignment review workspace must contain exactly one reference"
         )
-    return AlignmentReviewWorkspaceMetadata(session_id=session_id, comparisons=tuple(comparisons))
+    comparisons = tuple(
+        output for output in outputs if isinstance(output, AlignmentReviewComparisonMetadata)
+    )
+    if not comparisons:
+        raise AlignmentReviewContractError(
+            "alignment review workspace must contain at least one comparison"
+        )
+    ordinals = sorted(comparison.comparison_ordinal for comparison in comparisons)
+    if ordinals != list(range(1, len(comparisons) + 1)):
+        raise AlignmentReviewContractError("alignment review comparison ordinals are incomplete")
+    if len({comparison.comparison_key for comparison in comparisons}) != len(comparisons):
+        raise AlignmentReviewContractError("alignment review comparison keys are duplicated")
+    return AlignmentReviewWorkspaceMetadata(
+        session_id=session_id,
+        reference=references[0],
+        comparisons=tuple(
+            sorted(comparisons, key=lambda comparison: comparison.comparison_ordinal)
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,43 +320,53 @@ def _session_id_from_filename(filename: str) -> str:
 
 def _parse_output_metadata(
     candidate: AlignmentReviewOutputCandidate,
-) -> AlignmentReviewOutputMetadata:
+) -> AlignmentReviewReferenceMetadata | AlignmentReviewComparisonMetadata:
     if not _is_int(candidate.output_id):
         raise AlignmentReviewContractError("alignment review output identifier must be an integer")
     if not _is_int(candidate.source_frame_count) or candidate.source_frame_count <= 0:
         raise AlignmentReviewContractError("alignment review output frame count must be positive")
-    if set(candidate.metadata) != set(ALIGNMENT_REVIEW_METADATA_KEYS):
-        raise AlignmentReviewContractError("alignment review output metadata fields are invalid")
     metadata = candidate.metadata
+    role = metadata.get(ALIGNMENT_REVIEW_METADATA_ROLE_KEY)
+    if role == "reference":
+        expected_keys = ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS
+    elif role == "comparison":
+        expected_keys = ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS
+    else:
+        raise AlignmentReviewContractError("alignment review output role is invalid")
+    if set(metadata) != set(expected_keys):
+        raise AlignmentReviewContractError("alignment review output metadata fields are invalid")
     version = metadata[ALIGNMENT_REVIEW_METADATA_VERSION_KEY]
     session_id = metadata[ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY]
-    comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
-    ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
-    role = metadata[ALIGNMENT_REVIEW_METADATA_ROLE_KEY]
     name = metadata[ALIGNMENT_REVIEW_METADATA_NAME_KEY]
-    suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
     if not _is_int(version) or version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
         raise AlignmentReviewContractError("unsupported alignment review output metadata version")
     if not isinstance(session_id, str):
         raise AlignmentReviewContractError("alignment review output session identifier is invalid")
     session_id = _validated_session_id(session_id)
+    if not isinstance(name, str) or not name:
+        raise AlignmentReviewContractError("alignment review output presentation name is invalid")
+    if role == "reference":
+        return AlignmentReviewReferenceMetadata(
+            output_id=candidate.output_id,
+            source_frame_count=candidate.source_frame_count,
+            session_id=session_id,
+            presentation_name=name,
+        )
+    comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
+    ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
+    suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
     if not isinstance(comparison_key, str) or not comparison_key:
         raise AlignmentReviewContractError("alignment review output comparison key is invalid")
     if not _is_int(ordinal) or ordinal <= 0:
         raise AlignmentReviewContractError("alignment review output ordinal is invalid")
-    if role not in {"reference", "comparison"}:
-        raise AlignmentReviewContractError("alignment review output role is invalid")
-    if not isinstance(name, str) or not name:
-        raise AlignmentReviewContractError("alignment review output presentation name is invalid")
     if suggested_offset is not None and not _is_int(suggested_offset):
         raise AlignmentReviewContractError("alignment review suggested offset is invalid")
-    return AlignmentReviewOutputMetadata(
+    return AlignmentReviewComparisonMetadata(
         output_id=candidate.output_id,
         source_frame_count=candidate.source_frame_count,
         session_id=session_id,
         comparison_key=comparison_key,
         comparison_ordinal=ordinal,
-        role=cast(Literal["reference", "comparison"], role),
         presentation_name=name,
         suggested_offset=suggested_offset,
     )

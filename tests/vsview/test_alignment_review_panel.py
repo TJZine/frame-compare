@@ -27,6 +27,7 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
     ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    ALIGNMENT_REVIEW_SCHEMA_VERSION,
 )
 from frame_compare.vsview.alignment_review_panel import (
     AlignmentReviewPanel,
@@ -38,7 +39,7 @@ _APP = QApplication.instance() or QApplication([])
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _qt_event_loop() -> Generator[None]:
+def qt_event_loop() -> Generator[None]:
     previous = get_loop()
     set_loop(QtEventLoop(_APP))
     try:
@@ -64,33 +65,35 @@ class _Timeline:
         self.added.append(args)
 
 
-class _Playback:
-    def __init__(self) -> None:
-        self.sought: list[int] = []
+def _reference_output(*, frame_count: int = 200) -> Any:
+    return SimpleNamespace(
+        vs_index=0,
+        vs_output=SimpleNamespace(clip=SimpleNamespace(num_frames=frame_count)),
+        kwargs={
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
+            ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: _SESSION_ID,
+            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "reference",
+            ALIGNMENT_REVIEW_METADATA_NAME_KEY: "Reference master",
+        },
+    )
 
-    def seek(self, frame: int) -> bool:
-        self.sought.append(frame)
-        return True
 
-
-def _output(
-    output_id: int,
-    role: str,
-    suggestion: int | None = 12,
+def _comparison_output(
+    ordinal: int,
+    suggestion: int | None,
     *,
-    ordinal: int = 1,
     frame_count: int = 200,
 ) -> Any:
     return SimpleNamespace(
-        vs_index=output_id,
+        vs_index=ordinal,
         vs_output=SimpleNamespace(clip=SimpleNamespace(num_frames=frame_count)),
         kwargs={
-            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1,
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
             ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: _SESSION_ID,
             ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: f"ref:comparison-{ordinal}",
             ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY: ordinal,
-            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: role,
-            ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"{role.title()} {ordinal}",
+            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "comparison",
+            ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"Comparison {ordinal} source",
             ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY: suggestion,
         },
     )
@@ -101,16 +104,19 @@ def _panel(
     *,
     suggestion: int | None = 12,
     comparison_count: int = 1,
-    initialize_output: bool = True,
+    initialize_output: bool = False,
+    frame_count: int = 200,
 ) -> tuple[AlignmentReviewPanel, Any, Path]:
     sessions = tmp_path / "vsview_sessions"
     sessions.mkdir()
     script = sessions / f"alignment_{_SESSION_ID}.py"
     script.write_text("# session\n", encoding="utf-8")
     outputs = [
-        _output(output_id, role, suggestion, ordinal=ordinal)
-        for ordinal in range(1, comparison_count + 1)
-        for output_id, role in ((ordinal * 2 - 2, "reference"), (ordinal * 2 - 1, "comparison"))
+        _reference_output(frame_count=frame_count),
+        *(
+            _comparison_output(ordinal, suggestion, frame_count=frame_count)
+            for ordinal in range(1, comparison_count + 1)
+        ),
     ]
     api = SimpleNamespace(
         file_path=script,
@@ -118,7 +124,6 @@ def _panel(
         current_voutput=outputs[0],
         current_frame=12,
         timeline=_Timeline(),
-        playback=_Playback(),
     )
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
@@ -129,24 +134,61 @@ def _panel(
     return panel, api, script
 
 
-def test_workspace_activation_waits_for_public_output_lifecycle(tmp_path: Path) -> None:
-    panel, api, _script = _panel(tmp_path, initialize_output=False)
+def _visit(panel: AlignmentReviewPanel, api: Any, output_index: int, frame: int) -> None:
+    api.current_voutput = api.voutputs[output_index]
+    api.current_frame = frame
+    _call_hook(panel.on_current_voutput_changed, api.current_voutput, output_index)
 
+
+def _read_result(script: Path) -> dict[str, object]:
+    path = script.with_name(f"{script.stem}.alignment-result.json")
+    return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
+
+
+def test_activation_starts_with_every_source_not_visited(tmp_path: Path) -> None:
+    panel, api, _script = _panel(tmp_path, comparison_count=2)
+
+    assert panel.progress_label.text() == "0 / 3 sources ready"
+    assert [label.text() for label in panel.source_status_labels] == [
+        "Not visited",
+        "Not visited",
+        "Not visited",
+    ]
+    assert not panel.use_positions_button.isEnabled()
     assert api.timeline.added == []
-    assert not panel.capture_button.isEnabled()
-    assert not panel.seek_button.isEnabled()
-    assert panel.context_label.text() == ""
 
     _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
 
-    assert api.timeline.added[-1][0:2] == ("frame_compare_alignment_review", 12)
-    assert panel.capture_button.isEnabled()
-    assert panel.seek_button.isEnabled()
-    assert "Reference 1 (reference), frame 12" in panel.context_label.text()
+    assert panel.progress_label.text() == "1 / 3 sources ready"
+    assert panel.source_status_labels[0].text() == "Viewing — frame 12 — Viewer"
+    assert [label.text() for label in panel.source_status_labels[1:]] == [
+        "Not visited",
+        "Not visited",
+    ]
+    assert len(api.timeline.added) == 2
 
 
-def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
-    del tmp_path
+def test_viewer_callbacks_update_only_current_source_and_revisits_replace_it(
+    tmp_path: Path,
+) -> None:
+    panel, api, _script = _panel(tmp_path, comparison_count=2)
+    _visit(panel, api, 0, 40)
+    _visit(panel, api, 1, 31)
+
+    assert panel.source_status_labels[0].text() == "Ready — frame 40 — Viewer"
+    assert panel.source_status_labels[1].text() == "Viewing — frame 31 — Viewer"
+    assert panel.source_status_labels[2].text() == "Not visited"
+    assert panel.source_outcome_labels[1].text().startswith("+9 frames")
+
+    api.current_frame = 29
+    _call_hook(panel.on_current_frame_changed, 29)
+
+    assert panel.source_status_labels[0].text() == "Ready — frame 40 — Viewer"
+    assert panel.source_status_labels[1].text() == "Viewing — frame 29 — Viewer"
+    assert panel.source_outcome_labels[1].text().startswith("+11 frames")
+
+
+def test_panel_is_inert_for_ordinary_workspace() -> None:
     timeline = _Timeline()
     api = SimpleNamespace(file_path=None, timeline=timeline)
     parent = QWidget()
@@ -155,7 +197,8 @@ def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
     _call_hook(panel.on_workspace_loaded)
 
     assert "Inactive" in panel.progress_label.text()
-    assert not panel.capture_button.isEnabled()
+    assert not panel.use_positions_button.isEnabled()
+    assert not panel.keep_button.isEnabled()
     assert timeline.cleared == [("frame_compare_alignment_review", True)]
 
 
@@ -165,40 +208,48 @@ def test_malformed_output_proxy_keeps_panel_inert(tmp_path: Path) -> None:
     script = sessions / f"alignment_{_SESSION_ID}.py"
     script.write_text("# session\n", encoding="utf-8")
     timeline = _Timeline()
-    playback = _Playback()
     malformed = SimpleNamespace(vs_index=0, kwargs={})
-    api = SimpleNamespace(
-        file_path=script,
-        voutputs=[malformed],
-        current_voutput=malformed,
-        current_frame=0,
-        timeline=timeline,
-        playback=playback,
-    )
+    api = SimpleNamespace(file_path=script, voutputs=[malformed], timeline=timeline)
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
 
     _call_hook(panel.on_workspace_loaded)
 
     assert "Inactive" in panel.progress_label.text()
-    assert timeline.cleared == [("frame_compare_alignment_review", True)]
+    assert "could not be read safely (AttributeError)" in panel.error_label.text()
+    assert str(tmp_path) not in panel.error_label.text()
     assert timeline.added == []
-    assert playback.sought == []
     assert not script.with_name(f"{script.stem}.alignment-result.json").exists()
 
 
-def test_contract_rejection_is_explained_without_untrusted_values(tmp_path: Path) -> None:
+def test_session_read_failure_is_bounded_and_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_read(*_args: object, **_kwargs: object) -> None:
+        raise OSError(f"private path: {tmp_path}")
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.alignment_review_panel.alignment_review_session_from_script",
+        fail_read,
+    )
+
+    panel, _api, _script = _panel(tmp_path)
+
+    assert "Inactive" in panel.progress_label.text()
+    assert panel.error_label.text() == (
+        "Alignment review unavailable: workspace could not be read safely (OSError)."
+    )
+    assert str(tmp_path) not in panel.error_label.text()
+
+
+def test_contract_rejection_is_bounded_and_sanitized(tmp_path: Path) -> None:
     sessions = tmp_path / "vsview_sessions"
     sessions.mkdir()
     script = sessions / f"alignment_{_SESSION_ID}.py"
     script.write_text("# session\n", encoding="utf-8")
-    malformed = _output(0, "reference")
-    malformed.kwargs[ALIGNMENT_REVIEW_METADATA_NAME_KEY] = ""
-    api = SimpleNamespace(
-        file_path=script,
-        voutputs=[malformed],
-        timeline=_Timeline(),
-    )
+    reference = _reference_output()
+    reference.kwargs[ALIGNMENT_REVIEW_METADATA_NAME_KEY] = ""
+    api = SimpleNamespace(file_path=script, voutputs=[reference], timeline=_Timeline())
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
     panel.setParent(None)
@@ -209,92 +260,286 @@ def test_contract_rejection_is_explained_without_untrusted_values(tmp_path: Path
         "Alignment review rejected: alignment review output presentation name is invalid"
     )
     assert "Inactive" in panel.progress_label.text()
-    assert not panel.capture_button.isEnabled()
     assert str(tmp_path) not in panel.error_label.text()
 
 
-def test_plugin_hook_registers_one_stable_tool_panel() -> None:
+def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
+    panel, _api, _script = _panel(tmp_path)
+
     assert vsview_register_toolpanel() is AlignmentReviewPanel
     assert AlignmentReviewPanel.identifier == "frame_compare_alignment_review"
     assert AlignmentReviewPanel.display_name == "Frame Compare Alignment Review"
+    assert panel.guidance_label.wordWrap()
+    assert panel.error_label.accessibleName() == "Alignment review error"
+    assert panel.manual_toggle.accessibleName() == "Enter alignment manually"
+    assert panel.body_scroll.accessibleName() == "Alignment source lineup and manual inputs"
+    assert not panel.manual_group.isVisible()
+    assert panel.use_positions_button.text() == "Use these aligned positions"
 
 
-def test_panel_shows_unavailable_suggestion_without_seek_or_prefill(tmp_path: Path) -> None:
-    panel, _api, _script = _panel(tmp_path, suggestion=None)
-
-    assert "unavailable" in panel.suggestion_label.text().lower()
-    assert panel.reference_input.text() == ""
-    assert panel.comparison_input.text() == ""
-    assert not panel.seek_button.isEnabled()
-
-
-def test_out_of_range_active_suggestion_has_no_marker_or_seek(tmp_path: Path) -> None:
-    panel, api, _script = _panel(tmp_path, suggestion=250)
-
-    assert "outside that output's 0–199 range" in panel.suggestion_label.text()
-    assert "enter or capture a valid frame" in panel.suggestion_label.text()
-    assert panel.reference_input.text() == ""
-    assert api.timeline.cleared == [
-        ("frame_compare_alignment_review", True),
-        ("frame_compare_alignment_review", True),
-    ]
-    assert api.timeline.added == []
-    assert not panel.seek_button.isEnabled()
-    panel.seek_button.click()
-    assert api.playback.sought == []
-
-
-@pytest.mark.parametrize(
-    ("text", "use_paste", "error"),
-    [
-        ("500", False, 'between 0 and 199; entered "500"'),
-        ("200", True, 'between 0 and 199; entered "200"'),
-        ("-5", False, 'non-negative; entered "-5"'),
-        ("abc", True, 'whole number; entered "abc"'),
-    ],
-)
-def test_direct_frame_input_preserves_and_rejects_invalid_text(
-    tmp_path: Path, text: str, use_paste: bool, error: str
+def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
+    tmp_path: Path,
 ) -> None:
-    panel, _api, _script = _panel(tmp_path)
-    panel.reference_input.selectAll()
-    if use_paste:
-        QApplication.clipboard().setText(text)
-        panel.reference_input.paste()
-    else:
-        QTest.keyClicks(panel.reference_input, text)
+    panel, _api, _script = _panel(tmp_path, comparison_count=4)
+    panel.manual_toggle.click()
+    panel.resize(320, 600)
+    panel.show()
+    _APP.processEvents()
 
-    assert panel.reference_input.text() == text
-    assert error in panel.error_label.text()
-    assert not panel.confirm_button.isEnabled()
-    panel.confirm_button.click()
-    assert "not reviewed" in panel.comparison_selector.currentText()
+    assert panel.body_scroll.verticalScrollBar().maximum() > 0
+    assert panel.body_scroll.horizontalScrollBar().maximum() == 0
+    assert panel.use_positions_button.isVisible()
+    assert panel.keep_button.isVisible()
+    assert panel.use_positions_button.parent() is panel
+    assert panel.keep_button.parent() is panel
+
+    panel.hide()
 
 
-def test_valid_direct_frame_entry_writes_exact_frames(tmp_path: Path) -> None:
-    panel, _api, script = _panel(tmp_path)
-    panel.reference_input.setText("120")
-    panel.comparison_input.setText("108")
+def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
+    tmp_path: Path,
+) -> None:
+    panel, _api, script = _panel(tmp_path, suggestion=None, comparison_count=2)
 
-    assert panel.confirm_button.isEnabled()
-    assert "= +12 frames" in panel.equation_label.text()
-    panel.confirm_button.click()
-    panel.finish_button.click()
+    assert [label.text() for label in panel.source_outcome_labels[1:]] == [
+        "Suggestion unavailable",
+        "Suggestion unavailable",
+    ]
+    assert "remains unchanged" in panel.keep_help_label.text()
+    assert panel.keep_button.isEnabled()
 
-    result = json.loads(script.with_name(f"{script.stem}.alignment-result.json").read_text())
-    assert result["decisions"][0] == {
-        "comparison_key": "ref:comparison-1",
-        "action": "confirmed",
-        "reference_source_frame": 120,
-        "comparison_source_frame": 108,
+    panel.keep_button.click()
+
+    result = _read_result(script)
+    assert result["decisions"] == [
+        {"comparison_key": "ref:comparison-1", "action": "keep_current"},
+        {"comparison_key": "ref:comparison-2", "action": "keep_current"},
+    ]
+    assert "Alignment saved" in panel.progress_label.text()
+    assert all("retained" in label.text() for label in panel.source_status_labels)
+
+
+def test_markers_use_only_owned_group_and_role_relevant_bounded_suggestions(
+    tmp_path: Path,
+) -> None:
+    panel, api, _script = _panel(tmp_path, comparison_count=2)
+    _visit(panel, api, 0, 20)
+
+    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", False)
+    assert [marker[1] for marker in api.timeline.added] == [12, 12]
+    assert all(marker[2] == "#3daee9" for marker in api.timeline.added)
+
+    api.timeline.added.clear()
+    _visit(panel, api, 1, 5)
+
+    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", False)
+    assert api.timeline.added[0][0:3] == (
+        "frame_compare_alignment_review",
+        0,
+        "#d79b35",
+    )
+    assert {identifier for identifier, _update in api.timeline.cleared} == {
+        "frame_compare_alignment_review"
     }
 
 
-@pytest.mark.parametrize("next_workspace", ["ordinary", "malformed"])
-def test_deactivation_clears_only_owned_marker_group_with_update(
-    tmp_path: Path, next_workspace: str
+def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) -> None:
+    panel, api, _script = _panel(tmp_path, suggestion=250)
+
+    _visit(panel, api, 0, 12)
+
+    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
+    assert api.timeline.added == []
+
+
+def test_one_primary_action_saves_complete_viewer_positions(tmp_path: Path) -> None:
+    panel, api, script = _panel(tmp_path, comparison_count=2)
+    _visit(panel, api, 0, 120)
+    _visit(panel, api, 1, 108)
+    _visit(panel, api, 2, 127)
+
+    assert panel.progress_label.text() == "3 / 3 sources ready"
+    assert panel.use_positions_button.isEnabled()
+    assert panel.source_outcome_labels[1].text() == ("+12 frames — Trim 12 frame(s) from reference")
+    assert panel.source_outcome_labels[2].text() == (
+        "-7 frames — Trim 7 frame(s) from this comparison"
+    )
+
+    panel.use_positions_button.click()
+
+    result = _read_result(script)
+    assert result["decisions"] == [
+        {
+            "comparison_key": "ref:comparison-1",
+            "action": "confirmed",
+            "reference_source_frame": 120,
+            "comparison_source_frame": 108,
+        },
+        {
+            "comparison_key": "ref:comparison-2",
+            "action": "confirmed",
+            "reference_source_frame": 120,
+            "comparison_source_frame": 127,
+        },
+    ]
+    assert panel.progress_label.focusPolicy().name == "StrongFocus"
+    assert not panel.use_positions_button.isEnabled()
+    assert not panel.keep_button.isEnabled()
+    assert not panel.manual_toggle.isEnabled()
+
+
+def test_manual_source_frames_feed_same_draft_and_viewer_can_replace_origin(
+    tmp_path: Path,
 ) -> None:
-    panel, api, _script = _panel(tmp_path)
+    panel, api, script = _panel(tmp_path)
+    panel.manual_toggle.click()
+
+    assert not panel.manual_group.isHidden()
+    panel.frame_inputs[0].setText("120")
+    panel.frame_inputs[1].setText("bad")
+    assert panel.frame_inputs[1].text() == "bad"
+    assert "whole number" in panel.error_label.text()
+    assert "Needs attention" in panel.source_status_labels[1].text()
+    assert not panel.use_positions_button.isEnabled()
+
+    panel.frame_inputs[1].setText("108")
+    assert panel.source_status_labels[0].text() == "Ready (manual) — frame 120"
+    assert panel.source_status_labels[1].text() == "Ready (manual) — frame 108"
+    assert panel.use_positions_button.isEnabled()
+
+    _visit(panel, api, 1, 107)
+    assert panel.source_status_labels[1].text() == "Viewing — frame 107 — Viewer"
+    panel.use_positions_button.click()
+
+    assert (
+        cast(list[dict[str, object]], _read_result(script)["decisions"])[0][
+            "comparison_source_frame"
+        ]
+        == 107
+    )
+
+
+def test_known_offsets_are_whole_set_and_serialize_canonical_pairs(tmp_path: Path) -> None:
+    panel, _api, script = _panel(tmp_path, comparison_count=2)
+    panel.manual_toggle.click()
+    panel.basis_selector.setCurrentIndex(1)
+
+    assert panel.basis_status_label.text() == "Input basis: Known offsets"
+    assert not panel.offset_inputs_group.isHidden()
+    assert panel.frame_inputs_group.isHidden()
+    panel.offset_inputs[0].setText("+12")
+    assert not panel.use_positions_button.isEnabled()
+    panel.offset_inputs[1].setText("-7")
+
+    assert panel.progress_label.text() == "2 / 2 comparisons ready"
+    assert panel.source_status_labels[1].text() == "Manual offset — +12 frames"
+    assert panel.source_outcome_labels[2].text() == (
+        "-7 frames — Trim 7 frame(s) from this comparison"
+    )
+    assert panel.use_positions_button.isEnabled()
+    panel.use_positions_button.click()
+
+    assert _read_result(script)["decisions"] == [
+        {
+            "comparison_key": "ref:comparison-1",
+            "action": "confirmed",
+            "reference_source_frame": 12,
+            "comparison_source_frame": 0,
+        },
+        {
+            "comparison_key": "ref:comparison-2",
+            "action": "confirmed",
+            "reference_source_frame": 0,
+            "comparison_source_frame": 7,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ("abc", "must be a signed integer"),
+        ("+200", "outside 0–199"),
+        ("-200", "outside 0–199"),
+    ],
+)
+def test_known_offset_validation_preserves_text_and_blocks_save(
+    tmp_path: Path, text: str, error: str
+) -> None:
+    panel, _api, _script = _panel(tmp_path)
+    panel.manual_toggle.click()
+    panel.basis_selector.setCurrentIndex(1)
+
+    QTest.keyClicks(panel.offset_inputs[0], text)
+
+    assert panel.offset_inputs[0].text() == text
+    assert error in panel.error_label.text()
+    assert "Needs attention" in panel.source_status_labels[1].text()
+    assert not panel.use_positions_button.isEnabled()
+
+
+def test_switching_basis_never_combines_readiness(tmp_path: Path) -> None:
+    panel, _api, _script = _panel(tmp_path)
+    panel.manual_toggle.click()
+    panel.frame_inputs[0].setText("50")
+    panel.frame_inputs[1].setText("45")
+    assert panel.use_positions_button.isEnabled()
+
+    panel.basis_selector.setCurrentIndex(1)
+    assert panel.progress_label.text() == "0 / 1 comparisons ready"
+    assert not panel.use_positions_button.isEnabled()
+
+    panel.basis_selector.setCurrentIndex(0)
+    assert panel.progress_label.text() == "2 / 2 sources ready"
+    assert panel.use_positions_button.isEnabled()
+
+
+def test_workspace_reload_restores_collapsed_source_frame_manual_defaults(
+    tmp_path: Path,
+) -> None:
+    panel, _api, _script = _panel(tmp_path)
+    panel.manual_toggle.click()
+    panel.basis_selector.setCurrentIndex(1)
+    assert panel.manual_toggle.text() == "Hide manual alignment"
+    assert not panel.offset_inputs_group.isHidden()
+
+    _call_hook(panel.on_workspace_loaded)
+
+    assert not panel.manual_toggle.isChecked()
+    assert panel.manual_toggle.text() == "Enter alignment manually..."
+    assert panel.manual_group.isHidden()
+    assert panel.basis_selector.currentText() == "Source frames"
+    assert not panel.frame_inputs_group.isHidden()
+    assert panel.offset_inputs_group.isHidden()
+    assert panel.basis_status_label.text() == "Input basis: Source frames"
+
+
+def test_save_failure_stays_editable_unsaved_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    panel, _api, _script = _panel(tmp_path)
+
+    def fail_write(*_args: object) -> None:
+        raise OSError(f"disk full at {tmp_path}")
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.alignment_review_panel.write_alignment_review_result",
+        fail_write,
+    )
+
+    panel.keep_button.click()
+
+    assert panel.keep_button.isEnabled()
+    assert panel.manual_toggle.isEnabled()
+    assert "Check available space" in panel.error_label.text()
+    assert "OSError" in panel.error_label.text()
+    assert str(tmp_path) not in panel.error_label.text()
+    assert "saved" not in panel.progress_label.text().lower()
+
+
+@pytest.mark.parametrize("next_workspace", ["ordinary", "malformed"])
+def test_deactivation_clears_only_owned_marker_group(tmp_path: Path, next_workspace: str) -> None:
+    panel, api, _script = _panel(tmp_path, initialize_output=True)
     before = len(api.timeline.cleared)
     if next_workspace == "ordinary":
         api.file_path = None
@@ -308,104 +553,3 @@ def test_deactivation_clears_only_owned_marker_group_with_update(
         "frame_compare_alignment_review"
     }
     assert "Inactive" in panel.progress_label.text()
-
-
-def test_unavailable_suggestion_transition_publishes_owned_marker_clear(tmp_path: Path) -> None:
-    panel, api, _script = _panel(tmp_path)
-    before = len(api.timeline.cleared)
-    for output in api.voutputs:
-        output.kwargs[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY] = None
-
-    _call_hook(panel.on_workspace_loaded)
-    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
-
-    assert api.timeline.cleared[before:] == [
-        ("frame_compare_alignment_review", True),
-        ("frame_compare_alignment_review", True),
-    ]
-    assert not panel.seek_button.isEnabled()
-
-
-def test_selector_exposes_each_comparison_decision_status(tmp_path: Path) -> None:
-    panel, _api, _script = _panel(tmp_path, comparison_count=2)
-
-    assert [panel.comparison_selector.itemText(index) for index in range(2)] == [
-        "Comparison 1 — not reviewed",
-        "Comparison 2 — not reviewed",
-    ]
-    panel.confirm_button.click()
-    assert panel.comparison_selector.currentIndex() == 0
-    assert panel.comparison_selector.itemText(0) == "Comparison 1 — confirmed"
-    panel.comparison_selector.setCurrentIndex(1)
-    panel.keep_button.click()
-    assert panel.comparison_selector.currentIndex() == 1
-    assert panel.comparison_selector.itemText(1) == "Comparison 2 — keeping current"
-    panel.reference_input.setText("13")
-    assert panel.comparison_selector.itemText(1) == "Comparison 2 — not reviewed"
-
-
-def test_panel_capture_confirm_keep_and_finish_writes_result(tmp_path: Path) -> None:
-    panel, api, script = _panel(tmp_path)
-
-    assert "reference 12" in panel.suggestion_label.text().lower()
-    assert api.timeline.cleared == [
-        ("frame_compare_alignment_review", True),
-        ("frame_compare_alignment_review", False),
-    ]
-    panel.capture_button.click()
-    api.current_voutput = api.voutputs[1]
-    api.current_frame = 5
-    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 1)
-    assert "Comparison 1 (comparison), frame 5" in panel.context_label.text()
-    assert api.timeline.added[-1][0:2] == ("frame_compare_alignment_review", 0)
-    assert "suggested comparison frame 0" in str(api.timeline.added[-1][3])
-    panel.capture_button.click()
-    assert "= +7 frames" in panel.equation_label.text()
-    panel.confirm_button.click()
-    assert panel.finish_button.isEnabled()
-    panel.finish_button.click()
-
-    result = json.loads(script.with_name(f"{script.stem}.alignment-result.json").read_text())
-    assert result["decisions"] == [
-        {
-            "comparison_key": "ref:comparison-1",
-            "action": "confirmed",
-            "reference_source_frame": 12,
-            "comparison_source_frame": 5,
-        }
-    ]
-    assert "Result saved" in panel.progress_label.text()
-    assert not panel.capture_button.isEnabled()
-
-
-def test_editing_confirmed_pair_clears_decision_and_seek_uses_active_role(
-    tmp_path: Path,
-) -> None:
-    panel, api, _script = _panel(tmp_path)
-    panel.reference_input.setText("20")
-    panel.comparison_input.setText("8")
-    panel.confirm_button.click()
-    assert panel.finish_button.isEnabled()
-
-    panel.reference_input.setText("21")
-    assert not panel.finish_button.isEnabled()
-    panel.seek_button.click()
-    assert api.playback.sought == [12]
-
-
-def test_save_failure_remains_editable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    panel, _api, _script = _panel(tmp_path)
-    panel.keep_button.click()
-
-    def fail_write(*_args: object) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(
-        "frame_compare.vsview.alignment_review_panel.write_alignment_review_result",
-        fail_write,
-    )
-
-    panel.finish_button.click()
-
-    assert panel.keep_button.isEnabled()
-    assert "disk full" in panel.error_label.text()

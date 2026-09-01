@@ -434,19 +434,31 @@ def _preview_frame_props_for_script(
 def _build_main_execution_section() -> str:
     return """\
 # ─── Main ─────────────────────────────────────────────────────────────────────
-def _review_metadata(session_id, target, comparison_number, role, presentation_name):
+def _reference_metadata(session_id):
+    return {
+        REVIEW_METADATA_KEYS["version"]: REVIEW_SCHEMA_VERSION,
+        REVIEW_METADATA_KEYS["session_id"]: session_id,
+        REVIEW_METADATA_KEYS["role"]: "reference",
+        REVIEW_METADATA_KEYS["name"]: REFERENCE["display_name"],
+    }
+
+
+def _comparison_metadata(session_id, target, comparison_number):
     return {
         REVIEW_METADATA_KEYS["version"]: REVIEW_SCHEMA_VERSION,
         REVIEW_METADATA_KEYS["session_id"]: session_id,
         REVIEW_METADATA_KEYS["alignment_key"]: target["comparison_key"],
         REVIEW_METADATA_KEYS["ordinal"]: comparison_number,
-        REVIEW_METADATA_KEYS["role"]: role,
-        REVIEW_METADATA_KEYS["name"]: presentation_name,
+        REVIEW_METADATA_KEYS["role"]: "comparison",
+        REVIEW_METADATA_KEYS["name"]: target["display_name"],
         REVIEW_METADATA_KEYS["suggested_offset"]: target["suggested_offset"],
     }
 
 
 def main():
+    if not TARGETS:
+        safe_print(_status_line("[FAIL]", "Alignment review requires every comparison"))
+        sys.exit(1)
     try:
         import vapoursynth as vs
     except ImportError:
@@ -500,13 +512,15 @@ def main():
     try:
         ref_clip = core.text.Text(
             ref_clip,
-            f"REF: {REFERENCE['display_name']}",
+            f"REF: {REFERENCE['display_name']}\\n"
+            "Open Tool Panel -> Frame Compare Alignment Review.\\n"
+            "Unlink playheads, then position every source on the same visible moment.",
             alignment=7,
         )
     except Exception:
         safe_print(_status_line("[WARN]", "Could not apply reference text overlay"))
 
-    prepared_outputs = []
+    prepared_comparisons = []
 
     for comparison_number, (label, target) in enumerate(TARGETS.items(), start=1):
         comp_path = Path(target["path"])
@@ -555,62 +569,32 @@ def main():
             hint_pair = "Suggested match: REF 0 <-> CMP 0"
             trim_hint = "If confirmed: no trim"
 
-        # Apply overlay with the audio-derived hint only (best-effort)
+        # Apply comparison identity, hint, and review guidance (best-effort)
         try:
             overlay_text = (
                 f"CMP: {display_name}\\n"
                 f"Audio hint: {audio_hint}\\n"
                 f"{hint_pair}\\n"
-                f"{trim_hint}"
+                f"{trim_hint}\\n"
+                "Open Tool Panel -> Frame Compare Alignment Review.\\n"
+                "Unlink playheads, then position every source on the same visible moment."
             )
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
             safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
 
         safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
-        reference_output = (comparison_number - 1) * 2
-        comparison_output = reference_output + 1
-        prepared_outputs.append(
-            (comparison_number, target, ref_clip, comp_clip, reference_output, comparison_output)
-        )
-
-    if not prepared_outputs:
-        safe_print(_status_line("[FAIL]", "Alignment review requires every comparison"))
-        sys.exit(1)
+        prepared_comparisons.append((comparison_number, target, comp_clip))
 
     session_id = Path(__file__).stem.rpartition("_")[2]
     try:
-        for (
-            comparison_number,
-            target,
-            reference_clip,
-            comparison_clip,
-            reference_output,
-            comparison_output,
-        ) in prepared_outputs:
-            set_output(
-                reference_clip,
-                reference_output,
-                "Reference",
-                **_review_metadata(
-                    session_id,
-                    target,
-                    comparison_number,
-                    "reference",
-                    REFERENCE["display_name"],
-                ),
-            )
+        set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id))
+        for comparison_number, target, comparison_clip in prepared_comparisons:
             set_output(
                 comparison_clip,
-                comparison_output,
+                comparison_number,
                 f"Comparison {comparison_number}",
-                **_review_metadata(
-                    session_id,
-                    target,
-                    comparison_number,
-                    "comparison",
-                    target["display_name"],
-                ),
+                **_comparison_metadata(session_id, target, comparison_number),
             )
     except Exception as e:
         safe_print(
@@ -618,17 +602,11 @@ def main():
         )
         sys.exit(1)
 
-    for (
-        comparison_number,
-        _target,
-        _reference_clip,
-        _comparison_clip,
-        reference_output,
-        comparison_output,
-    ) in prepared_outputs:
+    safe_print(f"    {_key('output')}        Reference -> output 0")
+    for comparison_number, _target, _comparison_clip in prepared_comparisons:
         safe_print(
-            f"    {_key('outputs')}       "
-            f"Reference {reference_output} | Comparison {comparison_number} {comparison_output}"
+            f"    {_key('output')}        "
+            f"Comparison {comparison_number} -> output {comparison_number}"
         )
 
     if preview_assumptions:
@@ -647,8 +625,9 @@ def main():
             )
 
     safe_print("\\n" + _status_line("[OK]", "VSView Ready"))
-    safe_print("    Open Frame Compare Alignment Review from VSView's Tool Panel control.")
-    safe_print("    Finish the review in VSView, then close VSView to continue Frame Compare.")
+    safe_print("    Open Tool Panel -> Frame Compare Alignment Review.")
+    safe_print("    Unlink playheads, then position every source on the same visible moment.")
+    safe_print("    Save the alignment in the panel, then close VSView to continue Frame Compare.")
 
 main()
 """

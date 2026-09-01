@@ -13,6 +13,7 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
     ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    ALIGNMENT_REVIEW_SCHEMA_VERSION,
     AlignmentReviewContractError,
     AlignmentReviewExpectedComparison,
     AlignmentReviewOutputCandidate,
@@ -42,59 +43,90 @@ def symlinks_supported(tmp_path: Path) -> None:
         link.unlink()
 
 
-def _output(
+def _reference_output(
+    output_id: int,
+    *,
+    session_id: str = _SESSION_ID,
+    frame_count: int = 100,
+) -> AlignmentReviewOutputCandidate:
+    return AlignmentReviewOutputCandidate(
+        output_id=output_id,
+        source_frame_count=frame_count,
+        metadata={
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
+            ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: session_id,
+            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "reference",
+            ALIGNMENT_REVIEW_METADATA_NAME_KEY: "Reference",
+        },
+    )
+
+
+def _comparison_output(
     output_id: int,
     ordinal: int,
-    role: str,
     *,
     key: str = "ref:a",
     suggestion: int | None = 12,
     session_id: str = _SESSION_ID,
+    frame_count: int = 100,
 ) -> AlignmentReviewOutputCandidate:
     return AlignmentReviewOutputCandidate(
         output_id=output_id,
-        source_frame_count=100,
+        source_frame_count=frame_count,
         metadata={
-            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1,
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
             ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: session_id,
             ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: key,
             ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY: ordinal,
-            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: role,
-            ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"{role} {ordinal}",
+            ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "comparison",
+            ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"Comparison {ordinal}",
             ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY: suggestion,
         },
     )
 
 
-def test_workspace_metadata_accepts_complete_ordered_pairs() -> None:
+def test_workspace_metadata_accepts_one_reference_and_ordered_comparisons() -> None:
     workspace = parse_alignment_review_workspace_metadata(
-        (_output(1, 1, "reference"), _output(2, 1, "comparison"))
+        (
+            _comparison_output(2, 2, key="ref:b", suggestion=None),
+            _reference_output(0),
+            _comparison_output(1, 1),
+        )
     )
 
     assert workspace.session_id == _SESSION_ID
+    assert workspace.reference.output_id == 0
+    assert workspace.reference.source_frame_count == 100
+    assert [comparison.comparison_key for comparison in workspace.comparisons] == [
+        "ref:a",
+        "ref:b",
+    ]
     assert workspace.comparisons[0].comparison_key == "ref:a"
-    assert workspace.comparisons[0].reference.source_frame_count == 100
+    assert workspace.comparisons[0].source_frame_count == 100
 
 
 @pytest.mark.parametrize(
     "outputs",
     [
         (),
-        (_output(1, 1, "reference"),),
-        (_output(1, 2, "reference"), _output(2, 2, "comparison")),
-        (_output(1, 1, "reference"), _output(2, 1, "reference")),
-        (_output(1, 1, "reference"), _output(1, 1, "comparison")),
+        (_reference_output(0),),
+        (_comparison_output(1, 1),),
+        (_reference_output(0), _reference_output(1), _comparison_output(2, 1)),
+        (_reference_output(0), _comparison_output(1, 2)),
+        (_reference_output(0), _comparison_output(1, 1), _comparison_output(2, 1)),
+        (_reference_output(0), _comparison_output(0, 1)),
         (
-            _output(1, 1, "reference"),
-            _output(2, 1, "comparison", suggestion=-2),
+            _reference_output(0),
+            _comparison_output(1, 1),
+            _comparison_output(2, 2, key="ref:a"),
         ),
         (
-            _output(1, 1, "reference"),
-            _output(2, 1, "comparison", session_id="87654321876543218765432187654321"),
+            _reference_output(0),
+            _comparison_output(1, 1, session_id="87654321876543218765432187654321"),
         ),
     ],
 )
-def test_workspace_metadata_rejects_incomplete_or_mixed_outputs(
+def test_workspace_metadata_rejects_incomplete_duplicate_or_mixed_outputs(
     outputs: tuple[AlignmentReviewOutputCandidate, ...],
 ) -> None:
     with pytest.raises(AlignmentReviewContractError):
@@ -105,6 +137,7 @@ def test_workspace_metadata_rejects_incomplete_or_mixed_outputs(
     ("field", "value"),
     [
         (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, True),
+        (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, 2),
         (ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY, True),
         (ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY, True),
         (ALIGNMENT_REVIEW_METADATA_ROLE_KEY, "other"),
@@ -113,15 +146,53 @@ def test_workspace_metadata_rejects_incomplete_or_mixed_outputs(
     ],
 )
 def test_workspace_metadata_rejects_malformed_values(field: str, value: object) -> None:
-    reference = _output(1, 1, "reference")
+    comparison = _comparison_output(1, 1)
     malformed = AlignmentReviewOutputCandidate(
-        output_id=reference.output_id,
-        source_frame_count=reference.source_frame_count,
-        metadata=dict(reference.metadata) | {field: value},
+        output_id=comparison.output_id,
+        source_frame_count=comparison.source_frame_count,
+        metadata=dict(comparison.metadata) | {field: value},
     )
 
     with pytest.raises(AlignmentReviewContractError):
-        parse_alignment_review_workspace_metadata((malformed, _output(2, 1, "comparison")))
+        parse_alignment_review_workspace_metadata((_reference_output(0), malformed))
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        AlignmentReviewOutputCandidate(
+            output_id=0,
+            source_frame_count=0,
+            metadata=_reference_output(0).metadata,
+        ),
+        AlignmentReviewOutputCandidate(
+            output_id=1,
+            source_frame_count=True,
+            metadata=_comparison_output(1, 1).metadata,
+        ),
+        AlignmentReviewOutputCandidate(
+            output_id=0,
+            source_frame_count=100,
+            metadata=dict(_reference_output(0).metadata)
+            | {ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: "ref:a"},
+        ),
+        AlignmentReviewOutputCandidate(
+            output_id=1,
+            source_frame_count=100,
+            metadata={
+                key: value
+                for key, value in _comparison_output(1, 1).metadata.items()
+                if key != ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY
+            },
+        ),
+    ],
+)
+def test_workspace_metadata_rejects_invalid_bounds_and_role_specific_fields(
+    candidate: AlignmentReviewOutputCandidate,
+) -> None:
+    other = _comparison_output(1, 1) if candidate.output_id == 0 else _reference_output(0)
+    with pytest.raises(AlignmentReviewContractError):
+        parse_alignment_review_workspace_metadata((other, candidate))
 
 
 def _session(tmp_path: Path) -> AlignmentReviewSession:
@@ -156,7 +227,24 @@ def test_result_round_trip_accepts_confirmed_and_keep_current(tmp_path: Path) ->
     write_alignment_review_result(session, result)
 
     assert read_alignment_review_result(session, _expected()) == result
-    assert json.loads(session.result_path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert session.result_path.read_text(encoding="utf-8") == (
+        "{\n"
+        '  "schema_version": 1,\n'
+        f'  "session_id": "{_SESSION_ID}",\n'
+        '  "decisions": [\n'
+        "    {\n"
+        '      "comparison_key": "ref:a",\n'
+        '      "action": "confirmed",\n'
+        '      "reference_source_frame": 99,\n'
+        '      "comparison_source_frame": 79\n'
+        "    },\n"
+        "    {\n"
+        '      "comparison_key": "ref:b",\n'
+        '      "action": "keep_current"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    )
 
 
 def test_result_write_is_atomic_and_propagates_failure(
