@@ -280,8 +280,8 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.10.3, register the `Reference` and `Comparison 1` outputs, render frame 0 for both
-outputs, and round-trip/validate the sibling result sidecar. This feature run has
+0.10.3, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+all three outputs, and round-trip/validate the sibling result sidecar. This feature run has
 static contract proof only; execution remains unavailable/unverified until a
 compatible Linux/X11 host runs it. The contract does not prove a visible X11 desktop
 launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.

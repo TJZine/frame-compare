@@ -318,12 +318,15 @@ recovery requirement.
   (VSView's BestSource workspace is not a Frame Compare source-loader change)
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
-  the VSView panel only after every comparison is explicitly confirmed or marked
-  `keep_current`. Frame Compare derives this sibling path from the trusted generated
-  session script, checks the UUID/session identity and ordered comparison set, and
-  validates raw source-frame bounds before applying any confirmed offset. Missing,
-  malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds results
-  are rejected; panel metadata never supplies the result path or frame counts.
+  the VSView panel only after one complete whole-set positions action or keep-current
+  action.
+  The sidecar remains result schema v1: one ordered decision per comparison, either
+  confirmed raw source frames or `keep_current`. Frame Compare derives this sibling
+  path from the trusted generated session script, checks the UUID/session identity and
+  ordered comparison set, and validates raw source-frame bounds before applying any
+  confirmed offset. Missing, malformed, stale, mixed-session, duplicate, incomplete,
+  or out-of-bounds results are rejected; panel metadata never supplies the result path
+  or frame counts.
 - screenshot output directories and generated HTML reports
 - Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
 
@@ -427,15 +430,21 @@ computed or interactively confirmed provenance rather than inferring eligibility
 the final flattened `AlignmentResult.source`.
 
 Native alignment review is deliberately split across the existing owners. The
-`frame_compare.vsview.session_script` owner generates the complete ordered output
-pair set and serializes session/role/key/ordinal/name/suggestion metadata. The typed
-`frame_compare.vsview.alignment_review_contract` owns the session identity, trusted
-sibling-sidecar path, atomic result write, and fail-closed parse/validation boundary.
-`frame_compare.vsview.alignment_review_panel` is the sole human review surface inside
-VSView: it remains inert for ordinary sessions, respects VSView synchronization, and
-writes only the typed sidecar after an explicit finish. `alignment_vsview` owns
-availability policy, expected-comparison construction from raw source counts, result
-acceptance, and applying confirmed offsets; it does not parse terminal input. The
+`frame_compare.vsview.session_script` owner generates one `Reference` output and the
+complete ordered `Comparison N` output set, registering each source once and
+serializing role/key/ordinal/name/suggestion metadata as schema v1. The
+typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
+strict v1 metadata/result topology, trusted sibling-sidecar path, atomic
+result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
+is the sole human review surface inside VSView: it remains inert for ordinary or
+rejected sessions, observes only public current-output/current-frame callbacks after
+activation, requires each source to be visited, and writes only a complete typed
+sidecar through one whole-set action. The panel's manual source-frame and known-offset
+inputs feed that same result model; its secondary keep-audio action writes one
+`keep_current` decision per comparison. `alignment_vsview` owns availability policy,
+expected-comparison construction from raw source counts, result acceptance, and
+applying confirmed offsets; its service, persistence, override, cache, and CLI/config
+boundaries remain unchanged and it does not parse terminal input. The
 `frame_compare.vsview.adapter` remains the composition boundary for the current
 interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
 child-process lifetime.
@@ -522,8 +531,10 @@ owners. Its explicit X11 contract is:
 The optional GUI proof is non-CI and non-default. Its verifier contract requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.10.3, register `Reference` and `Comparison 1`, render
-frame 0 for both outputs, and round-trip/validate the sibling result sidecar. This
+L-SMASH session with VSView 0.10.3, register one `Reference` and ordered comparison
+outputs, render frame 0 for each output, exercise complete source readiness plus the
+whole-set positions and keep-current actions, and round-trip/validate the sibling
+result sidecar. This
 feature run has static contract proof only; execution remains unavailable/unverified
 until a compatible Linux/X11 host runs it. The contract covers dependency
 availability, plugin discovery, panel construction, generated metadata/result
@@ -814,7 +825,7 @@ Runtime ownership matrix:
 | Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
-| Native VSView alignment-review panel, synchronization markers, decisions, and finish/cancel behavior | `frame_compare.vsview.alignment_review_panel` |
+| Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
 | VSView availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
@@ -854,9 +865,9 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it still owns deterministic generated VSView scripts, source loading, output registration, and now the explicit contract metadata required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session/output/result identity, strict untrusted metadata and sidecar validation, and atomic result persistence. |
-| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, public VSView hooks, frame decisions, synchronization markers, and safe contract-rejection feedback. |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and schema-v1 metadata required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict schema-v1 metadata/result validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
+| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
 | `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |

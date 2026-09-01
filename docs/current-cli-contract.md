@@ -1173,7 +1173,7 @@ is:
 2. generated `[RUN] VSView Bootstrap` and prepared reference identity, before the
    first source load can emit native indexing diagnostics
 3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
-   paired truthful named-output mappings
+   truthful one-reference/ordered-comparison named-output mappings
 4. generated `[WARN] VSView Display Assumptions`, only when assumptions exist
 5. generated `[OK] VSView Ready` with the instruction to open **Frame Compare
    Alignment Review** from VSView's Tool Panel
@@ -1182,22 +1182,31 @@ is:
 
 Normal VSView labels reuse the release-aware presentation identities prepared by the
 typed alignment request. Paths and stems remain the internal source, suggested
-offset, manual-override, and alignment-result identities. In the native panel, the
-operator inspects synchronized `Reference`/`Comparison N` outputs, captures or enters
-untrimmed source-frame indices, confirms each pair, or explicitly keeps the current
-offset. The panel calculates reference minus comparison and shows the trim direction;
-finishing writes the typed sibling result sidecar atomically. Closing without
-finishing produces no result. Generated and parent no-color output retain the literal
-lifecycle markers. Native source/index diagnostics remain inherited without buffering.
+offset, manual-override, and alignment-result identities. The generated workspace
+contains each source exactly once: one `Reference` and one ordered `Comparison N`
+output per comparison. In the native panel, the operator unlinks playheads, visits
+every output, and positions each source on the same visible moment. Public current-
+output/current-frame callbacks update the live source lineup; the panel does not
+inspect or change hidden playheads or synchronization mode. **Use these aligned
+positions** writes the complete ordered result once. **Keep audio-derived alignment**
+writes one `keep_current` decision for every comparison. The collapsed manual
+disclosure offers source-frame or known-offset input, and both use the same whole-set
+save action. The panel calculates `reference - comparison` and shows the trim meaning;
+closing without saving produces no result. Generated and parent no-color output retain
+the literal lifecycle markers. Native source/index diagnostics remain inherited
+without buffering.
 
-The generated session carries an explicit UUID session identity, pair order, roles,
-presentation names, and bounded audio suggestions in each output's typed metadata;
-the metadata does not carry source-frame counts. The panel derives display bounds from
-the public output clip lengths, while the alignment service validates raw result
-indices against the authoritative `AlignmentClipRequest.source_frame_count` facts.
-Frame Compare derives the sibling result path from the trusted generated script path,
-then rejects missing, malformed, stale, mixed-session, duplicate, incomplete, or
-out-of-bounds results. It never trusts panel-supplied paths or counts.
+The generated session carries an explicit UUID session identity, one reference role,
+ordered comparison roles/keys/ordinals, presentation names, and bounded audio
+suggestions in strict metadata schema v1. The panel derives display bounds from public
+output clip lengths, while the alignment service validates raw result indices against
+the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
+sidecar uses the same schema v1 contract and exact ordered whole-set decision shape. Frame Compare
+derives the sibling result path from the trusted generated script path, then rejects
+missing, malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds
+results. It never trusts panel-supplied paths or counts.
+This generated-session/panel workflow adds no `run` flag, configuration field,
+successful JSON field, terminal input protocol, or CLI schema change.
 `audio_alignment.use_vsview = true` is optional; forced mode fails closed when
 readiness, process exit, cancellation, or result validation fails. Optional mode
 retains the computed/current alignment and reports an actionable diagnostic.

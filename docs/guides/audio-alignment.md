@@ -23,8 +23,8 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 1. Let automatic alignment compute an offset.
 2. Review confidence and warnings.
 3. Use the native VSView panel for optional alignment review when the route is
-   available and the evidence needs manual confirmation. It is not part of automatic
-   correlation.
+   available and the evidence needs visual confirmation. It is not part of automatic
+   correlation: position each source in the viewer, then save the complete lineup once.
 4. Verify dialogue, cuts, and motion in the final report.
 5. Reuse an accepted result only while the same source identities and alignment-affecting
    settings remain valid.
@@ -88,32 +88,35 @@ Frame Compare overlays, and BT.709 preview defaults.
 
 The terminal reports only the generated session, bounded readiness, inherited decoder
 diagnostics, and the final review outcome. It does not prompt for frames or read
-review input. Open **Frame Compare Alignment Review** from VSView's Tool Panel. For
-each synchronized reference/comparison pair, inspect the same visible moment, capture
-or enter untrimmed source-frame indices, then choose **Confirm pair** or **Keep current
-offset**. The panel shows `reference - comparison`, the trim direction, bounded
-suggestion markers, and completion status. **Finish review** writes the typed result
-atomically to the trusted sibling sidecar; closing VSView without finishing writes no
-result. Missing, malformed, stale, mixed-session, duplicate, incomplete, or
-out-of-bounds sidecars are rejected before any offset is applied. Missing modern
-`_Range` is reported once but remains unset, preserving VSView's native range
-inference; other native diagnostics remain inherited.
+review input. Open **Frame Compare Alignment Review** from VSView's Tool Panel, unlink
+the playheads, and visit `Reference` and every `Comparison N` output. Leave each on the
+same visible moment. The live source lineup records one current untrimmed source frame
+per output, reports `ready / total`, and previews `reference - comparison` plus the
+plain-language trim direction.
 
-The native-panel workflow gains a maintained viewer, named outputs, synchronized
-multi-output review, current frame/property surfaces, explicit status/equation/trim
-guidance, and a typed fail-closed result boundary. It intentionally removes the
-retired terminal confirmation flow, executable discovery/PATH fallback, viewer
-compatibility aliases, and speculative compatibility mutations. Existing v1 shared
-alignment entries are not reused; they are rebuilt as schema v2.
+Select **Use these aligned positions** once the complete lineup is ready. It writes one
+ordered result for the whole source set; the reference appears once and the decision is
+made for the full lineup in one action. **Keep audio-derived alignment** is
+the secondary whole-set option. It retains the alignment Frame Compare entered with,
+including the no-change case when no trusted suggestion exists.
 
-Panel confirmation uses untrimmed source-frame indices. Find the same visible moment in
-the reference and comparison, then enter or capture the reference frame followed by
-the comparison frame; Frame Compare calculates the offset and required trim. The audio
-hint shows an equivalent source-frame pair and the source it would trim. **Keep current
-offset** leaves the current audio result unchanged when one is available. Every signed
-offset is reference minus comparison: positive trims the reference, negative trims the
-comparison. Native decoder and index diagnostics remain visible between Frame
-Compare-owned status rows.
+For a known value, expand **Enter alignment manually...**. **Source frames** accepts one
+non-negative untrimmed frame per source; **Known offsets** accepts one signed integer per
+comparison using `reference - comparison`. Both bases feed the same whole-set save
+action and explain the trim direction immediately. Positive offsets trim the reference;
+negative offsets trim that comparison. Manual fields are an escape hatch, not a second
+result workflow.
+
+The result sidecar is written atomically only by a complete whole-set action; closing
+VSView without saving writes no result. Missing, malformed, stale, mixed-session,
+duplicate, incomplete, or out-of-bounds sidecars are rejected before any offset is
+applied. Missing modern `_Range` is reported once but remains unset, preserving
+VSView's native range inference; other native diagnostics remain inherited.
+
+The native-panel workflow uses each source exactly once, named outputs, public
+VSView callbacks, current frame/property surfaces, explicit lineup status and trim
+guidance, and a typed fail-closed result boundary. Existing v1 shared alignment entries
+are not reused; they are rebuilt as schema v2.
 
 No alignment screenshot is embedded here until the physical-Windows VSView acceptance
 pass supplies a current, provenance-recorded capture. macOS and headless Docker proof
@@ -138,7 +141,7 @@ different edit.
 | Good early match but later drift | FPS or timing mismatch | Recheck effective FPS and source structure; do not treat a constant offset as sufficient |
 | VSView/panel cannot launch | Missing same-environment UI dependencies or desktop/runtime issue | Run `doctor`, install `frame-compare[vsview]` in the environment that runs Frame Compare, use the Windows portable bundle, or continue without optional review |
 | Panel stays inactive | The session is ordinary, metadata is malformed/mixed, or the generated script/result identity is not trusted | Generate a fresh session through Frame Compare; do not open a hand-authored script or provide a PATH-only VSView executable |
-| Panel closes before **Finish review** | No complete typed result sidecar was written | Reopen the generated session and finish every comparison, or keep the computed/current alignment in optional mode |
+| Panel closes before saving | No complete typed result sidecar was written | Reopen the generated session, visit every source, and use **Use these aligned positions** or **Keep audio-derived alignment** |
 | Review result is rejected | Sidecar is missing, malformed, stale, duplicated, incomplete, or outside raw source-frame bounds | Discard the sidecar, generate a fresh session, and repeat the panel review; forced mode fails closed |
 | Reused offset no longer looks correct | Source or runtime changed outside the reusable identity assumptions | Reject reuse, clear the alignment cache entry, and recompute |
 | Selected frames disappear after alignment | Shared overlap is smaller than the initial reference-domain plan | Reduce trims or requested counts and review the warning/error context |
