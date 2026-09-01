@@ -75,4 +75,6 @@ def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) 
     assert "Hosted or macOS offscreen proof must not be reported" in docs
     assert "physical Windows desktop acceptance" in docs
     assert "ordinary VSView session" in docs
-    assert "Keep current" in docs
+    assert "Use these aligned positions" in docs
+    assert "Keep audio-derived alignment" in docs
+    assert "Keep current offset" not in docs

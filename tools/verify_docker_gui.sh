@@ -147,11 +147,14 @@ print("DOCKER_GUI_PROOF availability=ok")
 PY
 
   ffmpeg -hide_banner -loglevel error \
-    -f lavfi -i "color=c=black:size=64x48:rate=1:duration=1" \
-    -frames:v 1 -c:v libx264 -pix_fmt yuv420p -y "$proof_dir/reference.mkv"
+    -f lavfi -i "color=c=black:size=64x48:rate=1:duration=3" \
+    -frames:v 3 -c:v libx264 -pix_fmt yuv420p -y "$proof_dir/reference.mkv"
   ffmpeg -hide_banner -loglevel error \
-    -f lavfi -i "color=c=white:size=64x48:rate=1:duration=1" \
-    -frames:v 1 -c:v libx264 -pix_fmt yuv420p -y "$proof_dir/comparison.mkv"
+    -f lavfi -i "color=c=white:size=64x48:rate=1:duration=3" \
+    -frames:v 3 -c:v libx264 -pix_fmt yuv420p -y "$proof_dir/comparison.mkv"
+  ffmpeg -hide_banner -loglevel error \
+    -f lavfi -i "color=c=gray:size=64x48:rate=1:duration=3" \
+    -frames:v 3 -c:v libx264 -pix_fmt yuv420p -y "$proof_dir/comparison_2.mkv"
   echo "DOCKER_GUI_PROOF real_media=ok"
 
   python - "$proof_dir" "$script_path_file" <<'PY'
@@ -176,11 +179,8 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewExpectedComparison,
     AlignmentReviewOutputCandidate,
-    AlignmentReviewResult,
-    KeepCurrentAlignmentReviewDecision,
     parse_alignment_review_workspace_metadata,
     read_alignment_review_result,
-    write_alignment_review_result,
 )
 from frame_compare.vsview.alignment_review_panel import AlignmentReviewPanel
 from vsview.api.output import get_outputs
@@ -188,16 +188,21 @@ from vsview.api.output import get_outputs
 proof_dir = Path(sys.argv[1])
 reference = proof_dir / "reference.mkv"
 comparison = proof_dir / "comparison.mkv"
+comparison_2 = proof_dir / "comparison_2.mkv"
 unspecified_color_props = {"_Matrix": 2, "_Transfer": 2, "_Primaries": 2}
 session = launch_alignment_verification_session(
     VSViewSessionRequest(
         reference=reference,
-        comparisons=[comparison],
-        suggested_offsets_by_key={"reference:comparison": 0},
+        comparisons=[comparison, comparison_2],
+        suggested_offsets_by_key={
+            "reference:comparison": 0,
+            "reference:comparison_2": 0,
+        },
         cache_dir=proof_dir / "cache",
         frame_props_by_stem={
             reference.stem: unspecified_color_props,
             comparison.stem: unspecified_color_props,
+            comparison_2.stem: unspecified_color_props,
         },
     ),
     VSViewConfig(enabled=False),
@@ -213,7 +218,7 @@ sys.modules["__vsview__"] = script_module
 exec(compiled, script_module.__dict__)
 
 metadata = get_outputs()
-expected_names = {0: "Reference", 1: "Comparison 1"}
+expected_names = {0: "Reference", 1: "Comparison 1", 2: "Comparison 2"}
 actual_names = {index: item.name for index, item in metadata.items()}
 if actual_names != expected_names:
     raise SystemExit(f"unexpected VSView output metadata: {actual_names!r}")
@@ -249,7 +254,11 @@ for index in sorted(outputs):
     outputs[index].clip.get_frame(0)
 print("DOCKER_GUI_PROOF frame_zero=ok")
 
-index_paths = [source_index_path(reference), source_index_path(comparison)]
+index_paths = [
+    source_index_path(reference),
+    source_index_path(comparison),
+    source_index_path(comparison_2),
+]
 if not all(path.is_file() and path.stat().st_size > 0 for path in index_paths):
     raise SystemExit(f"missing L-SMASH indexes: {index_paths!r}")
 print("DOCKER_GUI_PROOF lsmash_indexes=ok")
@@ -268,24 +277,82 @@ if workspace.session_id != session.session_id:
 expected = tuple(
     AlignmentReviewExpectedComparison(
         pair.comparison_key,
-        pair.reference.source_frame_count,
-        pair.comparison.source_frame_count,
+        workspace.reference.source_frame_count,
+        pair.source_frame_count,
     )
     for pair in workspace.comparisons
 )
-write_alignment_review_result(
-    session,
-    AlignmentReviewResult(
-        session_id=session.session_id,
-        decisions=tuple(
-            KeepCurrentAlignmentReviewDecision(pair.comparison_key)
-            for pair in workspace.comparisons
-        ),
-    ),
+
+class Timeline:
+    def clear_notches(self, *_args, **_kwargs):
+        return None
+
+    def add_notch(self, *_args, **_kwargs):
+        return None
+
+
+voutputs = [
+    types.SimpleNamespace(
+        vs_index=index,
+        vs_output=output,
+        kwargs=metadata[index].kwargs,
+    )
+    for index, output in sorted(outputs.items())
+]
+panel_api = types.SimpleNamespace(
+    file_path=script_path,
+    voutputs=voutputs,
+    current_voutput=voutputs[0],
+    current_frame=1,
+    timeline=Timeline(),
 )
-if len(read_alignment_review_result(session, expected).decisions) != len(expected):
-    raise SystemExit("alignment result sidecar round trip was incomplete")
-print("DOCKER_GUI_PROOF alignment_metadata=ok")
+from vsengine.loops import get_loop, set_loop
+from vsview.vsenv import QtEventLoop
+
+previous_loop = get_loop()
+set_loop(QtEventLoop(app))
+try:
+    active_parent = QWidget()
+    active_panel = AlignmentReviewPanel(active_parent, panel_api)
+    active_panel.on_workspace_loaded()
+    app.processEvents()
+    if active_panel.progress_label.text() != "0 / 3 sources ready":
+        raise SystemExit("alignment panel did not start with an empty three-source lineup")
+    for output_index, frame in enumerate((1, 0, 2)):
+        panel_api.current_voutput = voutputs[output_index]
+        panel_api.current_frame = frame
+        active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
+        app.processEvents()
+    if active_panel.progress_label.text() != "3 / 3 sources ready":
+        raise SystemExit("alignment panel did not record every source position")
+    if active_panel.use_positions_button.text() != "Use these aligned positions":
+        raise SystemExit("alignment panel primary action label changed")
+    if active_panel.keep_button.text() != "Keep audio-derived alignment":
+        raise SystemExit("alignment panel keep action label changed")
+    if not active_panel.use_positions_button.isEnabled():
+        raise SystemExit("alignment positions action did not become ready for the whole set")
+    active_panel.use_positions_button.click()
+    app.processEvents()
+    observed_result = read_alignment_review_result(session, expected)
+    if [decision.action for decision in observed_result.decisions] != ["confirmed", "confirmed"]:
+        raise SystemExit("alignment positions action did not write complete confirmed decisions")
+    print("DOCKER_GUI_PROOF alignment_positions=ok")
+
+    session.result_path.unlink()
+    keep_parent = QWidget()
+    keep_panel = AlignmentReviewPanel(keep_parent, panel_api)
+    keep_panel.on_workspace_loaded()
+    app.processEvents()
+    keep_panel.keep_button.click()
+    app.processEvents()
+    observed_result = read_alignment_review_result(session, expected)
+    if [decision.action for decision in observed_result.decisions] != ["keep_current", "keep_current"]:
+        raise SystemExit("keep-audio action did not write one decision per comparison")
+    print("DOCKER_GUI_PROOF alignment_keep_current=ok")
+finally:
+    set_loop(previous_loop)
+
+print("DOCKER_GUI_PROOF alignment_metadata=ok topology=one_reference_ordered_comparisons")
 print("DOCKER_GUI_PROOF alignment_result_roundtrip=ok")
 session.result_path.write_text("{}\n", encoding="utf-8")
 try:
@@ -294,7 +361,7 @@ except AlignmentReviewContractError:
     pass
 else:
     raise SystemExit("malformed alignment result was accepted")
-print("DOCKER_GUI_PROOF alignment_result_validation=ok")
+print("DOCKER_GUI_PROOF alignment_result_validation=ok malformed=rejected")
 session.result_path.unlink(missing_ok=True)
 
 Path(sys.argv[2]).write_text(str(script_path), encoding="utf-8")

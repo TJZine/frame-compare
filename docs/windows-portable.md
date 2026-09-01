@@ -169,26 +169,37 @@ VSView child. Open **Frame Compare Alignment Review** from VSView's Tool Panel. 
 panel is inert for ordinary VSView sessions and does not take over or hide unrelated
 workspaces.
 
-Review the synchronized `Reference` and `Comparison N` outputs. For each pair, inspect
-the same visible moment, capture or enter untrimmed source-frame indices, and choose
-**Confirm pair** or **Keep current offset**. The panel shows the signed
-`reference - comparison` equation, trim direction, suggestion markers, and completion
-status. **Finish review** writes one typed, atomic sibling sidecar named
-`vsview_*.alignment-result.json`; its session UUID and ordered comparison keys are
-checked by Frame Compare, while raw source-frame indices are validated against the
-authoritative generated alignment request before any confirmed offset is applied.
-Closing VSView without finishing writes no result. Missing, malformed,
-stale, mixed-session, duplicate, incomplete, and out-of-bounds results fail closed.
+The generated workspace contains each source exactly once: one `Reference` output and
+one ordered `Comparison N` output per comparison. Open the panel, unlink playheads,
+and visit every output. Leave each source on the same visible moment. The live source
+lineup records the latest untrimmed source frame, reports `ready / total`, and previews
+the signed `reference - comparison` relationship and trim direction.
+
+Choose **Use these aligned positions** once every source is ready. It writes one
+typed, atomic sibling sidecar named `vsview_*.alignment-result.json` for the complete
+source set; there is no per-comparison confirmation or later completion step. **Keep
+audio-derived alignment** is the secondary whole-set action and retains the alignment
+Frame Compare entered with, including the no-change case when no trusted suggestion
+exists.
+
+For known values, expand **Enter alignment manually...** and choose **Source frames** or
+**Known offsets**. Source frames accepts one non-negative untrimmed frame per source;
+known offsets accepts one signed integer per comparison using `reference - comparison`.
+Both bases use the same save action and immediately show the trim meaning. Frame Compare
+checks the session UUID, ordered comparison keys, and authoritative raw source-frame
+bounds before applying any saved result. Closing VSView without saving writes no result.
+Missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds
+results fail closed.
 
 Optional review failures retain the computed/current alignment and print an actionable
 diagnostic. Forced review fails when the same-environment entry point is unavailable,
 startup readiness times out, the child process fails or times out, the review is
 cancelled without a complete result, or result validation fails. The former terminal
 frame-entry prompt, stdin protocol, executable/PATH discovery, and viewer compatibility
-fallbacks are removed. The native panel adds synchronized outputs, current-frame
-context, markers, explicit keep/confirm status, and a typed trust boundary; the tradeoff
-is that closing without **Finish review** does not preserve a manual decision and no
-external viewer fallback is available.
+fallbacks are removed. The native panel adds multi-output viewer context, current-frame
+observation, markers, explicit whole-set status, and a typed trust boundary; the tradeoff
+is that closing without saving does not preserve a manual decision and no external
+viewer fallback is available.
 
 ## Inspect previous runs
 
@@ -271,7 +282,7 @@ revisions in the build manifest and generated inventory remain authoritative.
 | Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
 | Doctor reports the alignment panel is missing | Reinstall the complete bundle or rebuild it; the VSView runtime and `frame-compare-alignment-review` entry point must come from the same environment |
 | Alignment panel is inactive | Open the Frame Compare-generated session; ordinary sessions and untrusted/mixed metadata intentionally remain inert |
-| Panel closes before **Finish review** | No result sidecar was written; reopen the generated session and complete each pair, or keep the computed/current alignment in optional mode |
+| Panel closes before saving | No result sidecar was written; reopen the generated session, visit every source, and choose **Use these aligned positions** or **Keep audio-derived alignment** |
 | Native review result is rejected | Generate a fresh session; Frame Compare rejects missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds sidecars |
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 
@@ -289,12 +300,13 @@ system:
 - open a real Frame Compare-generated session through the installed portable launcher;
 - verify the panel is discoverable from VSView's Tool Panel and remains inert in an
   ordinary VSView session;
-- verify synchronized `Reference`/`Comparison N` tabs, current-frame context, bounded
-  suggestion markers, source-frame bounds, signed equation, and trim-direction text;
-- capture/enter an untrimmed frame pair, confirm it, mark another pair **Keep current
-  offset**, finish all pairs, close VSView, and verify Frame Compare applies only the
-  validated confirmed offsets;
-- close or cancel before finishing and verify optional mode retains the current result
+- verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
+  suggestion markers, source-frame bounds, signed relationship, and trim-direction text;
+- unlink playheads, visit every source, use the whole-set positions action, then close
+  VSView and verify Frame Compare applies only the validated offsets;
+- exercise the manual source-frame and known-offset bases plus the whole-set keep-audio
+  action;
+- close or cancel before saving and verify optional mode retains the current result
   while forced mode fails with an actionable diagnostic;
 - exercise missing/malformed/stale/mixed/duplicate/incomplete/out-of-bounds sidecars,
   bounded readiness failure, child-process failure, and timeout behavior;
@@ -305,4 +317,8 @@ system:
 
 Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
 screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
-as physical Windows desktop acceptance.
+as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
+unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
+its offscreen contract does not establish visible ergonomics. This feature run has not
+completed the physical-Windows ergonomics checks above, so do not claim them from
+offscreen or hosted results.

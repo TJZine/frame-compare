@@ -912,6 +912,8 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\bin\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
+  $comparisonOneMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-1.mp4"
+  $comparisonTwoMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-2.mp4"
   $legacyMediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   $locationPushed = $false
@@ -923,8 +925,10 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
       throw "Bundled FFmpeg executable not found: $ffmpeg"
     }
-    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=64x64:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=64x64:rate=1:duration=3" -frames:v 3 -pix_fmt yuv420p -y $mediaPath
     Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
+    Copy-Item -LiteralPath $mediaPath -Destination $comparisonOneMediaPath
+    Copy-Item -LiteralPath $mediaPath -Destination $comparisonTwoMediaPath
 
     $smokeScript = @'
 from __future__ import annotations
@@ -1129,7 +1133,7 @@ def prove_lwlibavsource(media_path: Path) -> None:
         source = load_source(media_path, core=core)
         frame = source.clip.get_frame(0)
         assert_true(frame.width == 64 and frame.height == 64, "LWLibavSource frame render failed")
-        assert_true(source.num_frames == 1, f"unexpected source frame count: {source.num_frames}")
+        assert_true(source.num_frames == 3, f"unexpected source frame count: {source.num_frames}")
         owned_index = source_index_path(media_path)
         assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
         assert_true(not Path(f"{media_path}.lwi").exists(), "legacy unversioned source index was created")
@@ -1226,23 +1230,37 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         AlignmentReviewContractError,
         AlignmentReviewExpectedComparison,
         AlignmentReviewOutputCandidate,
-        AlignmentReviewResult,
-        KeepCurrentAlignmentReviewDecision,
         alignment_review_session_from_script,
         parse_alignment_review_workspace_metadata,
         read_alignment_review_result,
-        write_alignment_review_result,
     )
+    from frame_compare.vsview.alignment_review_panel import AlignmentReviewPanel
     from frame_compare.vsview.session_script import write_vsview_session_script
+    from PySide6.QtWidgets import QApplication, QWidget
+    from vsengine.loops import get_loop, set_loop
     from vsview.api import get_outputs
+    from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
+    comparison_one_media_path = media_path.with_name("runtime-smoke-comparison-1.mp4")
+    comparison_two_media_path = media_path.with_name("runtime-smoke-comparison-2.mp4")
+    assert_true(
+        len({media_path, comparison_one_media_path, comparison_two_media_path}) == 3,
+        "generated VSView fixture paths are not distinct",
+    )
     script_path = write_vsview_session_script(
         reference=media_path,
-        comparisons=[media_path],
-        suggested_offsets_by_key={f"{media_path.stem}:{media_path.stem}": 0},
+        comparisons=[comparison_one_media_path, comparison_two_media_path],
+        suggested_offsets_by_key={
+            f"{media_path.stem}:{comparison_one_media_path.stem}": 0,
+            f"{media_path.stem}:{comparison_two_media_path.stem}": 0,
+        },
         cache_dir=cache_dir,
-        frame_props_by_stem={media_path.stem: {"_Matrix": 2, "_Range": 2}},
+        frame_props_by_stem={
+            media_path.stem: {"_Matrix": 2, "_Range": 2},
+            comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2},
+            comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2},
+        },
     )
     script_text = script_path.read_text(encoding="utf-8")
     assert_true(
@@ -1256,8 +1274,14 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
         outputs = get_outputs()
         names = [output.name for output in outputs.values()]
-        assert_true(names == ["Reference", "Comparison 1"], f"unexpected VSView outputs: {names}")
-        assert_true(sorted(vs.get_outputs()) == [0, 1], "generated session did not register outputs 0 and 1")
+        assert_true(
+            names == ["Reference", "Comparison 1", "Comparison 2"],
+            f"unexpected VSView outputs: {names}",
+        )
+        assert_true(
+            sorted(vs.get_outputs()) == [0, 1, 2],
+            "generated session did not register outputs 0, 1, and 2",
+        )
         for output in vs.get_outputs().values():
             frame = output.clip.get_frame(0)
             assert_true(frame.width == 64 and frame.height == 64, "generated VSView output failed")
@@ -1276,24 +1300,90 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         expected = tuple(
             AlignmentReviewExpectedComparison(
                 pair.comparison_key,
-                pair.reference.source_frame_count,
-                pair.comparison.source_frame_count,
+                workspace.reference.source_frame_count,
+                pair.source_frame_count,
             )
             for pair in workspace.comparisons
         )
-        write_alignment_review_result(
-            session,
-            AlignmentReviewResult(
-                session_id=session.session_id,
-                decisions=tuple(
-                    KeepCurrentAlignmentReviewDecision(pair.comparison_key)
-                    for pair in workspace.comparisons
-                ),
-            ),
+
+        class Timeline:
+            def clear_notches(self, *_args, **_kwargs):
+                return None
+
+            def add_notch(self, *_args, **_kwargs):
+                return None
+
+        voutputs = [
+            types.SimpleNamespace(
+                vs_index=index,
+                vs_output=output,
+                kwargs=outputs[index].kwargs,
+            )
+            for index, output in sorted(vs.get_outputs().items())
+        ]
+        panel_api = types.SimpleNamespace(
+            file_path=script_path,
+            voutputs=voutputs,
+            current_voutput=voutputs[0],
+            current_frame=1,
+            timeline=Timeline(),
         )
-        observed_result = read_alignment_review_result(session, expected)
-        assert_true(len(observed_result.decisions) == len(expected), "alignment result round trip was incomplete")
-        proof("alignment_metadata=ok outputs=Reference,Comparison_1")
+        app = QApplication.instance() or QApplication([])
+        previous_loop = get_loop()
+        set_loop(QtEventLoop(app))
+        try:
+            active_parent = QWidget()
+            active_panel = AlignmentReviewPanel(active_parent, panel_api)
+            active_panel.on_workspace_loaded()
+            app.processEvents()
+            assert_true(
+                active_panel.progress_label.text() == "0 / 3 sources ready",
+                "alignment panel did not start with an empty three-source lineup",
+            )
+            for output_index, frame in enumerate((1, 0, 2)):
+                panel_api.current_voutput = voutputs[output_index]
+                panel_api.current_frame = frame
+                active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
+                app.processEvents()
+            assert_true(
+                active_panel.progress_label.text() == "3 / 3 sources ready",
+                "alignment panel did not record every source position",
+            )
+            assert_true(
+                active_panel.use_positions_button.isEnabled(),
+                "alignment positions action did not become ready for the whole set",
+            )
+            active_panel.use_positions_button.click()
+            app.processEvents()
+            observed_result = read_alignment_review_result(session, expected)
+            assert_true(
+                [decision.action for decision in observed_result.decisions]
+                == ["confirmed", "confirmed"],
+                "alignment positions action did not write complete confirmed decisions",
+            )
+            proof("alignment_positions=ok")
+
+            session.result_path.unlink()
+            keep_parent = QWidget()
+            keep_panel = AlignmentReviewPanel(keep_parent, panel_api)
+            keep_panel.on_workspace_loaded()
+            app.processEvents()
+            keep_panel.keep_button.click()
+            app.processEvents()
+            observed_result = read_alignment_review_result(session, expected)
+            assert_true(
+                [decision.action for decision in observed_result.decisions]
+                == ["keep_current", "keep_current"],
+                "keep-audio action did not write one decision per comparison",
+            )
+            proof("alignment_keep_current=ok")
+        finally:
+            set_loop(previous_loop)
+
+        proof(
+            "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "
+            "topology=one_reference_ordered_comparisons"
+        )
         proof("alignment_result_roundtrip=ok")
         session.result_path.write_text("{}\n", encoding="utf-8")
         try:
@@ -1308,7 +1398,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         vs.clear_outputs()
         if "session" in locals():
             session.result_path.unlink(missing_ok=True)
-    proof("generated_vsview_session=ok outputs=Reference,Comparison_1 color_defaults=BT709")
+    proof("generated_vsview_session=ok outputs=Reference,Comparison_1,Comparison_2 color_defaults=BT709")
 
 
 def prove_vsview_runtime(media_path: Path) -> None:
@@ -1391,10 +1481,12 @@ else:
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $comparisonOneMediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $comparisonTwoMediaPath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log") -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log") -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke*.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
       Remove-Item -Force -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-cache") -ErrorAction SilentlyContinue
     if ($locationPushed) {

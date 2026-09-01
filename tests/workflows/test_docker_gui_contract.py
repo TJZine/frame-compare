@@ -88,17 +88,33 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
     assert "AlignmentReviewPanel" in script
     assert "DOCKER_GUI_PROOF vsview_entry_point=ok" in script
     assert "DOCKER_GUI_PROOF panel_offscreen=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_positions=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_keep_current=ok" in script
     assert "DOCKER_GUI_PROOF alignment_metadata=ok" in script
     assert "DOCKER_GUI_PROOF alignment_result_roundtrip=ok" in script
     assert "DOCKER_GUI_PROOF alignment_result_validation=ok" in script
     assert "from vsview import set_output" in script
-    assert "color=c=black:size=64x48:rate=1:duration=1" in script
-    assert "color=c=white:size=64x48:rate=1:duration=1" in script
+    assert "color=c=black:size=64x48:rate=1:duration=3" in script
+    assert "color=c=white:size=64x48:rate=1:duration=3" in script
+    assert "color=c=gray:size=64x48:rate=1:duration=3" in script
     assert 'types.ModuleType("__vsview__")' in script
-    assert 'expected_names = {0: "Reference", 1: "Comparison 1"}' in script
+    assert 'expected_names = {0: "Reference", 1: "Comparison 1", 2: "Comparison 2"}' in script
     assert "outputs[index].clip.get_frame(0)" in script
     assert "source_index_path(reference)" in script
     assert "source_index_path(comparison)" in script
+    assert "source_index_path(comparison_2)" in script
+    assert "active_panel.on_workspace_loaded()\n    app.processEvents()" in script
+    assert (
+        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)\n"
+        "        app.processEvents()"
+    ) in script
+    assert "active_panel.use_positions_button.click()\n    app.processEvents()" in script
+    assert "keep_panel.keep_button.click()\n    app.processEvents()" in script
+    assert '"3 / 3 sources ready"' in script
+    assert '"Use these aligned positions"' in script
+    assert '"Keep audio-derived alignment"' in script
+    assert "pair.reference.source_frame_count" not in script
+    assert "pair.comparison.source_frame_count" not in script
     assert 'rm -rf -- "$proof_dir"' in script
     assert "DOCKER_GUI_PROOF temp_cleanup=ok" in script
     assert "xhost +si:localuser:" in script

@@ -616,7 +616,22 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "import vsview_cli._cli" in build_script
     assert "import vspackrgb.cython" in build_script
     assert "from PySide6.QtWidgets import QApplication" in build_script
-    assert '"testsrc2=size=64x64:rate=1:duration=1"' in build_script
+    assert '"testsrc2=size=64x64:rate=1:duration=3"' in build_script
+    fixture_generation = re.search(
+        r'-f lavfi -i "testsrc2=size=64x64:rate=1:duration=(?P<duration>\d+)" '
+        r"-frames:v (?P<frames>\d+) -pix_fmt yuv420p -y \$mediaPath",
+        build_script,
+    )
+    assert fixture_generation is not None
+    lwlibavsource_proof = build_script[
+        build_script.index("def prove_lwlibavsource") : build_script.index("def build_placebo_clip")
+    ]
+    frame_count_assertion = re.search(
+        r"assert_true\(source\.num_frames == (?P<count>\d+),", lwlibavsource_proof
+    )
+    assert frame_count_assertion is not None
+    assert fixture_generation.group("duration") == fixture_generation.group("frames")
+    assert fixture_generation.group("frames") == frame_count_assertion.group("count") == "3"
     combined_proof = build_script[
         build_script.index("def prove_vsview_runtime") : build_script.index("phase = sys.argv[1]")
     ]
@@ -647,6 +662,61 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "qt_webengine_runtime=absent deployment=excluded" in build_script
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
+
+
+def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
+    repo_root: Path,
+) -> None:
+    build_script = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    )
+    proof = build_script[
+        build_script.index("def prove_generated_vsview_session") : build_script.index(
+            "def prove_vsview_runtime"
+        )
+    ]
+
+    assert '$comparisonOneMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-1.mp4"' in (
+        build_script
+    )
+    assert '$comparisonTwoMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-2.mp4"' in (
+        build_script
+    )
+    assert "Copy-Item -LiteralPath $mediaPath -Destination $comparisonOneMediaPath" in build_script
+    assert "Copy-Item -LiteralPath $mediaPath -Destination $comparisonTwoMediaPath" in build_script
+    assert 'names == ["Reference", "Comparison 1", "Comparison 2"]' in proof
+    assert "sorted(vs.get_outputs()) == [0, 1, 2]" in proof
+    assert "len({media_path, comparison_one_media_path, comparison_two_media_path}) == 3" in proof
+    assert "comparisons=[comparison_one_media_path, comparison_two_media_path]" in proof
+    assert "comparisons=[media_path" not in proof
+    assert 'f"{media_path.stem}:{comparison_one_media_path.stem}": 0' in proof
+    assert 'f"{media_path.stem}:{comparison_two_media_path.stem}": 0' in proof
+    assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
+    assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
+    assert (
+        "active_parent = QWidget()\n            active_panel = AlignmentReviewPanel(active_parent, panel_api)"
+        in proof
+    )
+    assert (
+        "keep_parent = QWidget()\n            keep_panel = AlignmentReviewPanel(keep_parent, panel_api)"
+        in proof
+    )
+    assert "active_panel.on_workspace_loaded()\n            app.processEvents()" in proof
+    assert (
+        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)\n"
+        "                app.processEvents()"
+    ) in proof
+    assert "active_panel.use_positions_button.click()\n            app.processEvents()" in proof
+    assert "keep_panel.keep_button.click()\n            app.processEvents()" in proof
+    assert '"0 / 3 sources ready"' in proof
+    assert '"3 / 3 sources ready"' in proof
+    assert '"alignment_positions=ok"' in proof
+    assert '"alignment_keep_current=ok"' in proof
+    assert '"alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "' in proof
+    assert '"alignment_result_roundtrip=ok"' in proof
+    assert '"alignment_result_validation=ok malformed=rejected"' in proof
+    assert "pair.reference.source_frame_count" not in proof
+    assert "pair.comparison.source_frame_count" not in proof
 
 
 def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: Path) -> None:
@@ -705,7 +775,9 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert '$_ -match "(?i)\\bERROR\\b"' in launch_proof
     assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in launch_proof
 
-    assert 'frame_props_by_stem={media_path.stem: {"_Matrix": 2, "_Range": 2}}' in (build_script)
+    assert 'media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
+    assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
+    assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert "Color metadata incomplete; using standard display defaults (BT.709)" in build_script
     assert "Invoke-VSViewOffscreenLaunchProof" in build_script
 
@@ -2189,7 +2261,7 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "Remove-Item -Force -LiteralPath $legacyMediaIndexPath" in build_script
     assert (
         "Get-ChildItem -LiteralPath $BundleRoot -Filter "
-        '"runtime-smoke.mp4.frame-compare-*.lwi"' in build_script
+        '"runtime-smoke*.mp4.frame-compare-*.lwi"' in build_script
     )
     assert "function Assert-RequiredPySideLicenseMetadata" in build_script
     assert '"pyside6_addons-*.dist-info"' in build_script
