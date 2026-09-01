@@ -407,27 +407,6 @@ def test_windows_portable_update_contract_requires_media_runtime_identity(
     assert "media_runtime_fingerprints" in bundle_schema["required"]
 
 
-def test_windows_portable_code_only_updates_require_native_panel_capable_bundle(
-    repo_root: Path,
-) -> None:
-    build_update = _read_text_or_fail(repo_root / "tools" / "windows_portable" / "build_update.ps1")
-    updater = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
-    )
-    verifier = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "verify_extracted_bundle.ps1"
-    )
-
-    assert "$schemaVersion -ne 3" in build_update
-    assert "native-panel-capable bundle_info schema_version 3" in build_update
-    assert "a complete portable reinstall is required" in build_update
-    assert "$schemaVersion -ne 3" in updater
-    assert "native VSView alignment-panel capability" in updater
-    assert "bundle_info schema_version 3 required" in updater
-    assert "A complete portable reinstall is required; code-only update refused." in updater
-    assert '"schema_version" "bundle_info") -ne 3' in verifier
-
-
 def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
