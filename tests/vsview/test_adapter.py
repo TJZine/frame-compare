@@ -504,6 +504,8 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
 
     assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 3
     assert generated.count("Unlink playheads") == 3
+    assert "       Open Tool Panel -> Frame Compare Alignment Review." in generated
+    assert "       Save the alignment in the panel" in generated
 
 
 def test_write_vsview_session_script_is_atomic_and_deterministic_body(

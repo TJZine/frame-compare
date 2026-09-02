@@ -267,6 +267,7 @@ def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
     panel, _api, _script = _panel(tmp_path)
 
     assert vsview_register_toolpanel() is AlignmentReviewPanel
+    assert cast(Any, vsview_register_toolpanel).vsview_impl["tryfirst"] is True
     assert AlignmentReviewPanel.identifier == "frame_compare_alignment_review"
     assert AlignmentReviewPanel.display_name == "Frame Compare Alignment Review"
     assert panel.guidance_label.wordWrap()

@@ -29,7 +29,7 @@ def _group_table() -> Table:
 
 
 def _status_text(marker: str, message: str, *, style: str) -> Text:
-    return Text.assemble(Text(marker, style=style), " ", message)
+    return Text.assemble("  ", Text(marker, style=style), " ", message)
 
 
 def print_vsview_session(

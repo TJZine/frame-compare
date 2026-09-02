@@ -625,9 +625,9 @@ def main():
             )
 
     safe_print("\\n" + _status_line("[OK]", "VSView Ready"))
-    safe_print("    Open Tool Panel -> Frame Compare Alignment Review.")
-    safe_print("    Unlink playheads, then position every source on the same visible moment.")
-    safe_print("    Save the alignment in the panel, then close VSView to continue Frame Compare.")
+    safe_print("       Open Tool Panel -> Frame Compare Alignment Review.")
+    safe_print("       Unlink playheads, then position every source on the same visible moment.")
+    safe_print("       Save the alignment in the panel, then close VSView to continue Frame Compare.")
 
 main()
 """

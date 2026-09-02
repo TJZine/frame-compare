@@ -688,6 +688,6 @@ def _trim_explanation(offset: int) -> str:
     return "No starting trim"
 
 
-@hookimpl
+@hookimpl(tryfirst=True)
 def vsview_register_toolpanel() -> type[WidgetPluginBase[Any, Any]]:
     return AlignmentReviewPanel

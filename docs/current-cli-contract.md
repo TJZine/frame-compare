@@ -1176,9 +1176,11 @@ is:
    truthful one-reference/ordered-comparison named-output mappings
 4. generated `[WARN] VSView Display Assumptions`, only when assumptions exist
 5. generated `[OK] VSView Ready` with the instruction to open **Frame Compare
-   Alignment Review** from VSView's Tool Panel
+   Alignment Review** from VSView's Tool Panel; its three instruction lines use the
+   standard seven-space detail indentation
 6. parent waits for the bounded VSView process to close, then reports whether the
-   trusted result sidecar was accepted or retained the current alignment
+   trusted result sidecar was accepted or retained the current alignment, using the
+   standard two-space status indentation
 
 Normal VSView labels reuse the release-aware presentation identities prepared by the
 typed alignment request. Paths and stems remain the internal source, suggested
@@ -1195,6 +1197,9 @@ save action. The panel calculates `reference - comparison` and shows the trim me
 closing without saving produces no result. Generated and parent no-color output retain
 the literal lifecycle markers. Native source/index diagnostics remain inherited
 without buffering.
+
+The Frame Compare alignment-review tool panel registers with first priority so it is
+the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 
 The generated session carries an explicit UUID session identity, one reference role,
 ordered comparison roles/keys/ordinals, presentation names, and bounded audio
