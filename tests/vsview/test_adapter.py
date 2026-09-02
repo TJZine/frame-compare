@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -25,7 +26,6 @@ from frame_compare.vsview.adapter import (
 )
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.session_script import (
-    _build_helpers_section,
     _build_script_content,
     _build_script_header,
     write_vsview_session_script,
@@ -486,10 +486,28 @@ def test_generated_session_keeps_bt709_defaults_and_overlay_hints(
     assert applied_props["ref"] == {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1}
 
 
-def test_generated_script_header_and_helpers_are_self_contained() -> None:
-    generated = _build_script_header() + _build_helpers_section()
+def test_generated_script_suppresses_only_redundant_vsview_load_success() -> None:
+    logger = logging.getLogger("vsview.app.workspace.loader")
+    existing_filters = tuple(logger.filters)
+    namespace: dict[str, object] = {}
+    exec(_build_script_header(), namespace)  # noqa: S102
+    added_filters = [item for item in logger.filters if item not in existing_filters]
 
-    assert "import logging" not in generated
+    try:
+        assert len(added_filters) == 1
+        cases = (
+            (logging.INFO, "Content loaded successfully: %r", False),
+            (logging.INFO, "Content reloaded successfully: %r", True),
+            (logging.ERROR, "Failed to load content: %r", True),
+        )
+        for level, message, expected in cases:
+            record = logging.LogRecord(
+                logger.name, level, "loader.py", 1, message, (), None
+            )
+            assert bool(logger.filter(record)) is expected
+    finally:
+        for item in added_filters:
+            logger.removeFilter(item)
 
 
 def test_generated_session_guides_panel_discovery_and_unlinked_playheads(

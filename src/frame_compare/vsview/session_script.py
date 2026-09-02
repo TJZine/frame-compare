@@ -135,9 +135,17 @@ untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+logging.getLogger("vsview.app.workspace.loader").addFilter(
+    lambda record: not (
+        record.levelno == logging.INFO
+        and record.msg == "Content loaded successfully: %r"
+    )
+)
 '''
 
 

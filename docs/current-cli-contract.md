@@ -1196,7 +1196,10 @@ disclosure offers source-frame or known-offset input, and both use the same whol
 save action. The panel calculates `reference - comparison` and shows the trim meaning;
 closing without saving produces no result. Generated and parent no-color output retain
 the literal lifecycle markers. Native source/index diagnostics remain inherited
-without buffering.
+without buffering. Generated Frame Compare sessions suppress only VSView's redundant
+initial `Content loaded successfully` INFO record because `[OK] VSView Ready` already
+owns that success confirmation; reload, clipboard, warning, error, and other native
+diagnostics remain unchanged.
 
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
