@@ -440,13 +440,13 @@ function Copy-RepoApp([string]$BundleRoot) {
   Ensure-Directory -Path $sitePackages
 
   $sourceStatus = @(
-    & git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare
+    & git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare pyproject.toml
   )
   Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"
   if ($sourceStatus.Count -gt 0) {
     $dirtySourceMessage = (
-      "Uncommitted changes exist under src/frame_compare; the portable bundle " +
-      "packages committed HEAD and will exclude them."
+      "Uncommitted changes exist under src/frame_compare or pyproject.toml; the portable bundle " +
+      "packages committed HEAD and builds wheel dist-info metadata from it, so it will exclude them."
     )
     if ($RequireReleasePublicKey) {
       throw $dirtySourceMessage

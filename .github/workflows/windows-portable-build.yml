@@ -34,6 +34,12 @@ jobs:
     env:
       REQUIRE_SIGNING: ${{ inputs.require_signing }}
     steps:
+      - name: Validate reusable-workflow inputs
+        if: inputs.prepare_release_assets && !inputs.require_signing
+        shell: pwsh
+        run: |
+          throw "prepare_release_assets requires require_signing=true so orchestrated release assets are always signed."
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,7 +135,7 @@ jobs:
             "project_entrypoint=ok source=app/src",
             "alignment_panel=ok state=inactive platform=offscreen",
             "bestsource_frame=ok",
-            "alignment_metadata=ok outputs=Reference,Comparison_1",
+            "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 topology=one_reference_ordered_comparisons",
             "alignment_result_roundtrip=ok",
             "alignment_result_validation=ok malformed=rejected",
             "generated_vsview_session=ok",

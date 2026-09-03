@@ -67,7 +67,7 @@ OPTIONAL (Native VSView Alignment Review):
     pip install -e ".[vsview]"
   The hosted Windows release build is required to discover and load the exact panel
   entry point, construct it offscreen, start the managed VSView launcher against a
-  generated two-output session, require metadata/result round-trip plus
+  generated three-output session (Reference, Comparison 1, and Comparison 2), require metadata/result round-trip plus
   script/load/frame-0 evidence, and terminate it after the expected steady-state GUI
   timeout. This is a native runtime gate, not a substitute for later visible-UI
   acceptance on Windows; no hosted result is claimed by this local proof.
