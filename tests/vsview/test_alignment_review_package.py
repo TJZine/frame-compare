@@ -10,7 +10,8 @@ import pytest
 
 
 def test_vsview_entry_point_metadata_names_exactly_one_alignment_panel() -> None:
-    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    repo_root = Path(__file__).resolve().parents[2]
+    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert project["project"]["entry-points"]["vsview"] == {
         "frame-compare-alignment-review": "frame_compare.vsview.alignment_review_panel"

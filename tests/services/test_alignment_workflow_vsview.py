@@ -21,12 +21,14 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewResult,
     ConfirmedAlignmentReviewDecision,
     KeepCurrentAlignmentReviewDecision,
-    alignment_review_session_from_script,
     write_alignment_review_result,
 )
-from tests.services.alignment_request_test_support import alignment_request
-
-_SESSION_ID = "12345678123456781234567812345678"
+from tests.services.alignment_request_test_support import (
+    alignment_request,
+)
+from tests.services.alignment_request_test_support import (
+    vsview_session as _session,
+)
 
 
 def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int = 1000) -> None:
@@ -67,14 +69,6 @@ def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int =
         "_current_tty_status",
         lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
     )
-
-
-def _session(tmp_path: Path):
-    sessions_dir = tmp_path / "vsview_sessions"
-    sessions_dir.mkdir(exist_ok=True)
-    script = sessions_dir / f"vsview_ref_20260831T000000Z_{_SESSION_ID}.py"
-    script.write_text("# generated\n", encoding="utf-8")
-    return alignment_review_session_from_script(script, require_result_absent=True)
 
 
 def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentConfig):

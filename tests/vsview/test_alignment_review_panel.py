@@ -193,6 +193,7 @@ def test_panel_is_inert_for_ordinary_workspace() -> None:
     api = SimpleNamespace(file_path=None, timeline=timeline)
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
+    panel.setParent(None)
 
     _call_hook(panel.on_workspace_loaded)
 
@@ -212,6 +213,7 @@ def test_malformed_output_proxy_keeps_panel_inert(tmp_path: Path) -> None:
     api = SimpleNamespace(file_path=script, voutputs=[malformed], timeline=timeline)
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
+    panel.setParent(None)
 
     _call_hook(panel.on_workspace_loaded)
 

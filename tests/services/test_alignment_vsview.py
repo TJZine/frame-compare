@@ -20,12 +20,15 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewResult,
     ConfirmedAlignmentReviewDecision,
     KeepCurrentAlignmentReviewDecision,
-    alignment_review_session_from_script,
     write_alignment_review_result,
 )
 from frame_compare.vsview.errors import VSViewError
-
-_SESSION_ID = "12345678123456781234567812345678"
+from tests.services.alignment_request_test_support import (
+    VSVIEW_SESSION_ID as _SESSION_ID,
+)
+from tests.services.alignment_request_test_support import (
+    vsview_session as _session,
+)
 
 
 def _clip(path: Path, *, frame_count: int = 200) -> AlignmentClipRequest:
@@ -47,14 +50,6 @@ def _available() -> VSViewAvailability:
         status=VSViewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-
-
-def _session(tmp_path: Path):
-    sessions_dir = tmp_path / "vsview_sessions"
-    sessions_dir.mkdir(exist_ok=True)
-    script = sessions_dir / f"vsview_ref_20260831T000000Z_{_SESSION_ID}.py"
-    script.write_text("# generated\n", encoding="utf-8")
-    return alignment_review_session_from_script(script, require_result_absent=True)
 
 
 def _set_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -344,6 +339,24 @@ def test_optional_process_failure_retains_offsets(
     )
 
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+
+
+def test_optional_session_setup_failure_retains_offsets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_interactive(monkeypatch)
+    monkeypatch.setattr(
+        alignment_vsview,
+        "launch_alignment_verification_session",
+        MagicMock(
+            side_effect=VSViewError(
+                "VSView session setup failed (AlignmentReviewContractError)"
+            )
+        ),
+    )
+
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+    assert load_manual_overrides(tmp_path) == {}
 
 
 def test_forced_process_failure_propagates_typed_vsview_error(

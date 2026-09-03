@@ -78,9 +78,12 @@ def test_bash_executable_or_skip_falls_back_to_git_bash(
         lambda command: wsl_bash if command == "bash" else str(git_path),
     )
 
+    probed: list[str] = []
+
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         command = args[0]
         assert isinstance(command, list)
+        probed.append(command[0])
         if command[0] == wsl_bash:
             return subprocess.CompletedProcess(command, 1, b"Install a distribution.", b"")
         return subprocess.CompletedProcess(command, 0, b"frame-compare-bash-ok", b"")
@@ -88,6 +91,7 @@ def test_bash_executable_or_skip_falls_back_to_git_bash(
     monkeypatch.setattr(_helpers.subprocess, "run", fake_run)
 
     assert _helpers.bash_executable_or_skip() == str(git_bash)
+    assert probed == [wsl_bash, str(git_bash)]
 
 
 def test_bash_path_or_skip_uses_cygpath_when_available(

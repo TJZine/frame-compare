@@ -276,6 +276,8 @@ def test_result_write_is_atomic_and_propagates_failure(
     "payload",
     [
         "not json",
+        '{"schema_version": 1, "schema_version": 1, '
+        f'"session_id": "{_SESSION_ID}", "decisions": []}}',
         {"schema_version": 2, "session_id": _SESSION_ID, "decisions": []},
         {"schema_version": True, "session_id": _SESSION_ID, "decisions": []},
         {
