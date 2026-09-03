@@ -89,8 +89,8 @@ contract. `--force-interactive-alignment` enables the same route and makes readi
 process, cancellation, or invalid-result failure fatal. The generated session
 continues to use Frame Compare's L-SMASH-Works source/index path; VSView's BestSource
 workspace is UI-only. Open Frame Compare Alignment Review from VSView's Tool Panel,
-unlink the playheads, and visit Reference and every Comparison N output on the same
-visible moment. The live source lineup records the untrimmed source frames and previews
+unlink the playheads, and, when using viewer positions, visit Reference and every
+Comparison N output on the same visible moment. The live source lineup records the untrimmed source frames and previews
 the signed reference-to-comparison trim. Selecting **Use these aligned positions** writes
 one complete ordered result for the whole source set. **Keep audio-derived alignment** is
 the secondary whole-set action and retains the alignment Frame Compare entered with,

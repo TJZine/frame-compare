@@ -1186,8 +1186,9 @@ Normal VSView labels reuse the release-aware presentation identities prepared by
 typed alignment request. Paths and stems remain the internal source, suggested
 offset, manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
-output per comparison. In the native panel, the operator unlinks playheads, visits
-every output, and positions each source on the same visible moment. Public current-
+output per comparison. In the native panel, the default workflow unlinks playheads, visits
+every output, and positions each source on the same visible moment. Manual source-frame
+or known-offset entry and keep-current completion do not require viewer visits. Public current-
 output/current-frame callbacks update the live source lineup; the panel does not
 inspect or change hidden playheads or synchronization mode. **Use these aligned
 positions** writes the complete ordered result once. **Keep audio-derived alignment**

@@ -3,11 +3,11 @@ search:
   exclude: true
 ---
 
+# VSView Viewer-First Alignment UX Plan
+
 Status: Active
 Scope: Redesign native VSView alignment review around viewer-recorded source positions and one whole-set decision
 Owner: Maintainer-directed Frame Compare implementation session
-
-# VSView Viewer-First Alignment UX Plan
 
 ## Goal
 

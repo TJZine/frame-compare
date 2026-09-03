@@ -438,7 +438,8 @@ strict v1 metadata/result topology, trusted sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it remains inert for ordinary or
 rejected sessions, observes only public current-output/current-frame callbacks after
-activation, requires each source to be visited, and writes only a complete typed
+activation, requires each source to be visited for the default viewer-position
+workflow, and writes only a complete typed
 sidecar through one whole-set action. The panel's manual source-frame and known-offset
 inputs feed that same result model; its secondary keep-audio action writes one
 `keep_current` decision per comparison. `alignment_vsview` owns availability policy,
