@@ -24,6 +24,7 @@ from frame_compare.vsview.adapter import (
     check_vsview_availability,
     launch_alignment_verification_session,
 )
+from frame_compare.vsview.alignment_review_contract import AlignmentReviewContractError
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.session_script import (
     _build_script_content,
@@ -262,6 +263,25 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     assert "from vsview import set_output" in script
     assert "**_reference_metadata(" in script
     assert "**_comparison_metadata(" in script
+
+
+def test_session_setup_contract_failure_raises_typed_vsview_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract_failure = AlignmentReviewContractError("invalid VSView session script filename")
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.alignment_review_session_from_script",
+        MagicMock(side_effect=contract_failure),
+    )
+
+    with pytest.raises(VSViewError, match="VSView session setup failed") as excinfo:
+        launch_alignment_verification_session(
+            _session_request(tmp_path),
+            VSViewConfig(enabled=False),
+        )
+
+    assert excinfo.value.__cause__ is contract_failure
 
 
 def test_launch_timeout_terminates_child(

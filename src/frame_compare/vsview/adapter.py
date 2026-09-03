@@ -22,6 +22,7 @@ import structlog
 
 from frame_compare.vs.runtime_contract import runtime_kind
 from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewContractError,
     AlignmentReviewSession,
     alignment_review_session_from_script,
 )
@@ -178,8 +179,11 @@ def launch_alignment_verification_session(
     config: VSViewConfig,
 ) -> AlignmentReviewSession:
     """Generate and optionally launch a VSView session script."""
-    script_path = _write_vsview_session_script(request)
-    session = alignment_review_session_from_script(script_path, require_result_absent=True)
+    try:
+        script_path = _write_vsview_session_script(request)
+        session = alignment_review_session_from_script(script_path, require_result_absent=True)
+    except (AlignmentReviewContractError, OSError, ValueError) as exc:
+        raise VSViewError(f"VSView session setup failed ({type(exc).__name__})") from exc
 
     if not config.enabled:
         log.info(
