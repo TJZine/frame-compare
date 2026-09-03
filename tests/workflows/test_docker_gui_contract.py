@@ -14,6 +14,10 @@ from ._helpers import with_bash_env as _with_bash_env
 from ._helpers import write_bash_env as _write_bash_env
 
 
+def _assert_adjacent_statements(source: str, first: str, second: str) -> None:
+    assert re.search(rf"{re.escape(first)}\s+{re.escape(second)}", source) is not None
+
+
 def test_dockerfile_gui_target_uses_lock_derived_vsview_install(repo_root: Path) -> None:
     dockerfile = _read_text_or_fail(repo_root / "Dockerfile")
     stage_names = re.findall(r"^FROM .* AS (\S+)$", dockerfile, re.MULTILINE)
@@ -103,13 +107,26 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
     assert "source_index_path(reference)" in script
     assert "source_index_path(comparison)" in script
     assert "source_index_path(comparison_2)" in script
-    assert "active_panel.on_workspace_loaded()\n    app.processEvents()" in script
-    assert (
-        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)\n"
-        "        app.processEvents()"
-    ) in script
-    assert "active_panel.use_positions_button.click()\n    app.processEvents()" in script
-    assert "keep_panel.keep_button.click()\n    app.processEvents()" in script
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_workspace_loaded()",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "active_panel.use_positions_button.click()",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "keep_panel.keep_button.click()",
+        "app.processEvents()",
+    )
     assert '"3 / 3 sources ready"' in script
     assert '"Use these aligned positions"' in script
     assert '"Keep audio-derived alignment"' in script

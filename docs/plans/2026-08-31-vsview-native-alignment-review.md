@@ -3,11 +3,11 @@ search:
   exclude: true
 ---
 
+# VSView-Native Alignment Review Plan
+
 Status: Historical
 Scope: Replace terminal frame-pair confirmation with a Frame Compare-owned VSView alignment-review panel and session-result contract
 Owner: Maintainer-directed Frame Compare implementation session
-
-# VSView-Native Alignment Review Plan
 
 Superseded on 2026-09-01 by
 [VSView Viewer-First Alignment UX Plan](2026-09-01-vsview-viewer-first-alignment-ux.md).

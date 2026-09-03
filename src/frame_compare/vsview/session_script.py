@@ -74,7 +74,14 @@ def write_vsview_session_script(
     if script_path is None:
         raise FileExistsError("could not reserve a unique VSView session script path")
 
-    write_text_atomic(script_path, script_content, encoding="utf-8")
+    try:
+        write_text_atomic(script_path, script_content, encoding="utf-8")
+    except OSError:
+        try:
+            script_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     return script_path
 
 

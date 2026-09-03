@@ -40,6 +40,13 @@ from frame_compare.vsview.alignment_review_contract import (
 _TIMELINE_GROUP = "frame_compare_alignment_review"
 type _InputBasis = Literal["positions", "offsets"]
 type _FrameOrigin = Literal["Viewer", "Manual"]
+_POSITIONS_GUIDANCE = (
+    "Unlink playheads, then visit every source and position each on the same "
+    "visible moment."
+)
+_OFFSETS_GUIDANCE = (
+    "Enter one known signed offset for every comparison; viewer visits are not required."
+)
 
 
 @dataclass(slots=True)
@@ -94,11 +101,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        self.guidance_label = QLabel(
-            "Unlink playheads, then visit every source and position each on the same "
-            "visible moment.",
-            self,
-        )
+        self.guidance_label = QLabel(_POSITIONS_GUIDANCE, self)
         self.guidance_label.setWordWrap(True)
         layout.addWidget(self.guidance_label)
 
@@ -326,6 +329,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._basis = "positions"
         self._saved = False
         self._kept_current = False
+        self.guidance_label.setText(_POSITIONS_GUIDANCE)
         self.progress_label.setText("Inactive — not a Frame Compare alignment session")
         self.basis_status_label.setText("Input basis: Source frames")
         self.error_label.clear()
@@ -348,6 +352,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.source_outcome_labels.clear()
         self.frame_inputs.clear()
         self.offset_inputs.clear()
+        self.use_positions_button.setText("Use these aligned positions")
         self.use_positions_button.setEnabled(False)
         self.keep_button.setEnabled(False)
 
@@ -462,6 +467,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             else "Input basis: Known offsets"
         )
         if self._basis == "positions":
+            self.guidance_label.setText(_POSITIONS_GUIDANCE)
+            self.use_positions_button.setText("Use these aligned positions")
             ready = sum(
                 draft.frame is not None and draft.error is None for draft in self._source_drafts
             )
@@ -469,6 +476,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             progress_unit = "sources"
             complete = ready == total
         else:
+            self.guidance_label.setText(_OFFSETS_GUIDANCE)
+            self.use_positions_button.setText("Use these known offsets")
             ready = sum(
                 draft.value is not None and draft.error is None for draft in self._offset_drafts
             )

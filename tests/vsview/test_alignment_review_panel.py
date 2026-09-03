@@ -14,12 +14,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytest.importorskip("vsview")
 
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
-from vsengine.loops import get_loop, set_loop
-from vsview.vsenv import QtEventLoop
+# Qt must see the offscreen platform before PySide6 and VSView are imported.
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+from vsengine.loops import get_loop, set_loop  # noqa: E402
+from vsview.vsenv import QtEventLoop  # noqa: E402
 
-from frame_compare.vsview.alignment_review_contract import (
+from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_NAME_KEY,
     ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
@@ -29,7 +30,7 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
     ALIGNMENT_REVIEW_SCHEMA_VERSION,
 )
-from frame_compare.vsview.alignment_review_panel import (
+from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
@@ -273,6 +274,7 @@ def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
     assert AlignmentReviewPanel.identifier == "frame_compare_alignment_review"
     assert AlignmentReviewPanel.display_name == "Frame Compare Alignment Review"
     assert panel.guidance_label.wordWrap()
+    assert "visit every source" in panel.guidance_label.text()
     assert panel.error_label.accessibleName() == "Alignment review error"
     assert panel.manual_toggle.accessibleName() == "Enter alignment manually"
     assert panel.body_scroll.accessibleName() == "Alignment source lineup and manual inputs"
@@ -431,6 +433,10 @@ def test_known_offsets_are_whole_set_and_serialize_canonical_pairs(tmp_path: Pat
     panel.basis_selector.setCurrentIndex(1)
 
     assert panel.basis_status_label.text() == "Input basis: Known offsets"
+    assert panel.guidance_label.text() == (
+        "Enter one known signed offset for every comparison; viewer visits are not required."
+    )
+    assert panel.use_positions_button.text() == "Use these known offsets"
     assert not panel.offset_inputs_group.isHidden()
     assert panel.frame_inputs_group.isHidden()
     panel.offset_inputs[0].setText("+12")
@@ -493,10 +499,13 @@ def test_switching_basis_never_combines_readiness(tmp_path: Path) -> None:
 
     panel.basis_selector.setCurrentIndex(1)
     assert panel.progress_label.text() == "0 / 1 comparisons ready"
+    assert panel.use_positions_button.text() == "Use these known offsets"
     assert not panel.use_positions_button.isEnabled()
 
     panel.basis_selector.setCurrentIndex(0)
     assert panel.progress_label.text() == "2 / 2 sources ready"
+    assert "visit every source" in panel.guidance_label.text()
+    assert panel.use_positions_button.text() == "Use these aligned positions"
     assert panel.use_positions_button.isEnabled()
 
 
@@ -518,6 +527,8 @@ def test_workspace_reload_restores_collapsed_source_frame_manual_defaults(
     assert not panel.frame_inputs_group.isHidden()
     assert panel.offset_inputs_group.isHidden()
     assert panel.basis_status_label.text() == "Input basis: Source frames"
+    assert "visit every source" in panel.guidance_label.text()
+    assert panel.use_positions_button.text() == "Use these aligned positions"
 
 
 def test_save_failure_stays_editable_unsaved_and_redacted(
