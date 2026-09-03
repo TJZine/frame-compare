@@ -768,7 +768,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
         "[RUN] VSView Bootstrap",
         "[OK] VSView Ready",
         "Script execution completed",
-        "Content loaded successfully",
+        "Switching to video output",
         "Frame 0 rendered",
     ):
         assert marker in launch_proof

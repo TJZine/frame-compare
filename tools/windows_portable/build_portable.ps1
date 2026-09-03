@@ -875,7 +875,7 @@ function Invoke-VSViewOffscreenLaunchProof(
     "[RUN] VSView Bootstrap",
     "[OK] VSView Ready",
     "Script execution completed",
-    "Content loaded successfully",
+    "Switching to video output",
     "Frame 0 rendered"
   )) {
     if (-not $normalizedCombined.Contains($marker)) {
