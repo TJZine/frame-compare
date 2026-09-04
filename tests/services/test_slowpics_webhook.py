@@ -358,6 +358,84 @@ async def test_cancellation_stops_retry_worker_before_next_attempt() -> None:
     assert calls == 1
 
 
+async def test_repeated_cancellation_drains_blocked_worker_before_propagating() -> None:
+    connector_started = Event()
+    release_connector = Event()
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        connector_started.set()
+        assert release_connector.wait(1.0)
+        return WebhookResponse(status_code=503)
+
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            resolver=_public_resolver,
+            connector=_connector,
+        )
+    )
+    assert await asyncio.to_thread(connector_started.wait, 1.0)
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    try:
+        assert not task.done()
+    finally:
+        release_connector.set()
+
+    _done, pending = await asyncio.wait({task}, timeout=1.0)
+    assert not pending
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == 1
+
+
+async def test_repeated_cancellation_consumes_concurrent_worker_failure() -> None:
+    connector_started = Event()
+    release_connector = Event()
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled_contexts: list[dict[str, object]] = []
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        connector_started.set()
+        assert release_connector.wait(1.0)
+        raise RuntimeError("connector failed during cancellation")
+
+    loop.set_exception_handler(lambda _loop, context: unhandled_contexts.append(context))
+    try:
+        task = asyncio.create_task(
+            deliver_slowpics_webhook(
+                webhook_url="https://hooks.example.test/path",
+                slowpics_url="https://slow.pics/c/example",
+                resolver=_public_resolver,
+                connector=_connector,
+            )
+        )
+        assert await asyncio.to_thread(connector_started.wait, 1.0)
+
+        task.cancel()
+        await asyncio.sleep(0)
+        release_connector.set()
+        task.cancel()
+
+        _done, pending = await asyncio.wait({task}, timeout=1.0)
+        assert not pending
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert unhandled_contexts == []
+    finally:
+        release_connector.set()
+        loop.set_exception_handler(previous_handler)
+
+
 async def test_delivery_unknown_after_request_send_is_not_retried() -> None:
     calls = 0
 

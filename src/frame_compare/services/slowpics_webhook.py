@@ -133,23 +133,29 @@ async def deliver_slowpics_webhook(
     try:
         # Shield the thread-backed task so cancellation is handled by the
         # owner below rather than abandoning a worker that can still retry.
-        return await asyncio.shield(worker)
+        worker_result = await asyncio.shield(worker)
+        if isinstance(worker_result, Exception):
+            raise worker_result
+        return worker_result
     except asyncio.CancelledError:
         cancellation_event.set()
         # A Python thread cannot be forcefully stopped.  Drain it before
         # propagating cancellation; the worker cooperatively exits before
         # another attempt and the default retry wait is interruptible.
-        with suppress(BaseException):
-            await asyncio.shield(worker)
-        # Preserve the caller's cancellation even if the worker reports its
-        # private stop signal (or an unrelated terminal failure).
+        while True:
+            # A second cancellation can interrupt this await. Keep draining
+            # until the thread-backed worker has actually completed.
+            with suppress(BaseException):
+                await asyncio.shield(worker)
+            if worker.done():
+                break
         raise
 
 
 async def _run_slowpics_webhook_worker(
     sync_delivery: Callable[..., SlowpicsWebhookResult],
     **kwargs: object,
-) -> SlowpicsWebhookResult:
+) -> SlowpicsWebhookResult | Exception:
     """Run the thread-backed delivery while consuming its private stop signal."""
     try:
         return await asyncio.to_thread(sync_delivery, **kwargs)
@@ -158,6 +164,11 @@ async def _run_slowpics_webhook_worker(
         # as an unhandled exception by newer asyncio versions.  The owning
         # coroutine always re-raises cancellation, so this result is internal.
         return SlowpicsWebhookResult(success=False)
+    except Exception as error:
+        # Keep the shielded task successful so repeated owner cancellation
+        # cannot make asyncio report a racing worker failure as unhandled.
+        # The normal owner path immediately re-raises the captured error.
+        return error
 
 
 def resolve_webhook_addresses(hostname: str, port: int) -> tuple[str, ...]:
