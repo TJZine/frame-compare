@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import ssl
 from collections.abc import Callable
+from threading import Event
 
 import pytest
 
@@ -325,6 +327,35 @@ async def test_retryable_connection_and_server_failures_use_bounded_backoff(
         WEBHOOK_RETRY_BASE_DELAY_SECONDS,
         WEBHOOK_RETRY_BASE_DELAY_SECONDS * 2,
     ]
+
+
+async def test_cancellation_stops_retry_worker_before_next_attempt() -> None:
+    first_attempt = Event()
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        first_attempt.set()
+        return WebhookResponse(status_code=503)
+
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            resolver=_public_resolver,
+            connector=_connector,
+        )
+    )
+    assert await asyncio.to_thread(first_attempt.wait, 1.0)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert calls == 1
+    await asyncio.sleep(0.05)
+    assert calls == 1
 
 
 async def test_delivery_unknown_after_request_send_is_not_retried() -> None:

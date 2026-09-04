@@ -504,6 +504,43 @@ def test_execute_phases_fail_fast_failure_reports_failed_progress_status(
     assert reporter.complete_phase_calls == [ProgressPhaseStatus.FAILED]
 
 
+def test_execute_phases_marks_cancellation_failed_before_propagating(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+
+    class SpyReporter:
+        def __init__(self) -> None:
+            self.complete_phase_calls: list[ProgressPhaseStatus] = []
+
+        def start_phase(self, name: str, total: int) -> None:
+            del name, total
+
+        def advance(self, amount: int = 1) -> None:
+            del amount
+
+        def set_description(self, desc: str) -> None:
+            del desc
+
+        def complete_phase(
+            self,
+            status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+        ) -> None:
+            self.complete_phase_calls.append(status)
+
+    reporter = SpyReporter()
+
+    async def phase_cancel(_: RunContext) -> None:
+        raise asyncio.CancelledError
+
+    phase = Phase(name="cancel", execute=phase_cancel)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(execute_phases([phase], context, reporter))
+
+    assert phase.status is PhaseStatus.FAILED
+    assert reporter.complete_phase_calls == [ProgressPhaseStatus.FAILED]
+
+
 def test_execute_phases_fail_fast_failure_with_skip_condition_marks_failed_and_raises(
     tmp_path: Path,
 ) -> None:
