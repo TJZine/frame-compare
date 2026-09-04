@@ -23,7 +23,7 @@ from frame_compare.services.alignment_correlation import (
     CorrelationEstimate,
     correlate_audio,
     estimate_alignment_offset,
-    normalized_aligned_score,
+    refine_aligned_score,
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
@@ -53,6 +53,23 @@ def _stream(duration: int, *, start: int = 0) -> AudioStreamInfo:
 def _plan(*, rate: int, count: int) -> AudioAnalysisPlan:
     specs = tuple(AudioWindowSpec(index * 100, 200, index * 100, 400) for index in range(count))
     return AudioAnalysisPlan(rate, rate, specs, 1024, count * 1024)
+
+
+def _estimate_windows(
+    windows: list[AudioWindow],
+    *,
+    config: AlignmentConfig,
+) -> alignment_consensus.AlignmentConsensus:
+    remaining = iter(windows)
+    return alignment_consensus.estimate_planned_consensus_offset(
+        plan=_plan(rate=config.sample_rate, count=len(windows)),
+        config=config,
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: next(remaining),
+        scoring_window_loader=lambda _spec, _offset: (_ for _ in ()).throw(
+            AssertionError("requested-rate scoring is not expected")
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -107,23 +124,27 @@ def test_requested_rate_score_accepts_full_30_second_overlap() -> None:
     rng = np.random.default_rng(41)
     signal = rng.standard_normal(30 * 48000).astype(np.float32)
 
-    score = normalized_aligned_score(signal, signal, preprocessing_mode="none")
+    correction, score = refine_aligned_score(
+        signal,
+        signal,
+        preprocessing_mode="none",
+        correction_bounds_samples=(0, 0),
+    )
 
+    assert correction == 0
     assert score == pytest.approx(1.0)
 
 
 def test_overlap_confidence_threshold_rejects_without_exposing_an_offset() -> None:
     reference = np.array([0, 1, -2, 3, -1, 0], dtype=np.float32)
     comparison = np.concatenate((np.zeros(2, dtype=np.float32), reference))
-    result = alignment_consensus.estimate_streaming_consensus_offset(
+    result = _estimate_windows(
         [AudioWindow(reference, comparison, 0, 0)],
-        plan=_plan(rate=100, count=1),
         config=AlignmentConfig(
             sample_rate=100,
             max_offset_seconds=1,
             confidence_threshold=1.1,
         ),
-        fps=Fraction(24),
     )
 
     assert not result.applied
@@ -131,7 +152,7 @@ def test_overlap_confidence_threshold_rejects_without_exposing_an_offset() -> No
     assert result.diagnostic == "low_confidence"
 
 
-def test_streaming_consensus_uses_majority_before_score(
+def test_planned_consensus_uses_majority_before_score(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     estimates = iter(
@@ -152,15 +173,13 @@ def test_streaming_consensus_uses_majority_before_score(
         AudioWindow(np.ones(20), np.ones(20), index * 100, index * 100) for index in range(5)
     ]
 
-    result = alignment_consensus.estimate_streaming_consensus_offset(
+    result = _estimate_windows(
         windows,
-        plan=_plan(rate=100, count=5),
         config=AlignmentConfig(
             sample_rate=100,
             max_offset_seconds=1,
             consensus_minimum_ratio=0.6,
         ),
-        fps=Fraction(24),
     )
 
     assert result.applied
@@ -185,15 +204,13 @@ def test_winning_group_uses_representative_confidence(
     )
     windows = [AudioWindow(np.ones(20), np.ones(20), 0, 0) for _ in range(3)]
 
-    result = alignment_consensus.estimate_streaming_consensus_offset(
+    result = _estimate_windows(
         windows,
-        plan=_plan(rate=100, count=3),
         config=AlignmentConfig(
             sample_rate=100,
             max_offset_seconds=1,
             confidence_threshold=0.9,
         ),
-        fps=Fraction(24),
     )
 
     assert not result.applied
@@ -308,7 +325,7 @@ def test_requested_rate_interior_correction_is_preserved(
 
 
 @pytest.mark.parametrize("expected_offset", [-99, 99])
-def test_streaming_windows_recover_offsets_near_both_search_bounds(
+def test_planned_windows_recover_offsets_near_both_search_bounds(
     expected_offset: int,
 ) -> None:
     rng = np.random.default_rng(19)
@@ -321,11 +338,9 @@ def test_streaming_windows_recover_offsets_near_both_search_bounds(
     ]
     window = AudioWindow(reference, comparison, reference_start, comparison_start)
 
-    result = alignment_consensus.estimate_streaming_consensus_offset(
+    result = _estimate_windows(
         [window],
-        plan=_plan(rate=100, count=1),
         config=AlignmentConfig(sample_rate=100, max_offset_seconds=1),
-        fps=Fraction(24),
     )
 
     assert result.applied
@@ -341,15 +356,13 @@ def test_weak_intro_does_not_hide_strong_late_content() -> None:
         for index in range(1, 5)
     )
 
-    result = alignment_consensus.estimate_streaming_consensus_offset(
+    result = _estimate_windows(
         windows,
-        plan=_plan(rate=100, count=5),
         config=AlignmentConfig(
             sample_rate=100,
             max_offset_seconds=1,
             minimum_valid_windows=3,
         ),
-        fps=Fraction(24),
     )
 
     assert result.applied
@@ -510,7 +523,7 @@ def test_short_clip_remains_a_single_complete_window() -> None:
     assert plan.windows[0].reference_sample_count == 16000
 
 
-def test_audio_window_iterator_extracts_only_one_pair_before_yield(
+def test_extract_planned_window_decodes_exactly_one_pair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[Path, int]] = []
@@ -539,17 +552,19 @@ def test_audio_window_iterator_extracts_only_one_pair_before_yield(
         64,
         128,
     )
-    windows = alignment_audio.iter_audio_windows(
+    window = alignment_audio.extract_planned_window(
         Path("reference.mkv"),
         Path("comparison.mkv"),
         _stream(10),
         _stream(10),
         plan,
+        plan.windows[0],
         channel_strategy="mono_downmix",
     )
 
-    next(windows)
     assert calls == [(Path("reference.mkv"), 0), (Path("comparison.mkv"), 0)]
+    assert window.reference.size == 10
+    assert window.comparison.size == 20
 
 
 def test_stream_probe_prefers_selected_stream_duration_over_container(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
@@ -14,7 +13,6 @@ from typing import Literal, cast
 
 import numpy as np
 
-from frame_compare.services.alignment_correlation import ALIGNMENT_ANALYSIS_SAMPLE_LIMIT
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentChannelStrategy, AlignmentConfig
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
@@ -23,7 +21,6 @@ from frame_compare.utils.subproc import run_subprocess
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
 _FLOAT32_BYTES = np.dtype(np.float32).itemsize
-_MAX_ALIGNMENT_AUDIO_BYTES = ALIGNMENT_ANALYSIS_SAMPLE_LIMIT * _FLOAT32_BYTES
 # Decode enough context to avoid codec/version-dependent AAC state at an early seek.
 # The fixed bound preserves long-media behavior while early windows decode from origin.
 _SEEK_PREROLL_SECONDS = 5
@@ -507,84 +504,6 @@ def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
     return "pan=mono|c0=c0"
 
 
-def _audio_output_args(
-    *,
-    channel_strategy: AlignmentChannelStrategy,
-    stream: AudioStreamInfo | None,
-    sample_rate: int,
-) -> list[str]:
-    filters: list[str] = []
-    if channel_strategy == "mono_downmix":
-        channel_args = ["-ac", "1"]
-    else:
-        channel_args = []
-        filters.append(_best_channel_audio_filter(stream))
-    filters.extend(
-        (
-            f"aresample={sample_rate}",
-            f"atrim=end_sample={ALIGNMENT_ANALYSIS_SAMPLE_LIMIT}",
-        )
-    )
-    return [*channel_args, "-af", ",".join(filters)]
-
-
-def extract_audio(
-    video_path: Path,
-    sample_rate: int,
-    *,
-    audio_stream_index: int,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-    stream: AudioStreamInfo | None = None,
-) -> np.ndarray:
-    """Extract audio using FFmpeg with an explicit mapped audio stream."""
-    argv = [
-        "ffmpeg",
-        "-i",
-        str(video_path),
-        "-map",
-        f"0:a:{audio_stream_index}",
-        "-vn",
-        *_audio_output_args(
-            channel_strategy=channel_strategy,
-            stream=stream,
-            sample_rate=sample_rate,
-        ),
-        "-fs",
-        str(_MAX_ALIGNMENT_AUDIO_BYTES),
-        "-f",
-        "f32le",
-        "-",
-    ]
-
-    try:
-        proc = run_subprocess(argv, timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS)
-    except FileNotFoundError:
-        raise FFmpegNotFoundError() from None
-    except TimeoutExpired as e:
-        raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
-    except CalledProcessError as e:
-        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
-    except OSError as e:
-        raise FFmpegError(f"ffmpeg audio extraction could not start: {e}", 1) from e
-
-    if not proc.stdout:
-        raise AudioAlignmentError(f"empty audio track in {video_path.name}")
-
-    payload_len = len(proc.stdout)
-    if payload_len % _FLOAT32_BYTES != 0:
-        raise AudioAlignmentError(
-            f"invalid audio payload from {video_path.name}: {payload_len} bytes"
-        )
-
-    sample_count = payload_len // _FLOAT32_BYTES
-    if sample_count > ALIGNMENT_ANALYSIS_SAMPLE_LIMIT:
-        raise AudioAlignmentError(
-            f"audio payload from {video_path.name} exceeded the analysis sample limit"
-        )
-
-    return np.frombuffer(proc.stdout, dtype=np.float32)
-
-
 def _fft_size(sample_count: int) -> int:
     return 1 << max(0, sample_count - 1).bit_length()
 
@@ -847,28 +766,6 @@ def extract_audio_window(
     return np.frombuffer(proc.stdout, dtype=np.float32)
 
 
-def iter_audio_windows(
-    reference_path: Path,
-    comparison_path: Path,
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-    plan: AudioAnalysisPlan,
-    *,
-    channel_strategy: AlignmentChannelStrategy,
-) -> Iterator[AudioWindow]:
-    """Yield one decoded pair at a time so media duration cannot accumulate memory."""
-    for spec in plan.windows:
-        yield extract_planned_window(
-            reference_path,
-            comparison_path,
-            reference_stream,
-            comparison_stream,
-            plan,
-            spec,
-            channel_strategy=channel_strategy,
-        )
-
-
 def extract_planned_window(
     reference_path: Path,
     comparison_path: Path,
@@ -957,48 +854,4 @@ def extract_aligned_scoring_window(
         comparison=comparison,
         reference_start_sample=reference_start,
         comparison_start_sample=comparison_start,
-    )
-
-
-def extract_reference_audio(
-    video_path: Path,
-    sample_rate: int,
-    *,
-    stream_override: int | None = None,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-) -> tuple[np.ndarray, AudioStreamInfo]:
-    """Select and extract the reference anchor stream."""
-    stream = select_reference_audio_stream(video_path, stream_override=stream_override)
-    return (
-        extract_audio(
-            video_path,
-            sample_rate,
-            audio_stream_index=stream.audio_stream_index,
-            channel_strategy=channel_strategy,
-            stream=stream,
-        ),
-        stream,
-    )
-
-
-def extract_matching_audio(
-    video_path: Path,
-    sample_rate: int,
-    *,
-    reference_stream: AudioStreamInfo,
-    stream_override: int | None = None,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-) -> np.ndarray:
-    """Select and extract the comparison stream that matches the reference anchor."""
-    stream = select_matching_audio_stream(
-        video_path,
-        reference_stream=reference_stream,
-        stream_override=stream_override,
-    )
-    return extract_audio(
-        video_path,
-        sample_rate,
-        audio_stream_index=stream.audio_stream_index,
-        channel_strategy=channel_strategy,
-        stream=stream,
     )

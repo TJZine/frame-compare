@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
 
 import numpy as np
-import numpy.typing as npt
 
 from frame_compare.services.alignment_audio import AudioAnalysisPlan, AudioWindow, AudioWindowSpec
 from frame_compare.services.alignment_correlation import (
-    ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
     CorrelationEstimate,
     estimate_alignment_offset,
     refine_aligned_score,
@@ -25,10 +23,6 @@ from frame_compare.services.types import (
     AlignmentStabilitySummary,
     AlignmentWindowEvidence,
 )
-
-FloatArray = npt.NDArray[np.float64]
-
-_EPSILON = 1e-12
 
 
 @dataclass(frozen=True)
@@ -45,85 +39,6 @@ class AlignmentConsensus:
     ambiguity_ratio: float | None
     window_evidence: tuple[AlignmentWindowEvidence, ...] = ()
     stability: AlignmentStabilitySummary | None = None
-
-
-def _as_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
-    array = np.asarray(signal).reshape(-1)[:ALIGNMENT_ANALYSIS_SAMPLE_LIMIT]
-    array = np.asarray(array, dtype=np.float64)
-    if array.size == 0:
-        raise AudioAlignmentError("empty audio signal prevents consensus alignment")
-    if not bool(np.all(np.isfinite(array))):
-        raise AudioAlignmentError(f"{name} audio signal contains non-finite samples")
-    return array
-
-
-def _window_spans(signal_size: int, *, config: AlignmentConfig) -> list[tuple[int, int]]:
-    window_size = int(round(config.window_length_seconds * config.sample_rate))
-    if window_size <= 0 or window_size >= signal_size:
-        return [(0, signal_size)]
-
-    stride = int(round(config.window_stride_seconds * config.sample_rate))
-    if stride <= 0:
-        stride = window_size
-
-    spans: list[tuple[int, int]] = []
-    start = 0
-    while start + window_size <= signal_size:
-        spans.append((start, start + window_size))
-        start += stride
-    if spans and spans[-1][1] < signal_size:
-        spans.append((signal_size - window_size, signal_size))
-    return list(dict.fromkeys(spans))
-
-
-def _rms(signal: FloatArray) -> float:
-    return float(np.sqrt(np.mean(signal * signal)))
-
-
-def _window_estimate(
-    reference: FloatArray,
-    comparison: FloatArray,
-    *,
-    start: int,
-    end: int,
-    config: AlignmentConfig,
-) -> CorrelationEstimate | None:
-    reference_window = reference[start:end]
-    comparison_window = comparison[start:end]
-    if reference_window.size < 2 or comparison_window.size < 2:
-        return None
-    if _rms(reference_window) <= _EPSILON or _rms(comparison_window) <= _EPSILON:
-        return None
-    try:
-        return estimate_alignment_offset(reference_window, comparison_window, config=config)
-    except AudioAlignmentError:
-        return None
-
-
-def _diagnostic_spans(
-    signal_size: int,
-    *,
-    count: int,
-    config: AlignmentConfig,
-) -> list[tuple[int, int]]:
-    preferred_seconds = min(90.0, max(30.0, 2 * config.max_offset_seconds + 15.0))
-    window_size = min(signal_size, int(round(preferred_seconds * config.sample_rate)))
-    if window_size <= 0 or window_size >= signal_size:
-        return [(0, signal_size)]
-    available_start = signal_size - window_size
-    divisor = max(1, count - 1)
-    indexes = list(range(count))
-    if count == 5:
-        indexes = [0, 4, 2, 1, 3]
-    return list(
-        dict.fromkeys(
-            (
-                round(index * available_start / divisor),
-                round(index * available_start / divisor) + window_size,
-            )
-            for index in indexes
-        )
-    )
 
 
 def _valid_evidence(
@@ -293,62 +208,6 @@ def _finish_consensus(
     )
 
 
-def estimate_streaming_consensus_offset(
-    windows: Iterable[AudioWindow],
-    *,
-    plan: AudioAnalysisPlan,
-    config: AlignmentConfig,
-    fps: Fraction,
-) -> AlignmentConsensus:
-    """Correlate every selected window sequentially and select the majority offset."""
-    local_config = replace(config, sample_rate=plan.sample_rate)
-    margin = math.ceil(config.max_offset_seconds * plan.sample_rate)
-    candidates: list[CorrelationEstimate] = []
-    evidence: list[AlignmentWindowEvidence] = []
-    for window in windows:
-        origin_delta = window.reference_start_sample - window.comparison_start_sample
-        local_bounds = (-margin - origin_delta, margin - origin_delta)
-        try:
-            local_estimate = estimate_alignment_offset(
-                window.reference,
-                window.comparison,
-                config=local_config,
-                alignment_offset_bounds_samples=local_bounds,
-            )
-        except AudioAlignmentError:
-            continue
-        local_offset = (
-            local_estimate.subsample_offset
-            if local_estimate.subsample_offset is not None
-            else local_estimate.sample_offset
-        )
-        global_analysis_offset = local_offset + origin_delta
-        requested_offset = round(
-            global_analysis_offset * plan.requested_sample_rate / plan.sample_rate
-        )
-        estimate = CorrelationEstimate(
-            sample_offset=requested_offset,
-            score=local_estimate.score,
-            peak_ratio=local_estimate.peak_ratio,
-        )
-        candidates.append(estimate)
-        valid = _valid_evidence(
-            estimate,
-            start=round(
-                window.reference_start_sample * plan.requested_sample_rate / plan.sample_rate
-            ),
-            end=round(
-                (window.reference_start_sample + window.reference.size)
-                * plan.requested_sample_rate
-                / plan.sample_rate
-            ),
-            config=config,
-        )
-        if valid is not None:
-            evidence.append(valid)
-    return _finish_consensus(candidates, evidence, config=config, fps=fps)
-
-
 def estimate_planned_consensus_offset(
     *,
     plan: AudioAnalysisPlan,
@@ -430,58 +289,4 @@ def estimate_planned_consensus_offset(
         )
         if valid is not None:
             evidence.append(valid)
-    return _finish_consensus(candidates, evidence, config=config, fps=fps)
-
-
-def estimate_consensus_offset(
-    reference: npt.ArrayLike,
-    comparison: npt.ArrayLike,
-    *,
-    config: AlignmentConfig,
-    fps: Fraction,
-) -> AlignmentConsensus:
-    """Estimate and gate a single computed offset from per-window candidates."""
-    reference_signal = _as_signal(reference, name="reference")
-    comparison_signal = _as_signal(comparison, name="comparison")
-    signal_size = min(reference_signal.size, comparison_signal.size)
-    spans = _window_spans(signal_size, config=config)
-
-    candidates: list[CorrelationEstimate] = []
-    evidence: list[AlignmentWindowEvidence] = []
-    for start, end in spans:
-        estimate = _window_estimate(
-            reference_signal,
-            comparison_signal,
-            start=start,
-            end=end,
-            config=config,
-        )
-        if estimate is not None:
-            candidates.append(estimate)
-        valid = _valid_evidence(estimate, start=start, end=end, config=config)
-        if valid is not None:
-            evidence.append(valid)
-
-    if len(evidence) < 3:
-        existing_spans = set(spans)
-        for start, end in _diagnostic_spans(
-            signal_size,
-            count=5,
-            config=config,
-        ):
-            if len(evidence) >= 3:
-                break
-            if (start, end) in existing_spans:
-                continue
-            estimate = _window_estimate(
-                reference_signal,
-                comparison_signal,
-                start=start,
-                end=end,
-                config=config,
-            )
-            valid = _valid_evidence(estimate, start=start, end=end, config=config)
-            if valid is not None:
-                evidence.append(valid)
-
     return _finish_consensus(candidates, evidence, config=config, fps=fps)

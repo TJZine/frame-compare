@@ -266,27 +266,6 @@ def _normalized_overlap_score(
     return float(np.dot(reference_values, comparison_values) / denom)
 
 
-def normalized_aligned_score(
-    reference: npt.ArrayLike,
-    comparison: npt.ArrayLike,
-    *,
-    preprocessing_mode: str,
-) -> float:
-    """Score an already aligned pair using only its actual shared overlap."""
-    reference_signal = _preprocess_signal(
-        _as_finite_signal(reference, name="reference"),
-        mode=preprocessing_mode,
-    )
-    comparison_signal = _preprocess_signal(
-        _as_finite_signal(comparison, name="comparison"),
-        mode=preprocessing_mode,
-    )
-    score = _normalized_overlap_score(reference_signal, comparison_signal, offset=0.0)
-    if score is None:
-        raise AudioAlignmentError("insufficient aligned overlap prevents correlation")
-    return score
-
-
 def refine_aligned_score(
     reference: npt.ArrayLike,
     comparison: npt.ArrayLike,
