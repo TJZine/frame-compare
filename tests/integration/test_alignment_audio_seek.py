@@ -176,10 +176,9 @@ def test_audio_only_positive_container_start_matches_full_decode_grid(
 
     assert stream.timeline.start_time > Fraction(19, 10)
     assert stream.timeline.input_start_time > Fraction(19, 10)
-    minimum_correlation = 0.9 if codec_args[1] == "aac" else 0.9999
-    assert np.corrcoef(window, expected)[0, 1] > minimum_correlation
+    assert np.corrcoef(window, expected)[0, 1] > 0.9999
     lag = int(np.argmax(np.correlate(expected, window, mode="full"))) - (window.size - 1)
-    assert abs(lag) <= (1 if codec_args[1] == "aac" else 0)
+    assert lag == 0
 
 
 @pytest.mark.integration

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import _estimate_audio_pair, align_clips_from_request
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
@@ -257,8 +258,6 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
                 str(path),
             ]
         )
-    cache_dir = tmp_path / "long-cache"
-    cache_dir.mkdir()
     config = AlignmentConfig(
         cache_results=False,
         sample_rate=48000,
@@ -266,21 +265,17 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
         confidence_threshold=0.9,
     )
 
-    results = align_clips_from_request(
-        alignment_request(
-            reference=reference,
-            comparisons=[comparison],
-            config=config,
-            generated_dir=cache_dir,
-            fps_num=1,
-        ),
-        config,
+    result = _estimate_audio_pair(
+        reference,
+        comparison,
+        config=config,
+        fps_reference=Fraction(1),
     )
 
-    assert len(results) == 1
-    assert results[0].applied
-    assert results[0].frame_offset == 0
-    assert results[0].correlation_score > 0.99
+    assert result.applied, (result.diagnostic, result.score)
+    assert result.consensus_ratio == 1.0
+    assert tuple(item.sample_offset for item in result.window_evidence) == (0, 0, 0, 0, 0)
+    assert result.score > 0.99
 
 
 @pytest.mark.integration

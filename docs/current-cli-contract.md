@@ -1448,17 +1448,18 @@ container video duration. Stream `duration_ts` and time base are authoritative w
 available, followed by stream duration metadata and Matroska duration tags. Container
 duration is never substituted for missing selected-stream duration; an unavailable or
 empty selected-stream timeline produces a non-applied diagnostic. Each selected window
-uses a one-second input-seek preroll when available and an absolute post-decode timestamp
-trim before resampling. Uncompressed streams are sample-grid exact in the supported
-local proof; compressed streams can retain bounded codec/container seek granularity, so
-consensus and final frame conversion must tolerate sub-frame sample differences.
+uses up to five seconds of fixed input-seek preroll. Early windows decode from the
+selected-stream origin, resample once, and trim by output sample index; later windows use
+an absolute post-decode timestamp trim before resampling. This avoids codec- and
+FFmpeg-version-dependent early AAC seek grids while keeping long-media decoding bounded.
 
 Analysis has an internal fixed peak FFT limit of 2,097,152 points, a total budget of
 16,777,216 FFT points, and a maximum of 16 windows. It first uses the configured sample
 rate. When a normal long request cannot fit that FFT bound, bounded 8 kHz or 4 kHz
 correlation locates each candidate, then a separately decoded aligned overlap at the
-configured rate supplies its confidence score; coarse-rate confidence never decides
-acceptance. Requested-rate scoring is separately capped at 3,000,000 samples per pair
+configured rate refines the coarse lag over the bounded rate-ratio neighborhood and
+supplies its confidence score; coarse-rate confidence never decides acceptance.
+Requested-rate scoring is separately capped at 3,000,000 samples per pair
 and 15,000,000 samples in total. Reference and comparison pairs are extracted and
 processed sequentially. Confidence uses overlap-local mean centering and requires at
 least three samples and 5% of the shorter window, preventing tiny boundary overlaps

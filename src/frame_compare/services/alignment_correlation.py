@@ -287,6 +287,42 @@ def normalized_aligned_score(
     return score
 
 
+def refine_aligned_score(
+    reference: npt.ArrayLike,
+    comparison: npt.ArrayLike,
+    *,
+    preprocessing_mode: str,
+    correction_bounds_samples: tuple[int, int],
+) -> tuple[int, float]:
+    """Refine a coarse-aligned pair over a small bounded integer neighborhood."""
+    reference_signal = _preprocess_signal(
+        _as_finite_signal(reference, name="reference"),
+        mode=preprocessing_mode,
+    )
+    comparison_signal = _preprocess_signal(
+        _as_finite_signal(comparison, name="comparison"),
+        mode=preprocessing_mode,
+    )
+    lower_correction, upper_correction = correction_bounds_samples
+    if lower_correction > upper_correction:
+        raise AudioAlignmentError("requested-rate correction bounds are inverted")
+    scored = [
+        (correction, score)
+        for correction in range(lower_correction, upper_correction + 1)
+        if (
+            score := _normalized_overlap_score(
+                reference_signal,
+                comparison_signal,
+                offset=float(-correction),
+            )
+        )
+        is not None
+    ]
+    if not scored:
+        raise AudioAlignmentError("insufficient aligned overlap prevents correlation")
+    return max(scored, key=lambda item: item[1])
+
+
 def _interpolate(signal: FloatArray, positions: FloatArray) -> FloatArray:
     lower = np.floor(positions).astype(np.int64)
     upper = np.minimum(lower + 1, signal.size - 1)

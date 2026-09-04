@@ -24,7 +24,9 @@ _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
 _FLOAT32_BYTES = np.dtype(np.float32).itemsize
 _MAX_ALIGNMENT_AUDIO_BYTES = ALIGNMENT_ANALYSIS_SAMPLE_LIMIT * _FLOAT32_BYTES
-_SEEK_PREROLL_SECONDS = 1
+# Decode enough context to avoid codec/version-dependent AAC state at an early seek.
+# The fixed bound preserves long-media behavior while early windows decode from origin.
+_SEEK_PREROLL_SECONDS = 5
 _DEFAULT_WINDOW_SECONDS = 30
 _DEFAULT_DISTRIBUTED_WINDOWS = 5
 _MIN_ANALYSIS_SAMPLE_RATE = 4000
@@ -770,7 +772,6 @@ def extract_audio_window(
     """Seek with preroll, then trim exactly on the selected stream timeline."""
     preroll_samples = min(start_sample, _SEEK_PREROLL_SECONDS * sample_rate)
     window_start = stream.timeline.start_time + Fraction(start_sample, sample_rate)
-    window_end = window_start + Fraction(sample_count, sample_rate)
     seek_time = max(
         Fraction(0),
         window_start - Fraction(preroll_samples, sample_rate) - stream.timeline.input_start_time,
@@ -783,14 +784,24 @@ def extract_audio_window(
     else:
         channel_args = []
         filters.append(_best_channel_audio_filter(stream))
-    filters.extend(
-        (
-            f"atrim=start={_seconds_arg(window_start)}:end={_seconds_arg(window_end)}",
-            "asetpts=PTS-STARTPTS",
-            f"aresample={sample_rate}",
-            f"atrim=end_sample={sample_count}",
+    if seek_time == 0:
+        filters.extend(
+            (
+                f"aresample={sample_rate}",
+                f"atrim=start_sample={start_sample}:end_sample={start_sample + sample_count}",
+                "asetpts=PTS-STARTPTS",
+            )
         )
-    )
+    else:
+        window_end = window_start + Fraction(sample_count, sample_rate)
+        filters.extend(
+            (
+                f"atrim=start={_seconds_arg(window_start)}:end={_seconds_arg(window_end)}",
+                "asetpts=PTS-STARTPTS",
+                f"aresample={sample_rate}",
+                f"atrim=end_sample={sample_count}",
+            )
+        )
     seek_args = ["-ss", _seconds_arg(seek_time)] if seek_time > 0 else []
     if seek_time > 0 or stream.timeline.start_time != 0:
         seek_args.append("-copyts")

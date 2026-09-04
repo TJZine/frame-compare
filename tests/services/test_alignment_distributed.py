@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -232,6 +233,78 @@ def test_coarse_lag_is_scored_at_requested_rate(
     assert not result.applied
     assert result.diagnostic == "low_confidence"
     assert result.score == pytest.approx(-1.0)
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_requested_rate_correction_cannot_escape_max_offset(
+    monkeypatch: pytest.MonkeyPatch,
+    sign: int,
+) -> None:
+    plan = AudioAnalysisPlan(8000, 48000, (AudioWindowSpec(0, 100, 0, 100),), 256, 256)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(sign * 8000, 1.0, 2.0),
+    )
+    seen_bounds: list[tuple[int, int]] = []
+
+    def outward_refinement(*_args: object, **kwargs: Any) -> tuple[int, float]:
+        seen_bounds.append(kwargs["correction_bounds_samples"])
+        return sign * 6, 1.0
+
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", outward_refinement)
+
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=48000, max_offset_seconds=1),
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
+        scoring_window_loader=lambda _spec, _offset: AudioWindow(
+            np.ones(600),
+            np.ones(600),
+            48000 if sign > 0 else 0,
+            0 if sign > 0 else 48000,
+        ),
+    )
+
+    assert not result.applied
+    assert result.sample_offset is None
+    assert seen_bounds == [(-6, 0) if sign > 0 else (0, 6)]
+
+
+@pytest.mark.parametrize("expected", [-23, 23])
+def test_requested_rate_interior_correction_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+    expected: int,
+) -> None:
+    plan = AudioAnalysisPlan(8000, 48000, (AudioWindowSpec(0, 100, 0, 100),), 256, 256)
+    coarse = 24 if expected > 0 else -24
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(coarse // 6, 1.0, 2.0),
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "refine_aligned_score",
+        lambda *_args, **_kwargs: (expected - coarse, 1.0),
+    )
+
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=48000, max_offset_seconds=1),
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
+        scoring_window_loader=lambda _spec, _offset: AudioWindow(
+            np.ones(600),
+            np.ones(600),
+            max(0, coarse),
+            max(0, -coarse),
+        ),
+    )
+
+    assert result.applied
+    assert result.sample_offset == expected
 
 
 @pytest.mark.parametrize("expected_offset", [-99, 99])

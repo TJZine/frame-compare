@@ -424,8 +424,9 @@ Computed alignment work is planned against typed timing for each selected audio 
 total FFT-work budgets, requested-rate scoring budgets, distributed window selection,
 and seek-with-preroll followed by absolute post-decode trimming. Requested-rate
 correlation is preferred. When it cannot fit, a bounded coarse pair finds the lag, is
-released, and a fresh aligned pair at the configured rate supplies confidence, so only
-one decoded pair and one correlation workspace are live. `alignment_consensus`
+released, and a fresh aligned pair at the configured rate refines the rate-ratio
+neighborhood and supplies confidence, so only one decoded pair and one correlation
+workspace are live. `alignment_consensus`
 translates local unequal-window lag through the two stream origins before applying the
 public sign convention. All successfully correlated selected windows participate in
 majority consensus, with score used only for ties and the winning group's median score

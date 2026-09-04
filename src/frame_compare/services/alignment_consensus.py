@@ -16,7 +16,7 @@ from frame_compare.services.alignment_correlation import (
     ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
     CorrelationEstimate,
     estimate_alignment_offset,
-    normalized_aligned_score,
+    refine_aligned_score,
 )
 from frame_compare.services.alignment_stability import classify_alignment_stability
 from frame_compare.services.errors import AudioAlignmentError
@@ -360,6 +360,7 @@ def estimate_planned_consensus_offset(
     """Analyze planned windows sequentially and score fallback lags at the requested rate."""
     local_config = replace(config, sample_rate=plan.sample_rate)
     margin = math.ceil(config.max_offset_seconds * plan.sample_rate)
+    requested_limit = int(config.max_offset_seconds * plan.requested_sample_rate)
     candidates: list[CorrelationEstimate] = []
     evidence: list[AlignmentWindowEvidence] = []
     for spec in plan.windows:
@@ -386,18 +387,29 @@ def estimate_planned_consensus_offset(
             score = local_estimate.score
             if plan.sample_rate != plan.requested_sample_rate:
                 scoring_window = scoring_window_loader(spec, round(global_analysis_offset))
-                score = normalized_aligned_score(
+                scoring_origin_delta = (
+                    scoring_window.reference_start_sample - scoring_window.comparison_start_sample
+                )
+                correction_radius = math.ceil(plan.requested_sample_rate / plan.sample_rate)
+                correction, score = refine_aligned_score(
                     scoring_window.reference,
                     scoring_window.comparison,
                     preprocessing_mode=config.preprocessing_mode,
+                    correction_bounds_samples=(
+                        max(-correction_radius, -requested_limit - scoring_origin_delta),
+                        min(correction_radius, requested_limit - scoring_origin_delta),
+                    ),
                 )
+                requested_offset = scoring_origin_delta + correction
                 del scoring_window
+            else:
+                requested_offset = round(global_analysis_offset)
         except AudioAlignmentError:
             continue
 
-        requested_offset = round(
-            global_analysis_offset * plan.requested_sample_rate / plan.sample_rate
-        )
+        if abs(requested_offset) > requested_limit:
+            continue
+
         estimate = CorrelationEstimate(
             sample_offset=requested_offset,
             score=score,
