@@ -82,12 +82,16 @@ UPDATING (Code-Only Update Package):
     frame-compare-update purge-backups --keep 5
 
   Safety behavior:
-    - Signature verification defaults to Cancel when missing/invalid.
+    - Signature verification is mandatory. Missing or invalid signatures are always
+      refused; the updater has no interactive unsigned bypass.
+    - Archive processing is bounded before extraction by compressed size, entry count,
+      per-entry and total uncompressed size, and compression-ratio limits.
+    - If the installed app version cannot be established, the updater fails closed and
+      requires a complete portable reinstall rather than skipping the signed range.
     - Pre-native-panel bundles with bundle_info schema_version 2 are refused and
       require a complete portable reinstall; there is no bypass.
     - Dependency fingerprint mismatch always refuses a code-only update and requires
       a complete portable reinstall; there is no bypass.
-    - Non-interactive sessions fail safely instead of prompting.
 
 RELEASE SIGNING (Maintainers):
   One-time key generation is MAINTAINER-ONLY. Run it in a separate, ordinary
@@ -124,10 +128,11 @@ RELEASE SIGNING (Maintainers):
         WINDOWS_UPDATE_SIGNING_KEY_XML secret exists only in the approved
         release-candidate and production environments.
 
-  Unsigned zips are for local/dev only and require unsafe confirmation in the updater.
-  That confirmation never bypasses the media-runtime fingerprint boundary: a
-  code-only update with a missing, legacy, malformed, or different native runtime
-  fingerprint is refused and requires a complete portable bundle reinstall.
+  The updater does not apply unsigned zips, including local/development packages.
+  Build-update refuses dirty application/version sources and packages committed HEAD,
+  matching the source-selection rule used by the complete portable bundle builder. It
+  also refuses a supplied full bundle whose app version or packaged application source
+  differs from that commit before borrowing the bundle's compatibility fingerprints.
 
 THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:

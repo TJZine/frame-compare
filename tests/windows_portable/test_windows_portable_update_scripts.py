@@ -140,6 +140,35 @@ def _copy_keygen_owner(*, repo_root: Path, tmp_path: Path) -> tuple[Path, Path, 
     return copied_repo, script, placeholder
 
 
+def _commit_fake_update_source(repo: Path) -> None:
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "frame-compare"\nversion = "1.2.3"\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=10.0)
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "src/frame_compare", "pyproject.toml"],
+        check=True,
+        timeout=10.0,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Frame Compare Tests",
+            "-c",
+            "user.email=tests@frame-compare.invalid",
+            "commit",
+            "-qm",
+            "test source",
+        ],
+        check=True,
+        timeout=10.0,
+    )
+
+
 @pytest.mark.integration
 def test_windows_update_keygen_creates_redacted_compatible_keypair(
     tmp_path: Path,
@@ -397,6 +426,7 @@ def test_windows_portable_update_contract_requires_media_runtime_identity(
     assert update_schema["properties"]["schema_version"]["const"] == 2
     assert "expected_media_runtime_fingerprint" in update_schema["required"]
     assert update_schema["properties"]["signature_algorithm"]["const"] == ("rsa-sha256-pkcs1")
+    assert update_schema["properties"]["signature_file"]["const"] == "update-manifest.sig"
     file_schema = update_schema["properties"]["files"]["items"]
     assert "bytes" in file_schema["required"]
 
@@ -555,15 +585,25 @@ def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Pa
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("runtime_fingerprint", "bundle_schema_version", "expected_error"),
+    (
+        "runtime_fingerprint",
+        "bundle_schema_version",
+        "bundle_app_version",
+        "mutate_bundle_source",
+        "expected_error",
+    ),
     [
-        ("b" * 64, 3, None),
-        (None, 3, "media_runtime_fingerprint is missing or invalid"),
-        ("invalid", 3, "media_runtime_fingerprint is missing or invalid"),
-        ("B" * 64, 3, "media_runtime_fingerprint is missing or invalid"),
+        ("b" * 64, 3, "1.2.3", False, None),
+        ("b" * 64, 3, "1.2.3", True, "application source does not match committed HEAD"),
+        ("b" * 64, 3, "9.9.9", False, "app version '9.9.9' does not match"),
+        (None, 3, "1.2.3", False, "media_runtime_fingerprint is missing or invalid"),
+        ("invalid", 3, "1.2.3", False, "media_runtime_fingerprint is missing or invalid"),
+        ("B" * 64, 3, "1.2.3", False, "media_runtime_fingerprint is missing or invalid"),
         (
             "b" * 64,
             2,
+            "1.2.3",
+            False,
             "native-panel-capable bundle_info schema_version 3",
         ),
     ],
@@ -573,6 +613,8 @@ def test_windows_portable_build_update_validates_runtime_metadata_at_process_bou
     repo_root: Path,
     runtime_fingerprint: str | None,
     bundle_schema_version: int,
+    bundle_app_version: str,
+    mutate_bundle_source: bool,
     expected_error: str | None,
 ) -> None:
     exe = _powershell_exe()
@@ -587,13 +629,18 @@ def test_windows_portable_build_update_validates_runtime_metadata_at_process_bou
     (package / "__init__.py").write_text('__version__ = "1.2.3"\n', encoding="utf-8")
     (render / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
     (cache / "module.cpython-313.pyc").write_bytes(b"cache")
+    _commit_fake_update_source(fake_repo)
 
     bundle = tmp_path / "bundle"
     bundle.mkdir()
+    bundle_source = bundle / "app" / "src" / "frame_compare"
+    shutil.copytree(package, bundle_source)
+    if mutate_bundle_source:
+        (bundle_source / "render" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
     bundle_info: dict[str, object] = {
         "schema_version": bundle_schema_version,
         "bundle_kind": "full",
-        "app_version": "1.2.3",
+        "app_version": bundle_app_version,
         "requirements_lock_sha256": "a" * 64,
         "manifest_version": 2,
         "platform": "windows-x64",
@@ -713,6 +760,14 @@ def test_windows_portable_sign_update_fingerprints_public_key_only(repo_root: Pa
     assert "P>[" not in sign_script
 
 
+def test_windows_portable_sign_update_requires_canonical_signature_entry(
+    repo_root: Path,
+) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    assert "signature_file must be the canonical 'update-manifest.sig' entry" in sign_script
+
+
 def test_windows_portable_updater_restores_original_on_rename_failure(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
@@ -721,12 +776,84 @@ def test_windows_portable_updater_restores_original_on_rename_failure(repo_root:
     assert "Restore .old after rename failure" in updater or "Rename failed; restoring" in updater
 
 
-def test_windows_portable_updater_warns_when_installed_version_missing(repo_root: Path) -> None:
+def test_windows_portable_updater_fails_closed_when_installed_version_missing(
+    repo_root: Path,
+) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
     assert "Get-BundleAppVersion" in updater
-    assert "Write-Warning" in updater
-    assert "skipping version range check" in updater.lower()
+    assert "Installed app version could not be determined; refusing code-only update" in updater
+    assert "skipping version range check" not in updater.lower()
+
+
+def test_windows_portable_updater_authenticates_before_manifest_parse_and_archive_trust(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    body = _extract_powershell_function(updater, "Invoke-ApplyUpdate")
+
+    signature_check = body.index("Verify-ManifestSignature -ManifestBytes")
+    manifest_parse = body.index("$manifest = $manifestText | ConvertFrom-Json")
+    archive_validation = body.index("Assert-SafeUpdateArchive -Zip")
+    extraction = body.index("Copy-ZipEntryToFile -Entry")
+    assert signature_check < archive_validation < manifest_parse < extraction
+    assert "UNSIGNED" not in body
+    assert "Confirm-Token" not in updater
+
+
+def test_windows_portable_updater_holds_one_read_only_archive_stream(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    body = _extract_powershell_function(updater, "Invoke-ApplyUpdate")
+
+    open_stream = body.index("$zipStream = [System.IO.File]::Open(")
+    length_check = body.index("$archiveBytes = $zipStream.Length")
+    open_archive = body.index("$zip = [System.IO.Compression.ZipArchive]::new(")
+    assert open_stream < length_check < open_archive
+    assert "[System.IO.FileAccess]::Read" in body
+    assert "[System.IO.FileShare]::Read" in body
+    assert "ZipFile]::OpenRead" not in body
+    assert "$zipStream.Dispose()" in body
+
+
+def test_windows_portable_updater_bounds_untrusted_archive_resources(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    archive_guard = _extract_powershell_function(updater, "Assert-SafeUpdateArchive")
+    read_entry = _extract_powershell_function(updater, "Read-ZipEntryBytes")
+
+    for limit in (
+        "MaxUpdateArchiveBytes",
+        "MaxUpdateEntryCount",
+        "MaxPayloadEntryBytes",
+        "MaxUpdateUncompressedBytes",
+        "MaxCompressionRatio",
+    ):
+        assert limit in archive_guard or limit in updater
+    assert "CompressedLength" in archive_guard
+    assert "duplicate entry name" in archive_guard
+    assert "New-Object byte[] $Entry.Length" not in read_entry
+    assert "$MaxBytes" in read_entry
+
+
+def test_windows_portable_build_update_uses_clean_committed_source(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    export_source = _extract_powershell_function(build_script, "Export-CommittedAppSource")
+
+    assert "status --porcelain=v1 --untracked-files=all -- src/frame_compare pyproject.toml" in (
+        export_source
+    )
+    assert "Uncommitted changes exist under src/frame_compare or pyproject.toml" in export_source
+    assert "archive --format=tar" in export_source
+    assert "HEAD src/frame_compare pyproject.toml" in export_source
+    assert "New-ManifestFiles -SourceRoot $sourceRoot" in build_script
+    assert "Get-AppVersionFromSource -RepoRootPath $sourceSnapshotRoot" in build_script
+    source_match = _extract_powershell_function(build_script, "Assert-BundleAppSourceMatches")
+    assert "app\\\\src\\\\frame_compare" in source_match
+    assert "$actualHash -cne $expectedHash" in source_match
+    assert "$bundleAppVersion -cne $toAppVersion" in build_script
 
 
 def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
@@ -782,10 +909,13 @@ def test_windows_portable_updater_extract_zip_entry_disposes_streams_safely(
 ) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
-    body = _extract_powershell_function(updater, "Invoke-ApplyUpdate")
-    assert "$stream = $entry.Open()" in body
+    body = _extract_powershell_function(updater, "Copy-ZipEntryToFile")
+    assert "$stream = $Entry.Open()" in body
     assert "$out = $null" in body
-    assert re.search(r"try\s*\{\s*\$out = \[System\.IO\.File\]::Open\(", body, flags=re.DOTALL)
+    assert "$ExpectedBytes" in body
+    assert "exceeded its signed byte count" in body
+    assert "did not match its signed byte count" in body
+    assert re.search(r"\$out = \[System\.IO\.File\]::Open\(", body, flags=re.DOTALL)
     assert re.search(r"if \(\$null -ne \$out\)\s*\{\s*\$out\.Dispose\(\)", body, flags=re.DOTALL)
     assert re.search(
         r"if \(\$null -ne \$stream\)\s*\{\s*\$stream\.Dispose\(\)", body, flags=re.DOTALL
