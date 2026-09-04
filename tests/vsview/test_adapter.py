@@ -21,6 +21,7 @@ from frame_compare.vsview.adapter import (
     VSViewSessionRequest,
     _build_vsview_child_env,
     _check_startup_readiness,
+    _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
@@ -142,6 +143,34 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     assert "eps[0].load()" in probe_code
     assert "raise RuntimeError" in probe_code
     assert "compat" not in probe_code
+    assert mock_run.call_args.kwargs["cwd"] == Path(sys.executable).resolve().parent
+
+
+def test_managed_launcher_ignores_modules_from_calling_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hostile_workspace = tmp_path / "hostile-workspace"
+    hostile_workspace.mkdir()
+    marker = tmp_path / "hostile-launch-module-imported"
+    (hostile_workspace / "child_cwd_probe.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    safe_module_root = tmp_path / "safe-module-root"
+    safe_module_root.mkdir()
+    (safe_module_root / "child_cwd_probe.py").write_text("pass\n", encoding="utf-8")
+    child_env = os.environ.copy()
+    child_env["PYTHONPATH"] = str(safe_module_root)
+    monkeypatch.chdir(hostile_workspace)
+
+    returncode = _run_vsview_command(
+        [sys.executable, "-m", "child_cwd_probe"],
+        env=child_env,
+    )
+
+    assert returncode == 0
+    assert not marker.exists()
 
 
 def test_launch_rejects_missing_panel_entry_point(
@@ -521,9 +550,7 @@ def test_generated_script_suppresses_only_redundant_vsview_load_success() -> Non
             (logging.ERROR, "Failed to load content: %r", True),
         )
         for level, message, expected in cases:
-            record = logging.LogRecord(
-                logger.name, level, "loader.py", 1, message, (), None
-            )
+            record = logging.LogRecord(logger.name, level, "loader.py", 1, message, (), None)
             assert bool(logger.filter(record)) is expected
     finally:
         for item in added_filters:

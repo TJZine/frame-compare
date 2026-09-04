@@ -36,6 +36,8 @@ _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
 _REVIEW_PROCESS_TIMEOUT_SECONDS = 12 * 60 * 60
 _PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 _STARTUP_STDERR_LIMIT = 4000
+# Keep ``-c``/``-m`` imports out of the caller-controlled media workspace.
+_CHILD_PROCESS_CWD = Path(sys.executable).resolve().parent
 _ALIGNMENT_REVIEW_ENTRY_POINT_NAME = "frame-compare-alignment-review"
 _ALIGNMENT_REVIEW_ENTRY_POINT_VALUE = "frame_compare.vsview.alignment_review_panel"
 _MISSING_MODULE_PATTERN = re.compile(
@@ -265,6 +267,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
             errors="replace",
             timeout=_STARTUP_PROBE_TIMEOUT_SECONDS,
             env=env,
+            cwd=_CHILD_PROCESS_CWD,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -325,6 +328,7 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
         stdout=None,
         stderr=None,
         env=env,
+        cwd=_CHILD_PROCESS_CWD,
     ) as process:
         try:
             return process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
