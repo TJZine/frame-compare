@@ -40,10 +40,10 @@ def test_alignment_duplicate_stems_fail_before_starting_progress(tmp_path: Path)
     reporter.complete_phase.assert_not_called()
 
 
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment_audio.extract_matching_audio")
+@patch("frame_compare.services.alignment_audio.extract_reference_audio")
+@patch("frame_compare.services.alignment_consensus.estimate_consensus_offset")
 def test_alignment_computed_results_advance_phase_progress(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
@@ -77,10 +77,10 @@ def test_alignment_computed_results_advance_phase_progress(
     assert descriptions.count("ALIGN | Comparison 1 | comp.mkv") == 1
 
 
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment_audio.extract_matching_audio")
+@patch("frame_compare.services.alignment_audio.extract_reference_audio")
+@patch("frame_compare.services.alignment_consensus.estimate_consensus_offset")
 def test_alignment_advances_each_computed_comparison_before_starting_next(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
@@ -115,10 +115,10 @@ def test_alignment_advances_each_computed_comparison_before_starting_next(
     assert descriptions.count("ALIGN | Comparison 2 | comp_b.mkv") == 1
 
 
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment_audio.extract_matching_audio")
+@patch("frame_compare.services.alignment_audio.extract_reference_audio")
+@patch("frame_compare.services.alignment_consensus.estimate_consensus_offset")
 def test_alignment_uses_supplied_reference_fps_for_computed_frame_offsets(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,
@@ -176,8 +176,8 @@ def test_alignment_uses_supplied_reference_fps_for_computed_frame_offsets(
         ),
     ],
 )
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment_audio.extract_matching_audio")
+@patch("frame_compare.services.alignment_audio.extract_reference_audio")
 def test_computed_alignment_offset_is_reference_frame_minus_comparison_frame(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -211,9 +211,9 @@ def test_computed_alignment_offset_is_reference_frame_minus_comparison_frame(
     assert results[0].time_offset_seconds == expected_offset / 24
 
 
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment_audio.extract_matching_audio")
+@patch("frame_compare.services.alignment_audio.extract_reference_audio")
 def test_alignment_full_manual_hit_stays_in_parent_align_phase(
     mock_extract_reference: MagicMock,
     mock_extract_matching: MagicMock,
@@ -258,10 +258,10 @@ def test_alignment_full_manual_hit_stays_in_parent_align_phase(
     assert descriptions == ["ALIGN | Checking saved offsets"]
 
 
-@patch("frame_compare.services.alignment._probe_fps")
-@patch("frame_compare.services.alignment._extract_matching_audio")
-@patch("frame_compare.services.alignment._extract_reference_audio")
-@patch("frame_compare.services.alignment._estimate_consensus_offset")
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment_audio.extract_matching_audio")
+@patch("frame_compare.services.alignment_audio.extract_reference_audio")
+@patch("frame_compare.services.alignment_consensus.estimate_consensus_offset")
 def test_alignment_passes_stream_overrides_and_channel_strategy_to_audio_owner(
     mock_estimate: MagicMock,
     mock_extract_reference: MagicMock,

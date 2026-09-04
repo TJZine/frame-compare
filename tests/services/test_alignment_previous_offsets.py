@@ -148,15 +148,15 @@ def test_typed_alignment_progress_uses_prepared_comparison_presentation(
 
     with (
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
     ):
@@ -204,15 +204,15 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
 
     with (
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
         patch(
@@ -267,17 +267,17 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
     ):
@@ -330,9 +330,9 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment_audio.extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment_audio.extract_matching_audio") as mock_extract_comp,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
@@ -394,10 +394,12 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment_audio.extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment_audio.extract_matching_audio") as mock_extract_comp,
+        patch(
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset"
+        ) as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -455,10 +457,12 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment_audio.extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment_audio.extract_matching_audio") as mock_extract_comp,
+        patch(
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset"
+        ) as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -520,9 +524,9 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment_audio.extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment_audio.extract_matching_audio") as mock_extract_comp,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         results = align_clips_from_request(request, config)
@@ -580,10 +584,12 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment_audio.extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment_audio.extract_matching_audio") as mock_extract_comp,
+        patch(
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset"
+        ) as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -655,17 +661,17 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
         patch(
@@ -739,17 +745,17 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview", return_value=None),
@@ -838,10 +844,12 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment_audio.extract_reference_audio") as mock_extract_ref,
+        patch("frame_compare.services.alignment_audio.extract_matching_audio") as mock_extract_comp,
+        patch(
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset"
+        ) as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -887,17 +895,17 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
         patch(
@@ -1006,15 +1014,15 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
 
     with (
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(),
         ),
         patch(
@@ -1063,15 +1071,15 @@ def test_align_clips_from_request_interactive_confirmed_entry_keeps_computed_fal
 
     with (
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
+            "frame_compare.services.alignment_audio.extract_reference_audio",
             return_value=(np.ones(10, dtype=np.float32), object()),
         ),
         patch(
-            "frame_compare.services.alignment._extract_matching_audio",
+            "frame_compare.services.alignment_audio.extract_matching_audio",
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
             return_value=_accepted_consensus(4000),
         ),
         patch(
