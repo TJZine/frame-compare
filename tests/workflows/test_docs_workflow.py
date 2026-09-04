@@ -69,7 +69,7 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
 
     assert _step_by_name(build, "Set up Python")["with"]["python-version"] == "3.13"
     uv_step = _step_by_name(build, "Set up uv")
-    assert uv_step["with"] == {"version": "0.12.7", "enable-cache": "false"}
+    assert uv_step["with"] == {"version": "0.12.9", "enable-cache": "false"}
     assert not re.search(r"version:\s*[\"']?latest[\"']?", source, re.IGNORECASE)
     assert _step_by_name(build, "Install documentation dependencies")["run"] == (
         "uv sync --only-group docs --locked"

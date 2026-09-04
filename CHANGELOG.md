@@ -7,6 +7,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+## [0.6.0]
+
 ### Fixed
 
 - Populate guarded GitHub releases from the matching validated changelog section
@@ -28,6 +30,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Bump the shared alignment reuse cache to schema v2 with neutral interactive origins;
   schema-v1 entries are ignored and recomputed. Run-local `manual_overrides.toml`
   remains a v1 file with the same path and offset semantics.
+- Refresh the locked dependency graph and update the coordinated uv toolchain to
+  0.12.9 for the v0.6.0 release.
 
 ### Upgrade notes
 
