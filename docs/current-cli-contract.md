@@ -1423,7 +1423,9 @@ converted to this sign convention before consensus evidence, hints, caching, and
   defaulting to `1.0`. It gates ambiguous correlation peaks.
 - `window_length_seconds` and `window_stride_seconds` remain floats greater than
   or equal to `0.0`, both defaulting to `0.0`. They control the consensus window
-  shape used by computed alignment.
+  shape used by computed alignment. Audio extraction and correlation inspect at
+  most 2,097,152 decoded samples per clip so input duration cannot cause unbounded
+  memory use; at the default 8 kHz sample rate this is about 4 minutes 22 seconds.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,
   defaulting to `1`. It gates whether enough windows produced valid estimates.
 - `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting

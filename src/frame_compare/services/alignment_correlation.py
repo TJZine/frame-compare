@@ -12,6 +12,12 @@ from frame_compare.services.types import AlignmentConfig, AlignmentCorrelationMo
 
 FloatArray = npt.NDArray[np.float64]
 
+# Keep the largest linear FFT at 2**22 points. At the default 8 kHz this
+# analyzes more than four minutes while preventing media duration from driving
+# unbounded subprocess and correlation allocations.
+ALIGNMENT_ANALYSIS_SAMPLE_LIMIT = 1 << 21
+ALIGNMENT_ESTIMATOR_POLICY = f"bounded-prefix-{ALIGNMENT_ANALYSIS_SAMPLE_LIMIT}-v1"
+
 _EPSILON = 1e-12
 _REFINEMENT_RADIUS_SECONDS = 0.005
 _REFINEMENT_MAX_POINTS = 65_536
@@ -27,7 +33,8 @@ class CorrelationEstimate:
 
 
 def _as_finite_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
-    array = np.asarray(signal, dtype=np.float64).reshape(-1)
+    array = np.asarray(signal).reshape(-1)[:ALIGNMENT_ANALYSIS_SAMPLE_LIMIT]
+    array = np.asarray(array, dtype=np.float64)
     if array.size == 0:
         raise AudioAlignmentError("empty audio signal prevents correlation")
     if not bool(np.all(np.isfinite(array))):

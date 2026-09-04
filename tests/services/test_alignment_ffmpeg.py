@@ -221,8 +221,10 @@ def test_extract_audio_empty_raises(mock_run: MagicMock):
             "-vn",
             "-ac",
             "1",
-            "-ar",
-            "8000",
+            "-af",
+            "aresample=8000,atrim=end_sample=2097152",
+            "-fs",
+            "8388608",
             "-f",
             "f32le",
             "-",
@@ -278,9 +280,9 @@ def test_extract_audio_best_channel_uses_explicit_map_and_deterministic_channel(
             "0:a:2",
             "-vn",
             "-af",
-            expected_filter,
-            "-ar",
-            "8000",
+            f"{expected_filter},aresample=8000,atrim=end_sample=2097152",
+            "-fs",
+            "8388608",
             "-f",
             "f32le",
             "-",
@@ -295,6 +297,14 @@ def test_extract_audio_invalid_float32_payload_raises(mock_run: MagicMock) -> No
 
     with pytest.raises(AudioAlignmentError, match="test.mkv.*3 bytes"):
         _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_audio_rejects_payload_beyond_analysis_limit(mock_run: MagicMock) -> None:
+    mock_run.return_value.stdout = np.zeros(2_097_153, dtype=np.float32).tobytes()
+
+    with pytest.raises(AudioAlignmentError, match="exceeded the analysis sample limit"):
+        _extract_audio(Path("long.mkv"), 8000, audio_stream_index=0)
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")

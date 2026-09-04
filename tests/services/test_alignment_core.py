@@ -10,6 +10,8 @@ import pytest
 
 from frame_compare.services.alignment_consensus import estimate_consensus_offset
 from frame_compare.services.alignment_correlation import (
+    ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
+    CorrelationEstimate,
     _candidate_offsets,
     correlate_audio,
     estimate_alignment_offset,
@@ -282,3 +284,42 @@ def test_windowed_consensus_accepts_quorum_offset() -> None:
     assert estimate.sample_offset == -2
     assert estimate.valid_windows >= 2
     assert estimate.consensus_ratio >= 0.75
+
+
+def test_consensus_never_correlates_more_than_the_analysis_sample_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_sizes: list[tuple[int, int]] = []
+
+    def _capture_estimate(
+        reference: np.ndarray,
+        comparison: np.ndarray,
+        *,
+        config: AlignmentConfig,
+    ) -> CorrelationEstimate:
+        del config
+        observed_sizes.append((reference.size, comparison.size))
+        return CorrelationEstimate(sample_offset=0, score=1.0, peak_ratio=2.0)
+
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_consensus.estimate_alignment_offset",
+        _capture_estimate,
+    )
+    long_signal = np.ones(ALIGNMENT_ANALYSIS_SAMPLE_LIMIT + 1, dtype=np.float32)
+
+    estimate_consensus_offset(
+        long_signal,
+        long_signal,
+        config=AlignmentConfig(),
+        fps=Fraction(24, 1),
+    )
+
+    assert observed_sizes[0] == (
+        ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
+        ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
+    )
+    assert all(
+        reference_size <= ALIGNMENT_ANALYSIS_SAMPLE_LIMIT
+        and comparison_size <= ALIGNMENT_ANALYSIS_SAMPLE_LIMIT
+        for reference_size, comparison_size in observed_sizes
+    )

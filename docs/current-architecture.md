@@ -249,7 +249,8 @@ recovery requirement.
   interactively confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, alignment settings that affect
-  computed offsets, and the scoped media-runtime alignment fingerprint. For the
+  computed offsets, an internal estimator-policy revision, and the scoped
+  media-runtime alignment fingerprint. For the
   managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
   lineage change therefore misses cleanly rather than reusing offsets computed by a
   different decoder/tool build. Interactively confirmed

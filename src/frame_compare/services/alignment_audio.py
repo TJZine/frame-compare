@@ -11,6 +11,7 @@ from typing import cast
 
 import numpy as np
 
+from frame_compare.services.alignment_correlation import ALIGNMENT_ANALYSIS_SAMPLE_LIMIT
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
@@ -18,6 +19,8 @@ from frame_compare.utils.subproc import run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
+_FLOAT32_BYTES = np.dtype(np.float32).itemsize
+_MAX_ALIGNMENT_AUDIO_BYTES = ALIGNMENT_ANALYSIS_SAMPLE_LIMIT * _FLOAT32_BYTES
 
 
 @dataclass(frozen=True)
@@ -343,14 +346,25 @@ def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
     return "pan=mono|c0=c0"
 
 
-def _channel_strategy_args(
+def _audio_output_args(
     *,
     channel_strategy: AlignmentChannelStrategy,
     stream: AudioStreamInfo | None,
+    sample_rate: int,
 ) -> list[str]:
+    filters: list[str] = []
     if channel_strategy == "mono_downmix":
-        return ["-ac", "1"]
-    return ["-af", _best_channel_audio_filter(stream)]
+        channel_args = ["-ac", "1"]
+    else:
+        channel_args = []
+        filters.append(_best_channel_audio_filter(stream))
+    filters.extend(
+        (
+            f"aresample={sample_rate}",
+            f"atrim=end_sample={ALIGNMENT_ANALYSIS_SAMPLE_LIMIT}",
+        )
+    )
+    return [*channel_args, "-af", ",".join(filters)]
 
 
 def extract_audio(
@@ -369,9 +383,13 @@ def extract_audio(
         "-map",
         f"0:a:{audio_stream_index}",
         "-vn",
-        *_channel_strategy_args(channel_strategy=channel_strategy, stream=stream),
-        "-ar",
-        str(sample_rate),
+        *_audio_output_args(
+            channel_strategy=channel_strategy,
+            stream=stream,
+            sample_rate=sample_rate,
+        ),
+        "-fs",
+        str(_MAX_ALIGNMENT_AUDIO_BYTES),
         "-f",
         "f32le",
         "-",
@@ -392,9 +410,15 @@ def extract_audio(
         raise AudioAlignmentError(f"empty audio track in {video_path.name}")
 
     payload_len = len(proc.stdout)
-    if payload_len % np.dtype(np.float32).itemsize != 0:
+    if payload_len % _FLOAT32_BYTES != 0:
         raise AudioAlignmentError(
             f"invalid audio payload from {video_path.name}: {payload_len} bytes"
+        )
+
+    sample_count = payload_len // _FLOAT32_BYTES
+    if sample_count > ALIGNMENT_ANALYSIS_SAMPLE_LIMIT:
+        raise AudioAlignmentError(
+            f"audio payload from {video_path.name} exceeded the analysis sample limit"
         )
 
     return np.frombuffer(proc.stdout, dtype=np.float32)

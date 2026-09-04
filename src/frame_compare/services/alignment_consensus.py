@@ -10,6 +10,7 @@ import numpy as np
 import numpy.typing as npt
 
 from frame_compare.services.alignment_correlation import (
+    ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
     CorrelationEstimate,
     estimate_alignment_offset,
 )
@@ -43,7 +44,8 @@ class AlignmentConsensus:
 
 
 def _as_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
-    array = np.asarray(signal, dtype=np.float64).reshape(-1)
+    array = np.asarray(signal).reshape(-1)[:ALIGNMENT_ANALYSIS_SAMPLE_LIMIT]
+    array = np.asarray(array, dtype=np.float64)
     if array.size == 0:
         raise AudioAlignmentError("empty audio signal prevents consensus alignment")
     if not bool(np.all(np.isfinite(array))):

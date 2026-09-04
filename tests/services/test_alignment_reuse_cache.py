@@ -321,6 +321,18 @@ def test_source_set_cache_key_changes_with_media_runtime(
     assert observed_scopes == ["alignment"]
 
 
+def test_source_set_cache_key_changes_with_estimator_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    original = source_set_cache_key(request)
+
+    monkeypatch.setattr(reuse_cache, "ALIGNMENT_ESTIMATOR_POLICY", "next-policy")
+
+    assert source_set_cache_key(request) != original
+
+
 def test_alignment_cache_keys_intentionally_reuse_same_stat_identity(tmp_path: Path) -> None:
     """Content hashing is deliberately excluded from performance-first keys."""
     request = _request(tmp_path)
