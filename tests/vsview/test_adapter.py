@@ -62,14 +62,46 @@ def test_child_environment_isolated_and_preserves_warning_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYTHONWARNINGS", "error::ResourceWarning")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    monkeypatch.setenv("PYTHONSTARTUP", "/caller/startup.py")
+    monkeypatch.setenv("PYTHONINSPECT", "1")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.delenv("NO_COLOR", raising=False)
     parent_env = os.environ.copy()
 
     child_env = _build_vsview_child_env(no_color=True)
 
     assert child_env["PYTHONWARNINGS"] == "error::ResourceWarning"
+    assert child_env["PYTHONSAFEPATH"] == "1"
+    assert child_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONPATH" not in child_env
+    assert "PYTHONHOME" not in child_env
+    assert "PYTHONSTARTUP" not in child_env
+    assert "PYTHONINSPECT" not in child_env
+    assert "PYTHONUSERBASE" not in child_env
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
+
+
+def test_windows_portable_child_env_relies_on_managed_embedded_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+    monkeypatch.setenv("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "managed-fingerprint")
+    monkeypatch.setenv("PYTHONPATH", r"C:\bundle\app\src;C:\bundle\app\site-packages")
+
+    child_env = _build_vsview_child_env(no_color=False)
+
+    assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
+    assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
+    assert "PYTHONPATH" not in child_env
+    build_script = (
+        Path(__file__).parents[2] / "tools" / "windows_portable" / "build_portable.ps1"
+    ).read_text(encoding="utf-8")
+    assert r'"..\\app\\site-packages"' in build_script
+    assert r'"..\\app\\src"' in build_script
+    assert '"import site"' in build_script
 
 
 @pytest.mark.parametrize(
@@ -146,31 +178,41 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     assert mock_run.call_args.kwargs["cwd"] == Path(sys.executable).resolve().parent
 
 
-def test_managed_launcher_ignores_modules_from_calling_directory(
+@pytest.mark.parametrize(
+    "python_args",
+    [
+        ("-c", "import json"),
+        ("-m", "json.tool", "--help"),
+    ],
+)
+def test_managed_python_children_ignore_hostile_inherited_python_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    python_args: tuple[str, ...],
 ) -> None:
-    hostile_workspace = tmp_path / "hostile-workspace"
-    hostile_workspace.mkdir()
-    marker = tmp_path / "hostile-launch-module-imported"
-    (hostile_workspace / "child_cwd_probe.py").write_text(
-        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n",
+    hostile_python_path = tmp_path / "hostile-python-path"
+    hostile_python_path.mkdir()
+    sitecustomize_marker = tmp_path / "hostile-sitecustomize-imported"
+    shadow_marker = tmp_path / "hostile-json-imported"
+    (hostile_python_path / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(sitecustomize_marker)!r}).touch()\n",
         encoding="utf-8",
     )
-    safe_module_root = tmp_path / "safe-module-root"
-    safe_module_root.mkdir()
-    (safe_module_root / "child_cwd_probe.py").write_text("pass\n", encoding="utf-8")
-    child_env = os.environ.copy()
-    child_env["PYTHONPATH"] = str(safe_module_root)
-    monkeypatch.chdir(hostile_workspace)
+    (hostile_python_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(hostile_python_path))
+    child_env = _build_vsview_child_env(no_color=False)
 
     returncode = _run_vsview_command(
-        [sys.executable, "-m", "child_cwd_probe"],
+        [sys.executable, *python_args],
         env=child_env,
     )
 
     assert returncode == 0
-    assert not marker.exists()
+    assert not sitecustomize_marker.exists()
+    assert not shadow_marker.exists()
 
 
 def test_launch_rejects_missing_panel_entry_point(
@@ -250,10 +292,10 @@ def test_launch_uses_managed_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
-    )
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
     process = MagicMock()
     process.__enter__.return_value = process
     process.wait.return_value = 0
@@ -271,6 +313,13 @@ def test_launch_uses_managed_launcher(
         "frame_compare.vsview.launcher",
         str(session.script_path),
     ]
+    probe_env = mock_run.call_args.kwargs["env"]
+    launch_env = popen.call_args.kwargs["env"]
+    assert probe_env == launch_env
+    assert "PYTHONPATH" not in launch_env
+    assert "PYTHONHOME" not in launch_env
+    assert launch_env["PYTHONSAFEPATH"] == "1"
+    assert launch_env["PYTHONNOUSERSITE"] == "1"
 
 
 def test_disabled_launch_writes_vsview_named_session_without_starting_process(
