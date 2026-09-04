@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
-from frame_compare.services.alignment import _estimate_audio_pair, align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
@@ -228,6 +227,59 @@ def test_alignment_recovers_known_offset_from_generated_media(
     assert downmix_results[0].diagnostic == "low_confidence"
 
 
+_LONG_CLIP_SECONDS = 65
+
+
+def _write_long_clip(path: Path, *, delay_ms: int = 0) -> None:
+    if delay_ms % 20:
+        raise ValueError("delay_ms must align to the 20 ms packet framing")
+    # 65 s of audio forces the planner past the full-rate FFT budget, so
+    # analysis runs downsampled while fallback windows are scored at the
+    # requested 48 kHz rate.
+    #
+    # asetnsamples=960 reframes the audio into exact 20 ms packets. Matroska
+    # stores packet timestamps at millisecond precision, so unaligned
+    # packetization would shift post-seek extractions by a few samples and
+    # white-noise windows could never reach exact sample consensus. Aligned
+    # framing keeps every packet timestamp lossless, which makes the expected
+    # offsets below deterministic instead of muxer-layout luck. The delay is
+    # a multiple of the frame size, so the delayed variant stays aligned too.
+    noise = (
+        f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}"
+        f":duration={_LONG_CLIP_SECONDS}:seed=917,asetnsamples=960"
+    )
+    argv = [
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=black:s=16x16:r={_FPS}:d={_LONG_CLIP_SECONDS}",
+        "-f",
+        "lavfi",
+        "-i",
+        noise,
+    ]
+    if delay_ms:
+        argv += [
+            "-filter_complex",
+            f"[1:a]adelay={delay_ms}:all=1,atrim=0:{_LONG_CLIP_SECONDS},asetnsamples=960[delayed]",
+            "-map",
+            "0:v:0",
+            "-map",
+            "[delayed]",
+        ]
+    else:
+        argv += ["-map", "0:v:0", "-map", "1:a:0"]
+    argv += [
+        "-c:v",
+        "ffv1",
+        "-c:a",
+        "pcm_s16le",
+        "-shortest",
+        str(path),
+    ]
+    _run_ffmpeg(argv)
+
+
 @pytest.mark.integration
 def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
     tmp_path: Path,
@@ -235,29 +287,10 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
 ) -> None:
     reference = tmp_path / "long-reference.mkv"
     comparison = tmp_path / "long-comparison.mkv"
-    for path in (reference, comparison):
-        _run_ffmpeg(
-            [
-                "-f",
-                "lavfi",
-                "-i",
-                "color=c=black:s=16x16:r=1:d=65",
-                "-f",
-                "lavfi",
-                "-i",
-                "anoisesrc=color=white:sample_rate=48000:duration=65:seed=917",
-                "-map",
-                "0:v:0",
-                "-map",
-                "1:a:0",
-                "-c:v",
-                "ffv1",
-                "-c:a",
-                "pcm_s16le",
-                "-shortest",
-                str(path),
-            ]
-        )
+    generated_dir = tmp_path / "cache"
+    generated_dir.mkdir()
+    _write_long_clip(reference)
+    _write_long_clip(comparison, delay_ms=200)
     config = AlignmentConfig(
         cache_results=False,
         sample_rate=48000,
@@ -265,17 +298,24 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
         confidence_threshold=0.9,
     )
 
-    result = _estimate_audio_pair(
-        reference,
-        comparison,
+    request = alignment_request(
+        reference=reference,
+        # The self pair pins the fallback path at zero offset while the
+        # delayed pair proves the requested-rate result is genuinely
+        # discriminating: a constant-zero implementation fails the second
+        # assertion. Both are deterministic because _write_long_clip aligns
+        # audio packetization to exact millisecond timestamps (see above).
+        comparisons=[reference, comparison],
         config=config,
-        fps_reference=Fraction(1),
+        generated_dir=generated_dir,
+        fps_num=_FPS,
     )
+    results = align_clips_from_request(request, config)
 
-    assert result.applied, (result.diagnostic, result.score)
-    assert result.consensus_ratio == 1.0
-    assert tuple(item.sample_offset for item in result.window_evidence) == (0, 0, 0, 0, 0)
-    assert result.score > 0.99
+    assert len(results) == 2
+    by_clip = {result.comparison_clip: result for result in results}
+    _assert_applied_offset(by_clip[reference.name], frame_offset=0)
+    _assert_applied_offset(by_clip[comparison.name], frame_offset=-2)
 
 
 @pytest.mark.integration
