@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, replace
 from fractions import Fraction
 
 import numpy as np
 import numpy.typing as npt
 
+from frame_compare.services.alignment_audio import AudioAnalysisPlan, AudioWindow, AudioWindowSpec
 from frame_compare.services.alignment_correlation import (
     ALIGNMENT_ANALYSIS_SAMPLE_LIMIT,
     CorrelationEstimate,
     estimate_alignment_offset,
+    normalized_aligned_score,
 )
 from frame_compare.services.alignment_stability import classify_alignment_stability
 from frame_compare.services.errors import AudioAlignmentError
@@ -169,57 +173,38 @@ def _reject(
     )
 
 
-def estimate_consensus_offset(
-    reference: npt.ArrayLike,
-    comparison: npt.ArrayLike,
+def rejected_analysis(
+    diagnostic: str,
     *,
     config: AlignmentConfig,
     fps: Fraction,
 ) -> AlignmentConsensus:
-    """Estimate and gate a single computed offset from per-window candidates."""
-    reference_signal = _as_signal(reference, name="reference")
-    comparison_signal = _as_signal(comparison, name="comparison")
-    signal_size = min(reference_signal.size, comparison_signal.size)
-    spans = _window_spans(signal_size, config=config)
+    """Return a typed non-applied result before any windows can be analyzed."""
+    stability = classify_alignment_stability((), sample_rate=config.sample_rate, fps=fps)
+    return _reject(
+        diagnostic,
+        score=0.0,
+        valid_windows=0,
+        consensus_windows=0,
+        consensus_ratio=0.0,
+        ambiguity_ratio=None,
+        window_evidence=(),
+        stability=stability,
+    )
 
-    candidates: list[CorrelationEstimate] = []
-    evidence: list[AlignmentWindowEvidence] = []
-    for start, end in spans:
-        estimate = _window_estimate(
-            reference_signal,
-            comparison_signal,
-            start=start,
-            end=end,
-            config=config,
-        )
-        if estimate is not None:
-            candidates.append(estimate)
-        valid = _valid_evidence(estimate, start=start, end=end, config=config)
-        if valid is not None:
-            evidence.append(valid)
 
-    if len(evidence) < 3:
-        existing_spans = set(spans)
-        for start, end in _diagnostic_spans(
-            signal_size,
-            count=5,
-            config=config,
-        ):
-            if len(evidence) >= 3:
-                break
-            if (start, end) in existing_spans:
-                continue
-            estimate = _window_estimate(
-                reference_signal,
-                comparison_signal,
-                start=start,
-                end=end,
-                config=config,
-            )
-            valid = _valid_evidence(estimate, start=start, end=end, config=config)
-            if valid is not None:
-                evidence.append(valid)
+def analysis_budget_exceeded(*, config: AlignmentConfig, fps: Fraction) -> AlignmentConsensus:
+    """Return the typed non-applied outcome for a request outside fixed work limits."""
+    return rejected_analysis("analysis_budget_exceeded", config=config, fps=fps)
 
+
+def _finish_consensus(
+    candidates: list[CorrelationEstimate],
+    evidence: list[AlignmentWindowEvidence],
+    *,
+    config: AlignmentConfig,
+    fps: Fraction,
+) -> AlignmentConsensus:
     window_evidence = tuple(sorted(evidence, key=lambda item: item.start_sample))
     stability = classify_alignment_stability(
         window_evidence,
@@ -239,14 +224,20 @@ def estimate_consensus_offset(
             stability=stability,
         )
 
-    offsets = [candidate.sample_offset for candidate in candidates]
-    counts = Counter(offsets)
-    winner_offset, winner_count = counts.most_common(1)[0]
+    counts = Counter(candidate.sample_offset for candidate in candidates)
+    winner_count = max(counts.values())
+    tied_offsets = [offset for offset, count in counts.items() if count == winner_count]
+    winner_offset = max(
+        tied_offsets,
+        key=lambda offset: max(
+            candidate.score for candidate in candidates if candidate.sample_offset == offset
+        ),
+    )
     consensus_ratio = winner_count / len(candidates)
     winning_scores = [
         candidate.score for candidate in candidates if candidate.sample_offset == winner_offset
     ]
-    score = float(max(winning_scores))
+    score = float(np.median(winning_scores))
     winning_peak_ratios = [
         candidate.peak_ratio for candidate in candidates if candidate.sample_offset == winner_offset
     ]
@@ -300,3 +291,185 @@ def estimate_consensus_offset(
         window_evidence=window_evidence,
         stability=stability,
     )
+
+
+def estimate_streaming_consensus_offset(
+    windows: Iterable[AudioWindow],
+    *,
+    plan: AudioAnalysisPlan,
+    config: AlignmentConfig,
+    fps: Fraction,
+) -> AlignmentConsensus:
+    """Correlate every selected window sequentially and select the majority offset."""
+    local_config = replace(config, sample_rate=plan.sample_rate)
+    margin = math.ceil(config.max_offset_seconds * plan.sample_rate)
+    candidates: list[CorrelationEstimate] = []
+    evidence: list[AlignmentWindowEvidence] = []
+    for window in windows:
+        origin_delta = window.reference_start_sample - window.comparison_start_sample
+        local_bounds = (-margin - origin_delta, margin - origin_delta)
+        try:
+            local_estimate = estimate_alignment_offset(
+                window.reference,
+                window.comparison,
+                config=local_config,
+                alignment_offset_bounds_samples=local_bounds,
+            )
+        except AudioAlignmentError:
+            continue
+        local_offset = (
+            local_estimate.subsample_offset
+            if local_estimate.subsample_offset is not None
+            else local_estimate.sample_offset
+        )
+        global_analysis_offset = local_offset + origin_delta
+        requested_offset = round(
+            global_analysis_offset * plan.requested_sample_rate / plan.sample_rate
+        )
+        estimate = CorrelationEstimate(
+            sample_offset=requested_offset,
+            score=local_estimate.score,
+            peak_ratio=local_estimate.peak_ratio,
+        )
+        candidates.append(estimate)
+        valid = _valid_evidence(
+            estimate,
+            start=round(
+                window.reference_start_sample * plan.requested_sample_rate / plan.sample_rate
+            ),
+            end=round(
+                (window.reference_start_sample + window.reference.size)
+                * plan.requested_sample_rate
+                / plan.sample_rate
+            ),
+            config=config,
+        )
+        if valid is not None:
+            evidence.append(valid)
+    return _finish_consensus(candidates, evidence, config=config, fps=fps)
+
+
+def estimate_planned_consensus_offset(
+    *,
+    plan: AudioAnalysisPlan,
+    config: AlignmentConfig,
+    fps: Fraction,
+    analysis_window_loader: Callable[[AudioWindowSpec], AudioWindow],
+    scoring_window_loader: Callable[[AudioWindowSpec, int], AudioWindow],
+) -> AlignmentConsensus:
+    """Analyze planned windows sequentially and score fallback lags at the requested rate."""
+    local_config = replace(config, sample_rate=plan.sample_rate)
+    margin = math.ceil(config.max_offset_seconds * plan.sample_rate)
+    candidates: list[CorrelationEstimate] = []
+    evidence: list[AlignmentWindowEvidence] = []
+    for spec in plan.windows:
+        try:
+            window = analysis_window_loader(spec)
+            origin_delta = window.reference_start_sample - window.comparison_start_sample
+            local_estimate = estimate_alignment_offset(
+                window.reference,
+                window.comparison,
+                config=local_config,
+                alignment_offset_bounds_samples=(
+                    -margin - origin_delta,
+                    margin - origin_delta,
+                ),
+            )
+            local_offset = (
+                local_estimate.subsample_offset
+                if local_estimate.subsample_offset is not None
+                else local_estimate.sample_offset
+            )
+            global_analysis_offset = local_offset + origin_delta
+            del window
+
+            score = local_estimate.score
+            if plan.sample_rate != plan.requested_sample_rate:
+                scoring_window = scoring_window_loader(spec, round(global_analysis_offset))
+                score = normalized_aligned_score(
+                    scoring_window.reference,
+                    scoring_window.comparison,
+                    preprocessing_mode=config.preprocessing_mode,
+                )
+                del scoring_window
+        except AudioAlignmentError:
+            continue
+
+        requested_offset = round(
+            global_analysis_offset * plan.requested_sample_rate / plan.sample_rate
+        )
+        estimate = CorrelationEstimate(
+            sample_offset=requested_offset,
+            score=score,
+            peak_ratio=local_estimate.peak_ratio,
+        )
+        candidates.append(estimate)
+        valid = _valid_evidence(
+            estimate,
+            start=round(
+                spec.reference_start_sample * plan.requested_sample_rate / plan.sample_rate
+            ),
+            end=round(
+                (spec.reference_start_sample + spec.reference_sample_count)
+                * plan.requested_sample_rate
+                / plan.sample_rate
+            ),
+            config=config,
+        )
+        if valid is not None:
+            evidence.append(valid)
+    return _finish_consensus(candidates, evidence, config=config, fps=fps)
+
+
+def estimate_consensus_offset(
+    reference: npt.ArrayLike,
+    comparison: npt.ArrayLike,
+    *,
+    config: AlignmentConfig,
+    fps: Fraction,
+) -> AlignmentConsensus:
+    """Estimate and gate a single computed offset from per-window candidates."""
+    reference_signal = _as_signal(reference, name="reference")
+    comparison_signal = _as_signal(comparison, name="comparison")
+    signal_size = min(reference_signal.size, comparison_signal.size)
+    spans = _window_spans(signal_size, config=config)
+
+    candidates: list[CorrelationEstimate] = []
+    evidence: list[AlignmentWindowEvidence] = []
+    for start, end in spans:
+        estimate = _window_estimate(
+            reference_signal,
+            comparison_signal,
+            start=start,
+            end=end,
+            config=config,
+        )
+        if estimate is not None:
+            candidates.append(estimate)
+        valid = _valid_evidence(estimate, start=start, end=end, config=config)
+        if valid is not None:
+            evidence.append(valid)
+
+    if len(evidence) < 3:
+        existing_spans = set(spans)
+        for start, end in _diagnostic_spans(
+            signal_size,
+            count=5,
+            config=config,
+        ):
+            if len(evidence) >= 3:
+                break
+            if (start, end) in existing_spans:
+                continue
+            estimate = _window_estimate(
+                reference_signal,
+                comparison_signal,
+                start=start,
+                end=end,
+                config=config,
+            )
+            valid = _valid_evidence(estimate, start=start, end=end, config=config)
+            if valid is not None:
+                evidence.append(valid)
+
+    return _finish_consensus(candidates, evidence, config=config, fps=fps)

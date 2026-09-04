@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 
@@ -181,28 +182,27 @@ def _compute_missing_alignments(
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
     descriptions = progress_descriptions or {}
-    ref_audio, reference_stream = alignment_audio.extract_reference_audio(
-        reference,
-        config.sample_rate,
-        stream_override=config.reference_stream,
-        channel_strategy=config.channel_strategy,
-    )
+    selected_reference_stream: alignment_audio.AudioStreamInfo | None = None
+
+    def load_reference_stream() -> alignment_audio.AudioStreamInfo:
+        nonlocal selected_reference_stream
+        if selected_reference_stream is None:
+            selected_reference_stream = alignment_audio.select_reference_audio_stream(
+                reference,
+                stream_override=config.reference_stream,
+            )
+        return selected_reference_stream
+
     for comp in requested_comparisons:
         if progress:
             progress.set_description(descriptions.get(comp, f"ALIGN | {comp.name}"))
 
-        comp_audio = alignment_audio.extract_matching_audio(
+        estimate = _estimate_audio_pair(
+            reference,
             comp,
-            config.sample_rate,
-            reference_stream=reference_stream,
-            stream_override=config.comparison_streams.get(comp.stem),
-            channel_strategy=config.channel_strategy,
-        )
-        estimate = alignment_consensus.estimate_consensus_offset(
-            ref_audio,
-            comp_audio,
             config=config,
-            fps=fps_reference,
+            fps_reference=fps_reference,
+            reference_stream_loader=load_reference_stream,
         )
         frame_offset = (
             alignment_math.samples_to_frames(
@@ -232,6 +232,69 @@ def _compute_missing_alignments(
         results_map[_alignment_key(reference, comp)] = res
         if progress:
             progress.advance(1)
+
+
+def _estimate_audio_pair(
+    reference: Path,
+    comparison: Path,
+    *,
+    config: AlignmentConfig,
+    fps_reference: Fraction,
+    reference_stream_loader: Callable[[], alignment_audio.AudioStreamInfo] | None = None,
+) -> alignment_consensus.AlignmentConsensus:
+    reference_stream = (
+        reference_stream_loader()
+        if reference_stream_loader is not None
+        else alignment_audio.select_reference_audio_stream(
+            reference,
+            stream_override=config.reference_stream,
+        )
+    )
+    comparison_stream = alignment_audio.select_matching_audio_stream(
+        comparison,
+        reference_stream=reference_stream,
+        stream_override=config.comparison_streams.get(comparison.stem),
+    )
+    plan = alignment_audio.plan_audio_analysis(
+        reference_stream,
+        comparison_stream,
+        config=config,
+    )
+    if isinstance(plan, alignment_audio.AudioAnalysisBudgetExceeded):
+        if plan.reason.startswith("selected_audio_timeline_"):
+            return alignment_consensus.rejected_analysis(
+                plan.reason,
+                config=config,
+                fps=fps_reference,
+            )
+        return alignment_consensus.analysis_budget_exceeded(
+            config=config,
+            fps=fps_reference,
+        )
+    return alignment_consensus.estimate_planned_consensus_offset(
+        plan=plan,
+        config=config,
+        fps=fps_reference,
+        analysis_window_loader=lambda spec: alignment_audio.extract_planned_window(
+            reference,
+            comparison,
+            reference_stream,
+            comparison_stream,
+            plan,
+            spec,
+            channel_strategy=config.channel_strategy,
+        ),
+        scoring_window_loader=lambda spec, offset: alignment_audio.extract_aligned_scoring_window(
+            reference,
+            comparison,
+            reference_stream,
+            comparison_stream,
+            plan,
+            spec,
+            global_analysis_offset=offset,
+            channel_strategy=config.channel_strategy,
+        ),
+    )
 
 
 def _compute_missing_alignments_with_provenance(

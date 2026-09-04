@@ -418,6 +418,21 @@ previous-offset reuse policy. Exact-match computed audio alignment cache hits ar
 treated as deterministic and can be reused independently of the human
 confirmed-offset policy; `previous_offsets` governs only interactively confirmed
 offset reuse.
+
+Computed alignment work is planned against typed timing for each selected audio stream.
+`alignment_audio` owns stream-relative duration/origin normalization, the fixed peak and
+total FFT-work budgets, requested-rate scoring budgets, distributed window selection,
+and seek-with-preroll followed by absolute post-decode trimming. Requested-rate
+correlation is preferred. When it cannot fit, a bounded coarse pair finds the lag, is
+released, and a fresh aligned pair at the configured rate supplies confidence, so only
+one decoded pair and one correlation workspace are live. `alignment_consensus`
+translates local unequal-window lag through the two stream origins before applying the
+public sign convention. All successfully correlated selected windows participate in
+majority consensus, with score used only for ties and the winning group's median score
+used for confidence gating. Requests outside the fixed internal work budget produce a typed non-applied
+`analysis_budget_exceeded` consensus rather than widening config validation, truncating
+the requested search silently, or attempting unbounded work. The estimator-policy token
+includes this strategy so older computed cache entries are not reused.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -822,9 +837,9 @@ Runtime ownership matrix:
 | Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
-| Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
-| Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
-| Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
+| Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and FFmpeg/channel-aware seek/extraction policy | `frame_compare.services.alignment_audio` |
+| Audio correlation, unequal-length lag mapping, overlap-normalized confidence, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
+| Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |

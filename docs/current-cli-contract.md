@@ -1423,9 +1423,11 @@ converted to this sign convention before consensus evidence, hints, caching, and
   defaulting to `1.0`. It gates ambiguous correlation peaks.
 - `window_length_seconds` and `window_stride_seconds` remain floats greater than
   or equal to `0.0`, both defaulting to `0.0`. They control the consensus window
-  shape used by computed alignment. Audio extraction and correlation inspect at
-  most 2,097,152 decoded samples per clip so input duration cannot cause unbounded
-  memory use; at the default 8 kHz sample rate this is about 4 minutes 22 seconds.
+  shape used by computed alignment. A configured window length is retained, and a
+  configured stride defines the candidate grid before bounded candidates are sampled
+  across the complete shared selected-audio-stream timeline. With both values at
+  zero, long inputs use five distributed 30-second windows; short inputs use their
+  complete shared audio duration.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,
   defaulting to `1`. It gates whether enough windows produced valid estimates.
 - `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting
@@ -1440,6 +1442,36 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `comparison_streams` is a mapping from comparison filename stem to non-negative
   audio stream ordinal, defaulting to an empty map. Matching entries select the
   comparison clip audio stream for that stem.
+
+Computed alignment probes timing for the selected audio stream, rather than using the
+container video duration. Stream `duration_ts` and time base are authoritative when
+available, followed by stream duration metadata and Matroska duration tags. Container
+duration is never substituted for missing selected-stream duration; an unavailable or
+empty selected-stream timeline produces a non-applied diagnostic. Each selected window
+uses a one-second input-seek preroll when available and an absolute post-decode timestamp
+trim before resampling. Uncompressed streams are sample-grid exact in the supported
+local proof; compressed streams can retain bounded codec/container seek granularity, so
+consensus and final frame conversion must tolerate sub-frame sample differences.
+
+Analysis has an internal fixed peak FFT limit of 2,097,152 points, a total budget of
+16,777,216 FFT points, and a maximum of 16 windows. It first uses the configured sample
+rate. When a normal long request cannot fit that FFT bound, bounded 8 kHz or 4 kHz
+correlation locates each candidate, then a separately decoded aligned overlap at the
+configured rate supplies its confidence score; coarse-rate confidence never decides
+acceptance. Requested-rate scoring is separately capped at 3,000,000 samples per pair
+and 15,000,000 samples in total. Reference and comparison pairs are extracted and
+processed sequentially. Confidence uses overlap-local mean centering and requires at
+least three samples and 5% of the shorter window, preventing tiny boundary overlaps
+from appearing perfectly correlated. Consensus considers every successfully correlated
+selected window, selects the largest agreeing group, uses score only to break equal-size
+groups, and gates the winner by its median window score. A schema-valid window, offset,
+minimum-window, or requested-rate scoring request
+that cannot fit the fixed budget remains valid configuration but produces the explicit
+non-applied `analysis_budget_exceeded` result. Normal optional VSView/manual review and
+best-effort rendering policy then handle it like other rejected computed alignments.
+Because the fixed window cap samples a long configured grid, highly localized matching
+content that falls between selected windows can still produce a conservative false
+negative rather than unbounded scanning.
 
 ## Persistence Rules
 

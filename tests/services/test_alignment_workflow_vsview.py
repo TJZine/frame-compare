@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
@@ -36,15 +35,7 @@ def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int =
         "frame_compare.services.alignment_audio.probe_fps", lambda _path: Fraction(24, 1)
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.extract_reference_audio",
-        lambda *_args, **_kwargs: (np.ones(10, dtype=np.float32), object()),
-    )
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.extract_matching_audio",
-        lambda *_args, **_kwargs: np.ones(10, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_consensus.estimate_consensus_offset",
+        "frame_compare.services.alignment._estimate_audio_pair",
         lambda *_args, **_kwargs: AlignmentConsensus(
             sample_offset=offset,
             score=0.99,

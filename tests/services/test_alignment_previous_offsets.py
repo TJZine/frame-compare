@@ -65,6 +65,15 @@ def _accepted_consensus(sample_offset: int = 0) -> AlignmentConsensus:
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_computed_audio_alignment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these reuse-policy tests isolated from the FFmpeg owner."""
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: _accepted_consensus(),
+    )
+
+
 def _request_clip(path: Path, *, label: str | None = None) -> AlignmentClipRequest:
     stat = path.stat()
     return AlignmentClipRequest(
@@ -1079,7 +1088,7 @@ def test_align_clips_from_request_interactive_confirmed_entry_keeps_computed_fal
             return_value=np.ones(10, dtype=np.float32),
         ),
         patch(
-            "frame_compare.services.alignment_consensus.estimate_consensus_offset",
+            "frame_compare.services.alignment._estimate_audio_pair",
             return_value=_accepted_consensus(4000),
         ),
         patch(

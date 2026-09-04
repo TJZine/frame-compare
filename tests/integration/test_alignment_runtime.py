@@ -228,6 +228,62 @@ def test_alignment_recovers_known_offset_from_generated_media(
 
 
 @pytest.mark.integration
+def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
+    tmp_path: Path,
+    require_ffmpeg: None,
+) -> None:
+    reference = tmp_path / "long-reference.mkv"
+    comparison = tmp_path / "long-comparison.mkv"
+    for path in (reference, comparison):
+        _run_ffmpeg(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=16x16:r=1:d=65",
+                "-f",
+                "lavfi",
+                "-i",
+                "anoisesrc=color=white:sample_rate=48000:duration=65:seed=917",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "ffv1",
+                "-c:a",
+                "pcm_s16le",
+                "-shortest",
+                str(path),
+            ]
+        )
+    cache_dir = tmp_path / "long-cache"
+    cache_dir.mkdir()
+    config = AlignmentConfig(
+        cache_results=False,
+        sample_rate=48000,
+        max_offset_seconds=1.0,
+        confidence_threshold=0.9,
+    )
+
+    results = align_clips_from_request(
+        alignment_request(
+            reference=reference,
+            comparisons=[comparison],
+            config=config,
+            generated_dir=cache_dir,
+            fps_num=1,
+        ),
+        config,
+    )
+
+    assert len(results) == 1
+    assert results[0].applied
+    assert results[0].frame_offset == 0
+    assert results[0].correlation_score > 0.99
+
+
+@pytest.mark.integration
 def test_alignment_selects_runtime_streams_and_keeps_cache_config_distinct(
     tmp_path: Path,
     require_ffmpeg: None,
