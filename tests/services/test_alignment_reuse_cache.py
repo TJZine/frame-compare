@@ -59,6 +59,7 @@ def _clip(path: Path, *, label: str, stream: int | None = None) -> AlignmentClip
         trim_end_frame_inclusive=None,
         effective_fps_num=24000,
         effective_fps_den=1001,
+        source_frame_count=100,
         selected_audio_stream=stream,
     )
 
@@ -1132,6 +1133,20 @@ def test_shared_reuse_cache_identity_excludes_display_labels(tmp_path: Path) -> 
 
     assert source_set_cache_key(relabeled) == source_set_cache_key(request)
     assert comparison_cache_key(relabeled.comparisons[0]) == comparison_cache_key(
+        request.comparisons[0]
+    )
+
+
+def test_shared_reuse_cache_identity_excludes_source_frame_count(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    changed_bounds = replace(
+        request,
+        reference=replace(request.reference, source_frame_count=101),
+        comparisons=[replace(request.comparisons[0], source_frame_count=99)],
+    )
+
+    assert source_set_cache_key(changed_bounds) == source_set_cache_key(request)
+    assert comparison_cache_key(changed_bounds.comparisons[0]) == comparison_cache_key(
         request.comparisons[0]
     )
 

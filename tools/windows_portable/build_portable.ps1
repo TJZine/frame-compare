@@ -440,13 +440,13 @@ function Copy-RepoApp([string]$BundleRoot) {
   Ensure-Directory -Path $sitePackages
 
   $sourceStatus = @(
-    & git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare
+    & git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare pyproject.toml
   )
   Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"
   if ($sourceStatus.Count -gt 0) {
     $dirtySourceMessage = (
-      "Uncommitted changes exist under src/frame_compare; the portable bundle " +
-      "packages committed HEAD and will exclude them."
+      "Uncommitted changes exist under src/frame_compare or pyproject.toml; the portable bundle " +
+      "packages committed HEAD and builds wheel dist-info metadata from it, so it will exclude them."
     )
     if ($RequireReleasePublicKey) {
       throw $dirtySourceMessage
@@ -496,6 +496,99 @@ function Configure-EmbeddedPython([string]$BundleRoot) {
   Set-Content -LiteralPath $pth -Value $content -Encoding ASCII
 }
 
+function Install-ProjectDistributionMetadata([string]$BundleRoot) {
+  # Install only the repository wheel's distribution metadata into the bundle.
+  # The application code is copied from committed HEAD into app/src by
+  # Copy-RepoApp. The wheel is used here only for the standard
+  # importlib.metadata entry-point record; copying its frame_compare package
+  # would create a second application-code owner.
+  $appRoot = Join-Path $BundleRoot "app"
+  $sitePackages = Join-Path $appRoot "site-packages"
+  $sourcePackage = Join-Path $appRoot "src\frame_compare"
+  $duplicatePackage = Join-Path $sitePackages "frame_compare"
+  if (!(Test-Path -LiteralPath (Join-Path $sourcePackage "__init__.py") -PathType Leaf)) {
+    throw "Committed Frame Compare source is missing before metadata installation: $sourcePackage"
+  }
+  if (Test-Path -LiteralPath $duplicatePackage) {
+    throw "Refusing to install project metadata over a duplicate app/site-packages/frame_compare package."
+  }
+
+  $wheelBuildDir = Join-Path $CacheDir (
+    "frame-compare-wheel-$([System.Guid]::NewGuid().ToString('N'))"
+  )
+  $wheelExtractDir = Join-Path $wheelBuildDir "extract"
+  Ensure-Directory -Path $wheelBuildDir
+  try {
+    Push-Location $RepoRoot
+    try {
+      uv build --wheel --out-dir $wheelBuildDir
+      Assert-LastExitCode -CommandLabel "uv build Frame Compare wheel"
+    } finally {
+      Pop-Location
+    }
+
+    $wheelCandidates = @(
+      Get-ChildItem -LiteralPath $wheelBuildDir -File |
+        Where-Object { $_.Extension -ieq ".whl" }
+    )
+    if (
+      $wheelCandidates.Count -ne 1 -or
+      $wheelCandidates[0].Name -notmatch "^frame_compare-[^\\/]+\.whl$"
+    ) {
+      throw "Expected exactly one Frame Compare project wheel in $wheelBuildDir, found $($wheelCandidates.Name -join ', ')"
+    }
+    Expand-ArchiveFile -ArchivePath $wheelCandidates[0].FullName -Destination $wheelExtractDir
+
+    $distInfoDirectories = @(
+      Get-ChildItem -LiteralPath $wheelExtractDir -Directory |
+        Where-Object { $_.Name -cmatch "^frame_compare-[^\\/]+\.dist-info$" }
+    )
+    if ($distInfoDirectories.Count -ne 1) {
+      throw "Expected exactly one top-level Frame Compare dist-info directory in $wheelExtractDir, found $($distInfoDirectories.Name -join ', ')"
+    }
+    $distInfoDirectory = $distInfoDirectories[0]
+    $entryPointsPath = Join-Path $distInfoDirectory.FullName "entry_points.txt"
+    if (!(Test-Path -LiteralPath $entryPointsPath -PathType Leaf)) {
+      throw "Frame Compare wheel is missing entry_points.txt: $entryPointsPath"
+    }
+    $entryPointsText = Get-Content -LiteralPath $entryPointsPath -Raw -Encoding UTF8
+    $expectedEntryPoint = "frame-compare-alignment-review = frame_compare.vsview.alignment_review_panel"
+    $inVsViewSection = $false
+    $entryPointMatches = 0
+    foreach ($line in ($entryPointsText -split "`r?`n")) {
+      $trimmedLine = $line.Trim()
+      if ($trimmedLine.StartsWith("[") -and $trimmedLine.EndsWith("]")) {
+        $inVsViewSection = $trimmedLine -ceq "[vsview]"
+        continue
+      }
+      if ($inVsViewSection -and $trimmedLine -ceq $expectedEntryPoint) {
+        $entryPointMatches++
+      }
+    }
+    if ($entryPointMatches -ne 1) {
+      throw "Frame Compare wheel entry_points.txt is missing the exact VSView registration: $expectedEntryPoint"
+    }
+
+    $destination = Join-Path $sitePackages $distInfoDirectory.Name
+    if (Test-Path -LiteralPath $destination) {
+      throw "Frame Compare dist-info destination already exists: $destination"
+    }
+    Copy-Item -Recurse -LiteralPath $distInfoDirectory.FullName -Destination $sitePackages
+    if (!(Test-Path -LiteralPath $destination -PathType Container)) {
+      throw "Frame Compare dist-info metadata was not copied to the bundle: $destination"
+    }
+
+    if (Test-Path -LiteralPath $duplicatePackage) {
+      throw "Project wheel metadata installation created an unexpected app/site-packages/frame_compare package."
+    }
+    Write-Host "WINDOWS_BUNDLE_PROOF project_metadata=ok entry_point=frame-compare-alignment-review source=app/src"
+  } finally {
+    if (Test-Path -LiteralPath $wheelBuildDir) {
+      Remove-Item -Recurse -Force -LiteralPath $wheelBuildDir
+    }
+  }
+}
+
 function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv is required on PATH to build the portable bundle."
@@ -539,6 +632,8 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   if (!(Test-Path -LiteralPath $vsDllPackage)) {
     throw "libvapoursynth.dll not found after wheel install in expected R79 package layout: $vsDllPackage"
   }
+
+  Install-ProjectDistributionMetadata -BundleRoot $BundleRoot
 }
 
 function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Artifacts, [hashtable]$Downloaded) {
@@ -688,7 +783,7 @@ function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
 
   $requirementsLockSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $requirementsLockPath).Hash.ToLowerInvariant()
   $bundleInfo = [ordered]@{
-    schema_version = 2
+    schema_version = 3
     bundle_kind = "full"
     app_version = $AppVersion
     requirements_lock_sha256 = $requirementsLockSha256
@@ -780,7 +875,7 @@ function Invoke-VSViewOffscreenLaunchProof(
     "[RUN] VSView Bootstrap",
     "[OK] VSView Ready",
     "Script execution completed",
-    "Content loaded successfully",
+    "Switching to video output",
     "Frame 0 rendered"
   )) {
     if (-not $normalizedCombined.Contains($marker)) {
@@ -817,6 +912,8 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 
   $ffmpeg = Join-Path $BundleRoot "ffmpeg\bin\ffmpeg.exe"
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
+  $comparisonOneMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-1.mp4"
+  $comparisonTwoMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-2.mp4"
   $legacyMediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   $locationPushed = $false
@@ -828,8 +925,10 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {
       throw "Bundled FFmpeg executable not found: $ffmpeg"
     }
-    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=64x64:rate=1:duration=1" -frames:v 1 -pix_fmt yuv420p -y $mediaPath
+    & $ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=64x64:rate=1:duration=3" -frames:v 3 -pix_fmt yuv420p -y $mediaPath
     Assert-LastExitCode -CommandLabel "ffmpeg tiny media generation"
+    Copy-Item -LiteralPath $mediaPath -Destination $comparisonOneMediaPath
+    Copy-Item -LiteralPath $mediaPath -Destination $comparisonTwoMediaPath
 
     $smokeScript = @'
 from __future__ import annotations
@@ -877,6 +976,41 @@ def prove_vsview_distribution_contract() -> None:
     observed = {name: importlib.metadata.version(name) for name in expected}
     assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
     proof("vsview_distributions=ok " + ",".join(f"{name}={version}" for name, version in observed.items()))
+
+
+def prove_project_entrypoint_and_panel() -> None:
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    import frame_compare
+
+    bundle_root = Path(sys.executable).resolve().parent.parent
+    source_root = (bundle_root / "app" / "src" / "frame_compare").resolve()
+    package_path = Path(frame_compare.__file__).resolve()
+    assert_true(package_path.is_relative_to(source_root), f"Frame Compare resolved outside app/src: {package_path}")
+    assert_true(
+        not (bundle_root / "app" / "site-packages" / "frame_compare").exists(),
+        "portable bundle contains a duplicate app/site-packages/frame_compare package",
+    )
+
+    entry_points = tuple(
+        entry_point
+        for entry_point in importlib.metadata.entry_points(group="vsview")
+        if entry_point.name == "frame-compare-alignment-review"
+        and entry_point.value == "frame_compare.vsview.alignment_review_panel"
+    )
+    assert_true(len(entry_points) == 1, f"Frame Compare VSView entry point mismatch: {entry_points}")
+    panel_type = getattr(entry_points[0].load(), "AlignmentReviewPanel", None)
+    assert_true(panel_type is not None, "Frame Compare VSView entry point did not load AlignmentReviewPanel")
+
+    app = QApplication.instance() or QApplication([])
+    parent = QWidget()
+    panel = panel_type(parent, types.SimpleNamespace(file_path=None))
+    assert_true("Inactive" in panel.progress_label.text(), "alignment panel is not inert outside a generated session")
+    panel.setParent(None)
+    parent.deleteLater()
+    app.processEvents()
+    proof("project_entrypoint=ok source=app/src")
+    proof("alignment_panel=ok state=inactive platform=offscreen")
 
 
 def prove_qt_webengine_excluded() -> None:
@@ -999,7 +1133,7 @@ def prove_lwlibavsource(media_path: Path) -> None:
         source = load_source(media_path, core=core)
         frame = source.clip.get_frame(0)
         assert_true(frame.width == 64 and frame.height == 64, "LWLibavSource frame render failed")
-        assert_true(source.num_frames == 1, f"unexpected source frame count: {source.num_frames}")
+        assert_true(source.num_frames == 3, f"unexpected source frame count: {source.num_frames}")
         owned_index = source_index_path(media_path)
         assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
         assert_true(not Path(f"{media_path}.lwi").exists(), "legacy unversioned source index was created")
@@ -1092,16 +1226,41 @@ def prove_bestsource_frame(media_path: Path) -> None:
 def prove_generated_vsview_session(media_path: Path) -> None:
     import vapoursynth as vs
 
+    from frame_compare.vsview.alignment_review_contract import (
+        AlignmentReviewContractError,
+        AlignmentReviewExpectedComparison,
+        AlignmentReviewOutputCandidate,
+        alignment_review_session_from_script,
+        parse_alignment_review_workspace_metadata,
+        read_alignment_review_result,
+    )
+    from frame_compare.vsview.alignment_review_panel import AlignmentReviewPanel
     from frame_compare.vsview.session_script import write_vsview_session_script
+    from PySide6.QtWidgets import QApplication, QWidget
+    from vsengine.loops import get_loop, set_loop
     from vsview.api import get_outputs
+    from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
+    comparison_one_media_path = media_path.with_name("runtime-smoke-comparison-1.mp4")
+    comparison_two_media_path = media_path.with_name("runtime-smoke-comparison-2.mp4")
+    assert_true(
+        len({media_path, comparison_one_media_path, comparison_two_media_path}) == 3,
+        "generated VSView fixture paths are not distinct",
+    )
     script_path = write_vsview_session_script(
         reference=media_path,
-        comparisons=[media_path],
-        suggested_offsets_by_key={f"{media_path.stem}:{media_path.stem}": 0},
+        comparisons=[comparison_one_media_path, comparison_two_media_path],
+        suggested_offsets_by_key={
+            f"{media_path.stem}:{comparison_one_media_path.stem}": 0,
+            f"{media_path.stem}:{comparison_two_media_path.stem}": 0,
+        },
         cache_dir=cache_dir,
-        frame_props_by_stem={media_path.stem: {"_Matrix": 2, "_Range": 2}},
+        frame_props_by_stem={
+            media_path.stem: {"_Matrix": 2, "_Range": 2},
+            comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2},
+            comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2},
+        },
     )
     script_text = script_path.read_text(encoding="utf-8")
     assert_true(
@@ -1115,15 +1274,131 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
         outputs = get_outputs()
         names = [output.name for output in outputs.values()]
-        assert_true(names == ["Reference", "Comparison 1"], f"unexpected VSView outputs: {names}")
-        assert_true(sorted(vs.get_outputs()) == [0, 1], "generated session did not register outputs 0 and 1")
+        assert_true(
+            names == ["Reference", "Comparison 1", "Comparison 2"],
+            f"unexpected VSView outputs: {names}",
+        )
+        assert_true(
+            sorted(vs.get_outputs()) == [0, 1, 2],
+            "generated session did not register outputs 0, 1, and 2",
+        )
         for output in vs.get_outputs().values():
             frame = output.clip.get_frame(0)
             assert_true(frame.width == 64 and frame.height == 64, "generated VSView output failed")
+
+        session = alignment_review_session_from_script(script_path, require_result_absent=True)
+        candidates = tuple(
+            AlignmentReviewOutputCandidate(
+                output_id=output_id,
+                source_frame_count=vs_output.clip.num_frames,
+                metadata=outputs[output_id].kwargs,
+            )
+            for output_id, vs_output in sorted(vs.get_outputs().items())
+        )
+        workspace = parse_alignment_review_workspace_metadata(candidates)
+        assert_true(workspace.session_id == session.session_id, "generated output/session identities differ")
+        expected = tuple(
+            AlignmentReviewExpectedComparison(
+                pair.comparison_key,
+                workspace.reference.source_frame_count,
+                pair.source_frame_count,
+            )
+            for pair in workspace.comparisons
+        )
+
+        class Timeline:
+            def clear_notches(self, *_args, **_kwargs):
+                return None
+
+            def add_notch(self, *_args, **_kwargs):
+                return None
+
+        voutputs = [
+            types.SimpleNamespace(
+                vs_index=index,
+                vs_output=output,
+                kwargs=outputs[index].kwargs,
+            )
+            for index, output in sorted(vs.get_outputs().items())
+        ]
+        panel_api = types.SimpleNamespace(
+            file_path=script_path,
+            voutputs=voutputs,
+            current_voutput=voutputs[0],
+            current_frame=1,
+            timeline=Timeline(),
+        )
+        app = QApplication.instance() or QApplication([])
+        previous_loop = get_loop()
+        set_loop(QtEventLoop(app))
+        try:
+            active_parent = QWidget()
+            active_panel = AlignmentReviewPanel(active_parent, panel_api)
+            active_panel.on_workspace_loaded()
+            app.processEvents()
+            assert_true(
+                active_panel.progress_label.text() == "0 / 3 sources ready",
+                "alignment panel did not start with an empty three-source lineup",
+            )
+            for output_index, frame in enumerate((1, 0, 2)):
+                panel_api.current_voutput = voutputs[output_index]
+                panel_api.current_frame = frame
+                active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
+                app.processEvents()
+            assert_true(
+                active_panel.progress_label.text() == "3 / 3 sources ready",
+                "alignment panel did not record every source position",
+            )
+            assert_true(
+                active_panel.use_positions_button.isEnabled(),
+                "alignment positions action did not become ready for the whole set",
+            )
+            active_panel.use_positions_button.click()
+            app.processEvents()
+            observed_result = read_alignment_review_result(session, expected)
+            assert_true(
+                [decision.action for decision in observed_result.decisions]
+                == ["confirmed", "confirmed"],
+                "alignment positions action did not write complete confirmed decisions",
+            )
+            proof("alignment_positions=ok")
+
+            session.result_path.unlink()
+            keep_parent = QWidget()
+            keep_panel = AlignmentReviewPanel(keep_parent, panel_api)
+            keep_panel.on_workspace_loaded()
+            app.processEvents()
+            keep_panel.keep_button.click()
+            app.processEvents()
+            observed_result = read_alignment_review_result(session, expected)
+            assert_true(
+                [decision.action for decision in observed_result.decisions]
+                == ["keep_current", "keep_current"],
+                "keep-audio action did not write one decision per comparison",
+            )
+            proof("alignment_keep_current=ok")
+        finally:
+            set_loop(previous_loop)
+
+        proof(
+            "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "
+            "topology=one_reference_ordered_comparisons"
+        )
+        proof("alignment_result_roundtrip=ok")
+        session.result_path.write_text("{}\n", encoding="utf-8")
+        try:
+            read_alignment_review_result(session, expected)
+        except AlignmentReviewContractError:
+            pass
+        else:
+            raise AssertionError("malformed alignment result was accepted")
+        proof("alignment_result_validation=ok malformed=rejected")
     finally:
         sys.modules.pop("__vsview__", None)
         vs.clear_outputs()
-    proof("generated_vsview_session=ok outputs=Reference,Comparison_1 color_defaults=BT709")
+        if "session" in locals():
+            session.result_path.unlink(missing_ok=True)
+    proof("generated_vsview_session=ok outputs=Reference,Comparison_1,Comparison_2 color_defaults=BT709")
 
 
 def prove_vsview_runtime(media_path: Path) -> None:
@@ -1154,6 +1429,7 @@ def prove_vsview_runtime(media_path: Path) -> None:
     proof("qt_ffmpeg_runtime=ok lineage=7.1.5 dlls=avcodec-61,avformat-61,avutil-59")
     prove_qt_webengine_excluded()
     prove_vsview_distribution_contract()
+    prove_project_entrypoint_and_panel()
     prove_runtime_contract()
     prove_vapoursynth_environment()
     prove_bestsource_frame(media_path)
@@ -1205,10 +1481,12 @@ else:
   } finally {
     Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $mediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $comparisonOneMediaPath -ErrorAction SilentlyContinue
+    Remove-Item -Force -LiteralPath $comparisonTwoMediaPath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log") -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log") -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke*.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
       Remove-Item -Force -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-cache") -ErrorAction SilentlyContinue
     if ($locationPushed) {

@@ -9,6 +9,10 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
+from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewSession,
+    alignment_review_session_from_script,
+)
 
 
 def alignment_request(
@@ -35,6 +39,7 @@ def alignment_request(
             trim_end_frame_inclusive=None,
             effective_fps_num=fps_num,
             effective_fps_den=fps_den,
+            source_frame_count=100,
             selected_audio_stream=selected_audio_stream,
         )
 
@@ -69,3 +74,15 @@ def alignment_request(
             refinement_sample_rate=config.refinement_sample_rate,
         ),
     )
+
+
+VSVIEW_SESSION_ID = "12345678123456781234567812345678"
+
+
+def vsview_session(tmp_path: Path) -> AlignmentReviewSession:
+    """Build a generated-session fixture for native VSView review tests."""
+    sessions_dir = tmp_path / "vsview_sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    script = sessions_dir / f"vsview_ref_20260831T000000Z_{VSVIEW_SESSION_ID}.py"
+    script.write_text("# generated\n", encoding="utf-8")
+    return alignment_review_session_from_script(script, require_result_absent=True)

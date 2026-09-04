@@ -8,10 +8,10 @@ management.
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import os
 import re
-import shutil
 import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
@@ -21,6 +21,11 @@ from pathlib import Path
 import structlog
 
 from frame_compare.vs.runtime_contract import runtime_kind
+from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewContractError,
+    AlignmentReviewSession,
+    alignment_review_session_from_script,
+)
 from frame_compare.vsview.errors import VSViewError, VSViewNotFoundError
 from frame_compare.vsview.output import print_vsview_session
 from frame_compare.vsview.session_script import write_vsview_session_script
@@ -28,7 +33,11 @@ from frame_compare.vsview.session_script import write_vsview_session_script
 log = structlog.get_logger()
 
 _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
+_REVIEW_PROCESS_TIMEOUT_SECONDS = 12 * 60 * 60
+_PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 _STARTUP_STDERR_LIMIT = 4000
+_ALIGNMENT_REVIEW_ENTRY_POINT_NAME = "frame-compare-alignment-review"
+_ALIGNMENT_REVIEW_ENTRY_POINT_VALUE = "frame_compare.vsview.alignment_review_panel"
 _MISSING_MODULE_PATTERN = re.compile(
     r"ModuleNotFoundError:\s+No module named ['\"]([A-Za-z0-9_.]+)['\"]"
 )
@@ -43,8 +52,8 @@ class VSViewAvailabilityStatus(Enum):
     """Status enum for VSView availability."""
 
     AVAILABLE = "available"
-    MISSING_EXEC_AND_MODULE = "missing_exec_and_module"
-    MISSING_QT_BACKEND = "missing_qt_backend"
+    MISSING_RUNTIME = "missing_runtime"
+    MISSING_PLUGIN = "missing_plugin"
     PROBE_FAILED = "probe_failed"
 
 
@@ -92,47 +101,36 @@ class VSViewAvailability:
 def check_vsview_availability() -> VSViewAvailability:
     """Check if VSView is available, returning a structured availability report.
 
-    Availability rules:
-        - Return AVAILABLE if `shutil.which("vsview")` is non-None, OR
-        - `importlib.util.find_spec("vsview")` is non-None AND
-        `find_spec("PySide6")` is non-None.
+    Availability requires VSView, PySide6, and the packaged Frame Compare panel
+    entry point in this Python environment.
     """
     try:
-        # Priority 1: Check if vsview executable exists in PATH
-        if shutil.which("vsview") is not None:
-            return VSViewAvailability(
-                status=VSViewAvailabilityStatus.AVAILABLE,
-                message="VSView is available for interactive alignment",
-            )
-
-        # Priority 2: Check if vsview module is importable + Qt backend
         vsview_spec = importlib.util.find_spec("vsview")
-        if vsview_spec is None:
+        pyside6_spec = importlib.util.find_spec("PySide6")
+        if vsview_spec is None or pyside6_spec is None:
             return VSViewAvailability(
-                status=VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
-                message="VSView not installed (optional for manual alignment)",
+                status=VSViewAvailabilityStatus.MISSING_RUNTIME,
+                message="VSView runtime is not installed in the Frame Compare environment",
                 hint=(
-                    "Provide VSView; see "
+                    "Install frame-compare[vsview] in this environment; see "
                     "https://tjzine.github.io/frame-compare/getting-started/native/"
                 ),
             )
-
-        # VSView 0.10.x uses its documented PySide6 backend.
-        pyside6_spec = importlib.util.find_spec("PySide6")
-
-        if pyside6_spec is not None:
+        entry_points = tuple(
+            entry_point
+            for entry_point in importlib.metadata.entry_points(group="vsview")
+            if entry_point.name == _ALIGNMENT_REVIEW_ENTRY_POINT_NAME
+            and entry_point.value == _ALIGNMENT_REVIEW_ENTRY_POINT_VALUE
+        )
+        if len(entry_points) != 1:
             return VSViewAvailability(
-                status=VSViewAvailabilityStatus.AVAILABLE,
-                message="VSView is available for interactive alignment",
+                status=VSViewAvailabilityStatus.MISSING_PLUGIN,
+                message="Frame Compare alignment panel is not installed for VSView",
+                hint=("Reinstall frame-compare[vsview] in this environment, then rerun doctor"),
             )
-
         return VSViewAvailability(
-            status=VSViewAvailabilityStatus.MISSING_QT_BACKEND,
-            message="Qt backend missing for VSView (optional for manual alignment)",
-            hint=(
-                "Provide a supported Qt backend for VSView; see "
-                "https://tjzine.github.io/frame-compare/getting-started/native/"
-            ),
+            status=VSViewAvailabilityStatus.AVAILABLE,
+            message="VSView and the Frame Compare alignment panel are available",
         )
     except Exception as exc:
         return VSViewAvailability(
@@ -179,9 +177,13 @@ class VSViewSessionRequest:
 def launch_alignment_verification_session(
     request: VSViewSessionRequest,
     config: VSViewConfig,
-) -> Path:
+) -> AlignmentReviewSession:
     """Generate and optionally launch a VSView session script."""
-    script_path = _write_vsview_session_script(request)
+    try:
+        script_path = _write_vsview_session_script(request)
+        session = alignment_review_session_from_script(script_path, require_result_absent=True)
+    except (AlignmentReviewContractError, OSError, ValueError) as exc:
+        raise VSViewError(f"VSView session setup failed ({type(exc).__name__})") from exc
 
     if not config.enabled:
         log.info(
@@ -189,7 +191,7 @@ def launch_alignment_verification_session(
             script_path=str(script_path),
             enabled=False,
         )
-        return script_path
+        return session
 
     availability = check_vsview_availability()
     if not availability.is_available:
@@ -226,7 +228,7 @@ def launch_alignment_verification_session(
             returncode=returncode,
         )
 
-    return script_path
+    return session
 
 
 def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
@@ -238,10 +240,16 @@ def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
 
 
 def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None:
-    """Probe imports once when the resolved launcher uses this interpreter."""
-    if not command or Path(command[0]).resolve() != Path(sys.executable).resolve():
-        return
-    probe_code = "import PySide6; import vsview; from vsview import set_output"
+    """Boundedly prove the runtime and packaged panel load in this interpreter."""
+    probe_code = (
+        "import PySide6; import vsview; from vsview import set_output; "
+        "from importlib.metadata import entry_points; "
+        f"eps=[ep for ep in entry_points(group='vsview') if ep.name=={_ALIGNMENT_REVIEW_ENTRY_POINT_NAME!r} "
+        f"and ep.value=={_ALIGNMENT_REVIEW_ENTRY_POINT_VALUE!r}]\n"
+        "if len(eps) != 1:\n"
+        "    raise RuntimeError('Frame Compare alignment panel entry point is unavailable')\n"
+        "eps[0].load()\n"
+    )
     if runtime_kind().casefold() == "windows-portable":
         probe_code = (
             "from frame_compare.vsview.launcher import preload_vapoursynth_runtime; "
@@ -318,7 +326,19 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
         stderr=None,
         env=env,
     ) as process:
-        return process.wait()
+        try:
+            return process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            process.terminate()
+            try:
+                process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+            raise VSViewError(
+                "alignment review timed out before VSView closed",
+                command=tuple(command),
+            ) from exc
 
 
 def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
@@ -335,22 +355,12 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
 def _resolve_launch_command(script_path: Path) -> list[str]:
     """Resolve the launch command for VSView.
 
-    The managed Windows runtime uses a small launcher that preloads VapourSynth
-    before Qt registers its private native runtime. An external executable remains
-    the fallback when VSView is not installed in the current interpreter.
+    The managed launcher keeps VSView and the packaged Frame Compare panel in the
+    current interpreter. On Windows it also preloads VapourSynth before Qt.
     """
-    if (
-        runtime_kind().casefold() == "windows-portable"
-        or importlib.util.find_spec("vsview") is not None
-    ):
-        return [
-            sys.executable,
-            "-m",
-            "frame_compare.vsview.launcher",
-            str(script_path),
-        ]
-
-    vsview_path = shutil.which("vsview")
-    if vsview_path is not None:
-        return [vsview_path, str(script_path)]
-    return [sys.executable, "-m", "vsview", str(script_path)]
+    return [
+        sys.executable,
+        "-m",
+        "frame_compare.vsview.launcher",
+        str(script_path),
+    ]

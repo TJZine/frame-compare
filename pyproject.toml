@@ -47,6 +47,9 @@ vsview = [
 [project.scripts]
 frame-compare = "frame_compare.cli.entry:app"
 
+[project.entry-points.vsview]
+frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"
+
 [build-system]
 requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"

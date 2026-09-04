@@ -618,7 +618,7 @@ Assert-ExactProperties -Object $bundleInfo -Expected @(
   "media_runtime_fingerprints"
 ) -Context "bundle_info"
 if (
-  (Get-RequiredProperty $bundleInfo "schema_version" "bundle_info") -ne 2 -or
+  (Get-RequiredProperty $bundleInfo "schema_version" "bundle_info") -ne 3 -or
   (Get-RequiredProperty $bundleInfo "manifest_version" "bundle_info") -ne 2 -or
   (Get-RequiredString $bundleInfo "bundle_kind" "bundle_info") -cne "full" -or
   (Get-RequiredString $bundleInfo "platform" "bundle_info") -cne "windows-x64" -or

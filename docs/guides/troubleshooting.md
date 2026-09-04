@@ -21,7 +21,11 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Duplicate or confusing source labels | Use explicit per-source labels; duplicate explicit labels are rejected |
 | Doctor reports VapourSynth or L-SMASH-Works missing | Use Docker or Windows portable, or repair the native supported runtime; the default renderer requires VapourSynth |
 | Doctor reports vs-placebo or Vulkan unavailable | Repair the selected plugin/driver path or use the supported Docker software-Vulkan route for headless work |
-| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify manually with VSView when available |
+| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify with the native Frame Compare VSView panel when available |
+| Doctor reports the Frame Compare alignment panel is missing | Install `frame-compare[vsview]` in the same Python environment that runs Frame Compare; PATH-only VSView discovery is unsupported |
+| The native alignment panel is inactive | Open a Frame Compare-generated session; ordinary VSView sessions and malformed/mixed output metadata intentionally remain inert |
+| The panel closed before saving | No typed result sidecar was written; reopen the generated session, visit every source, and choose **Use these aligned positions** or **Keep audio-derived alignment** |
+| Native review result was rejected | The sidecar is missing, malformed, stale, mixed-session, duplicated, incomplete, or outside raw source bounds; generate a fresh session and review again |
 | Requested frames cannot survive alignment | Reduce trims or frame counts and inspect the final shared overlap; user frames are not silently replaced |
 | Docker cannot write config or generated data | Export host UID/GID values and pre-create `config`, `comparison_videos`, and `generated` as the host user |
 | Docker report did not open | Expected across the container boundary; use the host helper and exact path printed by the run |
@@ -78,7 +82,14 @@ selection failures. It is not a general “continue anyway” option.
 
 Check that the selected audio streams contain corresponding material. A stable constant
 offset cannot fix drift, different edits, or mismatched cadence. Review early, middle,
-and late evidence.
+and late evidence. When native VSView review is available, open **Frame Compare
+Alignment Review**, unlink playheads, and visit the Reference and every Comparison tab.
+Leave each source on the same visible moment; the source lineup reports which outputs
+are ready and previews the signed trim. Save the complete lineup once with **Use these
+aligned positions**. If you already know the values, expand **Enter alignment
+manually...** and choose either source frames or signed offsets. **Keep audio-derived
+alignment** is the secondary whole-set action when you want to retain Frame Compare's
+current alignment.
 
 ### Rendering and HDR
 

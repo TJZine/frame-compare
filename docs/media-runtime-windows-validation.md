@@ -135,6 +135,8 @@ Required evidence:
 - No artifact is accepted from a mutable fallback URL.
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
+- `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
+  schema-2 pre-native-panel bundles are not eligible for code-only updates.
 - The recorded source SHA equals the tested pull-request SHA.
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
@@ -328,15 +330,17 @@ Required cases:
 
 1. Build the candidate code-only update ZIP and its manifest.
 2. Attempt to apply it to the previous bundle.
-3. Confirm refusal occurs before file replacement because the native-runtime
-   fingerprint differs.
-4. Confirm an unsafe Python-dependency override does not bypass that refusal.
-5. Confirm the error directs the user to install the complete portable bundle.
-6. Install/extract the complete candidate bundle and confirm generated data stored
+3. Confirm refusal occurs before file replacement because the previous bundle is
+   pre-native-panel schema 2 (and its native-runtime fingerprint differs).
+4. With otherwise matching candidate fingerprints, confirm a schema-2 bundle still
+   refuses before file replacement.
+5. Confirm an unsafe Python-dependency override does not bypass that refusal.
+6. Confirm the error directs the user to install the complete portable bundle.
+7. Install/extract the complete candidate bundle and confirm generated data stored
    outside the bundle remains available.
-7. Apply a code-only update whose required fingerprint matches the candidate bundle.
-8. Verify backup creation, successful apply, rollback, and hash restoration.
-9. Test missing, malformed, and legacy runtime-fingerprint metadata; each must fail
+8. Apply a code-only update whose required fingerprint matches the candidate bundle.
+9. Verify backup creation, successful apply, rollback, and hash restoration.
+10. Test missing, malformed, and legacy runtime-fingerprint metadata; each must fail
    closed without partially updating the installation.
 
 ## 9. End-to-end comparisons

@@ -310,8 +310,8 @@ function Get-InstalledBundleCompatibilityContract([string]$BundlePath) {
 
   $schemaVersionRaw = Get-OptionalStringProperty -Object $bundleInfo -Name "schema_version"
   $schemaVersion = 0
-  if (-not [int]::TryParse($schemaVersionRaw, [ref]$schemaVersion) -or $schemaVersion -ne 2) {
-    throw "Installed bundle predates the media-runtime compatibility contract. A complete portable reinstall is required; code-only update refused."
+  if (-not [int]::TryParse($schemaVersionRaw, [ref]$schemaVersion) -or $schemaVersion -ne 3) {
+    throw "Installed bundle lacks the native VSView alignment-panel capability (bundle_info schema_version 3 required). A complete portable reinstall is required; code-only update refused."
   }
 
   $bundleKind = Get-RequiredStringProperty -Object $bundleInfo -Name "bundle_kind" -Context "bundle_info"

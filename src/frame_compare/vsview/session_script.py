@@ -15,6 +15,16 @@ from pathlib import Path
 
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER, source_index_path
+from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+    ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+    ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
+    ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+    ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+    ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+    ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    ALIGNMENT_REVIEW_SCHEMA_VERSION,
+)
 
 
 def write_vsview_session_script(
@@ -29,11 +39,12 @@ def write_vsview_session_script(
 
     Output location:
         - Directory: `{cache_dir}/vsview_sessions/` (created if missing)
-        - Filename: `vsview_{reference_stem}_{timestamp}.py` (UTC timestamp)
+        - Filename: `vsview_{reference_stem}_{timestamp}_{session_uuid}.py`
         - Timestamp format: YYYYMMDDTHHMMSSZ (UTC, seconds precision)
+        - Session UUID format: 32 lowercase hexadecimal characters
 
-    The timestamp MUST appear in the filename only; it MUST NOT appear in the
-    script body so that script content remains byte-identical for the same inputs.
+    The timestamp and session UUID MUST appear in the filename only; neither may
+    appear in the script body, so content remains byte-identical for the same inputs.
     """
     sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -52,21 +63,25 @@ def write_vsview_session_script(
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     script_path = None
-    for attempt in range(100):
-        suffix = f"_{attempt}" if attempt > 0 else ""
-        script_name = f"vsview_{reference.stem}_{base_timestamp}{suffix}.py"
+    for _attempt in range(100):
+        session_id = uuid.uuid4().hex
+        script_name = f"vsview_{reference.stem}_{base_timestamp}_{session_id}.py"
         candidate_path = sessions_dir / script_name
         if _reserve_empty_file(candidate_path):
             script_path = candidate_path
             break
 
     if script_path is None:
-        random_suffix = uuid.uuid4().hex[:8]
-        script_name = f"vsview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
-        script_path = sessions_dir / script_name
-        script_path.touch(exist_ok=False)
+        raise FileExistsError("could not reserve a unique VSView session script path")
 
-    write_text_atomic(script_path, script_content, encoding="utf-8")
+    try:
+        write_text_atomic(script_path, script_content, encoding="utf-8")
+    except OSError:
+        try:
+            script_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
     return script_path
 
 
@@ -127,9 +142,17 @@ untrimmed source clips so the operator can inspect source-frame positions.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+logging.getLogger("vsview.app.workspace.loader").addFilter(
+    lambda record: not (
+        record.levelno == logging.INFO
+        and record.msg == "Content loaded successfully: %r"
+    )
+)
 '''
 
 
@@ -351,27 +374,37 @@ def _build_clip_data_section(
     presentation_names = presentation_names_by_stem or {}
     targets_lines: list[str] = []
     for comp in comparisons:
+        comparison_key = f"{reference.stem}:{comp.stem}"
+        suggested_offset = suggested_offsets_by_key.get(comparison_key)
+        suggested_offset_value = "None" if suggested_offset is None else str(suggested_offset)
         targets_lines.append(
             f"    {json.dumps(comp.stem)}: {{"
             f'"path": {json.dumps(str(comp))}, '
             f'"index_path": {json.dumps(str(source_index_path(comp)))}, '
-            f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}'
+            f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}, '
+            f'"comparison_key": {json.dumps(comparison_key)}, '
+            f'"suggested_offset": {suggested_offset_value}'
             "},"
         )
 
-    offset_lines: list[str] = []
-    for key in sorted(suggested_offsets_by_key.keys()):
-        offset = suggested_offsets_by_key[key]
-        offset_value = "None" if offset is None else str(int(offset))
-        offset_lines.append(f"    {json.dumps(key)}: {offset_value},")
-
     targets_content = "\n".join(targets_lines)
-    offset_content = "\n".join(offset_lines)
     frame_props_content = json.dumps(
         _preview_frame_props_for_script(frame_props_by_stem),
         sort_keys=True,
         indent=4,
         allow_nan=False,
+    )
+    metadata_keys_content = json.dumps(
+        {
+            "version": ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+            "session_id": ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
+            "alignment_key": ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+            "ordinal": ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
+            "role": ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
+            "name": ALIGNMENT_REVIEW_METADATA_NAME_KEY,
+            "suggested_offset": ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+        },
+        sort_keys=True,
     )
 
     return f"""\
@@ -387,12 +420,9 @@ TARGETS = {{
 {targets_content}
 }}
 
-# Suggested offsets keyed by "{{ref_stem}}:{{comp_stem}}"
-suggested_offsets_by_key = {{
-{offset_content}
-}}
-
 FRAME_PROPS_BY_LABEL = {frame_props_content}
+REVIEW_SCHEMA_VERSION = {ALIGNMENT_REVIEW_SCHEMA_VERSION}
+REVIEW_METADATA_KEYS = {metadata_keys_content}
 """
 
 
@@ -419,7 +449,31 @@ def _preview_frame_props_for_script(
 def _build_main_execution_section() -> str:
     return """\
 # ─── Main ─────────────────────────────────────────────────────────────────────
+def _reference_metadata(session_id):
+    return {
+        REVIEW_METADATA_KEYS["version"]: REVIEW_SCHEMA_VERSION,
+        REVIEW_METADATA_KEYS["session_id"]: session_id,
+        REVIEW_METADATA_KEYS["role"]: "reference",
+        REVIEW_METADATA_KEYS["name"]: REFERENCE["display_name"],
+    }
+
+
+def _comparison_metadata(session_id, target, comparison_number):
+    return {
+        REVIEW_METADATA_KEYS["version"]: REVIEW_SCHEMA_VERSION,
+        REVIEW_METADATA_KEYS["session_id"]: session_id,
+        REVIEW_METADATA_KEYS["alignment_key"]: target["comparison_key"],
+        REVIEW_METADATA_KEYS["ordinal"]: comparison_number,
+        REVIEW_METADATA_KEYS["role"]: "comparison",
+        REVIEW_METADATA_KEYS["name"]: target["display_name"],
+        REVIEW_METADATA_KEYS["suggested_offset"]: target["suggested_offset"],
+    }
+
+
 def main():
+    if not TARGETS:
+        safe_print(_status_line("[FAIL]", "Alignment review requires every comparison"))
+        sys.exit(1)
     try:
         import vapoursynth as vs
     except ImportError:
@@ -473,13 +527,15 @@ def main():
     try:
         ref_clip = core.text.Text(
             ref_clip,
-            f"REF: {REFERENCE['display_name']}",
+            f"REF: {REFERENCE['display_name']}\\n"
+            "Open Tool Panel -> Frame Compare Alignment Review.\\n"
+            "Unlink playheads, then position every source on the same visible moment.",
             alignment=7,
         )
     except Exception:
         safe_print(_status_line("[WARN]", "Could not apply reference text overlay"))
 
-    loaded_comparison_count = 0
+    prepared_comparisons = []
 
     for comparison_number, (label, target) in enumerate(TARGETS.items(), start=1):
         comp_path = Path(target["path"])
@@ -487,8 +543,8 @@ def main():
         safe_print("")
         safe_print(f"    {_key(f'comparison {comparison_number}')}  {_value(display_name)}")
         if not comp_path.exists():
-            safe_print(_status_line("[WARN]", f"Comparison source not found: {comp_path}"))
-            continue
+            safe_print(_status_line("[FAIL]", f"Comparison source not found: {comp_path}"))
+            sys.exit(1)
 
         try:
             comp_clip = load_preview_source(
@@ -498,8 +554,8 @@ def main():
                 display_name,
             )
         except Exception as e:
-            safe_print(_status_line("[WARN]", f"Comparison source could not be loaded: {e}"))
-            continue
+            safe_print(_status_line("[FAIL]", f"Comparison source could not be loaded: {e}"))
+            sys.exit(1)
 
         comp_assumption = collect_preview_assumption(label, display_name)
         if comp_assumption is not None:
@@ -509,8 +565,7 @@ def main():
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
         comp_clip = apply_preview_defaults(core, comp_clip, label)
 
-        key = f"{REFERENCE['label']}:{label}"
-        suggested_offset = suggested_offsets_by_key.get(key)
+        suggested_offset = target["suggested_offset"]
         if suggested_offset is None:
             audio_hint = "no trusted audio hint"
             hint_pair = "Suggested match: unavailable"
@@ -529,32 +584,45 @@ def main():
             hint_pair = "Suggested match: REF 0 <-> CMP 0"
             trim_hint = "If confirmed: no trim"
 
-        # Apply overlay with the audio-derived hint only (best-effort)
+        # Apply comparison identity, hint, and review guidance (best-effort)
         try:
             overlay_text = (
                 f"CMP: {display_name}\\n"
                 f"Audio hint: {audio_hint}\\n"
                 f"{hint_pair}\\n"
-                f"{trim_hint}"
+                f"{trim_hint}\\n"
+                "Open Tool Panel -> Frame Compare Alignment Review.\\n"
+                "Unlink playheads, then position every source on the same visible moment."
             )
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
             safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
 
         safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
-        reference_output = loaded_comparison_count * 2
-        comparison_output = reference_output + 1
-        set_output(ref_clip, reference_output, "Reference")
-        set_output(comp_clip, comparison_output, f"Comparison {comparison_number}")
-        safe_print(
-            f"    {_key('outputs')}       "
-            f"Reference {reference_output} | Comparison {comparison_number} {comparison_output}"
-        )
-        loaded_comparison_count += 1
+        prepared_comparisons.append((comparison_number, target, comp_clip))
 
-    if loaded_comparison_count == 0:
-        safe_print(_status_line("[FAIL]", "No comparison clips loaded successfully"))
+    session_id = Path(__file__).stem.rpartition("_")[2]
+    try:
+        set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id))
+        for comparison_number, target, comparison_clip in prepared_comparisons:
+            set_output(
+                comparison_clip,
+                comparison_number,
+                f"Comparison {comparison_number}",
+                **_comparison_metadata(session_id, target, comparison_number),
+            )
+    except Exception as e:
+        safe_print(
+            _status_line("[FAIL]", f"Alignment review outputs could not be registered: {e}")
+        )
         sys.exit(1)
+
+    safe_print(f"    {_key('output')}        Reference -> output 0")
+    for comparison_number, _target, _comparison_clip in prepared_comparisons:
+        safe_print(
+            f"    {_key('output')}        "
+            f"Comparison {comparison_number} -> output {comparison_number}"
+        )
 
     if preview_assumptions:
         safe_print("\\n" + _status_line("[WARN]", "VSView Display Assumptions"))
@@ -572,7 +640,9 @@ def main():
             )
 
     safe_print("\\n" + _status_line("[OK]", "VSView Ready"))
-    safe_print("    Inspect the untrimmed clips in VSView, then return here to confirm frames.")
+    safe_print("       Open Tool Panel -> Frame Compare Alignment Review.")
+    safe_print("       Unlink playheads, then position every source on the same visible moment.")
+    safe_print("       Save the alignment in the panel, then close VSView to continue Frame Compare.")
 
 main()
 """

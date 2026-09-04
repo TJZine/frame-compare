@@ -9,7 +9,7 @@ Install these host prerequisites first:
 - L-SMASH-Works 1310 available to the VapourSynth runtime;
 - vs-placebo 2.0.4 and a compatible Vulkan implementation for HDR tonemapping;
 - `uv` (recommended for the repository's locked environment) or pip;
-- optionally VSView 0.10.3 for interactive manual alignment.
+- optionally VSView 0.10.3 with the native Frame Compare panel for alignment review.
 
 VapourSynth is not optional for the default renderer. Setting
 `screenshots.use_ffmpeg = true` selects the FFmpeg screenshot path, but HDR frames
@@ -32,15 +32,17 @@ From a clone of the repository:
 uv sync --no-dev --extra vsview --frozen
 ```
 
-The `vsview` extra pins VSView 0.10.3 and the repository-managed VapourSynth Python
-package to R79. It uses VSView's base dependency graph, including its documented
-PySide6 backend; the upstream `recommended` and `full` extras are intentionally not
-selected. Its current resolution includes vsjetengine 1.7.0, BestSource, vspackrgb,
-and jetpytools 3.1.1.
+The `vsview` extra pins VSView 0.10.3, the native Frame Compare alignment panel, and
+the repository-managed VapourSynth Python package to R79. It uses VSView's base
+dependency graph, including its documented PySide6 backend; the upstream `recommended`
+and `full` extras are intentionally not selected. Its current resolution includes
+vsjetengine 1.7.0, BestSource, vspackrgb, and jetpytools 3.1.1. Install and run
+Frame Compare and VSView from this same environment: a PATH-only VSView executable
+does not provide the panel contract and is unsupported.
 On Windows it also installs the selected `vapoursynth-lsmas 1310.0.0.0` and
 `vs-placebo 2.0.4` plugin wheels so the locked environment matches the supported native
 media stack. Linux and macOS still require host-managed L-SMASH-Works and vs-placebo
-installations. If you do not need interactive alignment, omit `--extra vsview` while
+installations. If you do not need native panel review, omit `--extra vsview` while
 retaining the required native renderer dependencies. BestSource is owned by VSView's
 UI workspace; generated Frame Compare sessions continue to load sources through
 L-SMASH-Works and its Frame Compare-owned index paths.

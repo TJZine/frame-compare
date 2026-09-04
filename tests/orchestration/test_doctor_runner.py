@@ -129,6 +129,51 @@ class TestCollectChecks:
 class TestCheckVSView:
     """Tests for the optional VSView diagnostic check."""
 
+    def test_check_vsview_reports_native_panel_readiness(self) -> None:
+        from frame_compare.vsview.adapter import (
+            VSViewAvailability,
+            VSViewAvailabilityStatus,
+        )
+
+        checks = collect_checks()
+        vsview_check = next(c for c in checks if c.name == "vsview")
+
+        with patch(
+            "frame_compare.vsview.adapter.check_vsview_availability",
+            return_value=VSViewAvailability(
+                status=VSViewAvailabilityStatus.AVAILABLE,
+                message="available",
+            ),
+        ):
+            result = vsview_check.check_fn()
+
+        assert result.passed is True
+        assert result.available is True
+        assert result.message == "VSView and the Frame Compare alignment panel are available"
+
+    def test_check_vsview_reports_missing_native_panel(self) -> None:
+        from frame_compare.vsview.adapter import (
+            VSViewAvailability,
+            VSViewAvailabilityStatus,
+        )
+
+        checks = collect_checks()
+        vsview_check = next(c for c in checks if c.name == "vsview")
+
+        with patch(
+            "frame_compare.vsview.adapter.check_vsview_availability",
+            return_value=VSViewAvailability(
+                status=VSViewAvailabilityStatus.MISSING_PLUGIN,
+                message="Frame Compare alignment panel is not installed for VSView",
+                hint="Reinstall frame-compare[vsview] in this environment",
+            ),
+        ):
+            result = vsview_check.check_fn()
+
+        assert result.passed is True
+        assert result.available is False
+        assert result.hint == "Reinstall frame-compare[vsview] in this environment"
+
     def test_check_vsview_probe_failure_is_optional_status(self) -> None:
         from frame_compare.vsview.adapter import (
             VSViewAvailability,

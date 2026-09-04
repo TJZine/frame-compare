@@ -1,4 +1,4 @@
-"""Alignment-specific VSView launch policy."""
+"""Native VSView alignment-review policy and result application."""
 
 from __future__ import annotations
 
@@ -9,11 +9,13 @@ from pathlib import Path
 
 import structlog
 
+from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
+from frame_compare.utils.types import AlignmentClipRequest
 from frame_compare.vsview.adapter import (
     VSViewAvailabilityStatus,
     VSViewConfig,
@@ -21,14 +23,18 @@ from frame_compare.vsview.adapter import (
     check_vsview_availability,
     launch_alignment_verification_session,
 )
+from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewContractError,
+    AlignmentReviewExpectedComparison,
+    AlignmentReviewResult,
+    ConfirmedAlignmentReviewDecision,
+    read_alignment_review_result,
+)
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.output import (
-    print_vsview_confirmation_footer,
-    print_vsview_confirmation_header,
     print_vsview_failure_details,
-    print_vsview_input_hint,
+    print_vsview_review_result,
     print_vsview_unavailable,
-    write_vsview_prompt,
 )
 
 log = structlog.get_logger()
@@ -55,14 +61,6 @@ def _current_tty_status() -> _TTYStatus:
     )
 
 
-def _raise_for_forced_unavailable(availability: VSViewAvailabilityStatus) -> None:
-    if availability == VSViewAvailabilityStatus.PROBE_FAILED:
-        raise AudioAlignmentError(
-            "Interactive alignment requested but VSView availability probe failed."
-        )
-    raise AudioAlignmentError("Interactive alignment requested but VSView is not available.")
-
-
 def _launch_requested(config: AlignmentConfig) -> bool:
     return bool(config.use_vsview or config.force_interactive)
 
@@ -79,7 +77,10 @@ def _ensure_forced_availability(
         raise AudioAlignmentError(
             f"Interactive alignment requested but VSView {probe_failure_reason}."
         )
-    _raise_for_forced_unavailable(status)
+    raise AudioAlignmentError(
+        "Interactive alignment requested but VSView and the Frame Compare panel "
+        "are not available in this Python environment."
+    )
 
 
 def _log_optional_unavailable(
@@ -87,43 +88,38 @@ def _log_optional_unavailable(
     status: VSViewAvailabilityStatus,
     hint: str | None,
     error_details: dict[str, str] | None,
-    use_vsview: bool,
-    force_interactive: bool,
-    probe_failure_reason: str,
-    probe_failure_details: dict[str, str],
+    config: AlignmentConfig,
     tty_status: _TTYStatus,
-    no_color: bool,
 ) -> None:
     if tty_status.stderr:
         reason = {
-            VSViewAvailabilityStatus.MISSING_EXEC_AND_MODULE: "VSView is not installed.",
-            VSViewAvailabilityStatus.MISSING_QT_BACKEND: ("Missing optional VSView Qt backend."),
-            VSViewAvailabilityStatus.PROBE_FAILED: ("VSView availability check failed."),
+            VSViewAvailabilityStatus.MISSING_RUNTIME: (
+                "VSView and PySide6 are not installed in the Frame Compare environment."
+            ),
+            VSViewAvailabilityStatus.MISSING_PLUGIN: (
+                "The Frame Compare alignment panel is not installed for VSView."
+            ),
+            VSViewAvailabilityStatus.PROBE_FAILED: "VSView availability check failed.",
         }.get(status, "VSView is unavailable.")
-        print_vsview_unavailable(reason=reason, no_color=no_color)
+        print_vsview_unavailable(reason=reason, no_color=config.no_color)
         log_method = log.debug
     else:
         log_method = log.warning
     if status == VSViewAvailabilityStatus.PROBE_FAILED:
         log_method(
             "vsview_availability_probe_failed",
-            reason=probe_failure_reason,
-            exception_type=probe_failure_details.get("exception_type"),
+            exception_type=(error_details or {}).get("exception_type"),
             hint=hint,
-            use_vsview=use_vsview,
-            force_interactive=force_interactive,
+            use_vsview=config.use_vsview,
+            force_interactive=config.force_interactive,
         )
-        if error_details:
-            log.debug(
-                "vsview_availability_probe_failed_debug",
-                error_details=error_details,
-            )
-    elif use_vsview and not force_interactive:
+    elif config.use_vsview and not config.force_interactive:
         log_method(
             "vsview_unavailable",
+            status=status.value,
             hint=hint,
-            use_vsview=use_vsview,
-            force_interactive=force_interactive,
+            use_vsview=config.use_vsview,
+            force_interactive=config.force_interactive,
         )
 
 
@@ -172,92 +168,6 @@ def _present_optional_launch_failed(
     )
 
 
-def _read_vsview_prompt(
-    *,
-    label: str,
-    suggested_offset: int | None,
-    no_color: bool,
-) -> str:
-    write_vsview_prompt(
-        label=label,
-        suggested_offset=suggested_offset,
-        no_color=no_color,
-    )
-    raw_value = sys.stdin.readline()
-    if raw_value == "":
-        raise EOFError
-    return raw_value
-
-
-def _parse_source_frame_pair(raw_value: str) -> tuple[int, int] | None:
-    tokens = raw_value.replace(",", " ").split()
-    if len(tokens) != 2:
-        return None
-    if not all(token.isascii() and token.isdecimal() for token in tokens):
-        return None
-    return int(tokens[0]), int(tokens[1])
-
-
-def _prompt_for_confirmed_offsets(
-    *,
-    reference: Path,
-    comparisons: list[Path],
-    offsets_by_key: dict[str, int | None],
-    presentation_names_by_stem: dict[str, str] | None = None,
-    no_color: bool = False,
-) -> dict[str, int] | None:
-    if not comparisons:
-        return {}
-
-    presentation_names = presentation_names_by_stem or {}
-    print_vsview_confirmation_header(
-        reference_name=presentation_names.get(reference.stem, reference.stem),
-        no_color=no_color,
-    )
-
-    confirmed: dict[str, int] = {}
-    for comparison_number, comparison in enumerate(comparisons, start=1):
-        key = f"{reference.stem}:{comparison.stem}"
-        suggested_offset = offsets_by_key.get(key)
-        while True:
-            try:
-                raw_value = _read_vsview_prompt(
-                    label=(
-                        f"Comparison {comparison_number} | "
-                        f"{presentation_names.get(comparison.stem, comparison.stem)}"
-                    ),
-                    suggested_offset=suggested_offset,
-                    no_color=no_color,
-                ).strip()
-            except (EOFError, OSError):
-                print_vsview_input_hint(
-                    "No terminal input available; keeping current offsets.",
-                    no_color=no_color,
-                )
-                return None
-            if raw_value == "":
-                print_vsview_input_hint(
-                    "Enter both source frames, for example '120 108', or 'skip'.",
-                    no_color=no_color,
-                )
-                continue
-            if raw_value.lower() in {"skip", "s"}:
-                break
-            source_frames = _parse_source_frame_pair(raw_value)
-            if source_frames is None:
-                print_vsview_input_hint(
-                    "Enter two non-negative integer source frames, for example '120 108', "
-                    "or 'skip'.",
-                    no_color=no_color,
-                )
-                continue
-            reference_source_frame, comparison_source_frame = source_frames
-            confirmed[key] = reference_source_frame - comparison_source_frame
-            break
-    print_vsview_confirmation_footer(no_color=no_color)
-    return confirmed
-
-
 def _save_confirmed_offsets(
     *,
     reference: Path,
@@ -267,7 +177,7 @@ def _save_confirmed_offsets(
 ) -> None:
     timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     for comparison in comparisons:
-        key = f"{reference.stem}:{comparison.stem}"
+        key = alignment_key(reference, comparison)
         if key not in confirmed_offsets_by_key:
             continue
         save_manual_override(
@@ -275,7 +185,7 @@ def _save_confirmed_offsets(
             ManualOverride(
                 reference_clip=reference.stem,
                 comparison_clip=comparison.stem,
-                frame_offset=int(confirmed_offsets_by_key[key]),
+                frame_offset=confirmed_offsets_by_key[key],
                 timestamp=timestamp,
                 confirmed=True,
             ),
@@ -296,39 +206,75 @@ def _resolve_launch_decision(
     tty_status: _TTYStatus,
 ) -> _LaunchDecision:
     requested = _launch_requested(config)
-    has_prompt_input = tty_status.stdin
-    enabled = bool(requested and is_available and has_prompt_input)
+    enabled = bool(requested and is_available and tty_status.stdin)
     return _LaunchDecision(
         enabled=enabled,
-        no_tty=bool(requested and is_available and not has_prompt_input),
+        no_tty=bool(requested and is_available and not tty_status.stdin),
     )
+
+
+def _expected_comparisons(
+    reference: AlignmentClipRequest,
+    comparisons: list[AlignmentClipRequest],
+) -> tuple[AlignmentReviewExpectedComparison, ...]:
+    return tuple(
+        AlignmentReviewExpectedComparison(
+            comparison_key=alignment_key(reference.path, comparison.path),
+            reference_source_frame_count=reference.source_frame_count,
+            comparison_source_frame_count=comparison.source_frame_count,
+        )
+        for comparison in comparisons
+    )
+
+
+def _confirmed_offsets(result: AlignmentReviewResult) -> dict[str, int]:
+    return {
+        decision.comparison_key: (
+            decision.reference_source_frame - decision.comparison_source_frame
+        )
+        for decision in result.decisions
+        if isinstance(decision, ConfirmedAlignmentReviewDecision)
+    }
+
+
+def _handle_invalid_result(
+    exc: AlignmentReviewContractError,
+    *,
+    config: AlignmentConfig,
+    tty_status: _TTYStatus,
+) -> None:
+    reason = str(exc)
+    if config.force_interactive:
+        raise AudioAlignmentError(
+            f"Interactive alignment did not return a valid VSView review result: {reason}."
+        ) from exc
+    if tty_status.stderr:
+        print_vsview_review_result(
+            accepted=False,
+            message=f"{reason}; current offsets were retained.",
+            no_color=config.no_color,
+        )
+        log.debug("vsview_review_result_rejected", reason=reason)
+    else:
+        log.warning("vsview_review_result_rejected", reason=reason)
 
 
 def maybe_launch_alignment_vsview(
     *,
-    reference: Path,
-    comparisons: list[Path],
+    reference: AlignmentClipRequest,
+    comparisons: list[AlignmentClipRequest],
     offsets_by_key: dict[str, int | None],
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
-    presentation_names_by_stem: dict[str, str] | None = None,
     verbose: bool = False,
 ) -> dict[str, int] | None:
-    """Best-effort VSView alignment verification.
-
-    This is intended for interactive verification/inspection only. Actual offsets
-    used by the pipeline are still sourced from:
-      1) manual overrides (highest precedence)
-      2) cached offsets
-      3) computed offsets (cross-correlation)
-    """
-    if not (config.use_vsview or config.force_interactive):
+    """Launch one native review and apply only a complete, trusted result."""
+    if not _launch_requested(config):
         return None
 
     availability = check_vsview_availability()
-
     if config.force_interactive:
         _ensure_forced_availability(
             status=availability.status,
@@ -341,13 +287,9 @@ def maybe_launch_alignment_vsview(
         _log_optional_unavailable(
             status=availability.status,
             hint=availability.hint,
-            error_details=availability.error_details,
-            use_vsview=config.use_vsview,
-            force_interactive=config.force_interactive,
-            probe_failure_reason=availability.public_probe_failure_reason(),
-            probe_failure_details=availability.public_probe_failure_details(),
+            error_details=availability.public_probe_failure_details(),
+            config=config,
             tty_status=tty_status,
-            no_color=config.no_color,
         )
 
     launch_decision = _resolve_launch_decision(
@@ -355,26 +297,31 @@ def maybe_launch_alignment_vsview(
         is_available=availability.is_available,
         tty_status=tty_status,
     )
-
     if progress:
-        progress.set_description("ALIGN | Interactive verification")
-
+        progress.set_description("ALIGN | Native VSView review")
     if config.force_interactive and launch_decision.no_tty:
         raise AudioAlignmentError(
             "Interactive alignment requested but no interactive terminal (TTY) is available."
         )
 
-    interactive_progress = progress
-    progress_suspended = _suspend_progress_for_interaction(interactive_progress)
+    reference_path = reference.path
+    comparison_paths = [comparison.path for comparison in comparisons]
+    progress_suspended = _suspend_progress_for_interaction(progress)
     try:
-        script_path = launch_alignment_verification_session(
+        session = launch_alignment_verification_session(
             request=VSViewSessionRequest(
-                reference=reference,
-                comparisons=comparisons,
+                reference=reference_path,
+                comparisons=comparison_paths,
                 suggested_offsets_by_key=offsets_by_key,
                 cache_dir=cache_dir,
                 frame_props_by_stem=frame_props_by_stem,
-                presentation_names_by_stem=presentation_names_by_stem,
+                presentation_names_by_stem={
+                    reference_path.stem: reference.presentation_name or reference_path.stem,
+                    **{
+                        comparison.path.stem: (comparison.presentation_name or comparison.path.stem)
+                        for comparison in comparisons
+                    },
+                },
             ),
             config=VSViewConfig(
                 enabled=launch_decision.enabled,
@@ -383,23 +330,33 @@ def maybe_launch_alignment_vsview(
             ),
         )
         if launch_decision.no_tty:
-            _log_no_tty(script_path, tty_status)
+            _log_no_tty(session.script_path, tty_status)
         if not launch_decision.enabled:
             return None
-        confirmed_offsets = _prompt_for_confirmed_offsets(
-            reference=reference,
-            comparisons=comparisons,
-            offsets_by_key=offsets_by_key,
-            presentation_names_by_stem=presentation_names_by_stem,
-            no_color=config.no_color,
-        )
-        if confirmed_offsets is None:
+        try:
+            result = read_alignment_review_result(
+                session,
+                _expected_comparisons(reference, comparisons),
+            )
+        except AlignmentReviewContractError as exc:
+            _handle_invalid_result(exc, config=config, tty_status=tty_status)
             return None
+
+        confirmed_offsets = _confirmed_offsets(result)
         _save_confirmed_offsets(
-            reference=reference,
-            comparisons=comparisons,
+            reference=reference_path,
+            comparisons=comparison_paths,
             cache_dir=cache_dir,
             confirmed_offsets_by_key=confirmed_offsets,
+        )
+        kept_count = len(result.decisions) - len(confirmed_offsets)
+        print_vsview_review_result(
+            accepted=True,
+            message=(
+                f"Accepted {len(confirmed_offsets)} confirmed pair(s); "
+                f"{kept_count} comparison(s) kept their current offset."
+            ),
+            no_color=config.no_color,
         )
         return confirmed_offsets
     except VSViewError as exc:
@@ -412,6 +369,6 @@ def maybe_launch_alignment_vsview(
             tty_status=tty_status,
         )
     finally:
-        if progress_suspended and interactive_progress is not None:
-            interactive_progress.resume()
+        if progress_suspended and progress is not None:
+            progress.resume()
     return None

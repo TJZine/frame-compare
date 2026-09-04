@@ -438,7 +438,7 @@ def main() -> int:
         "bundle_info",
     )
     schema_version = _require_int(bundle_info.get("schema_version"), "bundle_info.schema_version")
-    if schema_version != 2:
+    if schema_version != 3:
         raise ValueError(f"unsupported bundle_info schema_version: {schema_version}")
     app_version = _require_str(bundle_info.get("app_version"), "bundle_info.app_version")
     requirements_sha = _require_sha256(

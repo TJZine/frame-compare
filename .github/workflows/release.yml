@@ -19,9 +19,6 @@ on:
         description: Exact 40-character source commit SHA
         required: true
         type: string
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML:
-        required: true
 
 permissions: {}
 
@@ -65,11 +62,21 @@ jobs:
           MAIN_SHA: ${{ steps.main.outputs.sha }}
           DISPATCH_SHA: ${{ github.sha }}
           DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_REF_PROTECTED: ${{ github.ref_protected }}
+          DISPATCH_REF_TYPE: ${{ github.ref_type }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$DISPATCH_SHA" != "$EXPECTED_SHA" ]]; then
             echo "The selected workflow ref head must equal expected_sha." >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_REF_TYPE" != "branch" ]]; then
+            echo "Releases must be dispatched from a branch." >&2
+            exit 1
+          fi
+          if [[ "$DISPATCH_REF_PROTECTED" != "true" ]]; then
+            echo "Release branches must be protected by a branch rule or ruleset." >&2
             exit 1
           fi
           if [[ "$RELEASE_CHANNEL" == "stable" && "$DISPATCH_REF" != "refs/heads/main" ]]; then
@@ -159,9 +166,8 @@ jobs:
       expected_sha: ${{ inputs.expected_sha }}
       release_tag: ${{ inputs.tag }}
       require_signing: true
+      environment_name: ${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}
       prepare_release_assets: true
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
 
   publish:
     name: Draft, verify, and publish

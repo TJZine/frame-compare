@@ -105,7 +105,7 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
     bundle_info.write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "bundle_kind": "full",
                 "app_version": "1.0.0",
                 "requirements_lock_sha256": _REQ_HASH,
@@ -475,6 +475,58 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     assert rollback.returncode == 0, f"stdout:\n{rollback.stdout}\n\nstderr:\n{rollback.stderr}"
     assert _snapshot_tree(installed_tree) == original_snapshot
     assert _snapshot_bytes(external_generated_root) == external_snapshot
+
+
+@pytest.mark.integration
+def test_windows_portable_update_refuses_pre_native_panel_bundle(
+    tmp_path: Path,
+    repo_root: Path,
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    private_key_path, public_key_xml = _generate_rsa_keypair(
+        exe=exe,
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+    )
+    bundle_dir, shim_update_ps1, _state_dir = _setup_update_install(
+        tmp_path=tmp_path,
+        repo_root=repo_root,
+        public_key_xml=public_key_xml,
+    )
+    version_py = _write_mock_bundle(bundle_dir=bundle_dir)
+    bundle_info_path = bundle_dir / "bundle_info.json"
+    bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+    bundle_info["schema_version"] = 2
+    bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+
+    update_zip_path = _build_update_zip(tmp_path=tmp_path)
+    env = _sign_update_zip(
+        exe=exe,
+        repo_root=repo_root,
+        update_zip_path=update_zip_path,
+        private_key_path=private_key_path,
+        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+    )
+    original_content = version_py.read_bytes()
+
+    result = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=update_zip_path,
+    )
+
+    assert result.returncode != 0
+    normalized_output = (result.stdout + result.stderr).lower().replace("_", " ").replace("-", " ")
+    assert "native vsview alignment panel capability" in normalized_output
+    assert "bundle info schema version 3 required" in normalized_output
+    assert "complete portable reinstall is required" in normalized_output
+    assert version_py.read_bytes() == original_content
+    assert not (bundle_dir / "app" / ".update_backups").exists()
 
 
 @pytest.mark.integration

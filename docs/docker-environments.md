@@ -49,7 +49,7 @@ current host UID/GID so their writable bind-mount output remains host-owned.
 | macOS Docker Desktop | Backend rendering, HTML reports, software tonemap, `doctor`, non-GUI `run`, reproducible software Vulkan path | Native GPU acceleration, Docker-based VSView GUI launch, native Qt desktop forwarding | Supported for backend/software-Vulkan features only. macOS Docker does not support VSView GUI launch beyond the documented backend features; use a native desktop runtime for VSView GUI workflows. |
 | Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSView unless separately configured | This is the canonical default Docker mode. |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile and GPU proof script for host-dependent Vulkan acceleration | Guaranteed parity without host setup, default CI path, GUI/VSView by default | Documented-only/unverified in this repo unless you run the dedicated proof on a compatible Linux NVIDIA host. |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSView dependency availability, generated-session loading, and offscreen rendering | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. The offscreen proof currently passes for VSView 0.10.3 with a production-generated L-SMASH session, named `Reference`/`Comparison 1` outputs, and frame-0 rendering. Visible X11 launch remains unverified; real UI launch is manual and host-dependent. |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSView/plugin availability, generated-session loading, native panel construction, typed metadata/result integration, and offscreen rendering | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. The verifier contract covers VSView 0.10.3, exact Frame Compare panel entry-point loading, named `Reference`/`Comparison 1` outputs, frame-0 rendering, and sibling-sidecar validation. This feature run has static contract proof only; execution remains unavailable/unverified until a compatible Linux/X11 host runs it. Visible X11 launch remains unverified. |
 | Native Windows portable | Full native app path including backend rendering, reports, VSView GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. See [Windows Portable](windows-portable.md). |
 
 Optional Docker GPU and GUI profiles require compatible host setup and separate
@@ -91,9 +91,11 @@ and
 
 ## Linux X11 GUI Profile
 
-The optional GUI profile is for Linux desktop users who want VSView inside the
-container for interactive alignment checks. It does not change the default Docker
-image or the default CI-safe path.
+The optional GUI profile is for Linux desktop users who want the native Frame Compare
+VSView alignment panel inside the container for interactive alignment checks. The
+panel is available only for Frame Compare-generated sessions and is the sole human
+alignment-review surface. It does not change the default Docker image or the default
+CI-safe path.
 
 ### X11 Contract
 
@@ -112,6 +114,13 @@ image or the default CI-safe path.
 ```bash
 bash tools/verify_docker_gui.sh
 ```
+
+The verifier contract covers the exact `frame-compare-alignment-review` VSView entry
+point, offscreen panel construction, generated output metadata, atomic sibling-sidecar
+round-trip, and malformed-result rejection. This feature run has static contract proof
+only; execution and visible desktop launch remain unavailable/unverified until a
+compatible Linux/X11 host runs it. Do not run this verifier on macOS Docker Desktop;
+its Linux/X11 host contract is unavailable there.
 
 If your X server denies access, use the narrow local-user form on the host instead
 of `xhost +`:

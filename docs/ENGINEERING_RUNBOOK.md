@@ -136,11 +136,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update
 The Windows commands require a Windows host with PowerShell and the expected
 toolchain. In non-Windows environments, treat them as documented-only unless a
 compatible runner is available. A code-only update does not carry native media
-artifacts. `build_update.ps1` must copy the complete bundle's required
-media-runtime fingerprint into the signed update manifest, and the installed
-updater must refuse a missing, legacy, malformed, or different fingerprint before
-any unsafe dependency override. Crossing a media-runtime fingerprint requires a
-complete portable bundle reinstall.
+artifacts. `build_update.ps1` accepts only a native-panel-capable full bundle with
+`bundle_info.schema_version` 3, and copies the complete bundle's required
+media-runtime fingerprint into the signed update manifest. The installed updater
+refuses pre-native-panel schema-2 bundles, as well as missing, legacy, malformed,
+or different fingerprints, before any unsafe dependency override; each refusal
+requires a complete portable bundle reinstall. Crossing a media-runtime
+fingerprint also requires a complete portable bundle reinstall.
 
 Locked runtime dependency audit (PowerShell):
 
@@ -234,7 +236,7 @@ Current capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSView GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
 | Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the offscreen VSView/session/render proof passes, while visible X11 launch remains unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
 | Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
 
 When documenting or reviewing optional Docker GPU/profile work, cite the official
@@ -275,16 +277,20 @@ the cleanup command `xhost -si:localuser:<user>`. Real UI launch remains manual
 only; the proof command should verify dependency availability and session-script
 generation without requiring a visible desktop launch.
 
-The current migration proof has passed this offscreen path: the `gui-linux` image
-loaded a production-generated L-SMASH session with VSView 0.10.3, registered the
-`Reference` and `Comparison 1` outputs, and rendered frame 0 for both outputs. This
-proves the container dependency graph, generated-session loading, named-output
-registration, and offscreen rendering. It does not prove a visible X11 desktop
-launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance;
-visible X11 remains unverified.
+The verifier contract covers this offscreen path: the `gui-linux` image must discover
+and load the exact Frame Compare VSView panel entry point, construct the panel in its
+inert ordinary-session state, load a production-generated L-SMASH session with VSView
+0.10.3, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+all three outputs, and round-trip/validate the sibling result sidecar. This feature run has
+static contract proof only; execution remains unavailable/unverified until a
+compatible Linux/X11 host runs it. The contract does not prove a visible X11 desktop
+launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.
 
 If the local machine cannot run the GUI proof command, record GUI support as
 documented-only/unverified rather than supported.
+On macOS, an offscreen or synthetic-panel check proves only the Python/Qt/plugin
+contract; if `core.lsmas` is absent, it is not native L-SMASH media proof. Linux X11
+visible-GUI behavior remains unavailable/unverified until a compatible host runs it.
 
 ### Windows Portable / Release-Path Verification
 
@@ -310,19 +316,66 @@ Canonical verification path:
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
    importing PySide6 or VSView, then recheck the plugin environment, open the generated
-   media through L-SMASH, and invoke the application tonemap path. BestSource is
-   VSView/UI-only and does not replace Frame Compare's generated-session source loader.
+   media through L-SMASH, and invoke the application tonemap path. The build must fail
+   closed unless exactly one repository wheel and one `frame_compare-*.dist-info`
+   directory exist; it copies only that metadata directory into `app/site-packages`,
+   verifies the exact `frame-compare-alignment-review` entry point, and keeps executable
+   application code resolved from `app/src`. The bundled Python proof must discover
+   and load that entry point, construct the panel offscreen, round-trip the generated
+   metadata/result sidecar, and reject a malformed result. BestSource is VSView/UI-only
+   and does not replace Frame Compare's generated-session source loader.
    Run the direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
    `vulkan_runtime_unavailable` skip is permitted only on hosts without that runtime
    and does not replace the separate physical-Windows GPU proof.
 5. Build the code-only update ZIP when updater logic changes and prove both a
    matching-runtime apply/rollback and a mismatched media-runtime or requirements-
-   fingerprint fail-closed refusal. Every pre-VSView bundle requires a complete
-   portable reinstall; a code-only update must not mix its old UI/native dependency
-   graph with the new application code, even when the media-runtime fingerprint and
-   L-SMASH index token are unchanged.
+   fingerprint fail-closed refusal. Every pre-native-panel schema-2 bundle must be
+   refused and fully reinstalled; a code-only update must not mix its old UI/native
+   dependency graph with the new application code, even when the media-runtime
+   fingerprint and L-SMASH index token are unchanged. The current full bundle
+   advertises `bundle_info.schema_version` 3.
 6. Sign the update ZIP when updater or release-package logic changes.
 7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
+   For an exact hosted verification of a candidate SHA, dispatch the default-branch
+   workflow with its explicit verify inputs (the workflow checks out the supplied SHA):
+
+   ```bash
+   WorkflowRef='<branch-containing-the-workflow>'
+   ExpectedSha='<40-character-lowercase-head-sha-of-WorkflowRef>'
+   gh workflow run windows-portable.yml \
+     --ref "$WorkflowRef" \
+     -f operation=verify \
+     -f channel=rc \
+     -f expected_sha="$ExpectedSha"
+   gh run list --workflow windows-portable.yml --limit 1
+   ```
+
+   The secret-free validation job requires `ExpectedSha` to equal the selected
+   protected branch head or protected, conventionally named release-tag head before
+   the signed reusable workflow can start. The selected `release-candidate` or `production`
+   environment owns the signing key, required reviewer approval, and allowed
+   deployment branch/tag rules; `windows-ci` is the unsigned pull-request environment
+   and must not contain signing secrets. Record the resulting workflow URL, exact SHA,
+   success/failure result, and any uploaded portable/package proof. A hosted success
+   proves package/offscreen behavior;
+   complete physical Windows desktop acceptance remains a separate handoff.
+
+   Before enabling this workflow, maintainers must finish the environment migration:
+
+   - create `windows-ci` without secrets or approval requirements;
+   - require reviewers and restrict deployment branches/tags on both
+     `release-candidate` and `production`;
+   - store `WINDOWS_UPDATE_SIGNING_KEY_XML` only as an environment secret in both
+     protected environments; and
+   - atomically remove the same-named repository secret and any organization secret
+     that grants this repository access, then confirm `windows-ci` and an ordinary
+     workflow cannot resolve it.
+
+   GitHub resolves same-named environment secrets ahead of repository/organization
+   secrets rather than enforcing an environment-only namespace. The migration and
+   hosted negative-access proof are therefore release-blocking prerequisites.
+   Guarded RC and stable releases must also be dispatched from a protected branch;
+   the release workflow creates the validated release tag only after its preflight.
 
 Current CI ownership:
 
@@ -345,11 +398,12 @@ Current CI ownership:
   release orchestrator.
 - `.github/workflows/windows-portable-build.yml` also builds and verifies a code-only
   update zip after the full bundle exists. Pull requests prove unsigned update
-  zip creation and layout. Reusable release and manual runs require
-  `WINDOWS_UPDATE_SIGNING_KEY_XML`; they fail before artifact publication when
-  the secret is absent, does not match the committed public key, or signing
-  verification fails. Every public Windows release includes the signed update zip
-  and its checksum.
+  zip creation and layout in the secret-free `windows-ci` environment. Reusable
+  release and manual runs obtain `WINDOWS_UPDATE_SIGNING_KEY_XML` from the selected
+  protected `release-candidate` or `production` environment only after its approval
+  and branch/tag rules pass; they fail before artifact publication when the secret is
+  absent, does not match the committed public key, or signing verification fails.
+  Every public Windows release includes the signed update zip and its checksum.
 
 GitHub-hosted Windows proves packaging and generated-fixture behavior, not a
 physical release workstation. A media-runtime refresh remains unmergeable until
@@ -394,7 +448,8 @@ rejects them if they remain. Live RC/stable dispatches, production approval,
 remote tag/release cleanup, and the final merge are maintainer-only.
 
 When updater or release-package logic changes and the signed-update path cannot
-run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML`, mark signing as
+run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML` (mapped from the protected
+environment secret in hosted CI), mark signing as
 documented-only in the task handoff and require explicit maintainer or
 Windows-runner confirmation before treating the signed update release path as
 fully verified.

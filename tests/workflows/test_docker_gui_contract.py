@@ -14,6 +14,10 @@ from ._helpers import with_bash_env as _with_bash_env
 from ._helpers import write_bash_env as _write_bash_env
 
 
+def _assert_adjacent_statements(source: str, first: str, second: str) -> None:
+    assert re.search(rf"{re.escape(first)}\s+{re.escape(second)}", source) is not None
+
+
 def test_dockerfile_gui_target_uses_lock_derived_vsview_install(repo_root: Path) -> None:
     dockerfile = _read_text_or_fail(repo_root / "Dockerfile")
     stage_names = re.findall(r"^FROM .* AS (\S+)$", dockerfile, re.MULTILINE)
@@ -82,14 +86,52 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
     assert 'entry.get("available")' not in script
     assert "check_vsview_availability" in script
     assert "launch_alignment_verification_session" in script
+    assert 'entry_point.name == "frame-compare-alignment-review"' in script
+    assert 'entry_point.value == "frame_compare.vsview.alignment_review_panel"' in script
+    assert "entry_points[0].load()" in script
+    assert "AlignmentReviewPanel" in script
+    assert "DOCKER_GUI_PROOF vsview_entry_point=ok" in script
+    assert "DOCKER_GUI_PROOF panel_offscreen=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_positions=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_keep_current=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_metadata=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_result_roundtrip=ok" in script
+    assert "DOCKER_GUI_PROOF alignment_result_validation=ok" in script
     assert "from vsview import set_output" in script
-    assert "color=c=black:size=64x48:rate=1:duration=1" in script
-    assert "color=c=white:size=64x48:rate=1:duration=1" in script
+    assert "color=c=black:size=64x48:rate=1:duration=3" in script
+    assert "color=c=white:size=64x48:rate=1:duration=3" in script
+    assert "color=c=gray:size=64x48:rate=1:duration=3" in script
     assert 'types.ModuleType("__vsview__")' in script
-    assert 'expected_names = {0: "Reference", 1: "Comparison 1"}' in script
+    assert 'expected_names = {0: "Reference", 1: "Comparison 1", 2: "Comparison 2"}' in script
     assert "outputs[index].clip.get_frame(0)" in script
     assert "source_index_path(reference)" in script
     assert "source_index_path(comparison)" in script
+    assert "source_index_path(comparison_2)" in script
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_workspace_loaded()",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "active_panel.use_positions_button.click()",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "keep_panel.keep_button.click()",
+        "app.processEvents()",
+    )
+    assert '"3 / 3 sources ready"' in script
+    assert '"Use these aligned positions"' in script
+    assert '"Keep audio-derived alignment"' in script
+    assert "pair.reference.source_frame_count" not in script
+    assert "pair.comparison.source_frame_count" not in script
     assert 'rm -rf -- "$proof_dir"' in script
     assert "DOCKER_GUI_PROOF temp_cleanup=ok" in script
     assert "xhost +si:localuser:" in script
@@ -122,7 +164,7 @@ python() {
 
 frame-compare() {
   if [[ "${1:-}" == "doctor" ]]; then
-    printf '{"doctor":{"checks":[{"id":"vsview","status":"pass","message":"VSView is available for interactive alignment"}]}}\n'
+  printf '{"doctor":{"checks":[{"id":"vsview","status":"pass","message":"VSView and the Frame Compare alignment panel are available"}]}}\n'
   fi
 }
 

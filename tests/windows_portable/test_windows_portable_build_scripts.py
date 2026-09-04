@@ -616,7 +616,22 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "import vsview_cli._cli" in build_script
     assert "import vspackrgb.cython" in build_script
     assert "from PySide6.QtWidgets import QApplication" in build_script
-    assert '"testsrc2=size=64x64:rate=1:duration=1"' in build_script
+    assert '"testsrc2=size=64x64:rate=1:duration=3"' in build_script
+    fixture_generation = re.search(
+        r'-f lavfi -i "testsrc2=size=64x64:rate=1:duration=(?P<duration>\d+)" '
+        r"-frames:v (?P<frames>\d+) -pix_fmt yuv420p -y \$mediaPath",
+        build_script,
+    )
+    assert fixture_generation is not None
+    lwlibavsource_proof = build_script[
+        build_script.index("def prove_lwlibavsource") : build_script.index("def build_placebo_clip")
+    ]
+    frame_count_assertion = re.search(
+        r"assert_true\(source\.num_frames == (?P<count>\d+),", lwlibavsource_proof
+    )
+    assert frame_count_assertion is not None
+    assert fixture_generation.group("duration") == fixture_generation.group("frames")
+    assert fixture_generation.group("frames") == frame_count_assertion.group("count") == "3"
     combined_proof = build_script[
         build_script.index("def prove_vsview_runtime") : build_script.index("phase = sys.argv[1]")
     ]
@@ -647,6 +662,61 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "qt_webengine_runtime=absent deployment=excluded" in build_script
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
+
+
+def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
+    repo_root: Path,
+) -> None:
+    build_script = _read_text_or_fail(
+        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    )
+    proof = build_script[
+        build_script.index("def prove_generated_vsview_session") : build_script.index(
+            "def prove_vsview_runtime"
+        )
+    ]
+
+    assert '$comparisonOneMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-1.mp4"' in (
+        build_script
+    )
+    assert '$comparisonTwoMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-2.mp4"' in (
+        build_script
+    )
+    assert "Copy-Item -LiteralPath $mediaPath -Destination $comparisonOneMediaPath" in build_script
+    assert "Copy-Item -LiteralPath $mediaPath -Destination $comparisonTwoMediaPath" in build_script
+    assert 'names == ["Reference", "Comparison 1", "Comparison 2"]' in proof
+    assert "sorted(vs.get_outputs()) == [0, 1, 2]" in proof
+    assert "len({media_path, comparison_one_media_path, comparison_two_media_path}) == 3" in proof
+    assert "comparisons=[comparison_one_media_path, comparison_two_media_path]" in proof
+    assert "comparisons=[media_path" not in proof
+    assert 'f"{media_path.stem}:{comparison_one_media_path.stem}": 0' in proof
+    assert 'f"{media_path.stem}:{comparison_two_media_path.stem}": 0' in proof
+    assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
+    assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
+    assert (
+        "active_parent = QWidget()\n            active_panel = AlignmentReviewPanel(active_parent, panel_api)"
+        in proof
+    )
+    assert (
+        "keep_parent = QWidget()\n            keep_panel = AlignmentReviewPanel(keep_parent, panel_api)"
+        in proof
+    )
+    assert "active_panel.on_workspace_loaded()\n            app.processEvents()" in proof
+    assert (
+        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)\n"
+        "                app.processEvents()"
+    ) in proof
+    assert "active_panel.use_positions_button.click()\n            app.processEvents()" in proof
+    assert "keep_panel.keep_button.click()\n            app.processEvents()" in proof
+    assert '"0 / 3 sources ready"' in proof
+    assert '"3 / 3 sources ready"' in proof
+    assert '"alignment_positions=ok"' in proof
+    assert '"alignment_keep_current=ok"' in proof
+    assert '"alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "' in proof
+    assert '"alignment_result_roundtrip=ok"' in proof
+    assert '"alignment_result_validation=ok malformed=rejected"' in proof
+    assert "pair.reference.source_frame_count" not in proof
+    assert "pair.comparison.source_frame_count" not in proof
 
 
 def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: Path) -> None:
@@ -698,14 +768,16 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
         "[RUN] VSView Bootstrap",
         "[OK] VSView Ready",
         "Script execution completed",
-        "Content loaded successfully",
+        "Switching to video output",
         "Frame 0 rendered",
     ):
         assert marker in launch_proof
     assert '$_ -match "(?i)\\bERROR\\b"' in launch_proof
     assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in launch_proof
 
-    assert 'frame_props_by_stem={media_path.stem: {"_Matrix": 2, "_Range": 2}}' in (build_script)
+    assert 'media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
+    assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
+    assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert "Color metadata incomplete; using standard display defaults (BT.709)" in build_script
     assert "Invoke-VSViewOffscreenLaunchProof" in build_script
 
@@ -726,19 +798,6 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
     assert "WINDOWS_BUNDLE_PROOF vsview_runtime=ok" in required_phases
     assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in required_phases
     assert "Required combined VSView runtime proof marker missing." in required_phases
-
-
-def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "bundle_info.json" in build_script
-    assert "requirements_lock_sha256" in build_script
-    assert "bundle_kind" in build_script
-    assert "platform" in build_script
-    assert "schema_version = 2" in build_script
-    assert "manifest_version = $manifestVersion" in build_script
-    assert "media_runtime_fingerprint" in build_script
-    assert "media_runtime_fingerprints" in build_script
 
 
 def test_windows_portable_generated_launcher_sanitizes_malformed_bundle_info(
@@ -1018,7 +1077,7 @@ def _write_extracted_verifier_fixture(
     (bundle / "bundle_info.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "bundle_kind": "full",
                 "app_version": "1.2.3",
                 "requirements_lock_sha256": requirements_sha,
@@ -1207,6 +1266,7 @@ def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
         ("case_colliding_license", "Duplicate or case-colliding inventoried license path"),
         ("wrong_commit", "commit does not match expected checkout"),
         ("runtime_mismatch", "Media-runtime fingerprint mismatch"),
+        ("legacy_bundle_schema", "bundle_info.json does not match the bundle inventory identity"),
         ("missing_source_provenance", "missing required provenance entry"),
         ("webengine_runtime", "unexpectedly contains Qt WebEngine/Chromium runtime files"),
     ],
@@ -1241,6 +1301,11 @@ def test_extracted_bundle_verifier_rejects_incomplete_or_mismatched_provenance(
         bundle_info_path = bundle / "bundle_info.json"
         bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
         bundle_info["media_runtime_fingerprints"]["analysis"] = "f" * 64
+        bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
+    elif mutation == "legacy_bundle_schema":
+        bundle_info_path = bundle / "bundle_info.json"
+        bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
+        bundle_info["schema_version"] = 2
         bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
     elif mutation == "missing_source_provenance":
         inventory["source_build_install_scripts"].remove(
@@ -1667,6 +1732,7 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "Bundle inventory must cover every extracted license file exactly once" in verifier
     assert "Bundle inventory commit does not match expected checkout" in verifier
     assert "Media-runtime fingerprint mismatch for scope" in verifier
+    assert '"schema_version" "bundle_info") -ne 3' in verifier
     assert "Installed state points to the wrong bundle" in verifier
     assert "Installed shim version output does not match the candidate launcher" in verifier
 
@@ -1692,6 +1758,8 @@ def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
         repo_root / "docs" / "media-runtime-windows-validation.md"
     )
 
+    assert "bundle_info.schema_version` is 3" in physical_checklist
+    assert "otherwise matching candidate fingerprints" in physical_checklist
     assert "refs/pull/$PrNumber/head" in physical_checklist
     assert "refs/remotes/origin/pr/$PrNumber/head" in physical_checklist
     assert 'git fetch --no-tags origin "+${PrHeadRef}:${LocalPrHeadRef}"' in physical_checklist
@@ -1868,7 +1936,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     (bundle / "bundle_info.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "bundle_kind": "full",
                 "app_version": "0.1.0",
                 "requirements_lock_sha256": "a" * 64,
@@ -2193,7 +2261,7 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "Remove-Item -Force -LiteralPath $legacyMediaIndexPath" in build_script
     assert (
         "Get-ChildItem -LiteralPath $BundleRoot -Filter "
-        '"runtime-smoke.mp4.frame-compare-*.lwi"' in build_script
+        '"runtime-smoke*.mp4.frame-compare-*.lwi"' in build_script
     )
     assert "function Assert-RequiredPySideLicenseMetadata" in build_script
     assert '"pyside6_addons-*.dist-info"' in build_script

@@ -153,9 +153,18 @@ class AlignmentClipRequest:
     trim_end_frame_inclusive: int | None
     effective_fps_num: int
     effective_fps_den: int
+    source_frame_count: int
     selected_audio_stream: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if not _is_positive_int(self.source_frame_count):
+            raise ValueError("source_frame_count must be a positive integer")
+
+
+def _is_positive_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 @dataclass(frozen=True, slots=True)

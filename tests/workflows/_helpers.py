@@ -23,22 +23,28 @@ def with_bash_env(env: dict[str, str], bash_env_path: Path) -> dict[str, str]:
 
 
 def bash_executable_or_skip() -> str:
-    bash_path = shutil.which("bash")
-    if bash_path is None:
-        pytest.skip("bash is required for Docker shell-script contract tests")
-    try:
-        result = subprocess.run(
-            [bash_path, "-lc", "printf frame-compare-bash-ok"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=BASH_PROBE_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        pytest.skip(f"bash is not executable for Docker shell-script contract tests: {exc}")
-    if result.returncode != 0 or result.stdout != "frame-compare-bash-ok":
-        pytest.skip("bash is not executable for Docker shell-script contract tests")
-    return bash_path
+    candidates = [shutil.which("bash")]
+    git_path = shutil.which("git")
+    if git_path is not None:
+        executable_suffix = Path(git_path).suffix
+        git_bash = Path(git_path).parent.parent / "bin" / f"bash{executable_suffix}"
+        if git_bash.is_file():
+            candidates.append(str(git_bash))
+
+    for bash_path in dict.fromkeys(candidate for candidate in candidates if candidate):
+        try:
+            result = subprocess.run(
+                [bash_path, "-lc", "printf frame-compare-bash-ok"],
+                check=False,
+                capture_output=True,
+                timeout=BASH_PROBE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0 and result.stdout == b"frame-compare-bash-ok":
+            return bash_path
+
+    pytest.skip("an executable Bash is required for shell-script contract tests")
 
 
 def bash_path_or_skip(bash: str, path: Path) -> str:
