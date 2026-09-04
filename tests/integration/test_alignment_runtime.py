@@ -316,6 +316,9 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
     by_clip = {result.comparison_clip: result for result in results}
     _assert_applied_offset(by_clip[reference.name], frame_offset=0)
     _assert_applied_offset(by_clip[comparison.name], frame_offset=-2)
+    for result in by_clip.values():
+        assert result.stability is not None
+        assert result.stability.valid_windows == 5
 
 
 @pytest.mark.integration

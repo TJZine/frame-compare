@@ -146,6 +146,8 @@ def _commit_fake_update_source(repo: Path) -> None:
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=10.0)
+    disabled_hooks = repo / ".git" / "disabled-hooks"
+    disabled_hooks.mkdir()
     subprocess.run(
         ["git", "-C", str(repo), "add", "src/frame_compare", "pyproject.toml"],
         check=True,
@@ -162,14 +164,50 @@ def _commit_fake_update_source(repo: Path) -> None:
             "user.email=tests@frame-compare.invalid",
             "-c",
             "commit.gpgsign=false",
+            "-c",
+            f"core.hooksPath={disabled_hooks}",
             "commit",
-            "--no-verify",
             "-qm",
             "test source",
         ],
         check=True,
         timeout=10.0,
     )
+
+
+def test_commit_fake_update_source_ignores_ambient_prepare_commit_msg_hook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hooks = tmp_path / "ambient-hooks"
+    hooks.mkdir()
+    prepare_commit_msg = hooks / "prepare-commit-msg"
+    prepare_commit_msg.write_text("#!/bin/sh\nexit 73\n", encoding="utf-8")
+    prepare_commit_msg.chmod(prepare_commit_msg.stat().st_mode | stat.S_IXUSR)
+    global_config = tmp_path / "global.gitconfig"
+    subprocess.run(
+        ["git", "config", "--file", str(global_config), "core.hooksPath", str(hooks)],
+        check=True,
+        timeout=10.0,
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    repo = tmp_path / "repo"
+    package = repo / "src" / "frame_compare"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+
+    _commit_fake_update_source(repo)
+
+    result = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10.0,
+    )
+    assert result.stdout.strip()
 
 
 @pytest.mark.integration
