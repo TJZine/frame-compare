@@ -121,7 +121,6 @@ async def deliver_slowpics_webhook(
     cancellation_event = Event()
     worker = asyncio.create_task(
         _run_slowpics_webhook_worker(
-            _deliver_slowpics_webhook_sync,
             webhook_url=webhook_url,
             slowpics_url=slowpics_url,
             resolver=resolved_resolver,
@@ -153,12 +152,25 @@ async def deliver_slowpics_webhook(
 
 
 async def _run_slowpics_webhook_worker(
-    sync_delivery: Callable[..., SlowpicsWebhookResult],
-    **kwargs: object,
+    *,
+    webhook_url: str,
+    slowpics_url: str,
+    resolver: WebhookResolver,
+    connector: WebhookConnector,
+    sleeper: WebhookSleeper | None,
+    cancellation_event: Event,
 ) -> SlowpicsWebhookResult | Exception:
     """Run the thread-backed delivery while consuming its private stop signal."""
     try:
-        return await asyncio.to_thread(sync_delivery, **kwargs)
+        return await asyncio.to_thread(
+            _deliver_slowpics_webhook_sync,
+            webhook_url=webhook_url,
+            slowpics_url=slowpics_url,
+            resolver=resolver,
+            connector=connector,
+            sleeper=sleeper,
+            cancellation_event=cancellation_event,
+        )
     except _WebhookDeliveryCancelled:
         # A shielded task that raises after its owner is cancelled is reported
         # as an unhandled exception by newer asyncio versions.  The owning
