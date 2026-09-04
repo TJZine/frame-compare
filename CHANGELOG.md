@@ -13,6 +13,14 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 - Populate guarded GitHub releases from the matching validated changelog section
   instead of a placeholder, and verify the release body through publication.
+- Preserve successful TMDB variant results when another lookup fails, while keeping
+  credentials and request details out of diagnostics.
+- Isolate VSView child imports from caller-controlled Python paths and repair stable
+  `doctor` guidance links.
+- Make phase, render-failure, and slow.pics webhook cancellation outcomes deterministic,
+  including repeated cancellation while a thread-backed request is draining.
+- Require signed, canonical Windows update manifests; verify signatures before parsing,
+  bind updates to an exact clean source/version, and bound archive extraction.
 
 ### Changed
 
@@ -20,16 +28,20 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   documented named-output API. The supported dependency is the base `vsview` extra;
   its `recommended` and `full` extras are not selected.
 - Preserve generated-session L-SMASH-Works loading, Frame Compare overlays, source
-  ordering, audio alignment semantics, and terminal confirmation while removing the
-  old viewer compatibility bootstrap. VSView's BestSource workspace remains UI-only
-  and does not replace Frame Compare's analysis, probe, render, index, or cache-key
-  source loader.
+  ordering, audio offset sign and review conventions, and terminal confirmation while
+  removing the old viewer compatibility bootstrap. VSView's BestSource workspace
+  remains UI-only and does not replace Frame Compare's analysis, probe, render, index,
+  or cache-key source loader.
 - Rename interactive diagnostic and machine-readable identifiers to VSView, including
   `audio_alignment.use_vsview`, the `vsview` doctor check, and the
   `browser_clipboard_or_vsview` dry-run field. Numeric error codes remain unchanged.
 - Bump the shared alignment reuse cache to schema v2 with neutral interactive origins;
   schema-v1 entries are ignored and recomputed. Run-local `manual_overrides.toml`
   remains a v1 file with the same path and offset semantics.
+- Replace unbounded full-track audio correlation with selected-stream timeline windows,
+  fixed FFT/window/scoring budgets, sequential extraction, requested-rate confidence
+  scoring, and majority consensus. Requests that cannot be analyzed safely remain
+  unapplied with an explicit diagnostic instead of using a truncated estimate.
 - Refresh the locked dependency graph and update the coordinated uv toolchain to
   0.12.9 for the v0.6.0 release.
 
@@ -42,6 +54,12 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Replace `audio_alignment.use_vspreview = true` with
   `audio_alignment.use_vsview = true` in authored configuration. The old key is no
   longer accepted, and the shared alignment reuse cache is rebuilt as schema v2.
+- Computed audio-alignment cache entries are recomputed under the new bounded estimator.
+  Media without a reliable selected-stream duration, or settings outside its fixed work
+  budget, now continue through the existing manual/VSView or best-effort rejection path.
+- Windows code-only updates now accept only the canonical signed manifest and fail
+  closed when the installed version cannot be established; use a complete portable
+  reinstall for legacy or unverifiable bundles.
 
 ## [0.5.0]
 
