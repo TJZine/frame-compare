@@ -214,10 +214,10 @@ def _render_filmstrip(
                 <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}" aria-label="{_esc_attr(_frame_filmstrip_label(frame))}" title="{_esc_attr(_frame_filmstrip_label(frame))}">
                     <span class="rv-filmstrip-thumb">
                         <img src="{_esc_attr(frame["images"][0]["src"] if frame["images"] else "")}" loading="lazy" alt="{_esc_attr(first_clip_label)} - Frame {_esc_attr(frame["number"])}">
-                        <span class="rv-filmstrip-accent" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}"></span>
                     </span>
                     <span class="rv-filmstrip-caption">
                         <span class="rv-filmstrip-number">{_esc_text(frame["number"])}</span>
+                        <span aria-hidden="true">·</span>
                         <span class="rv-filmstrip-label">{_esc_text(_frame_category_text(frame))}</span>
                     </span>
                 </button>

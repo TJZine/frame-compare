@@ -23,11 +23,6 @@
     --danger-muted: rgba(231, 140, 136, 0.1);
     --warning: #e2b875;
     --warning-muted: rgba(226, 184, 117, 0.1);
-    --category-bright: #bea36b;
-    --category-dark: #9b8bb6;
-    --category-motion: #78a698;
-    --category-cut: #bd8b82;
-    --category-random: #8b929b;
     --shadow-floating: 0 4px 16px rgba(0, 0, 0, 0.24);
 
     /* Spacing & Sizes */
@@ -1647,7 +1642,6 @@ select optgroup {
 }
 
 .rv-filter-chip {
-    --category-accent: var(--text-muted);
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
@@ -1663,15 +1657,6 @@ select optgroup {
 
 .rv-filter-chip:hover {
     border-color: var(--border-hover);
-}
-
-.rv-filter-chip::before {
-    content: "";
-    width: 0.45rem;
-    height: 0.45rem;
-    border-radius: 999px;
-    background: var(--category-accent);
-    flex: 0 0 auto;
 }
 
 .rv-filter-chip.active {
@@ -1745,12 +1730,10 @@ select optgroup {
 }
 
 .rv-filmstrip-thumb {
-    position: relative;
+    position: absolute;
+    inset: 0;
     display: block;
-    flex: 1 1 0;
-    min-height: 0;
     background: black;
-    width: 100%;
     overflow: hidden;
 }
 
@@ -1762,73 +1745,23 @@ select optgroup {
     display: block;
 }
 
-/* Thumbnail Category Accent top bar */
-.rv-filmstrip-accent {
+.rv-filmstrip-caption {
     position: absolute;
-    top: 0;
     left: 0;
     right: 0;
-    height: 2px;
-    z-index: 5;
-    background: var(--category-accent, var(--text-muted));
-}
-
-/* Color definitions for category accents */
-.rv-filmstrip-accent[data-category="quantile_bright"],
-.rv-filmstrip-accent[data-category="Bright"],
-.rv-filter-chip[data-category="quantile_bright"],
-.rv-filter-chip[data-category="Bright"] {
-    --category-accent: var(--category-bright);
-}
-
-.rv-filmstrip-accent[data-category="quantile_dark"],
-.rv-filmstrip-accent[data-category="Dark"],
-.rv-filter-chip[data-category="quantile_dark"],
-.rv-filter-chip[data-category="Dark"] {
-    --category-accent: var(--category-dark);
-}
-
-.rv-filmstrip-accent[data-category="scene-cut"],
-.rv-filmstrip-accent[data-category="scene_cut"],
-.rv-filmstrip-accent[data-category="Scene Cuts"],
-.rv-filter-chip[data-category="scene-cut"],
-.rv-filter-chip[data-category="scene_cut"],
-.rv-filter-chip[data-category="Scene Cuts"] {
-    --category-accent: var(--category-cut);
-}
-
-.rv-filmstrip-accent[data-category="motion"],
-.rv-filmstrip-accent[data-category="Motion"],
-.rv-filter-chip[data-category="motion"],
-.rv-filter-chip[data-category="Motion"] {
-    --category-accent: var(--category-motion);
-}
-
-.rv-filmstrip-accent[data-category="random"],
-.rv-filmstrip-accent[data-category="Random"],
-.rv-filter-chip[data-category="random"],
-.rv-filter-chip[data-category="Random"] {
-    --category-accent: var(--category-random);
-}
-
-.rv-filmstrip-accent[data-category="selected"],
-.rv-filmstrip-accent[data-category="Selected"],
-.rv-filter-chip[data-category="selected"],
-.rv-filter-chip[data-category="Selected"] {
-    --category-accent: var(--text-secondary);
-}
-
-.rv-filmstrip-caption {
+    bottom: 0;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    flex: 0 0 24px;
+    justify-content: flex-start;
+    gap: 4px;
     min-width: 0;
-    padding: 2px 6px;
+    padding: 10px 4px 3px;
+    color: var(--text-primary);
+    font-size: var(--text-xs);
+    line-height: 16px;
     pointer-events: none;
-    background: var(--bg-control);
-    border-top: 1px solid var(--border);
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.65) 45%, rgba(0, 0, 0, 0.85));
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
 .rv-filmstrip-number {

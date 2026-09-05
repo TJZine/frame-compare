@@ -383,6 +383,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const paletteInset = window.innerWidth <= 768 ? 8 : (window.innerWidth <= 992 ? 12 : 16);
         const labelInset = window.innerWidth <= 768 ? 8 : 12;
         const approximately = (first, second) => Math.abs(first - second) <= 1;
+        const originalFilmstripSize = ReportViewer.state.filmstripSize;
+        document.documentElement.dataset.filmstripImageSpace = String(
+            [['compact', 120], ['normal', 150], ['large', 210]].every(([size, width]) => {
+                ReportViewer.setFilmstripSize(size, { save: false });
+                const item = document.querySelector('.rv-filmstrip-item');
+                const thumb = item.querySelector('.rv-filmstrip-thumb');
+                const caption = item.querySelector('.rv-filmstrip-caption');
+                const cardRect = item.getBoundingClientRect();
+                const thumbRect = thumb.getBoundingClientRect();
+                const captionRect = caption.getBoundingClientRect();
+                return approximately(cardRect.width, width)
+                    && approximately(cardRect.height, cardRect.width * 10 / 16)
+                    && approximately(thumbRect.width, item.clientWidth)
+                    && approximately(thumbRect.height, item.clientHeight)
+                    && approximately(captionRect.width, thumbRect.width)
+                    && approximately(captionRect.bottom, thumbRect.bottom)
+                    && captionRect.top >= thumbRect.top
+                    && window.getComputedStyle(caption).position === 'absolute';
+            })
+        );
+        ReportViewer.setFilmstripSize(originalFilmstripSize, { save: false });
         const primaryControls = document.querySelector('.rv-primary-controls');
         const frameControls = document.querySelector('.rv-frame-controls');
         const modeControls = document.querySelector('.rv-mode-controls');
@@ -904,6 +925,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes is not None
     assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
     assert parser.document_attributes["data-select-affordances"] == "true"
+    assert parser.document_attributes["data-filmstrip-image-space"] == "true"
     assert parser.document_attributes["data-source-hud-viewport-stable"] == "true"
     assert parser.document_attributes["data-source-hud-wraps"] == "true"
     assert parser.document_attributes["data-diff-source-hud-visible"] == "true"

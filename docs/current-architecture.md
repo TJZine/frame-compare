@@ -683,8 +683,10 @@ zero.
 Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
 readable text tiers, restrained brass comparison markers, and neutral utility states.
 The renderer supplies decorative inline SVG control icons and a frame-number/category
-caption rail shared by all filmstrip sizes. Palette orientation rotates its existing
-icon through CSS, while the viewer updates the accessible action label. The floating
+caption overlay shared by all filmstrip sizes. Thumbnails use the full card interior;
+frame numbers and categories sit over a shallow bottom gradient. Category filters
+retain text and counts without colored dots or thumbnail stripes. Palette orientation
+rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
 palette does not reserve stage height. Spatial alignment status is labeled `Offset`
 to distinguish image translation from temporal source-frame alignment.
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
@@ -733,8 +735,8 @@ DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rail
 preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
 current-source label. Direct image-inspection markers share one Projection Brass signal
 token family; utility controls and lens labels use neutral states, while semantic status
-and muted frame-category colors remain separate. Grip pointer dragging uses capture, while its
-arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+colors remain separate. Frame categories use text labels. Grip pointer dragging uses
+capture, while its arrow-key operation supports a larger Shift step, clamps to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.
 Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries

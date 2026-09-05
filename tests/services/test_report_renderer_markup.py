@@ -234,13 +234,18 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     assert scene_cut_filter.attrs["aria-pressed"] == "false"
     assert parser.selects["frame-select"].options[1].attrs["data-category"] == "scene-cut"
     assert "Source frame 10</span>" not in html
-    assert find_all(
+    item = require_first(
         document,
-        tag="span",
-        class_name="rv-filmstrip-accent",
+        tag="button",
+        class_name="rv-filmstrip-item",
         attr_name="data-category",
         attr_value="scene-cut",
     )
+    assert require_first(item, class_name="rv-filmstrip-number").text == "20"
+    assert require_first(item, class_name="rv-filmstrip-label").text == "Scene Cuts"
+    assert selected_filter.text == "Selected (1)"
+    assert scene_cut_filter.text == "Scene Cuts (1)"
+    assert not find_all(document, class_name="rv-filmstrip-accent")
 
 
 def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
@@ -513,13 +518,6 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
         document,
         tag="button",
         class_name="rv-filmstrip-item",
-        attr_name="data-category",
-        attr_value="__all__",
-    )
-    assert find_all(
-        document,
-        tag="span",
-        class_name="rv-filmstrip-accent",
         attr_name="data-category",
         attr_value="__all__",
     )
