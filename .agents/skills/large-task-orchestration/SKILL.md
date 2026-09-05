@@ -48,8 +48,8 @@ Route work deliberately:
   judgment, cross-boundary comprehension, complex diagnosis, or proof
   interpretation; return unresolved product, ownership, public-contract,
   architecture, or proof decisions to planning;
-- use a fresh read-only reviewer for the final independent review when the work is
-  high risk, novel, broad, or supported by weak verification evidence.
+- use a fresh read-only reviewer when the runbook's Review criteria justify an
+  independent assessment or the user requested it; state the concrete reason.
 
 Parallel writers must own disjoint files and non-overlapping symbols. Serialize
 changes to shared files, composition roots, public contracts, generated authority,
@@ -81,11 +81,13 @@ clean reviewer for an unchanged surface by habit.
 2. Dispatch only decision-complete write units, respecting dependency order and
    exclusive ownership.
 3. Continue useful, non-overlapping controller work while subagents run.
-4. On each result, inspect the actual diff, rerun the unit's focused proof, record
-   material decisions, and update the plan before releasing dependent work.
-5. Stop and replan if a worker finds an ownership conflict, unplanned
-   public-contract change, invalid invariant, unexpected dependency, or proof it
-   cannot run. A worker may report the evidence but must not choose the new contract.
+4. On each result, inspect the diff and verification output. Reuse still-current
+   results under the runbook; rerun affected proof when integration invalidates it.
+   Record material decisions and update the plan before releasing dependent work.
+5. Resolve worker-reported ownership, contract, invariant, dependency, or proof
+   questions within the user's authorized task. Update affected units before their
+   dependent work proceeds. Ask the user only for consequential decisions still
+   outside that authorization; continue independent work while waiting.
 6. After integration, run the runbook's risk-matched final gate and the independent
    review when required. Adjudicate findings through `review-request`.
 

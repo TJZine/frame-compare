@@ -505,7 +505,9 @@ Keep these integrations at their current owners:
 - browser auto-open for generated reports, slow.pics browser opening, clipboard
   copy, report-confirmed upload prompting, and report/slow.pics browser
   precedence rules:
-  `frame_compare.cli.entry`
+  `frame_compare.cli.run_command`; `frame_compare.cli.entry` owns registration and
+  dependency wiring, `frame_compare.cli.cli_helpers` owns browser/clipboard adapters,
+  and `frame_compare.cli.history_command` owns explicit recorded-report opening
 - host-side Docker report/URL opening helper for the default compose mount
   layout and `https://slow.pics/...` URLs:
   `tools/open_docker_host_target.py`
@@ -907,7 +909,11 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 - Keep CLI import time light; do not eagerly import VS-dependent runtime code in `cli/entry.py`.
 - Keep config/env loading centralized; do not add ad hoc env reads deep in domain logic.
-- The main pipeline passes HTTP clients from `runner` into orchestration, while diagnostics still create their own short-lived client for reachability checks.
+- The orchestration coordinator creates and closes the default shared HTTP client
+  when no client is injected through `RunDependencies`; injected clients remain
+  caller-owned. `runner` bridges sync callers to async orchestration. Diagnostics
+  create short-lived reachability clients, and webhook delivery keeps its isolated
+  pinned HTTPS transport.
 - Keep persistence deterministic: stable ordering, stable JSON/TOML output, atomic writes where owners already use them.
 - Respect the layered import contracts and sibling-domain independence.
 - Treat Docker and Windows portable flows as first-class runtime surfaces, not optional afterthoughts.

@@ -1,6 +1,6 @@
 ---
 name: architecture-boundaries
-description: Use when changing module ownership, composition roots, hotspot files, import layers, or any refactor that could expand responsibilities across Frame Compare's architecture.
+description: Assess Frame Compare responsibility, composition, and import boundaries when adding or moving behavior between owners. Hotspot location alone does not require an architecture workflow for nonbehavioral edits.
 ---
 
 # Architecture Boundaries
@@ -13,7 +13,7 @@ layered, and explicit without forcing either monoliths or artificial fragmentati
 ## Use This Skill For
 
 - Changes touching composition roots: [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py), [`src/frame_compare/runner.py`](../../../src/frame_compare/runner.py), or [`src/frame_compare/orchestration/coordinator.py`](../../../src/frame_compare/orchestration/coordinator.py)
-- Work in current hotspots listed in [`docs/current-architecture.md`](../../../docs/current-architecture.md)
+- Behavior or ownership changes in current hotspots listed in [`docs/current-architecture.md`](../../../docs/current-architecture.md)
 - Changes to `importlinter.ini` or top-level package boundaries
 - New coordinators, services, repositories, adapters, or output owners
 - Refactors that move logic between CLI, config, orchestration, analysis, render, services, VapourSynth, or filesystem owners
@@ -38,17 +38,18 @@ layered, and explicit without forcing either monoliths or artificial fragmentati
 - Do not extract solely for line count, test convenience, or a hypothetical future
   consumer. Do not keep accumulating unrelated behavior merely because extraction
   would add a file.
-- If ownership is unclear, stop and resolve the boundary before coding.
+- Resolve ownership from current source, callers, contracts, and task decisions.
+  Escalate only consequential choices outside the authorized scope that remain
+  unresolved after investigation, following the runbook.
 
 ## Architecture Attention
 
-Use physical production LOC only as a review trigger, never as a decomposition
-verdict. Exclude generated assets.
-
-- Above 500 lines: inspect the full owner and record the compact disposition below.
-- Above 800 lines, or for a named hotspot or composition root: require one fresh
-  `reviewer` architecture review before closeout.
-- Below either threshold: still extract when the change introduces a distinct owner.
+Use physical production LOC and named hotspots as attention signals. Exclude
+generated assets. Inspect the affected lifecycle, callers, and invariants; read the
+whole owner when needed to assess a behavior or ownership change. Record the
+compact disposition below when adding or moving responsibilities. File size alone
+does not require it, an extraction, or an independent reviewer. Follow the runbook's
+Review Policy for consequential risks that merit a second assessment.
 
 ```text
 Owner | Existing responsibility | New behavior
@@ -61,6 +62,9 @@ abstractions created only to reduce file length.
 
 ## Required Reading
 
+Read the relevant sections first; expand when affected contracts, callers, or
+invariants remain unclear. Existing task context need not be reread.
+
 1. [`docs/ENGINEERING_RUNBOOK.md`](../../../docs/ENGINEERING_RUNBOOK.md)
 2. [`docs/current-architecture.md`](../../../docs/current-architecture.md)
 3. [`docs/current-cli-contract.md`](../../../docs/current-cli-contract.md) when CLI/config behavior is involved
@@ -68,12 +72,15 @@ abstractions created only to reduce file length.
 
 ## Boundary Routing
 
-- If the change touches config, generated caches, run folders, presets, reports, or filesystem persistence, also load `persistence-boundaries`.
-- If the change touches FFmpeg, VapourSynth, TMDB, slow.pics, Docker, or Windows portable/release behavior, also load `runtime-integration-boundaries`.
-- If the change touches generated HTML reports, overlay text, screenshot naming, or user-visible output formatting, also load `report-output-patterns`.
-- If the change touches Python typing, Pydantic schemas, HTTPX clients, Typer/Rich wiring, or typed internal seams, also load `python-quality-boundaries`.
-- If the change touches CLI commands, options, streams, JSON mode, help text, exit codes, or config-persistence flags, also load `cli-contract-boundaries`.
-- If the change adds or reshapes tests, fixtures, markers, subprocess checks, HTTP mocks, or property-based tests, also load `python-test-design`.
+Load another skill only when the changed boundary needs guidance not already in
+context. These routes are conditional, not a checklist for every architecture task.
+
+- If the change alters persisted schemas, recovery, writes, or managed paths, consult `persistence-boundaries`; presentation-only report work does not require it.
+- If the change touches FFmpeg, VapourSynth, TMDB, slow.pics, Docker, or Windows portable/release behavior, consult relevant guidance in `runtime-integration-boundaries`.
+- If the change touches generated HTML reports, overlay text, screenshot naming, or user-visible output formatting, consult relevant guidance in `report-output-patterns`.
+- If the change touches Python typing, Pydantic schemas, HTTPX clients, Typer/Rich wiring, or typed internal seams, consult relevant guidance in `python-quality-boundaries`.
+- If the change touches CLI commands, options, streams, JSON mode, help text, exit codes, or config-persistence flags, consult relevant guidance in `cli-contract-boundaries`.
+- If the change adds or reshapes tests, fixtures, markers, subprocess checks, HTTP mocks, or property-based tests, consult relevant guidance in `python-test-design`.
 
 ## Discovery Pattern
 
@@ -92,10 +99,10 @@ abstractions created only to reduce file length.
 
 - Use the exact runbook verification gate for the classified risk; do not copy or
   omit individual commands from that canonical recipe.
-- Run full verification for hotspots, architecture authority, public CLI/config
-  contracts, Docker/runtime, Windows portable/release, or import-layer changes.
+- Use the runbook's behavior-based gate and nonbehavioral exception; preserve
+  required proof for changed public contracts, runtime, release, and import layers.
 - Add the targeted proof for the owner seam; the full suite does not replace it.
-- Use one independent review for the triggered hotspot surface. Repeat review only
+- Use independent review under the runbook's Review Policy. Repeat review only
   after a material finding or material review-surface change.
 
 ## Common Mistakes
