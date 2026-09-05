@@ -42,6 +42,28 @@ layered, and explicit without forcing either monoliths or artificial fragmentati
   Escalate only consequential choices outside the authorized scope that remain
   unresolved after investigation, following the runbook.
 
+## Apply Design Principles
+
+- Apply DRY to shared business knowledge and invariants. Reuse the owner of a
+  configuration or output contract; similar syntax alone does not justify
+  coupling analysis, render, and services that have different reasons to change.
+- Use small interfaces at real boundaries. SOLID does not require a protocol per
+  class, inheritance, or extension points for hypothetical features. Prefer
+  composition and explicit collaborators; substitutes must preserve failure,
+  ordering, cancellation, and cleanup contracts as well as successful results.
+- Apply KISS to readability and total maintenance cost, not minimum lines or
+  files. Follow existing conventions before introducing configurable machinery.
+- Apply YAGNI to speculative capabilities. Scoped refactoring and meaningful
+  regression coverage keep current code safe to change and are not speculative
+  features. Remove obsolete paths replaced by the change; report concrete
+  remaining debt and its consequence without expanding into unrelated cleanup.
+
+Use these as decision criteria within the current task, not an additional review
+pass. They interpret the maintainer's
+[SOLID/DRY/KISS reference](https://scalastic.io/en/solid-dry-kiss/) alongside
+[Fowler's YAGNI clarification](https://martinfowler.com/bliki/Yagni.html) and
+[Google's design/complexity guidance](https://google.github.io/eng-practices/review/reviewer/looking-for.html).
+
 ## Architecture Attention
 
 Use physical production LOC and named hotspots as attention signals. Exclude
