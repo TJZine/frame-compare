@@ -1436,7 +1436,9 @@ converted to this sign convention before consensus evidence, hints, caching, and
   or equal to `0.0`, both defaulting to `0.0`. They control the consensus window
   shape used by computed alignment. A configured window length is retained, and a
   configured stride defines the candidate grid before bounded candidates are sampled
-  across the complete shared selected-audio-stream timeline. With both values at
+  across the complete shared selected-audio-stream timeline. When the window length
+  is configured and the stride is zero, the window length is also used as the stride,
+  producing a contiguous candidate grid before bounded sampling. With both values at
   zero, long inputs use five distributed 30-second windows; short inputs use their
   complete shared audio duration.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,

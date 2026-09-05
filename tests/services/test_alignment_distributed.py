@@ -370,11 +370,17 @@ def test_weak_intro_does_not_hide_strong_late_content() -> None:
     assert result.valid_windows == 4
 
 
-def test_plan_uses_selected_stream_duration_and_configured_window_grid() -> None:
+@pytest.mark.parametrize("stride_seconds", [0, 60])
+def test_plan_uses_selected_stream_duration_and_configured_window_grid(
+    stride_seconds: int,
+) -> None:
     plan = alignment_audio.plan_audio_analysis(
         _stream(7200),
         _stream(300),
-        config=AlignmentConfig(window_length_seconds=60, window_stride_seconds=60),
+        config=AlignmentConfig(
+            window_length_seconds=60,
+            window_stride_seconds=stride_seconds,
+        ),
     )
 
     assert isinstance(plan, AudioAnalysisPlan)
