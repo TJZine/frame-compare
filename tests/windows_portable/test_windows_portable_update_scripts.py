@@ -179,6 +179,9 @@ def test_commit_fake_update_source_ignores_ambient_prepare_commit_msg_hook(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
     hooks = tmp_path / "ambient-hooks"
     hooks.mkdir()
     prepare_commit_msg = hooks / "prepare-commit-msg"
@@ -661,6 +664,8 @@ def test_windows_portable_build_update_validates_runtime_metadata_at_process_bou
     exe = _powershell_exe()
     if exe is None:
         pytest.skip("pwsh/powershell not available")
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
 
     fake_repo = tmp_path / "repo"
     package = fake_repo / "src" / "frame_compare"
