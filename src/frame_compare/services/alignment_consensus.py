@@ -224,43 +224,50 @@ def estimate_planned_consensus_offset(
     evidence: list[AlignmentWindowEvidence] = []
     for spec in plan.windows:
         try:
-            window = analysis_window_loader(spec)
-            origin_delta = window.reference_start_sample - window.comparison_start_sample
-            local_estimate = estimate_alignment_offset(
-                window.reference,
-                window.comparison,
-                config=local_config,
-                alignment_offset_bounds_samples=(
-                    -margin - origin_delta,
-                    margin - origin_delta,
-                ),
-            )
-            local_offset = (
-                local_estimate.subsample_offset
-                if local_estimate.subsample_offset is not None
-                else local_estimate.sample_offset
-            )
-            global_analysis_offset = local_offset + origin_delta
-            del window
+            window: AudioWindow | None = None
+            try:
+                window = analysis_window_loader(spec)
+                origin_delta = window.reference_start_sample - window.comparison_start_sample
+                local_estimate = estimate_alignment_offset(
+                    window.reference,
+                    window.comparison,
+                    config=local_config,
+                    alignment_offset_bounds_samples=(
+                        -margin - origin_delta,
+                        margin - origin_delta,
+                    ),
+                )
+                local_offset = (
+                    local_estimate.subsample_offset
+                    if local_estimate.subsample_offset is not None
+                    else local_estimate.sample_offset
+                )
+                global_analysis_offset = local_offset + origin_delta
+            finally:
+                del window
 
             score = local_estimate.score
             if plan.sample_rate != plan.requested_sample_rate:
-                scoring_window = scoring_window_loader(spec, round(global_analysis_offset))
-                scoring_origin_delta = (
-                    scoring_window.reference_start_sample - scoring_window.comparison_start_sample
-                )
-                correction_radius = math.ceil(plan.requested_sample_rate / plan.sample_rate)
-                correction, score = refine_aligned_score(
-                    scoring_window.reference,
-                    scoring_window.comparison,
-                    preprocessing_mode=config.preprocessing_mode,
-                    correction_bounds_samples=(
-                        max(-correction_radius, -requested_limit - scoring_origin_delta),
-                        min(correction_radius, requested_limit - scoring_origin_delta),
-                    ),
-                )
-                requested_offset = scoring_origin_delta + correction
-                del scoring_window
+                scoring_window: AudioWindow | None = None
+                try:
+                    scoring_window = scoring_window_loader(spec, round(global_analysis_offset))
+                    scoring_origin_delta = (
+                        scoring_window.reference_start_sample
+                        - scoring_window.comparison_start_sample
+                    )
+                    correction_radius = math.ceil(plan.requested_sample_rate / plan.sample_rate)
+                    correction, score = refine_aligned_score(
+                        scoring_window.reference,
+                        scoring_window.comparison,
+                        preprocessing_mode=config.preprocessing_mode,
+                        correction_bounds_samples=(
+                            max(-correction_radius, -requested_limit - scoring_origin_delta),
+                            min(correction_radius, requested_limit - scoring_origin_delta),
+                        ),
+                    )
+                    requested_offset = scoring_origin_delta + correction
+                finally:
+                    del scoring_window
             else:
                 requested_offset = round(global_analysis_offset)
         except AudioAlignmentError:

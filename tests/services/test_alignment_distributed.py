@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import weakref
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -250,6 +252,68 @@ def test_coarse_lag_is_scored_at_requested_rate(
     assert not result.applied
     assert result.diagnostic == "low_confidence"
     assert result.score == pytest.approx(-1.0)
+
+
+def test_failed_coarse_window_is_released_before_next_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    windows: list[weakref.ReferenceType[AudioWindow]] = []
+
+    def load_window(_spec: AudioWindowSpec) -> AudioWindow:
+        assert not windows or windows[-1]() is None
+        window = AudioWindow(np.ones(20), np.ones(20), 0, 0)
+        windows.append(weakref.ref(window))
+        return window
+
+    def fail_estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        raise AudioAlignmentError("invalid coarse window")
+
+    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", fail_estimate)
+
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=_plan(rate=100, count=2),
+        config=AlignmentConfig(sample_rate=100, max_offset_seconds=1),
+        fps=Fraction(24),
+        analysis_window_loader=load_window,
+        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+    )
+
+    assert result.valid_windows == 0
+    assert len(windows) == 2
+
+
+def test_failed_scoring_window_is_released_before_next_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    windows: list[weakref.ReferenceType[AudioWindow]] = []
+
+    def load_scoring_window(_spec: AudioWindowSpec, _offset: int) -> AudioWindow:
+        assert not windows or windows[-1]() is None
+        window = AudioWindow(np.ones(20), np.ones(20), 0, 0)
+        windows.append(weakref.ref(window))
+        return window
+
+    def fail_refinement(*_args: object, **_kwargs: object) -> tuple[int, float]:
+        raise AudioAlignmentError("invalid scoring window")
+
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(0, 1.0, 2.0),
+    )
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", fail_refinement)
+    plan = _plan(rate=100, count=2)
+
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=replace(plan, requested_sample_rate=200),
+        config=AlignmentConfig(sample_rate=200, max_offset_seconds=1),
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: AudioWindow(np.ones(20), np.ones(20), 0, 0),
+        scoring_window_loader=load_scoring_window,
+    )
+
+    assert result.valid_windows == 0
+    assert len(windows) == 2
 
 
 @pytest.mark.parametrize("sign", [-1, 1])
