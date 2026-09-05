@@ -100,9 +100,10 @@ use neutral selected states. The compact viewport palette floats over the stage 
 reserving another toolbar row; its orientation, zoom, alignment, and fullscreen buttons
 have tooltips. `Offset: none` means no spatial image offset is applied to the pair, not
 that temporal frame alignment failed. The filmstrip keeps the comparison frame number
-and selection category over a shallow bottom gradient at every thumbnail size, leaving
-the full thumbnail area available to the image. Categories use text labels instead of
-colored stripes or filter dots; filter counts and the brass selection border remain.
+and selection category centered together over a shallow bottom gradient at every
+thumbnail size, leaving the full thumbnail area available to the image. Categories use
+text labels instead of colored stripes or filter dots; filter counts and the brass
+selection border remain.
 Keyboard focus uses a light neutral outline. The header shows only the generation
 date; hover over it or open Report Information for the exact timestamp.
 
