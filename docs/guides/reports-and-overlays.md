@@ -101,7 +101,8 @@ reserving another toolbar row; its orientation, zoom, alignment, and fullscreen 
 have tooltips. `Offset: none` means no spatial image offset is applied to the pair, not
 that temporal frame alignment failed. The filmstrip keeps the comparison frame number
 and selection category in a solid caption rail at every thumbnail size.
-Keyboard focus uses a light neutral outline.
+Keyboard focus uses a light neutral outline. The header shows only the generation
+date; hover over it or open Report Information for the exact timestamp.
 
 Source selectors, the optional HUD, and baked overlays serve different contexts. Selectors
 identify the source at the point of selection. The HUD stays anchored to the viewport

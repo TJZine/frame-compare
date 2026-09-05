@@ -5,6 +5,8 @@ from __future__ import annotations
 import html as html_module
 import re
 
+import pytest
+
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_js
@@ -253,6 +255,29 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
     assert html.count('id="report-data"') == 1
 
 
+@pytest.mark.parametrize(
+    ("timestamp", "date_label"),
+    [
+        ("2026-09-04T14:29:22.256990+00:00", "2026-09-04"),
+        ("2026-09-04T23:59:59.123456-04:00", "2026-09-04"),
+        ("2026-09-04T00:00:00Z", "2026-09-04"),
+        ('unknown "<date>"', 'unknown "<date>"'),
+    ],
+)
+def test_build_html_shortens_header_date_and_preserves_exact_timestamp(
+    report_payload: ReportPayload, timestamp: str, date_label: str
+) -> None:
+    payload: ReportPayload = {**report_payload, "generated_at": timestamp}
+    html = build_html(payload)
+    metadata = require_first(parse_elements(html), class_name="rv-meta")
+    date = require_first(metadata, tag="span")
+
+    assert date.text == date_label
+    assert date.attrs["title"] == timestamp
+    assert parse_info_modal(html).general["Generated"] == timestamp
+    assert script_payload(html)["generated_at"] == timestamp
+
+
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     tags = parse_start_tags(html)
@@ -265,7 +290,9 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     info_icon = require_first(info_button, tag="svg")
     inspector_icon = require_first(inspector_button, tag="svg")
 
-    assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
+    metadata = require_first(elements, class_name="rv-meta")
+    assert "• 2 frames • 2 clips" in metadata.text
+    assert require_first(metadata, tag="span").text == "2026-05-22"
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report information"

@@ -795,6 +795,9 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   alignment. Filmstrip captions show the comparison frame number and selection category
   at every thumbnail size, with the full original frame label available on hover and
   in the frame selector. The viewport palette remains floating and adds no reserved row.
+- The header shows the generation date in `YYYY-MM-DD` form using the timestamp's
+  recorded date, without timezone conversion. The exact timestamp remains in the date
+  tooltip, Report Information, and payload; unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.

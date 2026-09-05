@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
@@ -448,6 +449,10 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
+    try:
+        generated_date = datetime.fromisoformat(generated_at).date().isoformat()
+    except ValueError:
+        generated_date = generated_at
     inspector_button = f'<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)">{_render_icon("M3 3h14v14H3z M12 3v14")}<span>Inspector</span></button>'
     info_button = f'<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report information">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M10 9v4 M10 6.5v.1")}</button>'
     help_button = f'<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M8 7a2 2 0 0 1 4 0c0 2-2 2-2 4 M10 13.5v.1")}</button>'
@@ -455,7 +460,7 @@ def _render_header(
     return f"""        <header class="rv-header">
             <div>
                 <div class="rv-title">{_esc_text(title)}</div>
-                <div class="rv-meta">Generated {_esc_text(generated_at)} • {frame_count} frames • {clip_count} clips</div>
+                <div class="rv-meta">Generated <span title="{_esc_attr(generated_at)}">{_esc_text(generated_date)}</span> • {frame_count} frames • {clip_count} clips</div>
             </div>
             <div class="rv-header-right">
                 {slowpics_block}{inspector_button} {info_button} {help_button}

@@ -688,7 +688,8 @@ icon through CSS, while the viewer updates the accessible action label. The floa
 palette does not reserve stage height. Spatial alignment status is labeled `Offset`
 to distinguish image translation from temporal source-frame alignment.
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
-shadow.
+shadow. The renderer shortens the header generation timestamp to its recorded ISO date;
+the exact timestamp remains available in the tooltip, Report Information, and payload.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
