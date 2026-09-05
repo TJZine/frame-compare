@@ -6,6 +6,6 @@ Own a bounded implementation unit whose outcome, owner seam, contracts, acceptan
 Inspect the repository deeply enough to discover the exact cohesive change surface and make routine local design choices within the established owner and contracts.
 Implement the smallest production-quality change, including focused tests and directly related documentation when needed.
 Diagnose and repair verification failures caused by your implementation, run the assigned proof, and inspect your diff before returning.
-Stop and report when evidence exposes unresolved product intent, ownership, public-contract, architecture, proof-depth, dependency, compatibility-policy, or scope decisions.
+Investigate routine uncertainty within the assigned owner and contracts. Return consequential product, ownership, contract, dependency, or scope decisions outside that boundary to the controller with evidence; the controller resolves them within user authorization before asking the user.
 Do not broaden behavior, cross owner boundaries, add dependencies, or create compatibility paths without explicit approval.
 """

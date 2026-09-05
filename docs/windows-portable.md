@@ -226,12 +226,24 @@ Apply a code-only update:
 frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
-The updater verifies the signature and every payload hash before replacement. It accepts
-only a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
+The updater bounds the archive and its two fixed authentication entries, then verifies
+the signature before parsing the manifest or inspecting and extracting payload entries.
+It verifies every payload hash before replacement. Unsigned packages have no interactive
+bypass. Archive compressed size, entry count, per-entry and total
+uncompressed size, and compression ratio are bounded before extraction. It accepts only
+a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
 pre-native-panel schema-2 bundles, as well as missing, malformed, or different
 media-runtime fingerprints, before applying any change. That refusal cannot be
 overridden safely because a code-only ZIP does not carry replacement native media
-components; install the complete portable ZIP instead.
+components. An unavailable installed app version also fails closed instead of skipping
+the signed source-version range; install the complete portable ZIP instead.
+
+Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
+`pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
+source selection. They also require the supplied complete bundle's application version
+and complete packaged `app/src/frame_compare` tree to match that committed source before
+borrowing its compatibility fingerprints. Commit the intended release source and rebuild
+the complete bundle before creating the matching update artifact.
 
 When the fingerprint differs, install the complete portable ZIP for that release. Keep
 **Generated data location** external when reports and reusable state must survive that

@@ -372,7 +372,7 @@ function loadViewer({ clipCount, savedState = null }) {
         },
     };
     viewer.dom.btnInfo.setAttribute('aria-label', 'Report information');
-    viewer.dom.btnInfo.setAttribute('title', 'Report Info');
+    viewer.dom.btnInfo.setAttribute('title', 'Report information');
     viewer.dom.btnInspector.setAttribute('aria-controls', 'rv-inspector');
     viewer.dom.btnInspector.setAttribute('aria-expanded', 'false');
     viewer.dom.btnInspector.setAttribute('aria-label', 'Open Inspector');
@@ -513,7 +513,7 @@ const summary = {};
     assert.equal(viewer.state.alignX, 5);
     assert.equal(viewer.state.alignY, -2);
     assert.deepEqual(Object.keys(viewer.state.pairAlignments).sort(), ['0:1', '1:0']);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: custom +5x -2y');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +5x -2y');
     summary.restoreFourClip = {
         clipCount: viewer.clipCount(),
         leftClipIdx: viewer.state.leftClipIdx,
@@ -1132,19 +1132,19 @@ const summary = {};
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: custom +4x +5y');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
 
     viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
     assert.equal(viewer.state.alignX, 4);
     assert.equal(viewer.state.alignY, 5);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: custom +4x +5y');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +4x +5y');
 
     viewer.setRightClip(2);
     assert.equal(viewer.state.alignX, -1);
@@ -1242,16 +1242,16 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
     viewer.viewport.setAlignmentPreset('left-1');
     assert.equal(viewer.state.alignX, -1);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: preset left 1px');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: preset left 1px');
     viewer.viewport.setAlignmentPreset('none');
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Aligned: none');
+    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
     summary.alignmentStatus = {
-        neutral: 'Aligned: none',
-        preset: 'Aligned: preset left 1px',
+        neutral: 'Offset: none',
+        preset: 'Offset: preset left 1px',
         reset: viewer.dom.alignmentStatus.textContent,
     };
 }
@@ -1327,12 +1327,12 @@ const summary = {};
     viewer.setPaletteOrientation('horizontal');
     assert.equal(viewer.state.paletteOrientation, 'horizontal');
     assert.equal(viewer.dom.viewportPalette.getAttribute('data-orientation'), 'horizontal');
-    assert.equal(viewer.dom.btnPaletteOrientation.textContent, '↔');
+    assert.equal(viewer.dom.btnPaletteOrientation.getAttribute('aria-label'), 'Switch to vertical orientation');
 
     viewer.setPaletteOrientation('vertical');
     assert.equal(viewer.state.paletteOrientation, 'vertical');
     assert.equal(viewer.dom.viewportPalette.getAttribute('data-orientation'), 'vertical');
-    assert.equal(viewer.dom.btnPaletteOrientation.textContent, '↕');
+    assert.equal(viewer.dom.btnPaletteOrientation.getAttribute('aria-label'), 'Switch to horizontal orientation');
 
     const { viewer: viewer2 } = loadViewer({
         clipCount: 4,

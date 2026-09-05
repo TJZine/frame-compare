@@ -4,26 +4,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 
-import numpy as np
-
-from frame_compare.services.alignment_correlation import correlate_audio
 from frame_compare.services.errors import AudioAlignmentError
-
-
-def cross_correlate(
-    reference: np.ndarray,
-    comparison: np.ndarray,
-    max_offset_samples: int | None = None,
-) -> tuple[int, float]:
-    """Find offset using cross-correlation."""
-    estimate = correlate_audio(
-        reference,
-        comparison,
-        max_offset_samples=max_offset_samples,
-        correlation_mode="raw_fft",
-        preprocessing_mode="none",
-    )
-    return estimate.sample_offset, estimate.score
 
 
 def samples_to_frames(

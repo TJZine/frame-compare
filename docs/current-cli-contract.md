@@ -791,6 +791,17 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
   changing DOM order, native controls, keyboard behavior, or ARIA semantics.
+- Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
+  alignment. Filmstrip captions show the comparison frame number and selection category
+  at every thumbnail size, with the full original frame label available on hover and
+  in the frame selector. The viewport palette remains floating and adds no reserved row.
+- Filmstrip captions center the frame-number/category group over a shallow bottom
+  gradient without reducing thumbnail image space or increasing card height.
+  Category identification uses text in captions and filters; filters keep their counts,
+  and the selected thumbnail retains its brass border.
+- The header shows the generation date in `YYYY-MM-DD` form using the timestamp's
+  recorded date, without timezone conversion. The exact timestamp remains in the date
+  tooltip, Report Information, and payload; unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.
@@ -1423,9 +1434,16 @@ converted to this sign convention before consensus evidence, hints, caching, and
   defaulting to `1.0`. It gates ambiguous correlation peaks.
 - `window_length_seconds` and `window_stride_seconds` remain floats greater than
   or equal to `0.0`, both defaulting to `0.0`. They control the consensus window
-  shape used by computed alignment.
+  shape used by computed alignment. A configured window length is retained, and a
+  configured stride defines the candidate grid before bounded candidates are sampled
+  across the complete shared selected-audio-stream timeline. When the window length
+  is configured and the stride is zero, the window length is also used as the stride,
+  producing a contiguous candidate grid before bounded sampling. With both values at
+  zero, long inputs use five distributed 30-second windows; short inputs use their
+  complete shared audio duration.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,
-  defaulting to `1`. It gates whether enough windows produced valid estimates.
+  defaulting to `1`. It gates whether enough selected windows produced correlation
+  estimates before the independent confidence and ambiguity gates run.
 - `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting
   to `1.0`. It gates whether enough windows agree on the selected offset.
 - `refinement_mode = "disabled" | "local"` selects whether local offset
@@ -1438,6 +1456,37 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `comparison_streams` is a mapping from comparison filename stem to non-negative
   audio stream ordinal, defaulting to an empty map. Matching entries select the
   comparison clip audio stream for that stem.
+
+Computed alignment probes timing for the selected audio stream, rather than using the
+container video duration. Stream `duration_ts` and time base are authoritative when
+available, followed by stream duration metadata and Matroska duration tags. Container
+duration is never substituted for missing selected-stream duration; an unavailable or
+empty selected-stream timeline produces a non-applied diagnostic. Each selected window
+uses up to five seconds of fixed input-seek preroll. Early windows decode from the
+selected-stream origin, resample once, and trim by output sample index; later windows use
+an absolute post-decode timestamp trim before resampling. This avoids codec- and
+FFmpeg-version-dependent early AAC seek grids while keeping long-media decoding bounded.
+
+Analysis has an internal fixed peak FFT limit of 2,097,152 points, a total budget of
+16,777,216 FFT points, and a maximum of 16 windows. It first uses the configured sample
+rate. When a normal long request cannot fit that FFT bound, bounded 8 kHz or 4 kHz
+correlation locates each candidate, then a separately decoded aligned overlap at the
+configured rate refines the coarse lag over the bounded rate-ratio neighborhood and
+supplies its confidence score; coarse-rate confidence never decides acceptance.
+Requested-rate scoring is separately capped at 3,000,000 samples per pair
+and 15,000,000 samples in total. Reference and comparison pairs are extracted and
+processed sequentially. Confidence uses overlap-local mean centering and requires at
+least three samples and 5% of the shorter window, preventing tiny boundary overlaps
+from appearing perfectly correlated. Consensus considers every successfully correlated
+selected window, selects the largest agreeing group, uses score only to break equal-size
+groups, and gates the winner by its median window score. A schema-valid window, offset,
+minimum-window, or requested-rate scoring request
+that cannot fit the fixed budget remains valid configuration but produces the explicit
+non-applied `analysis_budget_exceeded` result. Normal optional VSView/manual review and
+best-effort rendering policy then handle it like other rejected computed alignments.
+Because the fixed window cap samples a long configured grid, highly localized matching
+content that falls between selected windows can still produce a conservative false
+negative rather than unbounded scanning.
 
 ## Persistence Rules
 

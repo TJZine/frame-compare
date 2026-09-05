@@ -48,6 +48,15 @@ def test_run_dependencies_default_clock_is_aware_utc() -> None:
     assert RunDependencies().clock().tzinfo is UTC
 
 
+def test_run_artifacts_warning_defaults_are_isolated() -> None:
+    first = RunArtifacts()
+    second = RunArtifacts()
+
+    first.warnings.append("first-run warning")
+
+    assert second.warnings == []
+
+
 def test_execute_run_initializes_local_dependencies_without_mutating_injected_deps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

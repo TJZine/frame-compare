@@ -21,6 +21,7 @@ from frame_compare.vsview.adapter import (
     VSViewSessionRequest,
     _build_vsview_child_env,
     _check_startup_readiness,
+    _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
@@ -61,14 +62,46 @@ def test_child_environment_isolated_and_preserves_warning_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYTHONWARNINGS", "error::ResourceWarning")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    monkeypatch.setenv("PYTHONSTARTUP", "/caller/startup.py")
+    monkeypatch.setenv("PYTHONINSPECT", "1")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.delenv("NO_COLOR", raising=False)
     parent_env = os.environ.copy()
 
     child_env = _build_vsview_child_env(no_color=True)
 
     assert child_env["PYTHONWARNINGS"] == "error::ResourceWarning"
+    assert child_env["PYTHONSAFEPATH"] == "1"
+    assert child_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONPATH" not in child_env
+    assert "PYTHONHOME" not in child_env
+    assert "PYTHONSTARTUP" not in child_env
+    assert "PYTHONINSPECT" not in child_env
+    assert "PYTHONUSERBASE" not in child_env
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
+
+
+def test_windows_portable_child_env_relies_on_managed_embedded_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+    monkeypatch.setenv("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "managed-fingerprint")
+    monkeypatch.setenv("PYTHONPATH", r"C:\bundle\app\src;C:\bundle\app\site-packages")
+
+    child_env = _build_vsview_child_env(no_color=False)
+
+    assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
+    assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
+    assert "PYTHONPATH" not in child_env
+    build_script = (
+        Path(__file__).parents[2] / "tools" / "windows_portable" / "build_portable.ps1"
+    ).read_text(encoding="utf-8")
+    assert r'"..\\app\\site-packages"' in build_script
+    assert r'"..\\app\\src"' in build_script
+    assert '"import site"' in build_script
 
 
 @pytest.mark.parametrize(
@@ -142,6 +175,44 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     assert "eps[0].load()" in probe_code
     assert "raise RuntimeError" in probe_code
     assert "compat" not in probe_code
+    assert mock_run.call_args.kwargs["cwd"] == Path(sys.executable).resolve().parent
+
+
+@pytest.mark.parametrize(
+    "python_args",
+    [
+        ("-c", "import json"),
+        ("-m", "json.tool", "--help"),
+    ],
+)
+def test_managed_python_children_ignore_hostile_inherited_python_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    python_args: tuple[str, ...],
+) -> None:
+    hostile_python_path = tmp_path / "hostile-python-path"
+    hostile_python_path.mkdir()
+    sitecustomize_marker = tmp_path / "hostile-sitecustomize-imported"
+    shadow_marker = tmp_path / "hostile-json-imported"
+    (hostile_python_path / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(sitecustomize_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    (hostile_python_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(hostile_python_path))
+    child_env = _build_vsview_child_env(no_color=False)
+
+    returncode = _run_vsview_command(
+        [sys.executable, *python_args],
+        env=child_env,
+    )
+
+    assert returncode == 0
+    assert not sitecustomize_marker.exists()
+    assert not shadow_marker.exists()
 
 
 def test_launch_rejects_missing_panel_entry_point(
@@ -221,10 +292,10 @@ def test_launch_uses_managed_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
-    )
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
     process = MagicMock()
     process.__enter__.return_value = process
     process.wait.return_value = 0
@@ -242,6 +313,13 @@ def test_launch_uses_managed_launcher(
         "frame_compare.vsview.launcher",
         str(session.script_path),
     ]
+    probe_env = mock_run.call_args.kwargs["env"]
+    launch_env = popen.call_args.kwargs["env"]
+    assert probe_env == launch_env
+    assert "PYTHONPATH" not in launch_env
+    assert "PYTHONHOME" not in launch_env
+    assert launch_env["PYTHONSAFEPATH"] == "1"
+    assert launch_env["PYTHONNOUSERSITE"] == "1"
 
 
 def test_disabled_launch_writes_vsview_named_session_without_starting_process(
@@ -521,9 +599,7 @@ def test_generated_script_suppresses_only_redundant_vsview_load_success() -> Non
             (logging.ERROR, "Failed to load content: %r", True),
         )
         for level, message, expected in cases:
-            record = logging.LogRecord(
-                logger.name, level, "loader.py", 1, message, (), None
-            )
+            record = logging.LogRecord(logger.name, level, "loader.py", 1, message, (), None)
             assert bool(logger.filter(record)) is expected
     finally:
         for item in added_filters:

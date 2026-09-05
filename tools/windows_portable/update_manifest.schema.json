@@ -59,7 +59,7 @@
     },
     "signature_file": {
       "type": "string",
-      "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[A-Za-z0-9._/-]+$"
+      "const": "update-manifest.sig"
     },
     "payload_root": {
       "type": "string",

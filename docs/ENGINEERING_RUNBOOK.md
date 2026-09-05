@@ -135,7 +135,14 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update
 
 The Windows commands require a Windows host with PowerShell and the expected
 toolchain. In non-Windows environments, treat them as documented-only unless a
-compatible runner is available. A code-only update does not carry native media
+compatible runner is available. `build_portable.ps1` packages application source
+and builds wheel metadata from committed `HEAD`, excluding uncommitted changes in
+`src/frame_compare` and `pyproject.toml`. Record the packaged SHA and relevant
+working-tree differences; a successful bundle check does not verify excluded edits.
+Other packaging inputs may come from the worktree, so a SHA alone does not describe
+a dirty local build. Use a candidate commit when authorized or record that candidate
+packaging proof remains outstanding; this recipe does not authorize a commit.
+A code-only update does not carry native media
 artifacts. `build_update.ps1` accepts only a native-panel-capable full bundle with
 `bundle_info.schema_version` 3, and copies the complete bundle's required
 media-runtime fingerprint into the signed update manifest. The installed updater
@@ -162,6 +169,22 @@ owner, rationale, expiry, and removal condition; do not add an unrecorded
 
 ## Verification Policy
 
+Choose verification from the behavior and contracts changed, using the paths below
+as discovery aids. Comments, formatting, and demonstrably nonbehavioral edits may
+use Fast Local Sanity even in a hotspot or runtime directory; explain briefly why
+the broader gate adds no relevant proof. Uncertain runtime, public-contract, or
+release impact still requires the matching stronger gate.
+
+Inspect affected owners, callers, contracts, and existing tests before narrowing a
+gate. Read the relevant authority sections first and broaden when dependencies or
+invariants remain unclear. Do not omit a changed boundary to reduce context.
+
+Verification remains current when its output was inspected and the checked code,
+inputs, dependencies, and relevant environment are unchanged. Reuse that evidence,
+including a worker's observed results. Rerun affected checks after integration or
+other changes invalidate it; run additional integration proof for interactions not
+covered by unit results. Do not repeat an unchanged clean gate solely at closeout.
+
 ### Fast Local Sanity
 
 Use for docs-only changes and small internal refactors that do not touch runtime behavior.
@@ -185,8 +208,8 @@ Required for:
 
 - CLI behavior changes
 - config loading or env-var behavior changes
-- changes in `orchestration/`, `render/`, `vs/`, `services/`
-- changes to hot spots listed in the architecture doc
+- behavior changes in `orchestration/`, `render/`, `vs/`, `services/`
+- behavior or ownership changes to hot spots listed in the architecture doc
 - architecture or CLI/config authority changes that can affect product behavior
 
 Run:
@@ -199,9 +222,56 @@ uv run --no-sync pytest -q
 uv run --no-sync lint-imports --config importlinter.ini
 ```
 
+### Report Viewer Verification
+
+For changed viewer state, reuse the focused `tests/services/test_report_*.py`
+coverage and JavaScript harnesses through `tests/services/node_harness.py`, which
+uses the locked Node runtime. Changes to browser initialization, DOM interaction,
+keyboard/focus behavior, or layout also need real-browser proof:
+
+```bash
+uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py
+```
+
+The tests discover Chrome/Chromium on PATH or native macOS Chrome; `REPORT_BROWSER`
+can select an executable explicitly. Inspect relevant skips: when no browser is
+available, pytest success does not prove browser behavior. CI's `report-browser`
+job preflights the executable and requires this smoke. Record an observed matching
+SHA result when using hosted proof. Reuse a full-suite result if the relevant browser
+tests actually ran; do not repeat the same check solely as a separate closeout gate.
+Use focused visual/manual inspection for changed appearance or interactions the
+existing smoke does not exercise. Node, markup, and browser smoke each prove only
+their asserted behavior. Viewer work does not by itself require native media proof.
+
+### Python Distribution Verification
+
+Changes to build configuration, package inclusion, bundled assets, distribution
+metadata, or installed entry points require distribution proof in addition to the
+applicable Python checks. Use the existing `package` job in `.github/workflows/ci.yml`;
+this POSIX local equivalent uses a fresh output directory and install environment:
+
+```bash
+distribution_dir=$(mktemp -d "${TMPDIR:-/tmp}/frame-compare-dist.XXXXXX")
+uv build --out-dir "$distribution_dir"
+uv venv "$distribution_dir/venv" --python 3.13
+"$distribution_dir/venv/bin/python" scripts/verify_distribution.py "$distribution_dir"
+uv pip install --python "$distribution_dir/venv/bin/python" "$distribution_dir"/*.whl
+"$distribution_dir/venv/bin/frame-compare" version
+"$distribution_dir/venv/bin/frame-compare" --help
+```
+
+The verifier requires exactly one wheel and sdist. Inspect the built artifacts and
+installed behavior affected by the task; the verifier and help/version smoke do not
+exercise every packaged feature. On Windows use the corresponding `Scripts`
+executables or an observed matching-SHA CI package result. This route does not prove
+Windows portable layout, native plugins, updater behavior, or signing. Runtime
+dependency changes also need the matching dependency audit and deployment proof.
+
 ### Docker / Runtime Verification
 
-Required when changing:
+Required when changing runtime behavior, dependencies, or executable integration
+contracts in these surfaces. Route by the changed external call even when its
+owner is outside a listed directory:
 
 - `Dockerfile`
 - `docker-compose*.yml`
@@ -210,16 +280,33 @@ Required when changing:
 - Docker workflow/contract tests that validate Docker/runtime script or profile semantics
 - `src/frame_compare/render/**`
 - `src/frame_compare/vs/**`
+- native metric evaluation in `src/frame_compare/analysis/metrics.py` or `metric_strategies.py`
+- FFmpeg/ffprobe execution in `src/frame_compare/services/alignment_audio.py`
+- shared process behavior in `src/frame_compare/utils/subproc.py` affecting media calls
 - integration tests that validate real VS/FFmpeg behavior
 
-Canonical command:
+Pure calculations or serialization in these owners use the applicable Python gate
+when the native execution contract is unchanged. The test suite may mock missing
+VapourSynth and skip unavailable real integrations; inspect what actually ran.
+
+Canonical command for the default Docker media runtime:
 
 ```bash
 bash tools/verify_docker_integration.sh
 ```
 
-If this path cannot be run locally, record it as documented-only and rely on
-`.github/workflows/docker-integration.yml`.
+If this path cannot be run locally, record it as documented-only until an observed
+matching-SHA run of `.github/workflows/docker-integration.yml` supplies the proof.
+Inspect its event/path filters: a PR need not trigger it for every relevant owner
+(including alignment services or the workflow file itself). Obtain an authorized
+manual run when required; an absent or skipped CI job is not successful proof.
+
+`src/frame_compare/vsview/**` also owns an external plugin/process/UI boundary.
+Pure metadata/result validation uses focused Python proof and the applicable full
+gate. Changes to plugin discovery, launch/lifetime, Qt callbacks, or generated native
+sessions require compatible-host integration proof: use the Linux GUI verifier or
+Windows portable route for the platform changed. The default Docker gate does not
+cover VSView. Retain the offscreen/visible/physical-host distinctions below.
 
 For a coordinated media-runtime change, the gate additionally owns immutable
 source/wheel hashes and byte sizes, native SONAME/symlink preservation,
@@ -469,6 +556,11 @@ Do not create a generalized workflow verifier unless repeated, measured failures
 justify its maintenance cost. Do not run the full product suite solely because
 workflow prose changed. Use full verification when the same change also modifies
 product code, executable tooling, architecture, or a public CLI/config contract.
+Corrections to an ownership description that only reflect existing code use this
+structural route; an intentional architecture or public behavior change still uses
+the stronger gate. For skill edits, validate front matter and references, then check
+representative matching and adjacent nonmatching tasks against the description and
+instructions. Structural validity alone does not establish good task routing.
 
 ## Risk Tiers
 
@@ -515,8 +607,9 @@ Use the lightest workflow that still protects the outcome:
 - Low risk: one agent, focused proof, and a local diff audit.
 - Medium risk: one agent plans and implements. Add one independent final review
   only when the change is novel, broad, weakly covered, or hard to validate.
-- High risk: explicit plan, implementation, risk-matched verification, and one
-  independent final review.
+- High risk: explicit plan, implementation, and risk-matched verification. Add one
+  independent review when a consequential risk needs a second assessment under
+  Review Policy; the tier alone does not require a reviewer.
 - Separate planner: only for ambiguous seams, cross-session work, or genuinely
   large multi-boundary changes.
 - Repeated evaluator/reviewer loops: only after a material finding or measured
@@ -534,7 +627,9 @@ judgment, cross-boundary comprehension, complex diagnosis, or proof interpretati
 Return unresolved product, ownership, public-contract, architecture, or proof
 decisions to planning. Plans describe risk and constraints rather than permanently
 binding a model; the controller selects the current role at dispatch, reviews the
-diff, and reverifies the result. Keep delegation depth shallow.
+diff, and confirms current verification under Verification Policy. Keep delegation
+depth shallow. An approved write boundary may be established by the main agent
+within the user's authorized task; it is not a separate user approval gate.
 
 For genuinely large multi-unit work, explicitly use the
 `large-task-orchestration` skill. The main task remains the authoritative
@@ -592,19 +687,28 @@ Use this as the default routing shortcut before exploring deeper:
 | Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
 | Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, `.github/workflows/docker-integration.yml`, Docker workflow/contract tests, runtime integration tests | High | Full verification plus Docker/runtime verification |
+| Report viewer behavior | `docs/current-architecture.md` Report Viewer section | `services/report/**`, Node harnesses, `tests/browser/` | High | Full verification plus relevant browser/visual proof; reuse browser tests already exercised |
+| Python distribution contents or entry points | this runbook + `pyproject.toml` | build settings, bundled assets, `scripts/verify_distribution.py`, CI `package` job | High | Full verification plus distribution verification; add platform gates only for affected deployments |
 | Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
 | Workflow-only authority change | this runbook | `AGENTS.md`, repo-local skills, `.codex/config.toml`, `.codex/agents/**`, workflow-only runbook sections | Medium | Workflow/documentation verification |
 | Architecture or public contract authority change | affected authority doc | `docs/current-architecture.md`, `docs/current-cli-contract.md`, related product/tests | High | Full verification |
 
-### Stop And Ask
+### Continue Or Escalate
 
-Stop and get maintainer confirmation if any of these are unclear:
+Carry authorized work through implementation, applicable verification, and repair
+of failures caused by the change. Resolve routine ownership, implementation, and
+verification questions from current source, tests, relevant authority sections,
+and existing task decisions. Record consequential conclusions briefly.
 
-- product invariants
-- deployment/runtime model
-- security-sensitive boundaries
-- conflicting workflow docs
-- whether an import-level API should be treated as stable
+Ask the maintainer only when investigation leaves a consequential choice outside
+the established task: product intent, a compatibility promise, deployment/runtime
+model, a security or data-loss boundary, or irreconcilable authoritative guidance.
+Existing task authorization remains valid. Explicit release/production approval
+boundaries elsewhere in this runbook still apply.
+
+Workers return decisions outside their assigned boundary to the main agent. The
+main agent resolves them within the user's authorization before escalating to the
+user. Continue independent work while a genuinely required decision is pending.
 
 ## Discrepancy Handling
 
@@ -614,8 +718,9 @@ Stop and get maintainer confirmation if any of these are unclear:
 - Observed code, config, and successfully executed commands outrank stale prose in
   `docs/current-architecture.md`, `docs/current-cli-contract.md`, `README.md`,
   `CONTRIBUTING.md`, `docs/DECISIONS.md`, historical plans, and cached review material.
-- When a doc/code mismatch looks intentional, risky, or not safely resolvable in the
-  same pass, stop and ask the maintainer instead of guessing.
+- Investigate doc/code mismatches using the task and current evidence. Ask only
+  when a consequential intended contract remains unresolved; stale prose alone
+  does not require confirmation.
 - Correct stale active docs in the same pass once the current-state behavior is clear.
 
 ## Planning And Handoff
@@ -663,22 +768,26 @@ Review should prioritize:
 
 Changes in `orchestration/coordinator.py`, `errors.py`, `services/report/**`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
 
-Production LOC is an architecture-attention signal, not a decomposition rule.
-Exclude generated assets. For a touched owner above 500 lines, inspect the full file
-and record `Owner | Existing responsibility | New behavior | Decision | Evidence`.
-For a touched owner above 800 lines, a named hotspot, or a composition root, require
-one fresh `reviewer` architecture review. A cohesive owner may grow; a smaller file
-must still split when it gains a distinct responsibility.
+Production LOC and named hotspots are attention signals. For behavior or ownership
+changes in a large owner, inspect enough of its lifecycle, callers, and invariants
+to judge cohesion; expand to the full owner when needed. Record a brief disposition
+when the change adds or moves responsibilities. Neither the 500/800-line thresholds
+nor a file's name requires an independent review or an extraction by itself.
 
-Review is risk-triggered, not universal ceremony. One independent final review is
-the default high-risk gate. Review a plan only when its seam or public contract is
-still expensive to get wrong. Do not require both same-reviewer closure and a fresh
-clean review for an unchanged artifact.
+Use one independent review when requested or when a consequential unresolved risk
+benefits from a second assessment: novel security/data-loss boundaries, complex
+concurrency or native lifetime changes, broad contract migrations, or weak proof
+of changed behavior. State the concrete reason before dispatch. Small, well-proved
+changes do not require a reviewer because of their location or risk label alone.
+Review a plan separately only when its seam or public contract is still expensive
+to get wrong. Do not require both same-reviewer closure and a fresh clean review
+for an unchanged artifact.
 
 ## Subagent Transparency
 
-When dispatching a subagent, record the selected role and its
-`.codex/agents/<role>.toml` path. At task closeout, list each role used with
+When dispatching a subagent, resolve its `config_file` from `.codex/config.toml`
+and record the selected role and resolved TOML path; role keys need not match file
+names. At task closeout, list each role used with
 the `model` and `model_reasoning_effort` read from that TOML. The child role's
 `CONFIGURED ROLE` opening line is a visible confirmation of the selected role;
 the TOML remains the authoritative configuration and avoids duplicating model
@@ -707,8 +816,10 @@ Update or remove stale references immediately. Do not leave half-live commands i
 
 ## Repo-Specific Anti-Debt Rules
 
-- Keep config and env-var interpretation inside `config/*`, `cli/entry.py`, and preflight/bootstrap owners.
-- Keep HTTP integrations inside `services.metadata`, `services.publishers`, or explicit diagnostics code.
+- Keep config and env-var interpretation inside config, CLI command, and preflight/bootstrap owners.
+- Keep HTTP integration at the current external-boundary owners: TMDB lookup behind
+  the metadata facade, publishing, isolated webhook delivery, and diagnostics.
+  The coordinator owns default shared-client creation; callers own injected clients.
 - Use existing atomic-write owners for config and cache persistence paths.
 - Preserve lazy CLI import boundaries that avoid importing VS-heavy modules at CLI import time.
 - Keep cohesive behavior with its current owner. When a hotspot gains a distinct

@@ -249,7 +249,8 @@ recovery requirement.
   interactively confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, alignment settings that affect
-  computed offsets, and the scoped media-runtime alignment fingerprint. For the
+  computed offsets, an internal estimator-policy revision, and the scoped
+  media-runtime alignment fingerprint. For the
   managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
   lineage change therefore misses cleanly rather than reusing offsets computed by a
   different decoder/tool build. Interactively confirmed
@@ -417,6 +418,22 @@ previous-offset reuse policy. Exact-match computed audio alignment cache hits ar
 treated as deterministic and can be reused independently of the human
 confirmed-offset policy; `previous_offsets` governs only interactively confirmed
 offset reuse.
+
+Computed alignment work is planned against typed timing for each selected audio stream.
+`alignment_audio` owns stream-relative duration/origin normalization, the fixed peak and
+total FFT-work budgets, requested-rate scoring budgets, distributed window selection,
+and seek-with-preroll followed by absolute post-decode trimming. Requested-rate
+correlation is preferred. When it cannot fit, a bounded coarse pair finds the lag, is
+released, and a fresh aligned pair at the configured rate refines the rate-ratio
+neighborhood and supplies confidence, so only one decoded pair and one correlation
+workspace are live. `alignment_consensus`
+translates local unequal-window lag through the two stream origins before applying the
+public sign convention. All successfully correlated selected windows participate in
+majority consensus, with score used only for ties and the winning group's median score
+used for confidence gating. Requests outside the fixed internal work budget produce a typed non-applied
+`analysis_budget_exceeded` consensus rather than widening config validation, truncating
+the requested search silently, or attempting unbounded work. The estimator-policy token
+includes this strategy so older computed cache entries are not reused.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -488,7 +505,9 @@ Keep these integrations at their current owners:
 - browser auto-open for generated reports, slow.pics browser opening, clipboard
   copy, report-confirmed upload prompting, and report/slow.pics browser
   precedence rules:
-  `frame_compare.cli.entry`
+  `frame_compare.cli.run_command`; `frame_compare.cli.entry` owns registration and
+  dependency wiring, `frame_compare.cli.cli_helpers` owns browser/clipboard adapters,
+  and `frame_compare.cli.history_command` owns explicit recorded-report opening
 - host-side Docker report/URL opening helper for the default compose mount
   layout and `https://slow.pics/...` URLs:
   `tools/open_docker_host_target.py`
@@ -656,12 +675,25 @@ CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths,
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
 reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
-tab stop. Custom view-mode, fit, timeline-size, and lens-option radio groups use
+tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The header Help dialog is the single persistent
-shortcut reference; the timeline is the final visible report region. One responsive
+shortcut reference; the filmstrip is the final visible report region. One responsive
 Inspector width token owns both desktop drawer width and
 stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
 zero.
+
+Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
+readable text tiers, restrained brass comparison markers, and neutral utility states.
+The renderer supplies decorative inline SVG control icons and a frame-number/category
+caption overlay shared by all filmstrip sizes. Thumbnails use the full card interior;
+frame numbers and categories sit over a shallow bottom gradient. Category filters
+retain text and counts without colored dots or thumbnail stripes. Palette orientation
+rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
+palette does not reserve stage height. Spatial alignment status is labeled `Offset`
+to distinguish image translation from temporal source-frame alignment.
+Keyboard focus uses a neutral light outline, and the image canvas has no decorative
+shadow. The renderer shortens the header generation timestamp to its recorded ISO date;
+the exact timestamp remains available in the tooltip, Report Information, and payload.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
@@ -703,10 +735,10 @@ Lens group, which owns zoom, fixed status, and stage-clamped settings. The displ
 lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
 DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
 preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
-current-source label. Report interaction highlights, including lens markers and its grip, share one
-Projection Brass signal token family while semantic status and frame-category colors
-remain separate. Grip pointer dragging uses capture, while its
-arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+current-source label. Direct image-inspection markers share one Projection Brass signal
+token family; utility controls and lens labels use neutral states, while semantic status
+colors remain separate. Frame categories use text labels. Grip pointer dragging uses
+capture, while its arrow-key operation supports a larger Shift step, clamps to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.
 Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
@@ -821,9 +853,9 @@ Runtime ownership matrix:
 | Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
-| Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
-| Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
-| Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
+| Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and FFmpeg/channel-aware seek/extraction policy | `frame_compare.services.alignment_audio` |
+| Audio correlation, unequal-length lag mapping, overlap-normalized confidence, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
+| Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
@@ -877,7 +909,11 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 - Keep CLI import time light; do not eagerly import VS-dependent runtime code in `cli/entry.py`.
 - Keep config/env loading centralized; do not add ad hoc env reads deep in domain logic.
-- The main pipeline passes HTTP clients from `runner` into orchestration, while diagnostics still create their own short-lived client for reachability checks.
+- The orchestration coordinator creates and closes the default shared HTTP client
+  when no client is injected through `RunDependencies`; injected clients remain
+  caller-owned. `runner` bridges sync callers to async orchestration. Diagnostics
+  create short-lived reachability clients, and webhook delivery keeps its isolated
+  pinned HTTPS transport.
 - Keep persistence deterministic: stable ordering, stable JSON/TOML output, atomic writes where owners already use them.
 - Respect the layered import contracts and sibling-domain independence.
 - Treat Docker and Windows portable flows as first-class runtime surfaces, not optional afterthoughts.

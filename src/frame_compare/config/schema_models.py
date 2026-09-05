@@ -95,7 +95,7 @@ class AudioAlignmentConfig(BaseModel):
 
     enable: bool = True
     sample_rate: int = Field(default=8000, ge=4000, le=48000)
-    max_offset_seconds: float = Field(default=30.0, ge=1.0)
+    max_offset_seconds: float = Field(default=30.0, ge=1.0, allow_inf_nan=False)
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
@@ -105,8 +105,8 @@ class AudioAlignmentConfig(BaseModel):
     channel_strategy: Literal["mono_downmix", "best_channel"] = "mono_downmix"
     confidence_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     ambiguity_peak_ratio: float = Field(default=1.0, ge=1.0)
-    window_length_seconds: float = Field(default=0.0, ge=0.0)
-    window_stride_seconds: float = Field(default=0.0, ge=0.0)
+    window_length_seconds: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    window_stride_seconds: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
     minimum_valid_windows: int = Field(default=1, ge=1)
     consensus_minimum_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
     refinement_mode: Literal["disabled", "local"] = "disabled"

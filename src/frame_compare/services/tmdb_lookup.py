@@ -260,22 +260,25 @@ async def _request_tmdb_json(
     config: MetadataConfig,
     client: httpx.AsyncClient,
 ) -> object:
+    failure: TmdbError | None = None
     try:
         response = await _request_tmdb_search(url, params, config, client)
         _raise_for_tmdb_response(response)
         return _decode_tmdb_json(response)
-    except httpx.TimeoutException as e:
-        raise TmdbError("Request timed out") from e
-    except httpx.RequestError as e:
-        # Avoid including the request URL (which can contain the API key) in error messages.
-        raise TmdbError("Request failed") from e
-    except httpx.HTTPStatusError as e:
-        raise TmdbError(f"HTTP error occurred: {e.response.status_code}") from e
-    except Exception as e:
-        if isinstance(e, TmdbError | TmdbRateLimitedError):
+    except httpx.TimeoutException:
+        failure = TmdbError("Request timed out")
+    except httpx.RequestError:
+        failure = TmdbError("Request failed")
+    except httpx.HTTPStatusError as exc:
+        failure = TmdbError(f"HTTP error occurred: {exc.response.status_code}")
+    except Exception as exc:
+        if isinstance(exc, TmdbError | TmdbRateLimitedError):
             raise
-        # Avoid leaking request details (e.g., query params) via exception stringification.
-        raise TmdbError("Unexpected error during TMDB lookup") from e
+        failure = TmdbError("Unexpected error during TMDB lookup")
+
+    # Raise after leaving the handler so the raw HTTPX exception and its
+    # credential-bearing request URL are not retained as exception context.
+    raise failure
 
 
 async def _search_tmdb_endpoint(
