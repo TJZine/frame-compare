@@ -641,12 +641,12 @@ const Viewport = {
         const yText = this.formatSignedPixels(this.viewer.state.alignY, 'y');
         const hasOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
 
-        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'Aligned: none';
-        if (this.viewer.state.alignmentPreset === 'custom') return `Aligned: custom ${xText} ${yText}`;
+        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'Offset: none';
+        if (this.viewer.state.alignmentPreset === 'custom') return `Offset: custom ${xText} ${yText}`;
         if (this.viewer.state.alignmentPreset !== 'none') {
-            return `Aligned: preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
+            return `Offset: preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
         }
-        return `Aligned: ${xText} ${yText}`;
+        return `Offset: ${xText} ${yText}`;
     },
 
     updateAlignmentStatus() {

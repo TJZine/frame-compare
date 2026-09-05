@@ -94,6 +94,21 @@ The primary toolbar keeps frame navigation, view modes, and mode-specific contex
 stable zones at desktop widths. It reflows to two rows and then a narrow stack as space
 decreases, without changing keyboard order or replacing native controls.
 
+The viewer uses neutral charcoal surfaces and reserves its brass accent for the current
+comparison mode, selected frame, and direct image-inspection markers. Utility toggles
+use neutral selected states. The compact viewport palette floats over the stage without
+reserving another toolbar row; its orientation, zoom, alignment, and fullscreen buttons
+have tooltips. `Offset: none` means no spatial image offset is applied to the pair, not
+that temporal frame alignment failed. The filmstrip keeps the comparison frame number
+and selection category in a solid caption rail at every thumbnail size.
+Keyboard focus uses a light neutral outline.
+
+Source selectors, the optional HUD, and baked overlays serve different contexts. Selectors
+identify the source at the point of selection. The HUD stays anchored to the viewport
+while zooming and panning, and is useful when baked text is outside the visible area.
+Baked text stays with screenshots uploaded to slow.pics. When baked text already provides
+enough context, use the HUD toggle to reduce overlapping labels.
+
 Viewer state such as the current frame, mode, selected clips, reveal position, viewport,
 and review notes can persist in the browser for that report. It does not rewrite the
 HTML or run directory. Clearing browser storage or opening the report under a different

@@ -673,12 +673,22 @@ CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths,
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
 reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
-tab stop. Custom view-mode, fit, timeline-size, and lens-option radio groups use
+tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The header Help dialog is the single persistent
-shortcut reference; the timeline is the final visible report region. One responsive
+shortcut reference; the filmstrip is the final visible report region. One responsive
 Inspector width token owns both desktop drawer width and
 stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
 zero.
+
+Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
+readable text tiers, restrained brass comparison markers, and neutral utility states.
+The renderer supplies decorative inline SVG control icons and a frame-number/category
+caption rail shared by all filmstrip sizes. Palette orientation rotates its existing
+icon through CSS, while the viewer updates the accessible action label. The floating
+palette does not reserve stage height. Spatial alignment status is labeled `Offset`
+to distinguish image translation from temporal source-frame alignment.
+Keyboard focus uses a neutral light outline, and the image canvas has no decorative
+shadow.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
@@ -720,9 +730,9 @@ Lens group, which owns zoom, fixed status, and stage-clamped settings. The displ
 lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
 DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
 preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
-current-source label. Report interaction highlights, including lens markers and its grip, share one
-Projection Brass signal token family while semantic status and frame-category colors
-remain separate. Grip pointer dragging uses capture, while its
+current-source label. Direct image-inspection markers share one Projection Brass signal
+token family; utility controls and lens labels use neutral states, while semantic status
+and muted frame-category colors remain separate. Grip pointer dragging uses capture, while its
 arrow-key operation supports a larger Shift step, clamps to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.

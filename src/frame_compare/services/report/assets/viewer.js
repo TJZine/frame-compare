@@ -1183,7 +1183,7 @@ const ReportViewer = {
 
         this.dom.btnFilmstripToggle.disabled = !hasThumbnails;
         this.dom.btnFilmstripToggle.textContent = hasThumbnails
-            ? (collapsed ? 'Show timeline' : 'Hide timeline')
+            ? (collapsed ? 'Show filmstrip' : 'Hide filmstrip')
             : 'Filmstrip disabled';
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-expanded',
@@ -1192,12 +1192,12 @@ const ReportViewer = {
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-label',
             hasThumbnails
-                ? `${collapsed ? 'Expand' : 'Collapse'} timeline controls`
+                ? `${collapsed ? 'Expand' : 'Collapse'} filmstrip controls`
                 : 'Filmstrip disabled'
         );
         this.dom.btnFilmstripToggle.setAttribute(
             'title',
-            hasThumbnails ? 'Toggle timeline (F)' : 'Filmstrip disabled'
+            hasThumbnails ? 'Toggle filmstrip (F)' : 'Filmstrip disabled'
         );
 
         this.dom.filmstripSizeBtns.forEach(btn => {
@@ -1222,7 +1222,6 @@ const ReportViewer = {
 
         if (this.dom.btnPaletteOrientation) {
             const isVertical = this.state.paletteOrientation === 'vertical';
-            this.dom.btnPaletteOrientation.textContent = isVertical ? '↕' : '↔';
             this.dom.btnPaletteOrientation.setAttribute('aria-label', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
             this.dom.btnPaletteOrientation.setAttribute('title', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
         }

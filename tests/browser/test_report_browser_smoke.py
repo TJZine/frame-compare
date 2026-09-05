@@ -283,6 +283,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const stage = document.querySelector('.rv-viewer-stage');
         const stageLabels = document.querySelector('.rv-stage-labels');
         const palette = document.querySelector('.rv-viewport-palette');
+        document.documentElement.dataset.selectAffordances = String(
+            Array.from(document.querySelectorAll('select')).every(select => {
+                const style = window.getComputedStyle(select);
+                return style.backgroundImage !== 'none'
+                    && parseFloat(style.paddingRight) >= 24;
+            })
+        );
         const rectanglesIntersect = (first, second) => !(
             first.right <= second.left
             || second.right <= first.left
@@ -597,7 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inspectorButton?.click();
         document.documentElement.dataset.infoInspectorSemanticsStable = String(
             infoBefore.label === 'Report information'
-            && infoBefore.title === 'Report Info'
+            && infoBefore.title === 'Report information'
             && infoBefore.pressed === null
             && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
         );
@@ -896,6 +903,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert 'src="screenshots/reference/10.png"' in completed.stdout
     assert parser.document_attributes is not None
     assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
+    assert parser.document_attributes["data-select-affordances"] == "true"
     assert parser.document_attributes["data-source-hud-viewport-stable"] == "true"
     assert parser.document_attributes["data-source-hud-wraps"] == "true"
     assert parser.document_attributes["data-diff-source-hud-visible"] == "true"

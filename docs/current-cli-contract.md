@@ -791,6 +791,10 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
   changing DOM order, native controls, keyboard behavior, or ARIA semantics.
+- Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
+  alignment. Filmstrip captions show the comparison frame number and selection category
+  at every thumbnail size, with the full original frame label available on hover and
+  in the frame selector. The viewport palette remains floating and adds no reserved row.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.

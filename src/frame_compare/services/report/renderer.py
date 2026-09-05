@@ -35,6 +35,15 @@ def _esc_attr(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _render_icon(path: str) -> str:
+    """Render a small, decorative line icon inside an already labeled control."""
+    return (
+        '<svg class="rv-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" '
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" '
+        f'aria-hidden="true" focusable="false"><path d="{_esc_attr(path)}"/></svg>'
+    )
+
+
 def _safe_http_href(url: str | None) -> str | None:
     """Return an escaped http(s) URL suitable for href, else None."""
     if not url:
@@ -201,14 +210,14 @@ def _render_filmstrip(
     items = (
         "".join(
             f"""
-                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}" aria-label="{_esc_attr(_frame_filmstrip_label(frame))}">
+                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}" aria-label="{_esc_attr(_frame_filmstrip_label(frame))}" title="{_esc_attr(_frame_filmstrip_label(frame))}">
                     <span class="rv-filmstrip-thumb">
                         <img src="{_esc_attr(frame["images"][0]["src"] if frame["images"] else "")}" loading="lazy" alt="{_esc_attr(first_clip_label)} - Frame {_esc_attr(frame["number"])}">
                         <span class="rv-filmstrip-accent" data-category-key="{_esc_attr(category_filter_keys[frame["category"]])}" data-category="{_esc_attr(frame["category"])}"></span>
                     </span>
                     <span class="rv-filmstrip-caption">
-                        <span class="rv-filmstrip-label">{_esc_text(_frame_filmstrip_label(frame))}</span>
-                        <span class="rv-filmstrip-compact-label">Frame {_esc_text(frame["number"])}</span>
+                        <span class="rv-filmstrip-number">{_esc_text(frame["number"])}</span>
+                        <span class="rv-filmstrip-label">{_esc_text(_frame_category_text(frame))}</span>
                     </span>
                 </button>
                 """
@@ -232,10 +241,10 @@ def _render_bottom_panel(
 ) -> str:
     disabled_attr = " disabled" if not include_filmstrip else ""
     aria_expanded = "true" if include_filmstrip else "false"
-    expanded_label = "Hide timeline" if include_filmstrip else "Filmstrip disabled"
-    aria_label = "Collapse timeline controls" if include_filmstrip else "Filmstrip disabled"
-    title = "Toggle timeline (F)" if include_filmstrip else "Filmstrip disabled"
-    return f"""<section class="rv-bottom-panel" data-filmstrip-enabled="{str(include_filmstrip).lower()}" aria-label="Frame timeline">
+    expanded_label = "Hide filmstrip" if include_filmstrip else "Filmstrip disabled"
+    aria_label = "Collapse filmstrip controls" if include_filmstrip else "Filmstrip disabled"
+    title = "Toggle filmstrip (F)" if include_filmstrip else "Filmstrip disabled"
+    return f"""<section class="rv-bottom-panel" data-filmstrip-enabled="{str(include_filmstrip).lower()}" aria-label="Frame filmstrip">
     <div class="rv-bottom-panel-bar">
         <div class="rv-filter-group" data-control-scope="frame-filters" aria-label="Frame category filters">
             {category_filter_controls}
@@ -439,9 +448,9 @@ def _render_header(
     clip_count: int,
     slowpics_link: str,
 ) -> str:
-    inspector_button = '<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)"><span class="rv-btn-icon">☷</span></button>'
-    info_button = '<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report Info"><span class="rv-btn-icon">ℹ</span></button>'
-    help_button = '<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Help (?)"><span class="rv-btn-icon">?</span></button>'
+    inspector_button = f'<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)">{_render_icon("M3 3h14v14H3z M12 3v14")}<span>Inspector</span></button>'
+    info_button = f'<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report information">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M10 9v4 M10 6.5v.1")}</button>'
+    help_button = f'<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M8 7a2 2 0 0 1 4 0c0 2-2 2-2 4 M10 13.5v.1")}</button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
     return f"""        <header class="rv-header">
             <div>
@@ -505,7 +514,7 @@ def _render_controls(
                 {active_clip_options}
             </select>
         </div>
-        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite">Aligned: none</div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair">Offset: none</div>
         </div>
         </div>
     </div>"""
@@ -544,16 +553,17 @@ def _render_lens_settings() -> str:
 
 
 def _render_viewport_palette() -> str:
-    return """        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal">
+    settings_icon = _render_icon("M4 5h12 M4 10h12 M4 15h12 M7 3v4 M13 8v4 M9 13v4")
+    return f"""        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal">
         <div class="rv-palette-group">
-            <button id="btn-palette-orientation" aria-label="Toggle palette orientation" title="Toggle palette orientation">↔</button>
+            <button id="btn-palette-orientation" aria-label="Toggle palette orientation" title="Toggle palette orientation">{_render_icon("M3 6h14v8H3z M7 6v8 M13 6v8")}</button>
         </div>
 
         <div class="rv-palette-group rv-palette-group--zoom">
-            <button id="btn-zoom-out" aria-label="Zoom out">-</button>
+            <button id="btn-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
             <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
-            <button id="btn-zoom-in" aria-label="Zoom in">+</button>
-            <button id="btn-zoom-reset" aria-label="Reset zoom">R</button>
+            <button id="btn-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+            <button id="btn-zoom-reset" aria-label="Reset zoom" title="Reset viewport (R)">{_render_icon("M4 8a6 6 0 1 1 0 5 M4 3v5h5")}</button>
             <span id="zoom-val" class="rv-zoom-value">100%</span>
         </div>
 
@@ -564,7 +574,7 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
-            <button id="btn-align-toggle" aria-label="Alignment settings" title="Alignment Settings (⚙)" aria-expanded="false" aria-haspopup="true">⚙</button>
+            <button id="btn-align-toggle" aria-label="Alignment settings" title="Spatial alignment settings" aria-expanded="false" aria-haspopup="true">{settings_icon}</button>
             <div id="align-popover" class="rv-align-popover" aria-hidden="true" hidden>
                 <div class="rv-popover-row">
                     <label for="alignment-preset">Preset</label>
@@ -590,7 +600,7 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group">
-            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Enter fullscreen"><span class="rv-fullscreen-icon" aria-hidden="true">⛶</span></button>
+            <button id="btn-fullscreen" aria-label="Enter fullscreen" aria-pressed="false" title="Enter fullscreen">{_render_icon("M7 3H3v4 M13 3h4v4 M17 13v4h-4 M7 17H3v-4")}</button>
         </div>
 
         <div class="rv-palette-group">
@@ -604,7 +614,7 @@ def _render_viewport_palette() -> str:
                 <output data-lens-zoom aria-label="Lens magnification">4×</output>
                 <button id="btn-lens-zoom-in" type="button" aria-label="Increase lens magnification">+</button>
                 <span class="rv-lens-fixed-status" aria-label="Lens window behavior">Fixed</span>
-                <button id="btn-lens-settings" type="button" aria-label="Lens settings" aria-haspopup="dialog" aria-controls="lens-settings-popover" aria-expanded="false">⚙</button>
+                <button id="btn-lens-settings" type="button" aria-label="Lens settings" title="Lens settings" aria-haspopup="dialog" aria-controls="lens-settings-popover" aria-expanded="false">{settings_icon}</button>
             </div>
         </div>
 
