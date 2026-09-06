@@ -135,7 +135,7 @@ const viewer = {
         alignmentPresetLabel() { return 'Default'; },
         formatSignedPixels(value, axis) { return `${axis}:${value}`; },
     },
-    persistViewportState() {},
+    persistViewerState() {},
     focusElement() {},
 };
 const inspector = context.__Inspector.create(viewer);

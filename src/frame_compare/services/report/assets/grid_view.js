@@ -108,12 +108,12 @@ const GridView = (() => {
 
         function safeLabel(index) {
             const clip = viewer.state.data?.clips?.[index];
-            return viewer.sourceHudLabel(clip, 'micro');
+            return ViewerFormat.sourceHudLabel(clip, 'micro');
         }
 
         function unavailableLabel(index) {
             const clip = viewer.state.data?.clips?.[index];
-            return viewer.clipDisplay(clip, 'micro');
+            return ViewerFormat.clipDisplay(clip, 'micro');
         }
 
         function clipRoles(index) {
@@ -129,10 +129,10 @@ const GridView = (() => {
                 const index = Number(cell.dataset.clipIndex);
                 const label = safeLabel(index);
                 const clip = viewer.state.data?.clips?.[index];
-                const accessibleName = viewer.clipAccessibleName(clip);
+                const accessibleName = ViewerFormat.clipAccessibleName(clip);
                 const fileSize = viewer.state.overlaysHidden
                     ? ''
-                    : viewer.formatFileSize(clip?.size_bytes);
+                    : ViewerFormat.formatFileSize(clip?.size_bytes);
                 const roles = clipRoles(index);
                 cell.dataset.reference = roles.includes('Reference') ? 'true' : 'false';
                 cell.dataset.active = roles.includes('Active') ? 'true' : 'false';
@@ -269,13 +269,13 @@ const GridView = (() => {
             cell.dataset.clipIndex = String(index);
             cell.dataset.status = 'loading';
             cell.tabIndex = 0;
-            cell.title = viewer.clipAccessibleName(viewer.state.data?.clips?.[index]);
+            cell.title = ViewerFormat.clipAccessibleName(viewer.state.data?.clips?.[index]);
 
             const media = document.createElement('div');
             media.className = 'rv-grid-media';
             const image = document.createElement('img');
             image.className = 'rv-grid-image';
-            image.alt = `${viewer.clipAccessibleName(viewer.state.data?.clips?.[index])} - Frame ${currentFrame()?.number ?? viewer.state.currentFrameIdx + 1}`;
+            image.alt = `${ViewerFormat.clipAccessibleName(viewer.state.data?.clips?.[index])} - Frame ${currentFrame()?.number ?? viewer.state.currentFrameIdx + 1}`;
             image.decoding = 'async';
             image.dataset.clipIndex = String(index);
             image.addEventListener('load', () => handleLoad(cell, image, index, generation));

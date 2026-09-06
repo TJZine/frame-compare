@@ -397,7 +397,7 @@ const ReviewState = (() => {
         function populatePreferredOptions() {
             const options = [new Option('No preferred clip', '')];
             viewer.state.data.clips.forEach((clip, index) => {
-                options.push(new Option(viewer.clipDisplay(clip), `clip:${index}`));
+                options.push(new Option(ViewerFormat.clipDisplay(clip), `clip:${index}`));
             });
             viewer.dom.reviewPreferred.replaceChildren(...options);
         }

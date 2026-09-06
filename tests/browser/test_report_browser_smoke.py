@@ -546,8 +546,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         stage.style.transition = 'none';
-        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setOpen(true, { focus: false, save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         ReportViewer.updateInspectorData();
         const inspectorStageRect = stage.getBoundingClientRect();
         const inspectorPaletteRect = palette.getBoundingClientRect();
@@ -567,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
             panel.hidden = wasHidden;
             return safe;
         });
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.inspectorWidthPolicy = String(
             approximately(inspector.getBoundingClientRect().width, expectedInspectorWidth)
@@ -606,7 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
             && approximately(inspectorPaletteRect.bottom, inspectorStageRect.bottom - paletteInset)
             && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
         );
-        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(false, { focus: false, save: false });
         const infoButton = document.getElementById('btn-info');
         infoButton?.focus();
         infoButton?.click();
@@ -756,18 +756,18 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
         );
-        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(true, { focus: false, save: false });
         const sourceRowsByMode = {};
         ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
             ReportViewer.setMode(mode);
-            ReportViewer.setInspectorTab('frame');
+            ReportViewer.inspector.setTab('frame');
             ReportViewer.updateInspectorData();
             sourceRowsByMode[mode] = Array.from(
                 document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
             ).map(row => row.textContent.trim());
         });
         document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
-        ReportViewer.setInspectorTab('clips');
+        ReportViewer.inspector.setTab('clips');
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.clipsMetadata = String(
             document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
@@ -777,7 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         let reviewTabUsable = false;
         try {
-            ReportViewer.setInspectorTab('review', { save: false });
+            ReportViewer.inspector.setTab('review', { save: false });
             const bookmark = document.querySelector('[data-review-bookmark]');
             const note = document.querySelector('[data-review-note]');
             bookmark.checked = true;
@@ -796,7 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.dataset.reviewTabError = String(error);
         }
         document.documentElement.dataset.reviewTabUsable = String(reviewTabUsable);
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         document.documentElement.dataset.renderingDisclosure = String(
             document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
             && !document.querySelector('[data-rendering-details]')
@@ -805,7 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.scrollWidth <= window.innerWidth
             && document.body.scrollWidth <= window.innerWidth
         );
-        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(false, { focus: false, save: false });
         ReportViewer.setMode('diff');
     };
     probeHud();

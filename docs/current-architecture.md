@@ -794,8 +794,9 @@ separate from viewport preferences and never writes into the report or run direc
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state
 rather than owning duplicate Inspector rendering/focus policy or
-coordinate conversions
-or grid mount policy. Grid remains outside the public report default-mode payload
+coordinate conversions or grid mount policy. Viewer modules call `Inspector` and
+`ViewerFormat` directly rather than routing those owners through root forwarding
+methods. Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
 paused.

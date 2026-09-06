@@ -246,7 +246,7 @@ function loadViewer({ clipCount, savedState = null }) {
         },
     };
     activeDocument = context.document;
-    const script = `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(inspectorPath, 'utf8')}\n${fs.readFileSync(viewportPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__Lens = Lens;\nglobalThis.__Inspector = Inspector;\nglobalThis.__Viewport = Viewport;\nglobalThis.__ReportViewer = ReportViewer;`;
+    const script = `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(inspectorPath, 'utf8')}\n${fs.readFileSync(viewportPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__ViewerFormat = ViewerFormat;\nglobalThis.__Lens = Lens;\nglobalThis.__Inspector = Inspector;\nglobalThis.__Viewport = Viewport;\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
     assert.equal(typeof context.__Lens.create, 'function');
 
@@ -256,7 +256,7 @@ function loadViewer({ clipCount, savedState = null }) {
     const payload = viewer.normalizePayload(payloadWithClipCount(clipCount));
     viewer.state.data = payload;
     viewer.state.mode = payload.default_mode;
-    viewer.state.storageKey = viewer.viewportStorageKey();
+    viewer.state.storageKey = viewer.viewerStorageKey();
     viewer.state.currentFrameIdx = 0;
     viewer.state.leftClipIdx = 0;
     viewer.state.rightClipIdx = 1;
@@ -406,7 +406,7 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.reviewController = null;
     viewer.render = function renderStateOnly() {
         this.viewport.applyAlignment();
-        this.persistViewportState();
+        this.persistViewerState();
     };
 
     if (savedState !== null) {
@@ -418,6 +418,7 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.viewport.applyAlignment();
     return {
         viewer,
+        format: context.__ViewerFormat,
         storage,
         storageKey: viewer.state.storageKey,
         document: context.document,
@@ -447,7 +448,12 @@ function keyboardEvent(key) {
 const summary = {};
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { viewer, format } = loadViewer({ clipCount: 4 });
+    assert.equal(
+        viewer.state.storageKey,
+        'frame-compare:report-viewer:report_viewer_state_contract:viewport',
+    );
+    summary.viewerStorageKey = viewer.state.storageKey;
     const clip = {
         name: 'canonical-name',
         label: 'Canonical label',
@@ -459,19 +465,19 @@ const summary = {};
             filename: 'Exact.File.Name.mkv',
         },
     };
-    assert.equal(viewer.clipDisplay(clip), 'Control descriptor');
-    assert.equal(viewer.clipDisplay(clip, 'micro'), 'Micro descriptor');
+    assert.equal(format.clipDisplay(clip), 'Control descriptor');
+    assert.equal(format.clipDisplay(clip, 'micro'), 'Micro descriptor');
     assert.equal(
-        viewer.clipAccessibleName(clip),
+        format.clipAccessibleName(clip),
         'Primary release identity — Exact.File.Name.mkv',
     );
-    assert.equal(viewer.stableClipRole(0), 'Reference');
-    assert.equal(viewer.stableClipRole(1), 'Comparison 1');
+    assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Reference');
+    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison 1');
     viewer.state.data.default_selection.left_clip_index = 2;
-    assert.equal(viewer.stableClipRole(0), 'Comparison 1');
-    assert.equal(viewer.stableClipRole(1), 'Comparison 2');
-    assert.equal(viewer.stableClipRole(2), 'Reference');
-    assert.equal(viewer.stableClipRole(3), 'Comparison 3');
+    assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Comparison 1');
+    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison 2');
+    assert.equal(format.stableClipRole(2, viewer.referenceClipIndex()), 'Reference');
+    assert.equal(format.stableClipRole(3, viewer.referenceClipIndex()), 'Comparison 3');
     summary.clipDisplayProfiles = {
         requiredPayloadProfiles: true,
         stableInspectorRoles: true,
@@ -651,34 +657,34 @@ const summary = {};
     assert.equal(viewer.state.blinkIntervalMs, 1200);
     assert.equal(viewer.state.blinkPaused, false);
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
-    viewer.setInspectorOpen(false, { focus: false, save: false });
+    viewer.inspector.setOpen(false, { focus: false, save: false });
 
     assert.equal(reviewMetrics.creates, 0);
-    viewer.setInspectorTab('review');
+    viewer.inspector.setTab('review');
     assert.equal(viewer.state.inspectorTab, 'review');
     assert.deepEqual(reviewMetrics, { creates: 0, binds: 0, renders: 0 });
-    viewer.setInspectorTab('export');
-    viewer.setInspectorTab('review');
+    viewer.inspector.setTab('export');
+    viewer.inspector.setTab('review');
     assert.equal(reviewMetrics.creates, 0);
-    viewer.setInspectorTab('export');
+    viewer.inspector.setTab('export');
     const focusables = viewer.dom.inspectorFocusables;
     const initiatingControl = fakeElement();
     document.activeElement = initiatingControl;
     const infoLabel = viewer.dom.btnInfo.getAttribute('aria-label');
     const infoTitle = viewer.dom.btnInfo.getAttribute('title');
-    viewer.setInspectorOpen(true);
+    viewer.inspector.setOpen(true);
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[4]);
     const wrapEvent = keyboardEvent('ArrowRight');
     wrapEvent.currentTarget = viewer.dom.inspectorTabs[4];
-    viewer.handleInspectorTabKey(wrapEvent);
+    viewer.inspector.handleTabKey(wrapEvent);
     assert.equal(viewer.state.inspectorTab, 'frame');
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[0]);
-    viewer.setInspectorTab('export');
+    viewer.inspector.setTab('export');
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'true');
     assert.equal(viewer.dom.btnInspector.classList.contains('active'), true);
-    viewer.setInspectorOpen(false);
+    viewer.inspector.setOpen(false);
     assert.equal(document.activeElement, initiatingControl);
     assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'false');
     assert.equal(viewer.dom.btnInspector.classList.contains('active'), false);
@@ -691,16 +697,16 @@ const summary = {};
     focusables.forEach((element) => {
         assert.equal(element.getAttribute('tabindex'), '-1');
     });
-    viewer.setInspectorOpen(true);
+    viewer.inspector.setOpen(true);
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.dom.inspectorTabs.forEach((element, index) => {
         assert.equal(element.tabIndex, index === 4 ? 0 : -1);
     });
-    viewer.setInspectorOpen(false);
+    viewer.inspector.setOpen(false);
     document.activeElement = document.body;
-    viewer.setInspectorOpen(true);
-    viewer.setInspectorOpen(false);
+    viewer.inspector.setOpen(true);
+    viewer.inspector.setOpen(false);
     assert.equal(document.activeElement, viewer.dom.btnInspector);
     viewer.setBlinkIntervalMs(300);
     viewer.setBlinkPaused(true);
@@ -728,7 +734,7 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 1 });
-    viewer.setInspectorOpen(true, { focus: false, save: false });
+    viewer.inspector.setOpen(true, { focus: false, save: false });
     const values = viewer.dom.inspectorClips.children[0].querySelectorAll('dd');
     assert.equal(values.length, 7);
     assert.equal(values[4].textContent, '17.00 GiB');
@@ -753,7 +759,7 @@ const summary = {};
         primary: 'Explicit comparison label',
         release,
     };
-    viewer.setInspectorOpen(true, { focus: false, save: false });
+    viewer.inspector.setOpen(true, { focus: false, save: false });
     const automaticRelease = viewer.dom.inspectorClips.children[0]
         .querySelector('.rv-inspector-clip-release');
     const explicitRelease = viewer.dom.inspectorClips.children[1]
@@ -770,7 +776,7 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
-    viewer.setInspectorOpen(true, { focus: false, save: false });
+    viewer.inspector.setOpen(true, { focus: false, save: false });
     summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
         item => item.textContent,
     );
@@ -829,7 +835,7 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.bindAlignmentEvents();
-    viewer.setInspectorOpen(true);
+    viewer.inspector.setOpen(true);
     viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
     const popoverEscape = keyboardEvent('Escape');
     viewer.dom.alignPopover.dispatch('keydown', popoverEscape);
@@ -839,7 +845,7 @@ const summary = {};
     assert.equal(viewer.isAlignmentPopoverOpen(), false);
     assert.equal(viewer.state.inspectorOpen, true);
 
-    viewer.setInspectorOpen(true);
+    viewer.inspector.setOpen(true);
     viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
     const firstEscape = keyboardEvent('Escape');
     viewer.handleKey(firstEscape);
@@ -852,7 +858,7 @@ const summary = {};
     assert.equal(secondEscape.defaultPrevented, true);
     assert.equal(viewer.state.inspectorOpen, false);
 
-    viewer.setInspectorOpen(true);
+    viewer.inspector.setOpen(true);
     viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
     viewer.dom.infoModal.classList.add('open');
     const infoEscape = keyboardEvent('Escape');
@@ -878,7 +884,7 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.state.data.slowpics_url = 'https://slow.pics/c/abc?x=1&y=2';
-    viewer.updateInspectorSlowpics();
+    viewer.inspector.renderSlowpics();
     assert.equal(viewer.dom.inspectorExportSlowpics.children.length, 1);
     const link = viewer.dom.inspectorExportSlowpics.children[0];
     assert.equal(link.tagName, 'A');
@@ -888,13 +894,13 @@ const summary = {};
     assert.equal(link.textContent, 'https://slow.pics/c/abc?x=1&y=2');
 
     viewer.state.data.slowpics_url = 'javascript:alert(1)';
-    viewer.updateInspectorSlowpics();
+    viewer.inspector.renderSlowpics();
     assert.equal(viewer.dom.inspectorExportSlowpics.children.length, 1);
     assert.equal(viewer.dom.inspectorExportSlowpics.children[0].nodeType, 3);
     assert.equal(viewer.dom.inspectorExportSlowpics.children[0].textContent, 'javascript:alert(1)');
 
     viewer.state.data.slowpics_url = null;
-    viewer.updateInspectorSlowpics();
+    viewer.inspector.renderSlowpics();
     assert.equal(viewer.dom.inspectorExportSlowpics.children[0].textContent, 'Not uploaded');
 
     summary.inspectorSlowpics = {
@@ -928,7 +934,7 @@ const summary = {};
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { viewer, format } = loadViewer({ clipCount: 2 });
     const clip = {
         label: 'Title.2160p.WEB-DL.Service-GROUP',
         display: {
@@ -956,18 +962,18 @@ const summary = {};
         diff: viewer.clipOverlayLabel(clip, 'Base'),
     };
 
-    assert.equal(viewer.formatFileSize(1), '1.00 B');
-    assert.equal(viewer.formatFileSize(1023), '1023.00 B');
-    assert.equal(viewer.formatFileSize(1024), '1.00 KiB');
-    assert.equal(viewer.formatFileSize(512 * 1024), '512.00 KiB');
-    assert.equal(viewer.formatFileSize(1024 ** 2), '1.00 MiB');
-    assert.equal(viewer.formatFileSize(1024 ** 3), '1.00 GiB');
-    assert.equal(viewer.formatFileSize(1024 ** 4), '1.00 TiB');
-    assert.equal(viewer.formatFileSize(0), '');
-    assert.equal(viewer.formatFileSize(-1), '');
-    assert.equal(viewer.formatFileSize(Number.NaN), '');
+    assert.equal(format.formatFileSize(1), '1.00 B');
+    assert.equal(format.formatFileSize(1023), '1023.00 B');
+    assert.equal(format.formatFileSize(1024), '1.00 KiB');
+    assert.equal(format.formatFileSize(512 * 1024), '512.00 KiB');
+    assert.equal(format.formatFileSize(1024 ** 2), '1.00 MiB');
+    assert.equal(format.formatFileSize(1024 ** 3), '1.00 GiB');
+    assert.equal(format.formatFileSize(1024 ** 4), '1.00 TiB');
+    assert.equal(format.formatFileSize(0), '');
+    assert.equal(format.formatFileSize(-1), '');
+    assert.equal(format.formatFileSize(Number.NaN), '');
     assert.equal(
-        viewer.formatSignal({
+        format.formatSignal({
             is_hdr: true,
             primaries: 9,
             transfer: 16,
@@ -1410,7 +1416,7 @@ const summary = {};
     assert.equal(viewer.pointerInteraction.panMoved, true);
     let cycleCount = 0;
     viewer.cycleClip = () => { cycleCount += 1; };
-    viewer.persistViewportState = () => true;
+    viewer.persistViewerState = () => true;
     viewer.state.mode = 'overlay';
     viewer.pointerInteraction = {
         isDragging: false,
@@ -1558,7 +1564,7 @@ const summary = {};
         savedState: { inspectorOpen: false, inspectorTab: 'review' },
     });
     assert.equal(reviewMetrics.creates, 0);
-    viewer.setInspectorOpen(true, { focus: false, save: false });
+    viewer.inspector.setOpen(true, { focus: false, save: false });
     assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
     summary.lazyReviewController = { opensOnFirstVisibleUse: true, createsOnce: true };
 }
