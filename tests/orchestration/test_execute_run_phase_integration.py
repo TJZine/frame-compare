@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -15,7 +16,6 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
-    PublishPhaseOutput,
     RunArtifacts,
 )
 from frame_compare.orchestration.types import (
@@ -222,12 +222,10 @@ enable = true
         callback_calls.append(request)
         return "declined"
 
-    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
-        raise AssertionError("declined report-confirmed upload must not publish")
-
+    publish = AsyncMock()
     monkeypatch.setattr(
         "frame_compare.orchestration.execution.run_publish_phase",
-        _unexpected_publish,
+        publish,
     )
 
     result = asyncio.run(
@@ -252,6 +250,8 @@ enable = true
     assert result.slowpics_upload_confirmation_status == "declined"
     assert result.slowpics_url is None
     assert "confirm_slowpics_upload" in result.phase_timings
+    publish.assert_not_awaited()
+    assert not any(warning.startswith("publish:") for warning in result.warnings)
 
 
 def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Path) -> None:
