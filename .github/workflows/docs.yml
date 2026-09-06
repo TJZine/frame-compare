@@ -2,7 +2,7 @@ name: Documentation
 
 on:
   pull_request:
-    branches: [main, cleanup, staging]
+    branches: [main, pre-release, staging]
     paths: &docs-paths
       - docs/**
       - README.md

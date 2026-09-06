@@ -500,7 +500,14 @@ frame properties, old/new index and cache behavior, updater migration from the
 previous bundle, and objective plus perceptual comparison evidence. Never describe
 that handoff as complete based only on hosted CI.
 
-### Staging and dependency-update flow
+### Pre-release, staging, and dependency-update flow
+
+- `pre-release` is the current pre-main integration branch. Pull requests targeting
+  it receive the same path-applicable CI, documentation, and Docker checks as pull
+  requests targeting `main`; `cleanup` previously filled this role and is retired
+  from active workflow triggers.
+- `staging` is synchronized from `main` and is the integration target for normal
+  Dependabot version updates. It is not the pre-main release-integration branch.
 
 - `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
   dispatched manually. It fast-forwards `staging` when possible, merges `main`

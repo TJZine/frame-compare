@@ -163,8 +163,12 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
         "cancel-in-progress": "true",
     }
-    assert {"main", "cleanup", "staging"} <= set(docker["on"]["pull_request"]["branches"])
-    assert set(ci["on"]["pull_request"]["branches"]) == {"main", "cleanup", "staging"}
+    assert {"main", "pre-release", "staging"} <= set(docker["on"]["pull_request"]["branches"])
+    assert set(ci["on"]["pull_request"]["branches"]) == {
+        "main",
+        "pre-release",
+        "staging",
+    }
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
         "uv.lock",
