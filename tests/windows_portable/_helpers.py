@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -25,6 +26,15 @@ def read_text_or_fail(path: Path) -> str:
 
 def powershell_exe() -> str | None:
     return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def normalized_powershell_output(output: str) -> str:
+    output = re.sub(r"\r?\n\s*\|\s?", " ", output)
+    return " ".join(output.split())
+
+
+def normalized_process_output(result: subprocess.CompletedProcess[str]) -> str:
+    return normalized_powershell_output(f"{result.stdout}\n{result.stderr}")
 
 
 def snapshot_bytes(root: Path) -> dict[str, bytes]:

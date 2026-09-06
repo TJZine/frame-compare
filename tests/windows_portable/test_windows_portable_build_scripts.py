@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import normalized_process_output as _normalized_process_output
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
 
@@ -30,11 +31,6 @@ def _generated_portable_launcher(build_script: str) -> str:
     )
     assert match is not None, "generated portable launcher payload not found"
     return match.group("launcher")
-
-
-def _normalized_process_output(result: subprocess.CompletedProcess[str]) -> str:
-    output = re.sub(r"\r?\n\s*\|\s?", " ", f"{result.stdout}\n{result.stderr}")
-    return " ".join(output.split())
 
 
 def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Path) -> None:

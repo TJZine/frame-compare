@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import normalized_powershell_output as _normalized_powershell_output
 from ._helpers import powershell_exe as _powershell_exe
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
@@ -712,6 +713,8 @@ def test_windows_portable_build_update_validates_runtime_metadata_at_process_bou
         "FRAME_COMPARE_TEST_BUNDLE": str(bundle),
         "FRAME_COMPARE_TEST_PROVIDER_ROOT": str(provider_root),
         "FRAME_COMPARE_TEST_REPO": str(fake_repo),
+        "NO_COLOR": "1",
+        "TERM": "dumb",
     }
     command = """
 Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
@@ -731,7 +734,7 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
     )
     if expected_error is not None:
         assert result.returncode != 0
-        assert expected_error in result.stderr
+        assert expected_error in _normalized_powershell_output(result.stderr)
         assert not update_zip.exists()
         return
 
