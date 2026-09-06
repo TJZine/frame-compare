@@ -22,6 +22,8 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
+from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.run_result_record import read_run_result
 from frame_compare.services.types import AlignmentResult, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 
@@ -128,6 +130,63 @@ enable = false
     assert by_video["a_ref.mkv"] == [32, 66, 83]
     assert by_video["b_comp1.mkv"] == [31, 65, 82]
     assert by_video["c_comp2.mkv"] == [33, 67, 84]
+
+
+def test_execute_run_forced_alignment_failure_stops_before_render_and_records_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = true
+use_vsview = true
+force_interactive = true
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    create_video_files(tmp_path / "comparison_videos", "a_ref.mkv", "b_comp.mkv")
+
+    failure = AudioAlignmentError(
+        "Interactive alignment did not return a valid VSView review result."
+    )
+
+    def _fail_alignment(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fail_alignment)
+    ffmpeg = FakeFFmpegRunner()
+
+    with pytest.raises(AudioAlignmentError) as raised:
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    random_frame_count=1,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg),
+            )
+        )
+
+    assert raised.value is failure
+    assert ffmpeg.calls == []
+    run_dirs = [path for path in (tmp_path / "generated").iterdir() if path.is_dir()]
+    assert len(run_dirs) == 1
+    record = read_run_result(run_dirs[0] / "run_result.toml")
+    assert record.status == "failed"
+    assert record.failure is not None
+    assert record.failure.code == "FC-4005"
 
 
 def test_execute_run_report_confirmed_decline_skips_publish(
