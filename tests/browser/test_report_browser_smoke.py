@@ -181,7 +181,12 @@ def test_browser_dump_does_not_retry_non_timeout_failure(
     assert calls == 1
 
 
-def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
+def _generated_report(
+    tmp_path: Path,
+    *,
+    tonemapped: bool = False,
+    encoded_image_paths: bool = False,
+) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
         "reference": RenderedGeometryFacts(
@@ -206,8 +211,12 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
         ("encode", _COMPARISON_LABEL),
     ):
         geometry = geometry_by_name[name]
-        screenshot = tmp_path / "screenshots" / name / "10.png"
-        screenshot.parent.mkdir(parents=True)
+        screenshot = (
+            tmp_path / "screenshots # %20 Ü" / f"{name} # %20 Ü.png"
+            if encoded_image_paths
+            else tmp_path / "screenshots" / name / "10.png"
+        )
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
             ClipInfo(
@@ -267,6 +276,44 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
         ),
         output_path=tmp_path / "report.html",
     )
+
+
+def _append_encoded_image_load_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<img id="encoded-screenshot-probe" src="screenshots%20%23%20%2520%20%C3%9C/reference%20%23%20%2520%20%C3%9C.png" alt="" hidden>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const image = document.getElementById('encoded-screenshot-probe');
+    const mark = () => {
+        document.documentElement.dataset.encodedImagesLoaded = String(
+            image.complete && image.naturalWidth > 0
+        );
+    };
+    image.addEventListener('load', mark, { once: true });
+    image.addEventListener('error', mark, { once: true });
+    mark();
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_generated_report_loads_percent_encoded_screenshot_paths(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+
+    report_path = _generated_report(tmp_path, encoded_image_paths=True)
+    _append_encoded_image_load_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+
+    assert "screenshots%20%23%20%2520%20%C3%9C" in completed.stdout
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-encoded-images-loaded"] == "true"
 
 
 def _append_screenshot_load_probe(report_path: Path) -> None:
