@@ -367,7 +367,7 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.10.3, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+0.11.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
 all three outputs, and round-trip/validate the sibling result sidecar. This feature run has
 static contract proof only; execution remains unavailable/unverified until a
 compatible Linux/X11 host runs it. The contract does not prove a visible X11 desktop
@@ -398,7 +398,7 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.10.3,
+   verify R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.11.0,
    PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
