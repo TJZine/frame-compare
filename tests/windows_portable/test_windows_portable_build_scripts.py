@@ -747,6 +747,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
         )
     ]
 
+    assert '"-u"' in launch_proof
     assert '"frame_compare.vsview.launcher"' in launch_proof
     assert '"-vv"' in launch_proof
     assert '"--verbose"' not in launch_proof
@@ -754,7 +755,10 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert '$env:QT_QPA_PLATFORM = "offscreen"' in launch_proof
     assert '$env:NO_COLOR = "1"' in launch_proof
     assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" not in launch_proof
-    assert "$process.WaitForExit(20000)" in launch_proof
+    assert "$deadline = [DateTime]::UtcNow.AddSeconds(60)" in launch_proof
+    assert "while ([DateTime]::UtcNow -lt $deadline)" in launch_proof
+    assert "$process.WaitForExit(250)" in launch_proof
+    assert "$exitedBeforeReady = $true" in launch_proof
     assert "Stop-Process -Id $process.Id -Force" in launch_proof
     assert "$process.WaitForExit(10000)" in launch_proof
     assert "VSView offscreen proof left its process running." in launch_proof
@@ -769,7 +773,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     ):
         assert marker in launch_proof
     assert '$_ -match "(?i)\\bERROR\\b"' in launch_proof
-    assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in launch_proof
+    assert "vsview_gui_launch=ok platform=offscreen readiness=observed cleanup=ok" in launch_proof
 
     assert 'media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
@@ -792,7 +796,9 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
     ]
     assert '"vsview_runtime"' in required_phases
     assert "WINDOWS_BUNDLE_PROOF vsview_runtime=ok" in required_phases
-    assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in required_phases
+    assert (
+        "vsview_gui_launch=ok platform=offscreen readiness=observed cleanup=ok" in required_phases
+    )
     assert "Required combined VSView runtime proof marker missing." in required_phases
 
 

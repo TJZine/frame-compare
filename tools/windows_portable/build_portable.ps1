@@ -838,19 +838,41 @@ function Invoke-VSViewOffscreenLaunchProof(
   $originalQtPlatform = Get-ProcessEnvironmentValue -Name "QT_QPA_PLATFORM"
   $originalNoColor = Get-ProcessEnvironmentValue -Name "NO_COLOR"
   $process = $null
-  $timedOut = $false
+  $ready = $false
+  $exitedBeforeReady = $false
+  $requiredMarkers = @(
+    "[RUN] VSView Bootstrap",
+    "[OK] VSView Ready",
+    "Script execution completed",
+    "Switching to video output",
+    "Frame 0 rendered"
+  )
   try {
     $env:QT_QPA_PLATFORM = "offscreen"
     $env:NO_COLOR = "1"
     $quotedSessionPath = '"' + $SessionPath + '"'
     $process = Start-Process -FilePath $Python -ArgumentList @(
+      "-u",
       "-m",
       "frame_compare.vsview.launcher",
       "-vv",
       "--no-settings",
       $quotedSessionPath
     ) -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-    $timedOut = -not $process.WaitForExit(20000)
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    while ([DateTime]::UtcNow -lt $deadline) {
+      if ($process.WaitForExit(250)) {
+        $exitedBeforeReady = $true
+        break
+      }
+      $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
+      $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+      $normalizedCombined = ("$stdout`n$stderr" -replace "\s+", " ").Trim()
+      $ready = @($requiredMarkers | Where-Object { -not $normalizedCombined.Contains($_) }).Count -eq 0
+      if ($ready) {
+        break
+      }
+    }
   } finally {
     if ($null -ne $process -and -not $process.HasExited) {
       Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -868,16 +890,10 @@ function Invoke-VSViewOffscreenLaunchProof(
   $normalizedCombined = ($combined -replace "\s+", " ").Trim()
   Write-Host $combined
 
-  if (-not $timedOut) {
-    throw "VSView offscreen proof exited before the expected steady-state GUI timeout."
+  if ($exitedBeforeReady) {
+    throw "VSView offscreen proof exited before reaching steady-state readiness."
   }
-  foreach ($marker in @(
-    "[RUN] VSView Bootstrap",
-    "[OK] VSView Ready",
-    "Script execution completed",
-    "Switching to video output",
-    "Frame 0 rendered"
-  )) {
+  foreach ($marker in $requiredMarkers) {
     if (-not $normalizedCombined.Contains($marker)) {
       throw "VSView offscreen proof marker missing: $marker"
     }
@@ -889,7 +905,7 @@ function Invoke-VSViewOffscreenLaunchProof(
   if ($null -ne $process -and -not $process.HasExited) {
     throw "VSView offscreen proof left its process running."
   }
-  Write-Host "WINDOWS_BUNDLE_PROOF vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
+  Write-Host "WINDOWS_BUNDLE_PROOF vsview_gui_launch=ok platform=offscreen readiness=observed cleanup=ok"
 }
 
 function Assert-BundleRuntime([string]$BundleRoot) {
