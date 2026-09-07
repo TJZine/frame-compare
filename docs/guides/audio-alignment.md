@@ -62,7 +62,7 @@ same path and offset semantics.
 
 ## Native VSView alignment review
 
-VSView 0.11.0 and the Frame Compare alignment panel are included in the Windows
+VSView 0.10.3 and the Frame Compare alignment panel are included in the Windows
 portable bundle and are optional in native installations through the
 `frame-compare[vsview]` extra. The panel entry point and VSView runtime must be
 installed in the same Python environment; a PATH-only VSView executable is not

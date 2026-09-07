@@ -1169,7 +1169,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.11.0 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.10.3 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with

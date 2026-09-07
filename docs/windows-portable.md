@@ -1,11 +1,11 @@
 # Windows portable
 
 The Windows portable bundle is the recommended Frame Compare distribution for Windows
-10/11 x64. It includes the supported Python and media runtime, VSView 0.11.0 with its
+10/11 x64. It includes the supported Python and media runtime, VSView 0.10.3 with its
 PySide6 backend and native Frame Compare alignment panel for review, the
 installer, and signed code-only update and rollback tooling.
 
-The portable graph pins the base `vsview==0.11.0` package and the Frame Compare panel
+The portable graph pins the base `vsview==0.10.3` package and the Frame Compare panel
 entry point; its upstream
 `recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
 VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
@@ -157,7 +157,7 @@ review checklist.
 
 ## Native VSView alignment review
 
-The portable bundle includes VSView 0.11.0, PySide6, and the packaged
+The portable bundle includes VSView 0.10.3, PySide6, and the packaged
 `frame-compare-alignment-review` panel entry point in one self-contained Python
 environment. Frame Compare launches VSView through that same environment; a
 PATH-only VSView executable or a separate Python installation is not supported.

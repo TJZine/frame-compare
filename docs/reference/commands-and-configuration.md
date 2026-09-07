@@ -84,7 +84,7 @@ For native VSView alignment review, set `audio_alignment.use_vsview = true` when
 the optional Frame Compare VSView panel is desired. Install `frame-compare[vsview]` in
 the same environment that runs Frame Compare; a PATH-only VSView executable is not a
 supported substitute. The `vsview` package is the supported base extra at version
-0.11.0; `recommended` and `full` extras are not part of Frame Compare's dependency
+0.10.3; `recommended` and `full` extras are not part of Frame Compare's dependency
 contract. `--force-interactive-alignment` enables the same route and makes readiness,
 process, cancellation, or invalid-result failure fatal. The generated session
 continues to use Frame Compare's L-SMASH-Works source/index path; VSView's BestSource

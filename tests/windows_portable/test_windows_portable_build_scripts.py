@@ -334,7 +334,7 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     )
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
-        "vsview-0.11.0-wheel": ("0.11.0", 2276081),
+        "vsview-0.10.3-wheel": ("0.10.3", 2260813),
         "vsview-cli-1.2.0-win-amd64-wheel": ("1.2.0", 393807),
         "pyside6-6.11.2-win-amd64-wheel": ("6.11.2", 578382),
         "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
@@ -368,7 +368,7 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     lock = tomllib.loads(_read_text_or_fail(repo_root / "uv.lock"))
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
-        "vsview": "vsview-0.11.0-wheel",
+        "vsview": "vsview-0.10.3-wheel",
         "vsview-cli": "vsview-cli-1.2.0-win-amd64-wheel",
         "pyside6": "pyside6-6.11.2-win-amd64-wheel",
         "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
@@ -531,7 +531,7 @@ def test_pyproject_defines_vsview_optional_dependency(repo_root: Path) -> None:
     pyproject = _read_text_or_fail(pyproject_path)
     assert "[project.optional-dependencies]" in pyproject
     assert re.search(r"vsview\s*=\s*\[", pyproject)
-    assert re.search(r'"vsview==0\.11\.0"', pyproject)
+    assert re.search(r'"vsview==0\.10\.3"', pyproject)
 
 
 def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:
@@ -747,7 +747,6 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
         )
     ]
 
-    assert '"-u"' in launch_proof
     assert '"frame_compare.vsview.launcher"' in launch_proof
     assert '"-vv"' in launch_proof
     assert '"--verbose"' not in launch_proof
@@ -755,10 +754,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert '$env:QT_QPA_PLATFORM = "offscreen"' in launch_proof
     assert '$env:NO_COLOR = "1"' in launch_proof
     assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" not in launch_proof
-    assert "$deadline = [DateTime]::UtcNow.AddSeconds(60)" in launch_proof
-    assert "while ([DateTime]::UtcNow -lt $deadline)" in launch_proof
-    assert "$process.WaitForExit(250)" in launch_proof
-    assert "$exitedBeforeReady = $true" in launch_proof
+    assert "$process.WaitForExit(20000)" in launch_proof
     assert "Stop-Process -Id $process.Id -Force" in launch_proof
     assert "$process.WaitForExit(10000)" in launch_proof
     assert "VSView offscreen proof left its process running." in launch_proof
@@ -773,7 +769,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     ):
         assert marker in launch_proof
     assert '$_ -match "(?i)\\bERROR\\b"' in launch_proof
-    assert "vsview_gui_launch=ok platform=offscreen readiness=observed cleanup=ok" in launch_proof
+    assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in launch_proof
 
     assert 'media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
@@ -796,9 +792,7 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
     ]
     assert '"vsview_runtime"' in required_phases
     assert "WINDOWS_BUNDLE_PROOF vsview_runtime=ok" in required_phases
-    assert (
-        "vsview_gui_launch=ok platform=offscreen readiness=observed cleanup=ok" in required_phases
-    )
+    assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in required_phases
     assert "Required combined VSView runtime proof marker missing." in required_phases
 
 
@@ -1138,7 +1132,7 @@ def _write_extracted_verifier_fixture(
                 ("shiboken6", "6.11.2"),
                 ("vapoursynth-bestsource", "21.0"),
                 ("vspackrgb", "1.4.0"),
-                ("VSView", "0.11.0"),
+                ("VSView", "0.10.3"),
                 ("vsview-cli", "1.2.0"),
                 ("vsjetengine", "1.7.0"),
             )
@@ -1896,7 +1890,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "vspackrgb": ("1.4.0", "MIT"),
-        "VSView": ("0.11.0", "EUPL-1.2"),
+        "VSView": ("0.10.3", "EUPL-1.2"),
         "vsview-cli": ("1.2.0", "Unlicense"),
         "vsjetengine": ("1.7.0", "MIT"),
     }

@@ -233,24 +233,24 @@
       "source_commit": "3cfd23f257ecb62b0cbd81eaaca092e18ae8e579"
     },
     {
-      "id": "vsview-0.11.0-wheel",
+      "id": "vsview-0.10.3-wheel",
       "name": "VSView",
-      "version": "0.11.0",
-      "url": "https://files.pythonhosted.org/packages/a6/fe/13ade5b78bd1ccf21c180a30a79c63ae8bb32f69aaf2557a601593a5000d/vsview-0.11.0-py3-none-any.whl",
-      "source_url": "https://files.pythonhosted.org/packages/0a/04/f69db3c58e07d6634cbd202d86ce9622ffa07f54d5cec6e99579c86f5b02/vsview-0.11.0.tar.gz",
-      "sha256": "8ea72dd14764cad2d6832213ebb2785364d41bdf4f8ede543e2af625f3abf8a8",
-      "bytes": 2276081,
+      "version": "0.10.3",
+      "url": "https://files.pythonhosted.org/packages/8a/62/04205cd1cd35c3beb1e3a2c2cf41d222e8ab1e657809894a5a6877a0817b/vsview-0.10.3-py3-none-any.whl",
+      "source_url": "https://files.pythonhosted.org/packages/0b/f8/b1b6160674b829f88afb5166bc02e58651875b04168ce893fd60b3b1194d/vsview-0.10.3.tar.gz",
+      "sha256": "e6a9d37c82a0f58db310c40b72ab38fc4a5879ec70ce45c2a8e80b95787bd223",
+      "bytes": 2260813,
       "license": {
         "spdx": "EUPL-1.2 AND MIT AND Apache-2.0 AND ISC AND OFL-1.1",
-        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.11.0/LICENSE",
+        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.10.3/LICENSE",
         "notes": "The wheel carries the application and bundled font/icon license texts under dist-info/licenses."
       },
       "install": { "type": "python_wheel" },
-      "release_date": "2026-09-05",
+      "release_date": "2026-08-16",
       "source_kind": "release",
-      "source_ref": "vsview/v0.11.0",
-      "source_sha256": "6d06ffdb12010df1a0992a0cb52b17b588a0a01b2675d08b63f629510d722662",
-      "source_bytes": 13872838
+      "source_ref": "vsview/v0.10.3",
+      "source_sha256": "c1836271957961afd77a1adc97eb14eadbde705ea30fc49408cc61791e21714c",
+      "source_bytes": 13843222
     },
     {
       "id": "vsview-cli-1.2.0-win-amd64-wheel",
@@ -398,7 +398,7 @@
       "bytes": 74394,
       "license": {
         "spdx": "MIT",
-        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.11.0/src/vspackrgb/LICENSE"
+        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.10.3/src/vspackrgb/LICENSE"
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",

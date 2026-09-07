@@ -9,7 +9,7 @@ Install these host prerequisites first:
 - L-SMASH-Works 1310 available to the VapourSynth runtime;
 - vs-placebo 2.0.4 and a compatible Vulkan implementation for HDR tonemapping;
 - `uv` (recommended for the repository's locked environment) or pip;
-- optionally VSView 0.11.0 with the native Frame Compare panel for alignment review.
+- optionally VSView 0.10.3 with the native Frame Compare panel for alignment review.
 
 VapourSynth is not optional for the default renderer. Setting
 `screenshots.use_ffmpeg = true` selects the FFmpeg screenshot path, but HDR frames
@@ -32,7 +32,7 @@ From a clone of the repository:
 uv sync --no-dev --extra vsview --frozen
 ```
 
-The `vsview` extra pins VSView 0.11.0, the native Frame Compare alignment panel, and
+The `vsview` extra pins VSView 0.10.3, the native Frame Compare alignment panel, and
 the repository-managed VapourSynth Python package to R79. It uses VSView's base
 dependency graph, including its documented PySide6 backend; the upstream `recommended`
 and `full` extras are intentionally not selected. Its current resolution includes

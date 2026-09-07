@@ -41,7 +41,7 @@ vsview = [
     "vapoursynth==79",
     "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'",
     "vs-placebo==2.0.4; sys_platform == 'win32'",
-    "vsview==0.11.0",
+    "vsview==0.10.3",
 ]
 
 [project.scripts]

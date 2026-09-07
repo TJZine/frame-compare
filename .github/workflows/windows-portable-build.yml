@@ -139,7 +139,7 @@ jobs:
             "alignment_result_roundtrip=ok",
             "alignment_result_validation=ok malformed=rejected",
             "generated_vsview_session=ok",
-            "vsview_gui_launch=ok platform=offscreen readiness=observed cleanup=ok"
+            "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
           )) {
             if ($proof -notmatch "WINDOWS_BUNDLE_PROOF $marker") {
               throw "Required VSView runtime proof marker missing: $marker"
