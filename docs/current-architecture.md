@@ -466,8 +466,9 @@ boundaries remain unchanged and it does not parse terminal input. The
 `frame_compare.vsview.adapter` remains the composition boundary for the current
 interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
 child-process lifetime. On the Windows portable runtime, `frame_compare.vsview.launcher`
-loads the managed VapourSynth environment and VSView's public API on the main thread
-before VSView starts its background plugin discovery.
+loads the managed VapourSynth environment before VSView. For Qt's headless `offscreen`
+platform only, the launcher skips VSView's Windows CJK font-cache warmup because that
+upstream worker stalls in the non-display Windows runtime; visible launches retain it.
 
 ## External Boundaries
 
