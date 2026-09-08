@@ -465,7 +465,9 @@ applying confirmed offsets; its service, persistence, override, cache, and CLI/c
 boundaries remain unchanged and it does not parse terminal input. The
 `frame_compare.vsview.adapter` remains the composition boundary for the current
 interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
-child-process lifetime.
+child-process lifetime. On the Windows portable runtime, `frame_compare.vsview.launcher`
+loads the managed VapourSynth environment and VSView's public API on the main thread
+before VSView starts its background plugin discovery.
 
 ## External Boundaries
 
@@ -551,7 +553,7 @@ owners. Its explicit X11 contract is:
 The optional GUI proof is non-CI and non-default. Its verifier contract requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.10.3, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.11.0, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
 result sidecar. This

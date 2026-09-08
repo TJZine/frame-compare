@@ -5,7 +5,7 @@ from __future__ import annotations
 from frame_compare.vsview import launcher
 
 
-def test_windows_portable_launcher_preloads_vapoursynth_before_vsview(
+def test_windows_portable_launcher_preloads_runtime_before_vsview(
     monkeypatch,
 ) -> None:
     events: list[str] = []
@@ -14,6 +14,11 @@ def test_windows_portable_launcher_preloads_vapoursynth_before_vsview(
         launcher,
         "preload_vapoursynth_runtime",
         lambda: events.append("vapoursynth"),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "preload_vsview_api",
+        lambda: events.append("vsview-api"),
     )
     monkeypatch.setattr(
         launcher.runpy,
@@ -25,7 +30,7 @@ def test_windows_portable_launcher_preloads_vapoursynth_before_vsview(
 
     launcher.main()
 
-    assert events == ["vapoursynth", "run:vsview:__main__:True"]
+    assert events == ["vapoursynth", "vsview-api", "run:vsview:__main__:True"]
 
 
 def test_unmanaged_launcher_only_runs_vsview(
@@ -37,6 +42,11 @@ def test_unmanaged_launcher_only_runs_vsview(
         launcher,
         "preload_vapoursynth_runtime",
         lambda: events.append("vapoursynth"),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "preload_vsview_api",
+        lambda: events.append("vsview-api"),
     )
     monkeypatch.setattr(
         launcher.runpy,
@@ -58,3 +68,12 @@ def test_preload_vapoursynth_runtime_uses_managed_environment(monkeypatch) -> No
     launcher.preload_vapoursynth_runtime()
 
     assert calls == ["ensure"]
+
+
+def test_preload_vsview_api_imports_public_api(monkeypatch) -> None:
+    imports: list[str] = []
+    monkeypatch.setattr(launcher.importlib, "import_module", imports.append)
+
+    launcher.preload_vsview_api()
+
+    assert imports == ["vsview.api"]
