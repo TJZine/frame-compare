@@ -1,3 +1,8 @@
+[features]
+multi_agent = true
+# Codex currently ignores agents.max_depth under the V2 runtime.
+multi_agent_v2 = false
+
 [agents]
 max_threads = 6
 max_depth = 1
