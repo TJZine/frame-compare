@@ -12,6 +12,7 @@ from typing import TypeGuard, cast
 import structlog
 import tomli_w
 
+from frame_compare.services.alignment_correlation import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
@@ -70,6 +71,7 @@ def _clip_identity_dict(clip: AlignmentClipRequest) -> dict[str, _TomlValue]:
 def _settings_identity_dict(request: AlignmentRequest) -> dict[str, _TomlValue]:
     settings = request.settings
     data: dict[str, _TomlValue] = {
+        "estimator_policy": ALIGNMENT_ESTIMATOR_POLICY,
         "sample_rate": settings.sample_rate,
         "max_offset_seconds": settings.max_offset_seconds,
         "correlation_mode": settings.correlation_mode,

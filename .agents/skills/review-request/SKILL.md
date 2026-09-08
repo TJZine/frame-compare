@@ -5,9 +5,10 @@ description: Use when Frame Compare needs an independent review or when reviewer
 
 # Review Lifecycle
 
-Review is risk-triggered. Use one independent final review for high-risk work or
-when novelty, blast radius, or weak proof justifies it. Review a plan separately
-only when its seam or public contract remains costly to get wrong.
+Follow the runbook's Review policy: use independent review when requested or a
+concrete consequential risk merits a second assessment. State the reason; file
+size, location, or a high-risk label alone does not require a reviewer. Review a
+plan separately only when its seam or public contract remains costly to get wrong.
 
 Send the reviewer the task, files, invariants, non-goals, verification evidence,
 known risks, and requested output. Reviewers stay read-only and lead with concrete

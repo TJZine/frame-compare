@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import normalized_process_output as _normalized_process_output
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
 
@@ -30,11 +31,6 @@ def _generated_portable_launcher(build_script: str) -> str:
     )
     assert match is not None, "generated portable launcher payload not found"
     return match.group("launcher")
-
-
-def _normalized_process_output(result: subprocess.CompletedProcess[str]) -> str:
-    output = re.sub(r"\r?\n\s*\|\s?", " ", f"{result.stdout}\n{result.stderr}")
-    return " ".join(output.split())
 
 
 def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Path) -> None:
@@ -338,7 +334,7 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     )
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
-        "vsview-0.10.3-wheel": ("0.10.3", 2260813),
+        "vsview-0.11.0-wheel": ("0.11.0", 2276081),
         "vsview-cli-1.2.0-win-amd64-wheel": ("1.2.0", 393807),
         "pyside6-6.11.2-win-amd64-wheel": ("6.11.2", 578382),
         "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
@@ -372,7 +368,7 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     lock = tomllib.loads(_read_text_or_fail(repo_root / "uv.lock"))
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
-        "vsview": "vsview-0.10.3-wheel",
+        "vsview": "vsview-0.11.0-wheel",
         "vsview-cli": "vsview-cli-1.2.0-win-amd64-wheel",
         "pyside6": "pyside6-6.11.2-win-amd64-wheel",
         "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
@@ -535,7 +531,7 @@ def test_pyproject_defines_vsview_optional_dependency(repo_root: Path) -> None:
     pyproject = _read_text_or_fail(pyproject_path)
     assert "[project.optional-dependencies]" in pyproject
     assert re.search(r"vsview\s*=\s*\[", pyproject)
-    assert re.search(r'"vsview==0\.10\.3"', pyproject)
+    assert re.search(r'"vsview==0\.11\.0"', pyproject)
 
 
 def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:
@@ -1136,7 +1132,7 @@ def _write_extracted_verifier_fixture(
                 ("shiboken6", "6.11.2"),
                 ("vapoursynth-bestsource", "21.0"),
                 ("vspackrgb", "1.4.0"),
-                ("VSView", "0.10.3"),
+                ("VSView", "0.11.0"),
                 ("vsview-cli", "1.2.0"),
                 ("vsjetengine", "1.7.0"),
             )
@@ -1894,7 +1890,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "vspackrgb": ("1.4.0", "MIT"),
-        "VSView": ("0.10.3", "EUPL-1.2"),
+        "VSView": ("0.11.0", "EUPL-1.2"),
         "vsview-cli": ("1.2.0", "Unlicense"),
         "vsjetengine": ("1.7.0", "MIT"),
     }

@@ -8,7 +8,6 @@ from fractions import Fraction
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import numpy as np
 import pytest
 import tomli_w
 
@@ -62,6 +61,15 @@ def _accepted_consensus(sample_offset: int = 0) -> AlignmentConsensus:
         consensus_ratio=1.0,
         ambiguity_ratio=None,
         stability=_DEFAULT_STABILITY,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_computed_audio_alignment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these reuse-policy tests isolated from the FFmpeg owner."""
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: _accepted_consensus(),
     )
 
 
@@ -146,26 +154,12 @@ def test_typed_alignment_progress_uses_prepared_comparison_presentation(
     )
     progress = Mock(spec=ProgressReporter)
 
-    with (
-        patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
-    ):
-        align_clips_from_request(
-            request,
-            config,
-            progress=progress,
-            reference_fps=Fraction(24, 1),
-        )
+    align_clips_from_request(
+        request,
+        config,
+        progress=progress,
+        reference_fps=Fraction(24, 1),
+    )
 
     descriptions = [call.args[0] for call in progress.set_description.call_args_list]
     assert descriptions[0] == "ALIGN | Checking saved offsets"
@@ -202,24 +196,10 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
         ],
     )
 
-    with (
-        patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
-        patch(
-            "frame_compare.services.alignment.maybe_launch_alignment_vsview",
-            return_value=None,
-        ) as launch,
-    ):
+    with patch(
+        "frame_compare.services.alignment.maybe_launch_alignment_vsview",
+        return_value=None,
+    ) as launch:
         results = align_clips_from_request(
             request,
             config,
@@ -266,21 +246,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
         lambda _request, _provenances: (_ for _ in ()).throw(AssertionError("shared cache write")),
     )
 
-    with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
-        patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
-    ):
+    with patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)):
         results = align_clips_from_request(request, config)
 
     assert results[0].source == "computed"
@@ -330,9 +296,8 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
@@ -344,8 +309,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     assert results[0].algorithm == "cross_correlation"
     assert results[0].correlation_score == pytest.approx(0.87)
     mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
+    mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
     assert mock_vs.call_args.kwargs["offsets_by_key"] == {"ref:comp": 7}
     mock_save_shared.assert_not_called()
@@ -394,10 +358,8 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -406,8 +368,6 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
     assert results[0].source == "cached"
     assert results[0].frame_offset == 3
     mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
 
@@ -455,10 +415,8 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -467,8 +425,6 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
     assert results[0].source == "cached"
     assert results[0].frame_offset == 3
     mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
 
@@ -520,9 +476,8 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         results = align_clips_from_request(request, config)
@@ -530,8 +485,7 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     assert results[0].source == "cached"
     assert results[0].frame_offset == 9
     mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
+    mock_estimate.assert_not_called()
     mock_vs.assert_not_called()
     assert prompt.call_count == (1 if policy == "prompt" else 0)
 
@@ -580,10 +534,8 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -592,8 +544,6 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
     assert results[0].source == "cached"
     assert results[0].frame_offset == 3
     mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
 
@@ -655,19 +605,7 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
-        patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
             return_value=None,
@@ -739,19 +677,7 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
-        patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview", return_value=None),
     ):
         align_clips_from_request(request, config)
@@ -838,10 +764,8 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps") as mock_probe,
-        patch("frame_compare.services.alignment._extract_reference_audio") as mock_extract_ref,
-        patch("frame_compare.services.alignment._extract_matching_audio") as mock_extract_comp,
-        patch("frame_compare.services.alignment._estimate_consensus_offset") as mock_estimate,
+        patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
+        patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = None
@@ -856,8 +780,6 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
         ("cached", 7),
     ]
     mock_probe.assert_not_called()
-    mock_extract_ref.assert_not_called()
-    mock_extract_comp.assert_not_called()
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
     assert mock_vs.call_args.kwargs["offsets_by_key"] == {
@@ -887,19 +809,7 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     )
 
     with (
-        patch("frame_compare.services.alignment._probe_fps", return_value=Fraction(24, 1)),
-        patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
+        patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
             "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
             return_value=None,
@@ -1006,18 +916,6 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
 
     with (
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
-            return_value=_accepted_consensus(),
-        ),
-        patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
             return_value={"ref:comp_manual": 5},
         ),
@@ -1063,15 +961,7 @@ def test_align_clips_from_request_interactive_confirmed_entry_keeps_computed_fal
 
     with (
         patch(
-            "frame_compare.services.alignment._extract_reference_audio",
-            return_value=(np.ones(10, dtype=np.float32), object()),
-        ),
-        patch(
-            "frame_compare.services.alignment._extract_matching_audio",
-            return_value=np.ones(10, dtype=np.float32),
-        ),
-        patch(
-            "frame_compare.services.alignment._estimate_consensus_offset",
+            "frame_compare.services.alignment._estimate_audio_pair",
             return_value=_accepted_consensus(4000),
         ),
         patch(

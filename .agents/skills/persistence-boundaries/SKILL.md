@@ -1,6 +1,6 @@
 ---
 name: persistence-boundaries
-description: Use when adding or changing config persistence, generated caches, run folders, presets, reports, bundle outputs, or any code that reads or writes Frame Compare filesystem state.
+description: Protect Frame Compare persisted state, serialization, cache recovery, and managed paths. Use for config/preset writes, caches, run records, or output placement; presentation-only edits do not need this skill.
 ---
 
 # Persistence Boundaries
@@ -12,6 +12,9 @@ Use this skill to keep filesystem persistence behind explicit owners.
 Frame Compare has no database; persistence is mostly config files, generated run artifacts, caches, reports, screenshots, and release outputs.
 
 ## Required Reading
+
+Read the relevant sections and affected owners first. Expand to callers, adjacent
+contracts, or full documents when material questions remain. Reuse task context.
 
 1. [`docs/ENGINEERING_RUNBOOK.md`](../../../docs/ENGINEERING_RUNBOOK.md)
 2. [`docs/current-architecture.md`](../../../docs/current-architecture.md)
@@ -33,9 +36,9 @@ categories below are routing aids, not a second authoritative inventory.
 
 ## Boundary Routing
 
-- If persistence changes affect CLI flags, config loading, or `--write-config`, also load `architecture-boundaries` and check `docs/current-cli-contract.md`.
-- If generated output or report presentation changes, also load `report-output-patterns`.
-- If persistence touches Docker, VS, FFmpeg, or Windows packaging, also load `runtime-integration-boundaries`.
+- If persistence changes affect CLI flags, config loading, or `--write-config`, consult `cli-contract-boundaries` and the relevant current CLI contract. Use `architecture-boundaries` when ownership or import direction changes.
+- If generated output or report presentation changes, consult relevant guidance in `report-output-patterns`.
+- If persistence touches Docker, VS, FFmpeg, or Windows packaging, consult relevant guidance in `runtime-integration-boundaries`.
 
 ## Core Rules
 
@@ -43,16 +46,25 @@ categories below are routing aids, not a second authoritative inventory.
 - Keep config/env interpretation near config, CLI, preflight, or bootstrap owners.
 - Preserve deterministic output: stable ordering, stable JSON/TOML, seeded randomness where relevant.
 - Use existing atomic-write patterns for durable files when applicable.
-- Normalize invalid or missing persisted values at the owner boundary.
+- Validate persisted data at its owner and preserve its explicit missing, corrupt,
+  and unsupported-version behavior. Invalid user config raises typed errors;
+  recoverable caches may miss or warn. Do not silently default authoritative config.
+- Reuse `config/persistence.py` for generated config/preset serialization so runtime
+  TMDB keys and webhook URLs are excluded. The wizard uses `load_raw_config` to
+  preserve the selected document independently of environment overrides.
+- Reuse preflight containment and `WorkspacePaths`: config stays under the workspace
+  except for the exact portable-state exception; the generated root may be external,
+  its managed descendants remain contained, and external media reads are allowed.
 - Keep run-folder behavior explicit; do not mix global generated paths with run-scoped outputs by accident.
 - Treat CLI/config persistence as public behavior and update the CLI contract in the same pass when it changes.
 - Do not let tests depend on unisolated generated state.
 
 ## Verification
 
-- For config/CLI persistence changes, run full verification.
-- For isolated owner changes, run focused tests plus `pyright`, `ruff`, and import-linter when imports changed.
-- Add or update tests for valid stored value, invalid value, missing/default value, and filesystem failure when the owner behavior changes.
+- Use the applicable runbook verification recipe without substituting a local
+  command subset. Persistence does not lower CLI/config, runtime, or release gates.
+- Reuse existing owner tests. Add or update valid, invalid, missing/default, or
+  filesystem-failure cases only where the changed behavior needs that proof.
 
 ## Common Mistakes
 

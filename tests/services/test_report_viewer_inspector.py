@@ -27,5 +27,7 @@ def test_inspector_harness_owns_formatting_and_inspector_policy() -> None:
 @pytest.mark.unit
 def test_viewer_assets_have_deterministic_owner_assembly_order() -> None:
     assembled = get_js()
-    assert assembled.index("const ViewerFormat") < assembled.index("const Inspector")
+    format_index = assembled.index("const ViewerFormat")
+    for owner in ("const ReviewState", "const Lens", "const GridView", "const Inspector"):
+        assert format_index < assembled.index(owner)
     assert assembled.index("const Inspector") < assembled.index("const ReportViewer")

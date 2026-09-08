@@ -156,7 +156,6 @@ async def _resolve_run_directory(
                 filenames=[input_videos[0].name],
                 error_type=type(exc).__name__,
                 error=str(exc),
-                exc_info=exc,
             )
 
     filenames = [video.name for video in input_videos]

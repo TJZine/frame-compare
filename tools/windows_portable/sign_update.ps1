@@ -217,6 +217,9 @@ try {
     $signatureFile = [string]$signatureFileProp.Value
   }
   Assert-SafeRelativePath -PathValue $signatureFile -FieldName "signature_file"
+  if ($signatureFile -cne "update-manifest.sig") {
+    throw "signature_file must be the canonical 'update-manifest.sig' entry."
+  }
 
   $signatureBytes = Sign-ManifestBytes -Rsa $rsa -Bytes $manifestBytes
   if (

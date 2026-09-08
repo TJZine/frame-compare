@@ -5,6 +5,8 @@ from __future__ import annotations
 import html as html_module
 import re
 
+import pytest
+
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_js
@@ -232,13 +234,18 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     assert scene_cut_filter.attrs["aria-pressed"] == "false"
     assert parser.selects["frame-select"].options[1].attrs["data-category"] == "scene-cut"
     assert "Source frame 10</span>" not in html
-    assert find_all(
+    item = require_first(
         document,
-        tag="span",
-        class_name="rv-filmstrip-accent",
+        tag="button",
+        class_name="rv-filmstrip-item",
         attr_name="data-category",
         attr_value="scene-cut",
     )
+    assert require_first(item, class_name="rv-filmstrip-number").text == "20"
+    assert require_first(item, class_name="rv-filmstrip-label").text == "Scene Cuts"
+    assert selected_filter.text == "Selected (1)"
+    assert scene_cut_filter.text == "Scene Cuts (1)"
+    assert not find_all(document, class_name="rv-filmstrip-accent")
 
 
 def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
@@ -253,6 +260,29 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
     assert html.count('id="report-data"') == 1
 
 
+@pytest.mark.parametrize(
+    ("timestamp", "date_label"),
+    [
+        ("2026-09-04T14:29:22.256990+00:00", "2026-09-04"),
+        ("2026-09-04T23:59:59.123456-04:00", "2026-09-04"),
+        ("2026-09-04T00:00:00Z", "2026-09-04"),
+        ('unknown "<date>"', 'unknown "<date>"'),
+    ],
+)
+def test_build_html_shortens_header_date_and_preserves_exact_timestamp(
+    report_payload: ReportPayload, timestamp: str, date_label: str
+) -> None:
+    payload: ReportPayload = {**report_payload, "generated_at": timestamp}
+    html = build_html(payload)
+    metadata = require_first(parse_elements(html), class_name="rv-meta")
+    date = require_first(metadata, tag="span")
+
+    assert date.text == date_label
+    assert date.attrs["title"] == timestamp
+    assert parse_info_modal(html).general["Generated"] == timestamp
+    assert script_payload(html)["generated_at"] == timestamp
+
+
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     tags = parse_start_tags(html)
@@ -261,14 +291,16 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     help_button = require_first(elements, tag="button", element_id="btn-help")
     info_button = require_first(elements, tag="button", element_id="btn-info")
     inspector_button = require_first(elements, tag="button", element_id="btn-inspector")
-    help_icon = require_first(help_button, tag="span", class_name="rv-btn-icon")
-    info_icon = require_first(info_button, tag="span", class_name="rv-btn-icon")
-    inspector_icon = require_first(inspector_button, tag="span", class_name="rv-btn-icon")
+    help_icon = require_first(help_button, tag="svg")
+    info_icon = require_first(info_button, tag="svg")
+    inspector_icon = require_first(inspector_button, tag="svg")
 
-    assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
+    metadata = require_first(elements, class_name="rv-meta")
+    assert "• 2 frames • 2 clips" in metadata.text
+    assert require_first(metadata, tag="span").text == "2026-05-22"
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
-    assert tags.by_id["btn-info"][1]["title"] == "Report Info"
+    assert tags.by_id["btn-info"][1]["title"] == "Report information"
     assert tags.by_id["btn-inspector"][0] == "button"
     assert tags.by_id["btn-inspector"][1]["class"] == "rv-header-inspector-btn"
     assert tags.by_id["btn-inspector"][1]["type"] == "button"
@@ -276,9 +308,10 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert tags.by_id["btn-inspector"][1]["aria-expanded"] == "false"
     assert tags.by_id["btn-inspector"][1]["aria-label"] == "Open Inspector"
     assert tags.by_id["btn-inspector"][1]["title"] == "Inspector (I)"
-    assert help_icon.text == "?"
-    assert info_icon.text == "ℹ"
-    assert inspector_icon.text == "☷"
+    for icon in (help_icon, info_icon, inspector_icon):
+        assert icon.attrs["aria-hidden"] == "true"
+        assert icon.attrs["focusable"] == "false"
+    assert inspector_button.text == "Inspector"
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
@@ -446,6 +479,7 @@ def test_build_html_avoids_duplicate_category_labels_when_label_matches_category
     html = build_html(payload)
 
     document = parse_elements(html)
+    assert require_first(document, tag="span", class_name="rv-filmstrip-number").text == "10"
     assert require_first(document, tag="span", class_name="rv-filmstrip-label").text == "Motion"
     assert "Motion • Motion" not in html
 
@@ -484,13 +518,6 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
         document,
         tag="button",
         class_name="rv-filmstrip-item",
-        attr_name="data-category",
-        attr_value="__all__",
-    )
-    assert find_all(
-        document,
-        tag="span",
-        class_name="rv-filmstrip-accent",
         attr_name="data-category",
         attr_value="__all__",
     )
@@ -767,12 +794,12 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     )
 
     assert visible_panel.attrs["data-filmstrip-enabled"] == "true"
-    assert visible_panel.attrs["aria-label"] == "Frame timeline"
+    assert visible_panel.attrs["aria-label"] == "Frame filmstrip"
     assert visible_filter_group.attrs["data-control-scope"] == "frame-filters"
     assert visible_filter_group.attrs["aria-label"] == "Frame category filters"
     assert visible_toggle.attrs["type"] == "button"
     assert visible_toggle.attrs["aria-expanded"] == "true"
-    assert visible_toggle.attrs["aria-label"] == "Collapse timeline controls"
+    assert visible_toggle.attrs["aria-label"] == "Collapse filmstrip controls"
 
     size_buttons = {
         child.attrs.get("data-filmstrip-size"): child
@@ -800,7 +827,7 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     hidden_toggle = require_first(hidden_panel, tag="button", element_id="btn-filmstrip-toggle")
 
     assert hidden_panel.attrs["data-filmstrip-enabled"] == "false"
-    assert hidden_panel.attrs["aria-label"] == "Frame timeline"
+    assert hidden_panel.attrs["aria-label"] == "Frame filmstrip"
     assert hidden_toggle.attrs["type"] == "button"
     assert hidden_toggle.attrs["aria-expanded"] == "false"
     assert hidden_toggle.attrs["aria-label"] == "Filmstrip disabled"

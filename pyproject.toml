@@ -1,6 +1,6 @@
 [project]
 name = "frame-compare"
-version = "0.5.0"
+version = "0.6.0"
 description = "Video frame comparison tool with tonemapping and slow.pics integration"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -41,7 +41,7 @@ vsview = [
     "vapoursynth==79",
     "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'",
     "vs-placebo==2.0.4; sys_platform == 'win32'",
-    "vsview==0.10.3",
+    "vsview==0.11.0",
 ]
 
 [project.scripts]
@@ -60,7 +60,7 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.57",
+    "zensical==0.0.59",
 ]
 docker-test = [
     "pytest==9.1.1",

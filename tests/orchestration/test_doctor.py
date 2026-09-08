@@ -120,7 +120,7 @@ class TestCheckLsmas:
         ]
         assert result.hint == (
             "Make L-SMASH-Works available under core.lsmas; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert "install" not in result.hint.lower()
 
@@ -159,7 +159,7 @@ class TestCheckLsmas:
         assert result.details == {"checked_plugin_paths": []}
         assert result.hint == (
             "Make L-SMASH-Works available under core.lsmas; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         load_plugin.assert_called_once_with(mock_core)
 
@@ -226,7 +226,7 @@ class TestCheckLsmas:
         assert result.message == "lsmas check failed"
         assert result.hint == (
             "Check the VapourSynth/plugin setup, then rerun doctor; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert result.details == {"exception_type": "RuntimeError"}
 
@@ -246,7 +246,7 @@ class TestCheckLsmas:
         assert result.message == "Cannot check lsmas (VapourSynth not available)"
         assert result.hint == (
             "Make VapourSynth importable before checking L-SMASH-Works; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
 
     def test_check_lsmas_import_error_after_runtime_import_is_setup_failure(self) -> None:
@@ -387,7 +387,7 @@ class TestCheckVapoursynth:
         assert result.passed is False
         assert "not found" in result.message
         assert result.hint == (
-            "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start"
+            "Make VapourSynth importable; see https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert "pip install" not in result.hint
 
@@ -945,7 +945,7 @@ class TestCheckFFmpeg:
         assert f"{missing_executable} not found" in result.message
         assert result.hint == (
             "Provide FFmpeg and ffprobe executables; see "
-            "https://github.com/TJZine/frame-compare#requirements"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert all(
             command not in result.hint.lower()

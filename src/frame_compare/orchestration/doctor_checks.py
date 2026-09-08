@@ -54,6 +54,9 @@ _CHECK_ORDER: list[tuple[str, str]] = [
 ]
 
 SLOWPICS_HEALTHCHECK_URL = "https://slow.pics/"
+_NATIVE_RUNTIME_DOC_URL = (
+    "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
+)
 _LSMAS_REQUIRED_FUNCTIONS = ("LibavSMASHSource", "LWLibavSource")
 # FFMS2's pinned C++ callback is named GetVersion internally, but VapourSynth
 # registers the public function as Version. Keep the registered name here.
@@ -69,10 +72,7 @@ def _check_vapoursynth() -> CheckResult:
         return CheckResult(
             passed=False,
             message="VapourSynth not found",
-            hint=(
-                "Make VapourSynth importable; see "
-                "https://github.com/TJZine/frame-compare#quick-start"
-            ),
+            hint=f"Make VapourSynth importable; see {_NATIVE_RUNTIME_DOC_URL}",
         )
 
     version = getattr(vs, "__version__", None)
@@ -143,10 +143,7 @@ def _lsmas_setup_failure(error: Exception) -> CheckResult:
     return CheckResult(
         passed=False,
         message="lsmas check failed",
-        hint=(
-            "Check the VapourSynth/plugin setup, then rerun doctor; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
-        ),
+        hint=f"Check the VapourSynth/plugin setup, then rerun doctor; see {_NATIVE_RUNTIME_DOC_URL}",
         details={"exception_type": type(error).__name__},
     )
 
@@ -161,7 +158,7 @@ def _check_lsmas() -> CheckResult:
             message="Cannot check lsmas (VapourSynth not available)",
             hint=(
                 "Make VapourSynth importable before checking L-SMASH-Works; "
-                "see https://github.com/TJZine/frame-compare#quick-start"
+                f"see {_NATIVE_RUNTIME_DOC_URL}"
             ),
         )
     except Exception as error:
@@ -179,10 +176,7 @@ def _check_lsmas() -> CheckResult:
             return CheckResult(
                 passed=False,
                 message="L-SMASH-Works plugin not found in core.lsmas namespace",
-                hint=(
-                    "Make L-SMASH-Works available under core.lsmas; see "
-                    "https://github.com/TJZine/frame-compare#quick-start"
-                ),
+                hint=f"Make L-SMASH-Works available under core.lsmas; see {_NATIVE_RUNTIME_DOC_URL}",
                 details=_lsmas_plugin_path_details(),
             )
 
@@ -489,10 +483,7 @@ def _check_ffmpeg() -> CheckResult:
             return CheckResult(
                 passed=False,
                 message=f"{executable} not found in the configured runtime",
-                hint=(
-                    "Provide FFmpeg and ffprobe executables; see "
-                    "https://github.com/TJZine/frame-compare#requirements"
-                ),
+                hint=f"Provide FFmpeg and ffprobe executables; see {_NATIVE_RUNTIME_DOC_URL}",
                 details=details,
             )
 

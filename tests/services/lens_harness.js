@@ -14,6 +14,7 @@ const lensPath = path.resolve(
     'assets',
     'lens.js',
 );
+const viewerFormatPath = path.join(path.dirname(lensPath), 'viewer_format.js');
 
 let focusDocument = null;
 
@@ -225,7 +226,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         },
     };
     vm.runInNewContext(
-        `${fs.readFileSync(lensPath, 'utf8')}\nglobalThis.__Lens = Lens;`,
+        `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\nglobalThis.__Lens = Lens;`,
         context,
         { filename: lensPath },
     );

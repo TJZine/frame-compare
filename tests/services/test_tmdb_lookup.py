@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
 from typing import Literal, get_args
 
 import httpx
 import pytest
+import structlog
 
 import frame_compare.services.tmdb_lookup as tmdb_lookup
 from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
 from frame_compare.services.metadata import lookup_tmdb as metadata_lookup_tmdb
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
+from frame_compare.utils.logging import configure_logging
 
 
 def test_tmdb_metadata_media_type_is_closed_domain() -> None:
@@ -256,6 +260,45 @@ async def test_tmdb_lookup_direct_module_classifies_http_and_transport_errors() 
 
     assert excinfo.value.context.details == {"reason": "Request failed"}
     assert "d" * 32 not in excinfo.value.context.message
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure_kind", ["status", "request", "timeout", "decode"])
+async def test_tmdb_failures_do_not_leak_api_key_through_json_tracebacks(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    api_key = "d34db33fd34db33fd34db33fd34db33f"
+    stream = io.StringIO()
+    monkeypatch.setattr("sys.stderr", stream)
+    configure_logging(log_format="json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if failure_kind == "status":
+            return httpx.Response(403)
+        if failure_kind == "request":
+            raise httpx.ConnectError("transport failed", request=request)
+        if failure_kind == "timeout":
+            raise httpx.TimeoutException("request timed out", request=request)
+        return httpx.Response(200, content=f'{{"credential":"{api_key}"')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        try:
+            await tmdb_lookup.lookup_tmdb(
+                ParsedMetadata(title="Arrival"),
+                MetadataConfig(api_key=api_key),
+                client,
+            )
+        except TmdbError as exc:
+            structlog.get_logger().warning("metadata_degraded", exc_info=exc)
+            assert exc.__cause__ is None
+            assert exc.__context__ is None
+        else:
+            pytest.fail("TMDB failure did not raise TmdbError")
+
+    payload = json.loads(stream.getvalue())
+    assert payload["exception"]
+    assert api_key not in json.dumps(payload)
 
 
 @pytest.mark.anyio

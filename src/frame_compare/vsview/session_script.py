@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import uuid
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -77,10 +78,8 @@ def write_vsview_session_script(
     try:
         write_text_atomic(script_path, script_content, encoding="utf-8")
     except OSError:
-        try:
+        with suppress(OSError):
             script_path.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise
     return script_path
 

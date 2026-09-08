@@ -1,6 +1,6 @@
 ---
 name: bounded-worker-execution
-description: Use when Frame Compare has a bounded implementation unit suitable for the cost-efficient worker_luna role.
+description: Dispatch and integrate a bounded Frame Compare implementation unit after delegation is justified. Use for an established owner/write boundary; ordinary single-agent implementation does not need this skill.
 ---
 
 # Bounded Worker Execution
@@ -11,12 +11,13 @@ The unit may require substantial repository comprehension, exact-file discovery,
 routine local design choices, focused test design, and diagnosis of failures caused
 by its implementation. It must remain bounded and disjoint from other writers.
 
-The worker may choose files and implementation details within the approved owner
-seam, but must stop when evidence exposes unresolved product intent, ownership,
-public CLI/config behavior, architecture, proof depth, a new dependency or
-compatibility policy, or scope expansion. The controller reviews the diff,
-integrates it, and reruns the required proof. Use `worker` instead when a settled
-bounded unit needs material local design judgment, cross-boundary comprehension,
-complex diagnosis, or proof interpretation; return unresolved product, owner,
-contract, architecture, or proof decisions to planning. Route other delegation
-through `parallel-sidecars`.
+The worker may choose files, local implementation details, and focused proof within
+its assigned owner and contracts. Investigate uncertainty and repair failures
+caused by the change. Return a consequential scope, product, contract, dependency,
+or ownership decision outside that boundary to the controller with evidence.
+The controller resolves it within user authorization before asking the user.
+
+The controller reviews the diff, integrates it, and confirms current proof under
+the runbook. Use `worker` when a settled bounded unit needs material local design
+judgment, cross-boundary comprehension, complex diagnosis, or proof interpretation.
+Route other delegation through `parallel-sidecars`.

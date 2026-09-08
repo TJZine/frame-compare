@@ -26,7 +26,7 @@ Before proposing a fix, establish:
 - exact symptom and expected behavior
 - smallest reliable reproduction or best available observational proof
 - failing layer and nearest owner boundary
-- at least one rejected alternative cause with evidence
+- evidence distinguishing credible alternative causes when any remain
 - verification mode and command/manual proof that will prove the fix
 
 If reliable reproduction is impossible, say so and gather enough diagnostic evidence to make the next probe meaningful.
@@ -36,11 +36,13 @@ If reliable reproduction is impossible, say so and gather enough diagnostic evid
 1. Frame the symptom: command, inputs, environment, expected behavior, observed behavior, frequency, and first known bad change when available.
 2. Reproduce or observe through the cheapest real boundary: targeted pytest, CLI invocation, static check, Docker/runtime verification, Windows host proof, log/stack inspection, or source audit.
 3. Isolate the layer using the relevant boundary skill:
-   - CLI/config/output: `report-output-patterns`, `persistence-boundaries`, or `architecture-boundaries`
+   - CLI options, config precedence, streams, or exit behavior: `cli-contract-boundaries`
+   - generated reports, overlays, or presentation: `report-output-patterns`
    - runtime integrations: `runtime-integration-boundaries`
    - filesystem persistence: `persistence-boundaries`
    - ownership/import layer: `architecture-boundaries`
-4. Build falsifiable hypotheses:
+4. When causality remains ambiguous, compare falsifiable hypotheses. A directly
+   reproduced, source-confirmed cause does not require an invented alternative:
 
 ```text
 HYPOTHESIS:
@@ -51,11 +53,13 @@ STATUS: open | rejected | likely | confirmed
 ```
 
 5. Choose the remediation seam: owner file/module, files in scope, files out of scope, and stop-and-replan triggers.
-6. Verify with `verification-strategy`, then run the repo-required gate from the runbook.
+6. Use the relevant runbook verification gate; consult `verification-strategy` only
+   when the proof surface remains unclear.
 
 ## Output Shape
 
-For non-trivial debugging, keep this record:
+For intermittent or multi-layer failures, use this record when it helps retain the
+investigation. For a direct failure, the cause, fix, and proof can be a short note:
 
 ```text
 DEBUGGING_RECORD

@@ -72,7 +72,7 @@ const Inspector = {
                 viewer.state.inspectorOpen = nextOpen;
                 if (nextOpen) this.render();
                 else this.updateVisibility();
-                if (options.save !== false) viewer.persistViewportState();
+                if (options.save !== false) viewer.persistViewerState();
                 if (nextOpen && options.focus !== false) {
                     viewer.focusElement(Array.from(viewer.dom.inspectorTabs)
                         .find(tab => tab.dataset.inspectorTab === viewer.state.inspectorTab));
@@ -134,7 +134,7 @@ const Inspector = {
                     viewer.ensureReviewController().render();
                 }
                 this.updateTabs();
-                if (options.save !== false) viewer.persistViewportState();
+                if (options.save !== false) viewer.persistViewerState();
             },
 
             handleTabKey(event) {
@@ -232,7 +232,7 @@ const Inspector = {
                         const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
                         const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
                         const dolbyVision = image?.dolby_vision_rpu === true ? ' · DV RPU' : '';
-                        item.textContent = `${viewer.clipDisplay(clip)} — ${sourceFrame}${total} · ${pictureType}${dolbyVision}`;
+                        item.textContent = `${ViewerFormat.clipDisplay(clip)} — ${sourceFrame}${total} · ${pictureType}${dolbyVision}`;
                         return item;
                     });
                     viewer.dom.inspectorSourceFrames.replaceChildren(...rows);

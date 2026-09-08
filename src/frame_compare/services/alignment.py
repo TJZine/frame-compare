@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 
 import structlog
 
-from frame_compare.services.alignment_audio import (
-    extract_matching_audio,
-    extract_reference_audio,
-    probe_fps,
-)
-from frame_compare.services.alignment_consensus import estimate_consensus_offset
+from frame_compare.services import alignment_audio, alignment_consensus, alignment_math
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
-from frame_compare.services.alignment_math import (
-    calculate_alignment_trims,
-    cross_correlate,
-    samples_to_frames,
-)
+from frame_compare.services.alignment_math import calculate_alignment_trims
 from frame_compare.services.alignment_previous_offsets import (
     apply_shared_reuse,
     prompt_for_previous_alignment_offset_reuse,
@@ -39,18 +31,7 @@ from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 
 log = structlog.get_logger()
 
-_extract_matching_audio = extract_matching_audio
-_extract_reference_audio = extract_reference_audio
-_probe_fps = probe_fps
-_cross_correlate = cross_correlate
-_estimate_consensus_offset = estimate_consensus_offset
-_samples_to_frames = samples_to_frames
-
 __all__ = [
-    "_cross_correlate",
-    "_estimate_consensus_offset",
-    "_probe_fps",
-    "_samples_to_frames",
     "align_clips_from_request",
     "calculate_alignment_trims",
     "format_rejected_alignment_warning",
@@ -115,7 +96,7 @@ def _apply_confirmed_vsview_offsets(
 
     resolved_fps_reference = fps_reference
     if resolved_fps_reference is None:
-        resolved_fps_reference = _probe_fps(reference)
+        resolved_fps_reference = alignment_audio.probe_fps(reference)
 
     for comp in comparisons:
         key = _alignment_key(reference, comp)
@@ -170,7 +151,7 @@ def _apply_manual_overrides_with_provenance(
             continue
         override = manual_overrides[key]
         if fps_reference is None:
-            fps_reference = _probe_fps(reference)
+            fps_reference = alignment_audio.probe_fps(reference)
         result = AlignmentResult(
             reference_clip=reference.name,
             comparison_clip=comp.path.name,
@@ -201,31 +182,32 @@ def _compute_missing_alignments(
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
     descriptions = progress_descriptions or {}
-    ref_audio, reference_stream = _extract_reference_audio(
-        reference,
-        config.sample_rate,
-        stream_override=config.reference_stream,
-        channel_strategy=config.channel_strategy,
-    )
+    selected_reference_stream: alignment_audio.AudioStreamInfo | None = None
+
+    def load_reference_stream() -> alignment_audio.AudioStreamInfo:
+        nonlocal selected_reference_stream
+        if selected_reference_stream is None:
+            selected_reference_stream = alignment_audio.select_reference_audio_stream(
+                reference,
+                stream_override=config.reference_stream,
+            )
+        return selected_reference_stream
+
     for comp in requested_comparisons:
         if progress:
             progress.set_description(descriptions.get(comp, f"ALIGN | {comp.name}"))
 
-        comp_audio = _extract_matching_audio(
+        estimate = _estimate_audio_pair(
+            reference,
             comp,
-            config.sample_rate,
-            reference_stream=reference_stream,
-            stream_override=config.comparison_streams.get(comp.stem),
-            channel_strategy=config.channel_strategy,
-        )
-        estimate = _estimate_consensus_offset(
-            ref_audio,
-            comp_audio,
             config=config,
-            fps=fps_reference,
+            fps_reference=fps_reference,
+            reference_stream_loader=load_reference_stream,
         )
         frame_offset = (
-            _samples_to_frames(estimate.sample_offset, config.sample_rate, fps_reference)
+            alignment_math.samples_to_frames(
+                estimate.sample_offset, config.sample_rate, fps_reference
+            )
             if estimate.sample_offset is not None
             else None
         )
@@ -250,6 +232,69 @@ def _compute_missing_alignments(
         results_map[_alignment_key(reference, comp)] = res
         if progress:
             progress.advance(1)
+
+
+def _estimate_audio_pair(
+    reference: Path,
+    comparison: Path,
+    *,
+    config: AlignmentConfig,
+    fps_reference: Fraction,
+    reference_stream_loader: Callable[[], alignment_audio.AudioStreamInfo] | None = None,
+) -> alignment_consensus.AlignmentConsensus:
+    reference_stream = (
+        reference_stream_loader()
+        if reference_stream_loader is not None
+        else alignment_audio.select_reference_audio_stream(
+            reference,
+            stream_override=config.reference_stream,
+        )
+    )
+    comparison_stream = alignment_audio.select_matching_audio_stream(
+        comparison,
+        reference_stream=reference_stream,
+        stream_override=config.comparison_streams.get(comparison.stem),
+    )
+    plan = alignment_audio.plan_audio_analysis(
+        reference_stream,
+        comparison_stream,
+        config=config,
+    )
+    if isinstance(plan, alignment_audio.AudioAnalysisBudgetExceeded):
+        if plan.reason.startswith("selected_audio_timeline_"):
+            return alignment_consensus.rejected_analysis(
+                plan.reason,
+                config=config,
+                fps=fps_reference,
+            )
+        return alignment_consensus.analysis_budget_exceeded(
+            config=config,
+            fps=fps_reference,
+        )
+    return alignment_consensus.estimate_planned_consensus_offset(
+        plan=plan,
+        config=config,
+        fps=fps_reference,
+        analysis_window_loader=lambda spec: alignment_audio.extract_planned_window(
+            reference,
+            comparison,
+            reference_stream,
+            comparison_stream,
+            plan,
+            spec,
+            channel_strategy=config.channel_strategy,
+        ),
+        scoring_window_loader=lambda spec, offset: alignment_audio.extract_aligned_scoring_window(
+            reference,
+            comparison,
+            reference_stream,
+            comparison_stream,
+            plan,
+            spec,
+            global_analysis_offset=offset,
+            channel_strategy=config.channel_strategy,
+        ),
+    )
 
 
 def _compute_missing_alignments_with_provenance(
@@ -429,7 +474,7 @@ def align_clips_from_request(
             results_map=results_map,
         )
         if fps_reference is None:
-            fps_reference = _probe_fps(reference)
+            fps_reference = alignment_audio.probe_fps(reference)
         _compute_missing_alignments_with_provenance(
             reference=reference,
             requested_comparisons=requested_comparisons,
