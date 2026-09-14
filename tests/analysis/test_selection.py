@@ -4,7 +4,11 @@ import pytest
 
 from frame_compare.analysis import selection
 from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.selection import preferred_frame_gap, select_frames
+from frame_compare.analysis.selection import (
+    preferred_frame_gap,
+    select_frames,
+    select_random_frames,
+)
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import AnalysisConfig
 
@@ -255,10 +259,15 @@ def test_random_count_same_seed_deterministic() -> None:
 
 
 def test_zero_random_count_skips_seeded_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _unexpected_ordering(_seed: int, _frame_index: int) -> bytes:
-        raise AssertionError("zero random frames must not build a seeded ordering")
-
-    monkeypatch.setattr(selection, "_stable_seeded_order", _unexpected_ordering)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            selection.hashlib,
+            "blake2b",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("zero random frames must not hash a seeded ordering")
+            ),
+        )
+        assert select_random_frames(100, 0, 42, selection_fps=Fraction(24)) == []
 
     result = select_frames(
         make_metrics(LUMINANCE_100, MOTION_100),

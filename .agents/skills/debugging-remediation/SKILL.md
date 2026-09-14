@@ -44,13 +44,13 @@ If reliable reproduction is impossible, say so and gather enough diagnostic evid
 4. When causality remains ambiguous, compare falsifiable hypotheses. A directly
    reproduced, source-confirmed cause does not require an invented alternative:
 
-```text
-HYPOTHESIS:
-EVIDENCE_FOR:
-EVIDENCE_AGAINST:
-NEXT_PROBE:
-STATUS: open | rejected | likely | confirmed
-```
+   ```text
+   HYPOTHESIS:
+   EVIDENCE_FOR:
+   EVIDENCE_AGAINST:
+   NEXT_PROBE:
+   STATUS: open | rejected | likely | confirmed
+   ```
 
 5. Choose the remediation seam: owner file/module, files in scope, files out of scope, and stop-and-replan triggers.
 6. Use the relevant runbook verification gate; consult `verification-strategy` only
