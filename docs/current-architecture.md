@@ -429,8 +429,10 @@ neighborhood and supplies confidence, so only one decoded pair and one correlati
 workspace are live. `alignment_consensus`
 translates local unequal-window lag through the two stream origins before applying the
 public sign convention. All successfully correlated selected windows participate in
-majority consensus, with score used only for ties and the winning group's median score
-used for confidence gating. Requests outside the fixed internal work budget produce a typed non-applied
+frame-equivalent majority consensus, with score used only for ties and the winning
+group's median score used for confidence gating. An observed lower-median sample offset
+represents the winning frame group without replacing raw window evidence. Requests
+outside the fixed internal work budget produce a typed non-applied
 `analysis_budget_exceeded` consensus rather than widening config validation, truncating
 the requested search silently, or attempting unbounded work. The estimator-policy token
 includes this strategy so older computed cache entries are not reused.

@@ -333,6 +333,41 @@ def test_source_set_cache_key_changes_with_estimator_policy(
     assert source_set_cache_key(request) != original
 
 
+@pytest.mark.parametrize(
+    ("provenance", "source"),
+    [
+        ("computed_this_run", "computed"),
+        ("interactive_confirmed_this_run", "manual"),
+    ],
+)
+def test_previous_estimator_policy_shared_entries_miss_without_schema_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provenance: str,
+    source: str,
+) -> None:
+    request = _request(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            reuse_cache,
+            "ALIGNMENT_ESTIMATOR_POLICY",
+            "stream-timeline-distributed-2097152-v4",
+        )
+        save_reusable_offsets(
+            request,
+            [
+                _provenance(
+                    request,
+                    result=_result(request, source=source),
+                    provenance=provenance,
+                )
+            ],
+        )
+
+    assert _cache_data(request)["version"] == CACHE_VERSION == "2"
+    assert load_reusable_offset_entries(request) is None
+
+
 def test_alignment_cache_keys_intentionally_reuse_same_stat_identity(tmp_path: Path) -> None:
     """Content hashing is deliberately excluded from performance-first keys."""
     request = _request(tmp_path)

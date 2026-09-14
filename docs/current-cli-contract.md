@@ -1445,7 +1445,11 @@ converted to this sign convention before consensus evidence, hints, caching, and
   defaulting to `1`. It gates whether enough selected windows produced correlation
   estimates before the independent confidence and ambiguity gates run.
 - `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting
-  to `1.0`. It gates whether enough windows agree on the selected offset.
+  to `1.0`. It gates whether enough windows agree on the exact integer frame
+  correction produced by `samples_to_frames` at the requested sample rate and
+  reference FPS. Adjacent frame corrections remain distinct. The accepted group
+  retains an observed lower-median sample offset for diagnostic time reporting;
+  raw per-window sample evidence remains unchanged.
 - `refinement_mode = "disabled" | "local"` selects whether local offset
   refinement runs after coarse correlation. `disabled` is the default.
 - `refinement_sample_rate` is either `null` or an integer from `4000` through
@@ -1478,8 +1482,12 @@ and 15,000,000 samples in total. Reference and comparison pairs are extracted an
 processed sequentially. Confidence uses overlap-local mean centering and requires at
 least three samples and 5% of the shorter window, preventing tiny boundary overlaps
 from appearing perfectly correlated. Consensus considers every successfully correlated
-selected window, selects the largest agreeing group, uses score only to break equal-size
-groups, and gates the winner by its median window score. A schema-valid window, offset,
+selected window, groups candidates by the exact frame correction that would be applied,
+selects the largest agreeing group, uses score only to break equal-size groups, and gates
+the winner by its median window score and minimum peak ratio. The winning group's
+lower-median observed sample offset supplies diagnostic time information without
+replacing raw window evidence. Sample offsets that cross a frame-rounding boundary do
+not agree, even when the resulting frame corrections are adjacent. A schema-valid window, offset,
 minimum-window, or requested-rate scoring request
 that cannot fit the fixed budget remains valid configuration but produces the explicit
 non-applied `analysis_budget_exceeded` result. Normal optional VSView/manual review and

@@ -53,12 +53,19 @@ ignored with a warning rather than treated as authoritative evidence.
 Computed alignment may also classify bounded evidence across the source as stable,
 possible drift, possible discontinuity, variable, or insufficient. This summary is
 diagnostic only: Frame Compare always retains the selected constant offset and trims.
+Consensus groups windows only when their requested-rate sample estimates produce the
+same integer source-frame correction at the reference FPS. It does not merge adjacent
+frames or use the diagnostic stability classification for acceptance. The accepted
+group retains an observed lower-median sample estimate for diagnostic time reporting,
+while preserving every original per-window sample estimate as evidence.
 Material non-stable evidence produces one concise warning and should be verified at
 multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
 schema v2 requires the compact summary and the reference-minus-comparison sign
-convention. Schema-v1 entries are ignored and recomputed; there is no cache migration
-or compatibility path. Run-local `manual_overrides.toml` remains a v1 file with the
-same path and offset semantics.
+convention. The estimator policy is part of the shared source-set identity for both
+computed and interactively confirmed entries, so older-policy shared entries miss and
+are recomputed or reviewed normally. Schema-v1 entries are ignored and recomputed;
+there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
+remains a v1 file with the same path and offset semantics.
 
 ## Native VSView alignment review
 

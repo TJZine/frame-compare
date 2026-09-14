@@ -27,6 +27,7 @@ from frame_compare.services.alignment_correlation import (
     estimate_alignment_offset,
     refine_aligned_score,
 )
+from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 
@@ -68,6 +69,36 @@ def _estimate_windows(
         config=config,
         fps=Fraction(24),
         analysis_window_loader=lambda _spec: next(remaining),
+        scoring_window_loader=lambda _spec, _offset: (_ for _ in ()).throw(
+            AssertionError("requested-rate scoring is not expected")
+        ),
+    )
+
+
+def _estimate_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+    estimates: list[CorrelationEstimate],
+    *,
+    config: AlignmentConfig,
+    fps: Fraction = Fraction(24),
+) -> alignment_consensus.AlignmentConsensus:
+    remaining = iter(estimates)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: next(remaining),
+    )
+    windows = [
+        AudioWindow(np.ones(20), np.ones(20), index * 100, index * 100)
+        for index in range(len(estimates))
+    ]
+    plan = _plan(rate=config.sample_rate, count=len(windows))
+    window_iter = iter(windows)
+    return alignment_consensus.estimate_planned_consensus_offset(
+        plan=plan,
+        config=config,
+        fps=fps,
+        analysis_window_loader=lambda _spec: next(window_iter),
         scoring_window_loader=lambda _spec, _offset: (_ for _ in ()).throw(
             AssertionError("requested-rate scoring is not expected")
         ),
@@ -189,14 +220,129 @@ def test_planned_consensus_uses_majority_before_score(
     assert result.consensus_windows == 3
 
 
+@pytest.mark.parametrize(
+    ("offsets", "sample_rate", "fps", "expected_sample", "expected_frame"),
+    [
+        ([1000, 1000, 1001, 1000, 1000], 8000, Fraction(24), 1000, 3),
+        ([1000, 1004, 1002, 1003], 8000, Fraction(24), 1002, 3),
+        ([-1000, -1004, -1002, -1003], 8000, Fraction(24), -1003, -3),
+        ([-1, 0, 1], 8000, Fraction(24), 0, 0),
+        ([-1, 1], 48, Fraction(24), -1, 0),
+        ([1000, 1001, 1002], 8000, Fraction(24000, 1001), 1001, 3),
+    ],
+)
+def test_frame_equivalent_candidates_reach_consensus_with_observed_representative(
+    monkeypatch: pytest.MonkeyPatch,
+    offsets: list[int],
+    sample_rate: int,
+    fps: Fraction,
+    expected_sample: int,
+    expected_frame: int,
+) -> None:
+    estimates = [CorrelationEstimate(offset, 0.9, 2.0) for offset in offsets]
+
+    result = _estimate_candidates(
+        monkeypatch,
+        estimates,
+        config=AlignmentConfig(sample_rate=sample_rate),
+        fps=fps,
+    )
+
+    assert result.applied
+    assert result.sample_offset == expected_sample
+    assert result.sample_offset in offsets
+    assert samples_to_frames(result.sample_offset, sample_rate, fps) == expected_frame
+    assert result.consensus_windows == len(offsets)
+    assert result.consensus_ratio == 1.0
+    assert [item.sample_offset for item in result.window_evidence] == offsets
+
+
+@pytest.mark.parametrize(
+    "offsets",
+    [
+        [1166, 1167],
+        [-1166, -1167],
+        [1000, 2000],
+    ],
+)
+def test_different_frame_corrections_do_not_reach_default_consensus(
+    monkeypatch: pytest.MonkeyPatch,
+    offsets: list[int],
+) -> None:
+    result = _estimate_candidates(
+        monkeypatch,
+        [CorrelationEstimate(offset, 0.9, 2.0) for offset in offsets],
+        config=AlignmentConfig(sample_rate=8000),
+    )
+
+    assert not result.applied
+    assert result.sample_offset is None
+    assert result.diagnostic == "insufficient_consensus"
+    assert result.consensus_windows == 1
+    assert result.consensus_ratio == 0.5
+
+
+def test_equal_frame_group_sizes_use_score_then_first_encountered_tie_break(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scored = _estimate_candidates(
+        monkeypatch,
+        [
+            CorrelationEstimate(1000, 0.8, 2.0),
+            CorrelationEstimate(1167, 0.9, 2.0),
+            CorrelationEstimate(1001, 0.7, 2.0),
+            CorrelationEstimate(1168, 0.6, 2.0),
+        ],
+        config=AlignmentConfig(sample_rate=8000, consensus_minimum_ratio=0.5),
+    )
+    assert scored.sample_offset == 1167
+
+    first = _estimate_candidates(
+        monkeypatch,
+        [
+            CorrelationEstimate(1167, 0.9, 2.0),
+            CorrelationEstimate(1000, 0.9, 2.0),
+            CorrelationEstimate(1168, 0.6, 2.0),
+            CorrelationEstimate(1001, 0.6, 2.0),
+        ],
+        config=AlignmentConfig(sample_rate=8000, consensus_minimum_ratio=0.5),
+    )
+    assert first.sample_offset == 1167
+
+
+def test_frame_consensus_preserves_minimum_window_and_ratio_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    insufficient_windows = _estimate_candidates(
+        monkeypatch,
+        [CorrelationEstimate(1000, 0.9, 2.0), CorrelationEstimate(1001, 0.9, 2.0)],
+        config=AlignmentConfig(sample_rate=8000, minimum_valid_windows=3),
+    )
+    assert insufficient_windows.diagnostic == "insufficient_valid_windows"
+
+    insufficient_ratio = _estimate_candidates(
+        monkeypatch,
+        [
+            CorrelationEstimate(1000, 0.9, 2.0),
+            CorrelationEstimate(1001, 0.9, 2.0),
+            CorrelationEstimate(1002, 0.9, 2.0),
+            CorrelationEstimate(1167, 0.9, 2.0),
+            CorrelationEstimate(1168, 0.9, 2.0),
+        ],
+        config=AlignmentConfig(sample_rate=8000, consensus_minimum_ratio=0.61),
+    )
+    assert insufficient_ratio.diagnostic == "insufficient_consensus"
+    assert insufficient_ratio.consensus_ratio == 0.6
+
+
 def test_winning_group_uses_representative_confidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     estimates = iter(
         [
-            CorrelationEstimate(4, 0.95, 2.0),
-            CorrelationEstimate(4, 0.10, 2.0),
-            CorrelationEstimate(4, 0.10, 2.0),
+            CorrelationEstimate(1000, 0.95, 2.0),
+            CorrelationEstimate(1001, 0.10, 2.0),
+            CorrelationEstimate(1002, 0.10, 2.0),
         ]
     )
     monkeypatch.setattr(
@@ -209,8 +355,7 @@ def test_winning_group_uses_representative_confidence(
     result = _estimate_windows(
         windows,
         config=AlignmentConfig(
-            sample_rate=100,
-            max_offset_seconds=1,
+            sample_rate=8000,
             confidence_threshold=0.9,
         ),
     )
@@ -218,6 +363,69 @@ def test_winning_group_uses_representative_confidence(
     assert not result.applied
     assert result.diagnostic == "low_confidence"
     assert result.score == pytest.approx(0.1)
+
+
+def test_winning_frame_group_uses_minimum_ambiguity_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _estimate_candidates(
+        monkeypatch,
+        [
+            CorrelationEstimate(1000, 0.9, 2.0),
+            CorrelationEstimate(1001, 0.9, 1.2),
+            CorrelationEstimate(1002, 0.9, 1.8),
+        ],
+        config=AlignmentConfig(sample_rate=8000, ambiguity_peak_ratio=1.5),
+    )
+
+    assert not result.applied
+    assert result.diagnostic == "ambiguous_correlation_peak"
+    assert result.ambiguity_ratio == 1.2
+
+
+def test_requested_rate_fallback_votes_in_requested_frame_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offsets = iter([6000, 6004, 6002, 6001, 6003])
+    plan = AudioAnalysisPlan(
+        8000,
+        48000,
+        tuple(AudioWindowSpec(index * 100, 100, index * 100, 100) for index in range(5)),
+        256,
+        1280,
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(0, 0.9, 2.0),
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "refine_aligned_score",
+        lambda *_args, **_kwargs: (0, 0.9),
+    )
+
+    def scoring_window(_spec: AudioWindowSpec, _offset: int) -> AudioWindow:
+        requested_offset = next(offsets)
+        return AudioWindow(
+            np.ones(100),
+            np.ones(100),
+            requested_offset,
+            0,
+        )
+
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=48000),
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
+        scoring_window_loader=scoring_window,
+    )
+
+    assert result.applied
+    assert result.sample_offset == 6002
+    assert samples_to_frames(result.sample_offset, 48000, Fraction(24)) == 3
+    assert result.consensus_windows == 5
 
 
 def test_coarse_lag_is_scored_at_requested_rate(

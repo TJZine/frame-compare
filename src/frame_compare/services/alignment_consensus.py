@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from statistics import median_low
 
 import numpy as np
 
@@ -16,6 +16,7 @@ from frame_compare.services.alignment_correlation import (
     estimate_alignment_offset,
     refine_aligned_score,
 )
+from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.alignment_stability import classify_alignment_stability
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
@@ -139,23 +140,20 @@ def _finish_consensus(
             stability=stability,
         )
 
-    counts = Counter(candidate.sample_offset for candidate in candidates)
-    winner_count = max(counts.values())
-    tied_offsets = [offset for offset, count in counts.items() if count == winner_count]
-    winner_offset = max(
-        tied_offsets,
-        key=lambda offset: max(
-            candidate.score for candidate in candidates if candidate.sample_offset == offset
-        ),
+    groups: dict[int, list[CorrelationEstimate]] = {}
+    for candidate in candidates:
+        frame_offset = samples_to_frames(candidate.sample_offset, config.sample_rate, fps)
+        groups.setdefault(frame_offset, []).append(candidate)
+    winning_group = max(
+        groups.values(),
+        key=lambda group: (len(group), max(candidate.score for candidate in group)),
     )
+    winner_count = len(winning_group)
+    winner_offset = int(median_low(candidate.sample_offset for candidate in winning_group))
     consensus_ratio = winner_count / len(candidates)
-    winning_scores = [
-        candidate.score for candidate in candidates if candidate.sample_offset == winner_offset
-    ]
+    winning_scores = [candidate.score for candidate in winning_group]
     score = float(np.median(winning_scores))
-    winning_peak_ratios = [
-        candidate.peak_ratio for candidate in candidates if candidate.sample_offset == winner_offset
-    ]
+    winning_peak_ratios = [candidate.peak_ratio for candidate in winning_group]
     ambiguity_ratio = min(winning_peak_ratios)
 
     if score < config.confidence_threshold:
