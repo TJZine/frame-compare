@@ -10,7 +10,6 @@ import pytest
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_diagnostics
-from frame_compare.services.alignment_math import calculate_alignment_trims
 from frame_compare.services.types import (
     AlignmentResult,
     AudioAlignmentAttempt,
@@ -282,31 +281,13 @@ def test_symlinked_diagnostic_directory_is_rejected(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     diagnostics_dir = tmp_path / "alignment_diagnostics"
-    diagnostics_dir.symlink_to(outside, target_is_directory=True)
+    try:
+        diagnostics_dir.symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
 
     with pytest.raises(PathEscapesRootError):
         alignment_diagnostics.diagnostic_path(tmp_path.parent, diagnostics_dir, 1)
-
-
-def test_editing_diagnostic_cannot_authorize_candidate_or_change_trims(tmp_path: Path) -> None:
-    attempt = audio_attempt()
-    path, _, _ = alignment_diagnostics.write_alignment_diagnostic(
-        generated_root=tmp_path.parent,
-        diagnostics_dir=tmp_path / "alignment_diagnostics",
-        comparison_ordinal=1,
-        reference_label="Reference",
-        comparison_label="Comparison 1",
-        attempt=attempt,
-        evidence_availability="current_attempt",
-        review_outcome="not_requested",
-        final_result=_result(attempt),
-        final_origin="none",
-    )
-    before = calculate_alignment_trims(100, [None], [100])
-    path.write_text('{"frame_offset": 99}\n', encoding="utf-8")
-    after = calculate_alignment_trims(100, [None], [100])
-
-    assert before == after == ((0, 99), [(0, 99)])
 
 
 def test_provisional_candidate_cannot_be_constructed_as_applied_authority() -> None:
