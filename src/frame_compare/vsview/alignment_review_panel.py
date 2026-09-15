@@ -41,6 +41,13 @@ from frame_compare.vsview.alignment_review_contract import (
 _TIMELINE_GROUP = "frame_compare_alignment_review"
 type _InputBasis = Literal["positions", "offsets"]
 type _FrameOrigin = Literal["Viewer", "Manual"]
+_MANUAL_AUTHORITY_ORIGINS = frozenset(
+    {
+        "interactive_confirmed_this_run",
+        "shared_previous_offsets",
+        "preexisting_manual_override",
+    }
+)
 _POSITIONS_GUIDANCE = (
     "Unlink playheads, then visit every source and position each on the same visible moment."
 )
@@ -787,7 +794,7 @@ def _marker_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
 
 def _marker_color(comparison: AlignmentReviewComparisonMetadata, role: str) -> str:
     origin = comparison.audio_review.current_authority.origin
-    if "confirmed" in origin or "manual" in origin:
+    if origin in _MANUAL_AUTHORITY_ORIGINS:
         return "#8e6ccf"
     decision = _decision(comparison)
     if decision is not None and decision["state"] == "provisional":
@@ -800,10 +807,7 @@ def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role
     if offset is None:
         return ""
     decision = _decision(comparison)
-    if (
-        "confirmed" in comparison.audio_review.current_authority.origin
-        or "manual" in comparison.audio_review.current_authority.origin
-    ):
+    if comparison.audio_review.current_authority.origin in _MANUAL_AUTHORITY_ORIGINS:
         prefix = "[MANUAL ALIGNMENT]"
     elif decision is not None and decision["state"] == "provisional":
         prefix = "[PROVISIONAL — NOT APPLIED]"
@@ -817,11 +821,7 @@ def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role
 def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
     authority = comparison.audio_review.current_authority
     lines: list[str] = []
-    if authority.origin in {
-        "interactive_confirmed_this_run",
-        "shared_previous_offsets",
-        "preexisting_manual_override",
-    }:
+    if authority.origin in _MANUAL_AUTHORITY_ORIGINS:
         lines.append(f"Current alignment: {authority.frame_offset:+d}f — manually confirmed")
     decision = _decision(comparison)
     if decision is None:
@@ -945,15 +945,7 @@ def _append_marker_bounds_detail(
 def _keep_saved_text(comparison: AlignmentReviewComparisonMetadata) -> str:
     authority = comparison.audio_review.current_authority
     decision = _decision(comparison)
-    if (
-        authority.origin
-        in {
-            "interactive_confirmed_this_run",
-            "shared_previous_offsets",
-            "preexisting_manual_override",
-        }
-        and authority.frame_offset is not None
-    ):
+    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
         return f"Saved — manually confirmed alignment {authority.frame_offset:+d}f retained."
     if authority.frame_offset is not None:
         return f"Saved — accepted alignment {authority.frame_offset:+d}f retained."

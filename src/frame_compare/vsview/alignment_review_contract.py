@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeGuard, cast
+from typing import Literal, TypeGuard, cast, get_args
 
 from frame_compare.utils.atomic_write import write_text_atomic
 
@@ -50,6 +50,19 @@ ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS = frozenset(
 
 class AlignmentReviewContractError(ValueError):
     """Raised when an alignment review session or result is untrusted."""
+
+
+type _AuthorityOrigin = Literal[
+    "computed_this_run",
+    "shared_computed_offsets",
+    "interactive_confirmed_this_run",
+    "shared_previous_offsets",
+    "preexisting_manual_override",
+    "none",
+]
+type _EvidenceAvailabilityLiteral = Literal[
+    "current_attempt", "historical_details_unavailable", "not_computed"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,23 +109,14 @@ class AlignmentReviewReferenceMetadata:
 
 @dataclass(frozen=True, slots=True)
 class AlignmentReviewCurrentAuthority:
-    origin: Literal[
-        "computed_this_run",
-        "shared_computed_offsets",
-        "interactive_confirmed_this_run",
-        "shared_previous_offsets",
-        "preexisting_manual_override",
-        "none",
-    ]
+    origin: _AuthorityOrigin
     frame_offset: int | None
 
 
 @dataclass(frozen=True, slots=True)
 class AlignmentReviewAudioReview:
     current_authority: AlignmentReviewCurrentAuthority
-    evidence_availability: Literal[
-        "current_attempt", "historical_details_unavailable", "not_computed"
-    ]
+    evidence_availability: _EvidenceAvailabilityLiteral
     audio_attempt: Mapping[str, object] | None
 
 
@@ -410,19 +414,12 @@ def _parse_output_metadata(
     )
 
 
-_CURRENT_AUTHORITY_ORIGINS = {
-    "computed_this_run",
-    "shared_computed_offsets",
-    "interactive_confirmed_this_run",
-    "shared_previous_offsets",
-    "preexisting_manual_override",
-    "none",
-}
-_EVIDENCE_AVAILABILITY = {
-    "current_attempt",
-    "historical_details_unavailable",
-    "not_computed",
-}
+_CURRENT_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
+    get_args(_AuthorityOrigin.__value__)
+)
+_EVIDENCE_AVAILABILITY: frozenset[_EvidenceAvailabilityLiteral] = frozenset(
+    get_args(_EvidenceAvailabilityLiteral.__value__)
+)
 _ATTEMPT_KEYS = {
     "reference_identity_digest",
     "comparison_identity_digest",
@@ -545,6 +542,14 @@ _STABILITY_KEYS = {
 }
 
 
+def _is_authority_origin(value: object) -> TypeGuard[_AuthorityOrigin]:
+    return isinstance(value, str) and value in _CURRENT_AUTHORITY_ORIGINS
+
+
+def _is_evidence_availability(value: object) -> TypeGuard[_EvidenceAvailabilityLiteral]:
+    return isinstance(value, str) and value in _EVIDENCE_AVAILABILITY
+
+
 def _parse_audio_review(
     raw: object, *, suggested_offset: int | None, comparison_ordinal: int
 ) -> AlignmentReviewAudioReview:
@@ -564,7 +569,7 @@ def _parse_audio_review(
     )
     origin = authority_raw["origin"]
     frame_offset = authority_raw["frame_offset"]
-    if origin not in _CURRENT_AUTHORITY_ORIGINS:
+    if not _is_authority_origin(origin):
         raise AlignmentReviewContractError("alignment review current authority origin is invalid")
     if frame_offset is not None and not _is_int(frame_offset):
         raise AlignmentReviewContractError("alignment review current authority offset is invalid")
@@ -573,7 +578,7 @@ def _parse_audio_review(
     if suggested_offset != frame_offset:
         raise AlignmentReviewContractError("alignment review trusted offset is inconsistent")
     availability = root["evidence_availability"]
-    if availability not in _EVIDENCE_AVAILABILITY:
+    if not _is_evidence_availability(availability):
         raise AlignmentReviewContractError("alignment review evidence availability is invalid")
     attempt = root["audio_attempt"]
     if availability == "current_attempt":
@@ -588,10 +593,8 @@ def _parse_audio_review(
             "historical alignment evidence must not invent an attempt"
         )
     return AlignmentReviewAudioReview(
-        current_authority=AlignmentReviewCurrentAuthority(
-            origin=cast(Any, origin), frame_offset=frame_offset
-        ),
-        evidence_availability=cast(Any, availability),
+        current_authority=AlignmentReviewCurrentAuthority(origin=origin, frame_offset=frame_offset),
+        evidence_availability=availability,
         audio_attempt=cast(Mapping[str, object] | None, attempt),
     )
 
@@ -600,7 +603,7 @@ def _validate_audio_attempt(
     raw: object,
     *,
     suggested_offset: int | None,
-    authority_origin: object,
+    authority_origin: _AuthorityOrigin,
     comparison_ordinal: int,
 ) -> None:
     attempt = _strict_dict(raw, _ATTEMPT_KEYS, "audio attempt")

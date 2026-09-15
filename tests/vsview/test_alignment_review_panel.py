@@ -140,6 +140,20 @@ def _manual_with_provisional_audio_review() -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
+def _authority_audio_review(origin: str) -> str:
+    if origin == "computed_this_run":
+        return _accepted_audio_review()
+    return json.dumps(
+        {
+            "current_authority": {"origin": origin, "frame_offset": 0},
+            "evidence_availability": "historical_details_unavailable",
+            "audio_attempt": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 @pytest.fixture(scope="module", autouse=True)
 def qt_event_loop() -> Generator[None]:
     previous = get_loop()
@@ -593,6 +607,70 @@ def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
     assert "Provisional audio candidate: +0f — NOT APPLIED" in summary
     _visit(panel, api, 0, 0)
     assert api.timeline.added[0][3] == "[MANUAL ALIGNMENT] +0f — reference frame 0"
+
+
+@pytest.mark.parametrize(
+    ("origin", "manual", "summary_prefix", "marker_prefix"),
+    [
+        (
+            "interactive_confirmed_this_run",
+            True,
+            "Current alignment: +0f — manually confirmed",
+            "[MANUAL ALIGNMENT]",
+        ),
+        (
+            "shared_previous_offsets",
+            True,
+            "Current alignment: +0f — manually confirmed",
+            "[MANUAL ALIGNMENT]",
+        ),
+        (
+            "preexisting_manual_override",
+            True,
+            "Current alignment: +0f — manually confirmed",
+            "[MANUAL ALIGNMENT]",
+        ),
+        (
+            "computed_this_run",
+            False,
+            "Audio alignment accepted: +0f",
+            "[ACCEPTED AUDIO]",
+        ),
+        (
+            "shared_computed_offsets",
+            False,
+            "Reused accepted audio alignment: +0f",
+            "[REUSED ACCEPTED AUDIO]",
+        ),
+    ],
+)
+def test_authority_origin_consistently_drives_alignment_presentation(
+    tmp_path: Path,
+    origin: str,
+    manual: bool,
+    summary_prefix: str,
+    marker_prefix: str,
+) -> None:
+    panel, api, _script = _panel(
+        tmp_path,
+        suggestion=0,
+        audio_review=_authority_audio_review(origin),
+    )
+
+    assert panel.audio_summary_labels[0].text().startswith(summary_prefix)
+
+    _visit(panel, api, 0, 0)
+
+    assert api.timeline.added[0][2] == ("#8e6ccf" if manual else "#3daee9")
+    assert api.timeline.added[0][3] == f"{marker_prefix} +0f — reference frame 0"
+
+    panel.keep_button.click()
+
+    assert panel.source_outcome_labels[1].text() == (
+        "Saved — manually confirmed alignment +0f retained."
+        if manual
+        else "Saved — accepted alignment +0f retained."
+    )
 
 
 def test_one_primary_action_saves_complete_viewer_positions(tmp_path: Path) -> None:
