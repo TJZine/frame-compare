@@ -85,11 +85,11 @@ offset cannot fix drift, different edits, or mismatched cadence. Review early, m
 and late evidence. When native VSView review is available, open **Frame Compare
 Alignment Review**, unlink playheads, and visit the Reference and every Comparison tab.
 Leave each source on the same visible moment; the source lineup reports which outputs
-are ready and previews the signed trim. Save the complete lineup once with **Use these
-aligned positions**. If you already know the values, expand **Enter alignment
-manually...** and choose either source frames or signed offsets. **Keep audio-derived
-alignment** is the secondary whole-set action when you want to retain Frame Compare's
-current alignment.
+are ready and previews the signed trim. Save the complete lineup once with **Confirm
+these aligned positions**. If you already know the values, expand **Enter alignment
+manually...** and choose either source frames or signed offsets. **Keep current
+alignment** is the secondary whole-set action when you want to preserve the existing
+alignment authority without confirming an unapplied candidate.
 
 ### Rendering and HDR
 

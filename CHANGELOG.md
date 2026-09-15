@@ -24,7 +24,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Changed
 
-- Replace the retired interactive viewer integration with VSView 0.10.3 using its
+- Replace the retired interactive viewer integration with VSView 0.11.0 using its
   documented named-output API. The supported dependency is the base `vsview` extra;
   its `recommended` and `full` extras are not selected.
 - Preserve generated-session L-SMASH-Works loading, Frame Compare overlays, source
