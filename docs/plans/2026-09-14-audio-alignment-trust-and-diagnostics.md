@@ -22,7 +22,9 @@ with physical-Windows acceptance outstanding; P3 is verified at
 extraction discrepancy, so the P5 repair branch must run before P4. P5A's
 fixed-ten-second branch was evaluated at
 `ba5364d9695223f4e866b05a586c5f42c36e7221` and failed its two-runtime
-gate; P5B is required. P4 and P6 remain blocked or pending as recorded below.
+gate. P5B's single grid-preserving design also failed its two-runtime gate;
+production extraction remains v5 and a newly authorized focused extraction design
+is required. P4 and P6 remain blocked or pending as recorded below.
 
 ## Executive recommendation and report adjudication
 
@@ -987,6 +989,70 @@ hit the container's temporary-disk limit while retaining all 160 generated
 media cases; the test now uses per-case `TemporaryDirectory` cleanup and the
 canonical rerun passed.
 
+#### P5B execution record — grid-preserving resample/PTS crop (2026-09-15)
+
+P5B's test/evidence surface was implemented by `1f4269fb`
+(`test(alignment): evaluate grid-preserving extraction`). It tested exactly one bounded
+design. The experiment sought one selected-stream time-base tick
+before the existing five-second context with `-noaccurate_seek`, retained the decoded
+boundary packet and preroll through `aresample`, normalized the output time base to
+`1/requested_rate`, and cropped with `atrim start_pts/end_pts` against the validated
+selected-stream output-sample origin. The final sample trim, raw output byte cap,
+120-second process timeout, sequential pair lifetime, FFT/scoring limits and window
+limits stayed unchanged. The origin was independently checked against each source's
+continuous decode; requested positions were not recorded as measured origins. The
+test-only recipe and pathless scalar results are retained in
+`tests/integration/test_alignment_grid_preserving_extraction.py` and
+`tests/fixtures/alignment_oracle/p5b-results.json`. No original incident media was
+used.
+
+The design repaired the native macOS positive-start AAC symptom: the origin window
+changed from `945/2048` samples with a 29-sample oracle lag to `2048/2048` with zero
+lag, and the asymmetric clean pair changed from `+1115` samples / `+1f`, score
+`0.8713582429603048`, to `0` samples / `+0f`, score `1.0`. Docker remained correct
+for that pair at `0` samples / `+0f`, score `0.9999999999999999`.
+
+The required grid gate still failed. On native macOS FFmpeg 9.0.1, 48→8 kHz AAC
+worsened from a maximum zero-sample lag to 2 samples against the unchanged one-sample
+allowance. The native 44.1→48 kHz maximum stayed at 1 within its six-sample allowance,
+but its minimum late-window oracle correlation was `0.9335095988695936`. On Debian
+FFmpeg 7.1.5, 48→8 kHz remained 3 samples against allowance 1 and 44.1→48 kHz remained
+10 against allowance 6; its minimum late-window oracle correlation was
+`0.9336318557269901`. Thus validating crop coordinates fixes the boundary-origin
+loss, but bounded AAC resampling still uses a runtime/rate/seek-position-dependent
+sample phase relative to continuous decode.
+
+The safety holdouts remained intact on both runtimes: clean zero, very quiet
+independent noise, unrelated audio, silence, steady tone, repetition, wrong-stream and
+explicit-matching-stream outcomes did not change; all 80 weak-dissent cases per
+runtime remained accepted by the frozen proposal; all 80 localized-edit cases per
+runtime remained credible conflicts with zero false acceptance. All returned primary
+control windows recorded their actual 2,048-sample counts. These negative results do
+not override the failed grid gate.
+
+**P5B disposition: STOP / no ship.** The experimental production edit and tentative
+v6 estimator token were reverted before evidence retention. Production extraction,
+estimator policy `stream-timeline-distributed-2097152-v5`, and shared-cache identity
+are unchanged. No second design, diagnostic recheck, zero-frame diagnostic, widened
+correction radius, whole-track fallback, or P4 work was attempted. P4 remains blocked;
+a focused extraction redesign requires controller and maintainer input.
+
+Observed verification:
+
+```text
+uv run --no-sync pytest -q tests/integration/test_alignment_grid_preserving_extraction.py -m 'not slow' -rs
+    PASS: 3 passed (tracked evidence plus native primary/grid and clean/signal/stream holdouts)
+uv run --no-sync pytest -q tests/integration/test_alignment_grid_preserving_extraction.py -m slow -rs
+    PASS: 1 passed (native 80 weak-dissent + 80 localized-edit cases)
+docker compose run --rm ... pytest ... -m 'not slow' / -m slow
+    PASS: Docker scalar evidence runs
+bash tools/verify_docker_integration.sh --no-build --pytest-path tests/integration/test_alignment_grid_preserving_extraction.py
+    PASS: 3 passed in 423.01s, zero skips; canonical runtime/application proof passed
+```
+
+Windows portable and unrelated real-media proof remain outstanding and are not
+claimed. They cannot reverse the demonstrated native-and-Docker stop condition.
+
 ### [ ] P6 — Cross-boundary acceptance, migration rehearsal and release handoff
 
 **Outcome.** Prove the integrated trust/persistence/UI behavior on the actual release candidate and clearly distinguish delivered observability from any estimator work still blocked.
@@ -1183,8 +1249,8 @@ The first slice is:
 | P1 — evidence and persistence | Complete | `14d82237011da0e2efd518ed6c70e64e732d9a21`; execution record above | None; later-package native/oracle gates remain scoped to P2/P3/P6 |
 | P2 — terminal/native UX | Implementation complete; native acceptance outstanding | `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`; execution record above | Physical-Windows visible VSView and portable bundle proof |
 | P3 — oracle and policy gate | Complete; extraction stop gate reached | `7f342a6208944e53a4e48c77d3449ffdc05e9085`; execution record and tracked scalar evidence above | Windows portable and identifiable real-media evidence outstanding |
-| P4 — acceptance policy | Blocked on P5 extraction repair | None | P3 demonstrated runtime-dependent primary extraction discrepancies; rerun this exact matrix after P5 |
-| P5 — extraction/local checks | P5A failed; P5B required | `ba5364d9695223f4e866b05a586c5f42c36e7221`; execution record and `tests/fixtures/alignment_oracle/p5-results.json` above | Ten seconds does not pass the two-runtime oracle/holdout gate; execute the predeclared grid-preserving P5B branch before any P4 work |
+| P4 — acceptance policy | Blocked on focused extraction redesign | None | P3, P5A and P5B leave supported-runtime primary extraction discrepancies unresolved |
+| P5 — extraction/local checks | P5A failed; P5B stopped/no ship | P5A `ba5364d9695223f4e866b05a586c5f42c36e7221`; P5B `1f4269fb`; execution records and scalar evidence above | Both predeclared bounded designs failed the two-runtime grid gate; a newly authorized focused extraction design is required |
 | P6 — integrated release proof | Not started | None | Scope-appropriate gates above |
 
 ## Source and authority record
