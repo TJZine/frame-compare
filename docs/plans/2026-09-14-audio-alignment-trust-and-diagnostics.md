@@ -533,7 +533,7 @@ No P1 stop condition was reached. Residual P1 risk is limited to those outstandi
 host/runtime proofs and the deliberately unobserved FFmpeg/ffprobe version fields in
 run artifacts; the independent native command above records the test host versions.
 
-### [ ] P2 — Complete terminal and native review UX, metadata v2
+### [~] P2 — Complete terminal and native review UX, metadata v2
 
 **Outcome.** Terminal and VSView show the same service decision and evidence. Accepted zero, provisional zero and absence are visibly distinct. Keeping current never implies confirmation of an unapplied candidate.
 
@@ -556,6 +556,135 @@ run artifacts; the independent native command above records the test host versio
 **Rollback.** Revert generator, metadata parser, panel and verifier fixtures together, leaving result v1 unchanged. Regenerate sessions under the installed version. Keep P1 evidence/artifacts if reverting only presentation. Do not add a v1-to-v2 trust-upgrade shim.
 
 **Stop and replan.** VSView cannot carry the bounded primitive projection through its actual supported metadata transport; the panel would need to import service policy; deterministic script generation is lost; native result safeguards need weakening; or the UI requires a new result action/per-comparison save model to meet the specified behavior.
+
+**Execution record (2026-09-15, macOS arm64).** Implementation is complete at
+`1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`
+(`feat(vsview): explain audio alignment trust`). The package remains `[~]`, rather
+than `[x]`, solely because the required physical-Windows visible acceptance has not
+been performed. No P2 stop condition was reached.
+
+The service now presents accepted, provisional and unavailable evidence before the
+optional native launch and projects the same immutable attempt into generated session
+metadata. Orchestration forwards existing verbose/quiet/JSON context without adding a
+flag or successful JSON field. Normal output stays compact; verbose output adds the
+bounded stream, timing, threshold, gate, work and per-window facts; quiet suppresses
+routine accepted/status evidence but retains actionable rejection; no-color and
+non-TTY output remain static plain text; JSON suppresses human blocks and logs bounded
+rejection scalars through the existing structured stderr boundary. Cached computed
+and manually confirmed history remain separately labeled without invented current
+details.
+
+Representative terminal states asserted by the focused service tests are:
+
+```text
+Comparison 1 - Audio alignment accepted: +0f.
+No relative audio correction is required. Policy: stream-timeline-distributed-2097152-v5; 4/5 correlated windows agree.
+
+Comparison 1 - Audio alignment requires review. Provisional candidate: +0f (not applied).
+4/5 correlated windows agree; configured consensus requires 100%.
+Reason: insufficient_consensus.
+
+Comparison 1 - No usable audio candidate. No automatic correction applied.
+5 windows planned; 0 usable estimates. Reason: no_usable_windows.
+```
+
+Every fresh-attempt state also reports the selected `Reference a:N -> Comparison
+a:N` stream pair. Provisional launch copy states that the candidate is a hint rather
+than a confirmed alignment; unavailable launch copy states that no automatic candidate
+exists. Historical representatives are `Reused accepted audio alignment: +7f` and
+`Reused manually confirmed alignment: +3f`, with honest detail unavailability.
+
+Metadata and result compatibility are deliberately split. Generated outputs now use
+strict metadata v2. Reference metadata retains only version/session/role/name;
+comparison metadata adds a deterministic, bounded `frame_compare_audio_review` JSON
+string beside the existing trusted integer/null `frame_compare_suggested_offset`.
+The projection contains current authority, evidence availability and the current
+attempt or explicit absence. The parser validates exact keys, finite/bounded primitive
+facts, ordered topology, session identity, stream/window/decision consistency and
+candidate/authority agreement. Metadata v1, unknown and mixed Frame Compare sessions
+fail with regeneration guidance; there is no migration or trust-upgrade shim. Ordinary
+sessions without Frame Compare metadata remain inert. Result schema v1 is byte-shape
+compatible and unchanged: only complete ordered `confirmed`/`keep_current` decisions
+for the exact session and source topology are accepted, with authoritative raw-frame
+bounds and sibling-path containment still enforced.
+
+The native panel's representative states are:
+
+```text
+Audio alignment accepted: +0f
+No relative audio correction required.
+[ACCEPTED AUDIO] +0f - reference/comparison origin marker
+
+Provisional audio candidate: +0f - NOT APPLIED
+insufficient_consensus
+Verify manually; this candidate is not a confirmed alignment.
+[PROVISIONAL - NOT APPLIED] +0f - reference/comparison origin marker
+
+No usable audio candidate
+insufficient_signal
+Enter known offsets or align the sources manually.
+(no marker)
+```
+
+The actual Qt copy uses em dashes where shown in §3.5; the ASCII rendering above keeps
+the ledger portable. `Confirm these aligned positions`, `Confirm these known offsets`
+and `Keep current alignment` are the only whole-set actions. Keep-current writes one
+unchanged result-v1 `keep_current` action per comparison. Saved labels separately state
+accepted authority retained, provisional candidate not confirmed, no accepted
+candidate available, or manually confirmed authority retained. Offscreen tests cover
+accepted/provisional/unavailable/manual mixed sets, accepted and provisional `+0f`,
+cached history, manual authority with retained rejected history, no field prefill,
+no implicit visit/readiness, marker bounds, one ordered save, accessible labels,
+scrolling, focus, close-without-save, write failure and ordinary-session inertness.
+
+Exact verification and observed outcomes:
+
+```text
+uv sync --group dev --frozen                                      PASS
+uv sync --extra vsview --group dev --frozen                       PASS
+uv run --no-sync pytest -q tests/services -k alignment            PASS
+uv run --no-sync pytest -q tests/vsview                            PASS (offscreen Qt/native contract)
+uv run --no-sync pytest -q tests/orchestration -k alignment       PASS
+uv run --no-sync pytest -q tests/cli tests/test_cli_contract_docs.py
+                                                                  PASS
+uv run --no-sync pytest -q tests/windows_portable/test_windows_portable_docs.py tests/workflows/test_docker_gui_contract.py
+                                                                  PASS
+uv run --no-sync pytest -q tests/integration/test_alignment_runtime.py -rs
+                                                                  PASS
+uv run --no-sync pytest -q tests/integration -k alignment -rs     PASS; unrelated L-SMASH/GOP cases skipped
+bash -n tools/verify_docker_gui.sh                                 PASS
+uv run --no-sync pyright --warnings                               PASS; 0 errors/warnings
+uv run --no-sync ruff check .                                     PASS
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+                                                                  PASS; 0 medium/high issues
+uv run --no-sync pytest -q                                        PASS
+uv run --no-sync lint-imports --config importlinter.ini           PASS; 2 contracts kept
+uv build + scripts/verify_distribution.py + clean wheel install + version/help
+                                                                  PASS; wheel and sdist 0.6.0
+uv sync --extra vsview --group dev --group docs --locked          PASS
+uv run --no-sync python scripts/generate_api_docs.py --check      PASS
+uv run --no-sync zensical build --clean --strict                  PASS
+git diff --check                                                  PASS
+ffmpeg -version / ffprobe -version                                9.0.1 / 9.0.1
+```
+
+The first full-suite run exposed one stale orchestration test double that did not
+accept the newly forwarded existing quiet/JSON context; it was repaired and the
+focused test plus complete canonical gate then passed. Recorded full-suite skips were
+host/opt-in surfaces: local L-SMASH and libplacebo integration, live slow.pics/webhook,
+and Windows PowerShell/process/portable/update/install E2E tests. PowerShell was not
+available even for a local parser invocation. The Linux X11 GUI verifier was not run
+because this host is Darwin and has no compatible Linux X11 desktop; its shell syntax,
+fixture contract and generated-session path were tested statically.
+
+**Outstanding physical-Windows handoff.** At candidate
+`1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`, build the portable bundle on Windows and
+record the bundle/runtime identity. In visible VSView, capture accepted `+0f`,
+provisional `+0f`, unavailable and mixed-source-set screenshots; verify marker positions,
+expanded details/scrolling, keyboard and tab navigation, focus after save, both manual
+input bases, no provisional prefill/playhead/readiness effect, keep-current saved labels,
+close-without-save, malformed-result refusal and the actual result-v1 round trip. This
+is the remaining P2 release blocker; macOS offscreen proof is not a substitute.
 
 ### [ ] P3 — Continuous-decode oracle and predeclared policy evaluation
 
@@ -887,7 +1016,7 @@ The first slice is:
 | Package | Status | Candidate SHA / proof references | Outstanding blockers |
 | --- | --- | --- | --- |
 | P1 — evidence and persistence | Complete | `14d82237011da0e2efd518ed6c70e64e732d9a21`; execution record above | None; later-package native/oracle gates remain scoped to P2/P3/P6 |
-| P2 — terminal/native UX | Not started | None | Metadata v2 and visible Windows |
+| P2 — terminal/native UX | Implementation complete; native acceptance outstanding | `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`; execution record above | Physical-Windows visible VSView and portable bundle proof |
 | P3 — oracle and policy gate | Not started | None | Supported runtime matrix and controls |
 | P4 — acceptance policy | Blocked on P3 | None | Exact policy go/no-go |
 | P5 — extraction/local checks | Evidence-gated | None | Demonstrated discrepancy/benefit only |
