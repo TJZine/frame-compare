@@ -1,5 +1,6 @@
 """Core audio alignment computation and progress workflow tests."""
 
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, call, patch
@@ -9,7 +10,15 @@ import pytest
 import tomli_w
 
 from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment_audio import (
+    AudioAnalysisPlan,
+    AudioStreamInfo,
+    AudioStreamTimeline,
+    AudioWindow,
+    AudioWindowSpec,
+)
 from frame_compare.services.alignment_consensus import AlignmentConsensus
+from frame_compare.services.alignment_correlation import CorrelationEstimate
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -278,6 +287,9 @@ def test_alignment_passes_config_to_audio_pair_owner(
             config=config,
             fps_reference=Fraction(24, 1),
             reference_stream_loader=ANY,
+            reference_request=request.reference,
+            comparison_request=request.comparisons[0],
+            comparison_ordinal=1,
         ),
         call(
             ref,
@@ -285,5 +297,146 @@ def test_alignment_passes_config_to_audio_pair_owner(
             config=config,
             fps_reference=Fraction(24, 1),
             reference_stream_loader=ANY,
+            reference_request=request.reference,
+            comparison_request=request.comparisons[1],
+            comparison_ordinal=2,
         ),
     ]
+
+
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment._estimate_audio_pair")
+def test_diagnostic_write_failure_does_not_change_alignment_authority(
+    mock_estimate: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comp.mkv"
+    reference.touch()
+    comparison.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    mock_estimate.return_value = AlignmentConsensus(
+        8000,
+        0.99,
+        True,
+        "accepted",
+        1,
+        1,
+        1.0,
+        2.0,
+    )
+    config = AlignmentConfig(cache_results=False)
+    request = replace(
+        alignment_request(
+            reference=reference,
+            comparisons=[comparison],
+            config=config,
+            generated_dir=tmp_path,
+        ),
+        alignment_diagnostics_dir=tmp_path / "alignment_diagnostics",
+        alignment_diagnostics_root=tmp_path.parent,
+    )
+
+    with patch(
+        "frame_compare.services.alignment.write_alignment_diagnostic",
+        side_effect=OSError("disk full"),
+    ):
+        result = align_clips_from_request(request, config)[0]
+
+    assert result.applied
+    assert result.frame_offset == 24
+
+
+def test_computed_attempt_retains_resolved_stream_and_window_facts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    reference_stream = AudioStreamInfo(
+        audio_stream_index=1,
+        absolute_stream_index=2,
+        codec_name="aac",
+        channels=2,
+        channel_layout="stereo",
+        sample_rate=48000,
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        timeline=AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=Fraction(60),
+            time_base=Fraction(1, 48000),
+            duration_basis="duration_ts",
+            start_time_basis="metadata",
+            input_start_time_basis="metadata",
+        ),
+    )
+    comparison_stream = replace(
+        reference_stream,
+        audio_stream_index=2,
+        absolute_stream_index=3,
+    )
+    plan = AudioAnalysisPlan(
+        sample_rate=8000,
+        requested_sample_rate=8000,
+        windows=(AudioWindowSpec(0, 200, 0, 400),),
+        peak_fft_points=1024,
+        total_fft_points=1024,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_reference_audio_stream",
+        lambda *_args, **_kwargs: reference_stream,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_matching_audio_stream",
+        lambda *_args, **_kwargs: comparison_stream,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.plan_audio_analysis",
+        lambda *_args, **_kwargs: plan,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.extract_planned_window",
+        lambda *_args, **_kwargs: AudioWindow(
+            np.ones(200),
+            np.ones(400),
+            0,
+            0,
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_consensus.estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(0, 0.99, 2.0),
+    )
+    config = AlignmentConfig(
+        cache_results=False,
+        reference_stream=1,
+        comparison_streams={"comparison": 2},
+    )
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+
+    result = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert result.applied
+    assert result.audio_attempt is not None
+    attempt = result.audio_attempt
+    assert [stream.audio_stream_index for stream in attempt.selected_streams] == [1, 2]
+    assert [stream.selection_method for stream in attempt.selected_streams] == [
+        "explicit_override",
+        "explicit_override",
+    ]
+    assert [stream.selection_rank for stream in attempt.selected_streams] == [(1,), (2,)]
+    assert attempt.planned_window_count == 1
+    assert attempt.windows[0].actual_reference_count == 200
+    assert attempt.windows[0].actual_comparison_count == 400
+    assert attempt.windows[0].requested_sample_lag == 0

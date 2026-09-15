@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+import json
 import tomllib
 from dataclasses import replace
 from fractions import Fraction
@@ -22,6 +23,7 @@ from frame_compare.services.alignment_reuse_cache import (
     source_set_cache_key,
 )
 from frame_compare.services.alignment_reuse_prompt import PreviousOffsetPromptInput
+from frame_compare.services.alignment_vsview import AlignmentVSViewOutcome
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
@@ -198,7 +200,7 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
 
     with patch(
         "frame_compare.services.alignment.maybe_launch_alignment_vsview",
-        return_value=None,
+        return_value=AlignmentVSViewOutcome(None, "not_requested"),
     ) as launch:
         results = align_clips_from_request(
             request,
@@ -301,7 +303,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
-        mock_vs.return_value = None
+        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
         results = align_clips_from_request(request, config)
 
     assert results[0].source == "cached"
@@ -333,6 +335,16 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
         config=config,
         generated_dir=generated_dir,
     )
+    request = replace(
+        request,
+        alignment_diagnostics_dir=tmp_path / "alignment_diagnostics",
+        alignment_diagnostics_root=tmp_path.parent,
+    )
+    request.alignment_diagnostics_dir.mkdir()
+    (request.alignment_diagnostics_dir / "comparison-1.json").write_text(
+        '{"frame_offset": 999}',
+        encoding="utf-8",
+    )
     reusable = {
         comparison_cache_key(request.comparisons[0]): ReusableAlignmentEntry(
             result=AlignmentResult(
@@ -362,11 +374,17 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
         patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
-        mock_vs.return_value = None
+        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
         results = align_clips_from_request(request, config)
 
     assert results[0].source == "cached"
     assert results[0].frame_offset == 3
+    assert results[0].audio_attempt is None
+    diagnostic = json.loads(
+        (tmp_path / "alignment_diagnostics" / "comparison-1.json").read_text(encoding="utf-8")
+    )
+    assert diagnostic["evidence_availability"] == "historical_details_unavailable"
+    assert diagnostic["original_audio_attempt"] is None
     mock_probe.assert_not_called()
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
@@ -419,7 +437,7 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
         patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
-        mock_vs.return_value = None
+        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
         results = align_clips_from_request(request, config)
 
     assert results[0].source == "cached"
@@ -538,7 +556,7 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
         patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
-        mock_vs.return_value = None
+        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
         results = align_clips_from_request(request, config)
 
     assert results[0].source == "cached"
@@ -608,7 +626,7 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
         patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
-            return_value=None,
+            return_value=AlignmentVSViewOutcome(None, "no_result"),
         ),
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
@@ -678,7 +696,10 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
 
     with (
         patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)),
-        patch("frame_compare.services.alignment.maybe_launch_alignment_vsview", return_value=None),
+        patch(
+            "frame_compare.services.alignment.maybe_launch_alignment_vsview",
+            return_value=AlignmentVSViewOutcome(None, "no_result"),
+        ),
     ):
         align_clips_from_request(request, config)
 
@@ -768,7 +789,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
         patch("frame_compare.services.alignment._estimate_audio_pair") as mock_estimate,
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
-        mock_vs.return_value = None
+        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
         results = align_clips_from_request(
             request,
             config,
@@ -917,7 +938,7 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
     with (
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
-            return_value={"ref:comp_manual": 5},
+            return_value=AlignmentVSViewOutcome({"ref:comp_manual": 5}, "confirmed"),
         ),
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
@@ -966,7 +987,7 @@ def test_align_clips_from_request_interactive_confirmed_entry_keeps_computed_fal
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
-            return_value={"ref:comp": 5},
+            return_value=AlignmentVSViewOutcome({"ref:comp": 5}, "confirmed"),
         ),
         patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):

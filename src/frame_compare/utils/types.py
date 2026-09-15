@@ -84,6 +84,13 @@ class WorkspacePaths:
         return self.generated_root / "cache" / "tmdb.toml"
 
     @property
+    def alignment_diagnostics_dir(self) -> Path | None:
+        """Run-local directory for diagnostic-only alignment evidence."""
+        if self.run_dir is None:
+            return None
+        return self.run_dir / "alignment_diagnostics"
+
+    @property
     def cache_dir(self) -> Path:
         """Directory for shared analysis cache files."""
         return self.shared_analysis_cache_dir
@@ -114,6 +121,7 @@ class WorkspacePaths:
             self.shared_alignment_cache_dir,
             self.shared_tmdb_cache_path,
             self.generated_root / "clip_probe.toml",
+            resolved_run_dir / "alignment_diagnostics",
         ):
             require_managed_descendant(
                 resolved_run_dir if managed_path.parent == resolved_run_dir else resolved_root,
@@ -203,3 +211,5 @@ class AlignmentRequest:
     shared_alignment_cache_dir: Path
     settings: AlignmentCacheSettings
     presentation_content: str | None = None
+    alignment_diagnostics_dir: Path | None = None
+    alignment_diagnostics_root: Path | None = None

@@ -39,9 +39,18 @@ def _as_finite_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
     array = np.asarray(signal).reshape(-1)[:ALIGNMENT_ANALYSIS_SAMPLE_LIMIT]
     array = np.asarray(array, dtype=np.float64)
     if array.size == 0:
-        raise AudioAlignmentError("empty audio signal prevents correlation")
+        raise AudioAlignmentError(
+            "empty audio signal prevents correlation",
+            category="insufficient_signal",
+            stage="correlation",
+        )
     if not bool(np.all(np.isfinite(array))):
-        raise AudioAlignmentError(f"{name} audio signal contains non-finite samples")
+        raise AudioAlignmentError(
+            f"{name} audio signal contains non-finite samples",
+            category="non_finite_signal",
+            stage="correlation",
+            role="reference" if name == "reference" else "comparison",
+        )
     return array
 
 
@@ -54,7 +63,11 @@ def _preprocess_signal(signal: FloatArray, *, mode: str) -> FloatArray:
     centered = signal - float(np.mean(signal))
     rms = float(np.sqrt(np.mean(centered * centered)))
     if rms <= _EPSILON:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
+        raise AudioAlignmentError(
+            "zero-norm audio signal prevents correlation",
+            category="insufficient_signal",
+            stage="correlation",
+        )
     return centered / rms
 
 
@@ -186,7 +199,11 @@ def correlate_audio(
     norm_ref = float(np.linalg.norm(reference_signal))
     norm_comp = float(np.linalg.norm(comparison_signal))
     if norm_ref <= _EPSILON or norm_comp <= _EPSILON:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
+        raise AudioAlignmentError(
+            "zero-norm audio signal prevents correlation",
+            category="insufficient_signal",
+            stage="correlation",
+        )
 
     correlation = _linear_correlation(
         reference_signal,
@@ -205,7 +222,11 @@ def correlate_audio(
         offset=float(sample_offset),
     )
     if score is None:
-        raise AudioAlignmentError("insufficient aligned overlap prevents correlation")
+        raise AudioAlignmentError(
+            "insufficient aligned overlap prevents correlation",
+            category="insufficient_overlap",
+            stage="correlation",
+        )
     return CorrelationEstimate(sample_offset=sample_offset, score=score, peak_ratio=peak_ratio)
 
 
@@ -298,7 +319,11 @@ def refine_aligned_score(
         is not None
     ]
     if not scored:
-        raise AudioAlignmentError("insufficient aligned overlap prevents correlation")
+        raise AudioAlignmentError(
+            "insufficient aligned overlap prevents correlation",
+            category="insufficient_overlap",
+            stage="scoring",
+        )
     return max(scored, key=lambda item: item[1])
 
 

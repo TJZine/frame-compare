@@ -11,7 +11,10 @@ import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
-from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
+from frame_compare.services.alignment_vsview import (
+    AlignmentVSViewOutcome,
+    maybe_launch_alignment_vsview,
+)
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest
@@ -66,7 +69,7 @@ def _call(
     *,
     config: AlignmentConfig,
     comparisons: list[AlignmentClipRequest] | None = None,
-) -> dict[str, int] | None:
+) -> AlignmentVSViewOutcome:
     reference = _clip(tmp_path / "ref.mkv")
     resolved_comparisons = comparisons or [_clip(tmp_path / "comparison.mkv", frame_count=150)]
     return maybe_launch_alignment_vsview(
@@ -85,7 +88,9 @@ def test_disabled_review_has_no_runtime_side_effects(
     probe = MagicMock(side_effect=AssertionError("disabled review must not probe"))
     monkeypatch.setattr(alignment_vsview, "check_vsview_availability", probe)
 
-    assert _call(tmp_path, config=AlignmentConfig()) is None
+    assert _call(tmp_path, config=AlignmentConfig()) == AlignmentVSViewOutcome(
+        None, "not_requested"
+    )
 
 
 def test_native_result_confirms_and_keeps_in_request_order(
@@ -119,7 +124,11 @@ def test_native_result_confirms_and_keeps_in_request_order(
         comparisons=comparisons,
     )
 
-    assert result == {"ref:first": 12}
+    assert result == AlignmentVSViewOutcome(
+        {"ref:first": 12},
+        "confirmed",
+        (("ref:first", 120, 108),),
+    )
     overrides = load_manual_overrides(tmp_path)
     assert set(overrides) == {"ref:first"}
     assert overrides["ref:first"].frame_offset == 12
@@ -143,7 +152,9 @@ def test_keep_current_only_is_a_successful_empty_override_result(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == {}
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        {}, "keep_current"
+    )
     assert load_manual_overrides(tmp_path) == {}
 
 
@@ -196,7 +207,9 @@ def test_optional_invalid_result_fails_closed_and_retains_offsets(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        None, "rejected_result"
+    )
     assert load_manual_overrides(tmp_path) == {}
 
 
@@ -210,7 +223,9 @@ def test_close_without_finish_is_optional_cancellation(
         lambda *_args, **_kwargs: _session(tmp_path),
     )
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        None, "rejected_result"
+    )
 
 
 def test_forced_close_without_finish_is_typed_alignment_failure(
@@ -259,13 +274,13 @@ def test_result_bounds_come_from_typed_request_not_sidecar(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    assert (
-        _call(
-            tmp_path,
-            config=AlignmentConfig(use_vsview=True),
-            comparisons=[comparison],
-        )
-        is None
+    assert _call(
+        tmp_path,
+        config=AlignmentConfig(use_vsview=True),
+        comparisons=[comparison],
+    ) == AlignmentVSViewOutcome(
+        None,
+        "rejected_result",
     )
 
 
@@ -282,7 +297,9 @@ def test_non_tty_optional_generates_but_does_not_launch(
     launch = MagicMock(return_value=session)
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        None, "no_result"
+    )
     assert launch.call_args.kwargs["config"].enabled is False
 
 
@@ -338,7 +355,9 @@ def test_optional_process_failure_retains_offsets(
         MagicMock(side_effect=VSViewError("launch exited with code 7")),
     )
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        None, "no_result"
+    )
 
 
 def test_optional_session_setup_failure_retains_offsets(
@@ -349,13 +368,13 @@ def test_optional_session_setup_failure_retains_offsets(
         alignment_vsview,
         "launch_alignment_verification_session",
         MagicMock(
-            side_effect=VSViewError(
-                "VSView session setup failed (AlignmentReviewContractError)"
-            )
+            side_effect=VSViewError("VSView session setup failed (AlignmentReviewContractError)")
         ),
     )
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) is None
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        None, "no_result"
+    )
     assert load_manual_overrides(tmp_path) == {}
 
 
@@ -400,7 +419,9 @@ def test_native_review_never_reads_terminal_input(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == {}
+    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
+        {}, "keep_current"
+    )
 
 
 def test_progress_is_resumed_after_review_failure(

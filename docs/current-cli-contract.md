@@ -497,6 +497,11 @@ unchanged.
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
   native VSView panel review is labeled `ALIGN | Native VSView review`.
+- Before an optional native review opens, each rejected current audio attempt emits a
+  compact stderr explanation naming its retained display-only provisional candidate
+  and `not applied` status, or stating that no usable candidate exists. This does not
+  add a successful JSON field or write human text to JSON stdout. The run-local
+  diagnostic location is reported only after a successful write.
 - Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
@@ -1496,7 +1501,33 @@ Because the fixed window cap samples a long configured grid, highly localized ma
 content that falls between selected windows can still produce a conservative false
 negative rather than unbounded scanning.
 
+Every fresh completed attempt also retains immutable selected-stream facts, one
+categorized outcome for every planned window, raw candidate/quality facts, aggregate
+v5 gate evidence, and an explicit audio decision: `trusted_automatic`, `provisional`,
+or `unavailable`. A provisional candidate uses fixed display-only floors (score at
+least 0.90 and peak ratio at least 1.50) and a unique largest frame-equivalent group.
+It never supplies an applied offset, trim, cache value, or trusted VSView hint. These
+display rules do not change v5 automatic voting or acceptance. A manual result keeps
+the original attempt as separate diagnostic history.
+
 ## Persistence Rules
+
+Fresh runs write one pathless diagnostic artifact per comparison at
+`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v1 is marked
+`diagnostic_only`, is limited to 128 KiB per comparison, and contains no media path,
+PCM, raw command line, full subprocess stderr, environment value, or credential. It
+is atomically snapshotted before optional review and may be atomically replaced once
+with the final human outcome. The SHA-256 digest covers only canonical original-attempt
+JSON, so manual confirmation does not rewrite the recorded audio attempt. Sharing a
+run folder also shares bounded labels, pseudonymous source identity digests, selected
+stream metadata, and timing evidence.
+
+Diagnostic files are never read for offset selection, trim application, or shared
+cache reuse. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
+offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
+authority unchanged; a containment or symlink escape remains fail-closed. The shared
+alignment cache remains schema v2 and stores accepted authority only. Historical
+cache hits do not fabricate current stream or window evidence.
 
 `run --write-config` persists the effective config after applying the mapped overrides
 above. That means the flags in the previous section are persistent when combined with

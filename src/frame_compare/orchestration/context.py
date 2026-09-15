@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
+from frame_compare.services.types import (
+    AlignmentSource,
+    AlignmentStabilitySummary,
+    AudioAlignmentAttempt,
+)
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
@@ -128,6 +132,7 @@ class ClipState:
 
     trim: ClipTrimState = field(default_factory=ClipTrimState)
     alignment: ClipAlignmentState | None = None
+    audio_attempt: AudioAlignmentAttempt | None = None
     active_rect: ClipActiveRect | None = None
     release_identity: ReleaseIdentity | None = None
     label_is_explicit: bool = False

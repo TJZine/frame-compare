@@ -30,6 +30,7 @@ from frame_compare.services.alignment_correlation import (
 from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
+from frame_compare.utils.ffmpeg_errors import FFmpegError
 
 
 def _stream(duration: int, *, start: int = 0) -> AudioStreamInfo:
@@ -255,6 +256,9 @@ def test_frame_equivalent_candidates_reach_consensus_with_observed_representativ
     assert result.consensus_windows == len(offsets)
     assert result.consensus_ratio == 1.0
     assert [item.sample_offset for item in result.window_evidence] == offsets
+    assert result.decision is not None
+    assert result.decision.candidate is not None
+    assert result.decision.candidate.sample_offset == expected_sample
 
 
 @pytest.mark.parametrize(
@@ -280,6 +284,9 @@ def test_different_frame_corrections_do_not_reach_default_consensus(
     assert result.diagnostic == "insufficient_consensus"
     assert result.consensus_windows == 1
     assert result.consensus_ratio == 0.5
+    assert result.decision is not None
+    assert result.decision.state == "unavailable"
+    assert result.decision.primary_reason == "no_unique_candidate"
 
 
 def test_equal_frame_group_sizes_use_score_then_first_encountered_tie_break(
@@ -333,6 +340,153 @@ def test_frame_consensus_preserves_minimum_window_and_ratio_gates(
     )
     assert insufficient_ratio.diagnostic == "insufficient_consensus"
     assert insufficient_ratio.consensus_ratio == 0.6
+
+
+def test_legacy_rejection_retains_strong_zero_as_unapplied_provisional_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _estimate_candidates(
+        monkeypatch,
+        [
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(1, 0.98, 2.1),
+            CorrelationEstimate(-1, 0.97, 2.2),
+            CorrelationEstimate(0, 0.96, 2.3),
+            CorrelationEstimate(400, 0.40, 1.1),
+        ],
+        config=AlignmentConfig(sample_rate=8000),
+    )
+
+    assert not result.applied
+    assert result.sample_offset is None
+    assert result.diagnostic == "insufficient_consensus"
+    assert result.score == pytest.approx(0.975)
+    assert result.valid_windows == 5
+    assert result.consensus_windows == 4
+    assert result.consensus_ratio == pytest.approx(0.8)
+    assert result.ambiguity_ratio == pytest.approx(2.0)
+    assert result.decision is not None
+    assert result.decision.state == "provisional"
+    assert result.decision.candidate is not None
+    assert result.decision.candidate.frame_offset == 0
+    assert result.decision.candidate.sample_offset == 0
+    assert len(result.decision.candidate.supporting_window_ids) == 4
+    assert result.decision.raw_correlated_windows == 5
+    assert result.decision.consensus_windows == 4
+    assert result.decision.consensus_ratio == pytest.approx(0.8)
+    assert result.decision.aggregate_score == pytest.approx(0.975)
+    assert result.decision.minimum_peak_ratio == pytest.approx(2.0)
+    assert len(result.window_records) == 5
+    assert all(record.vote_disposition == "voted" for record in result.window_records)
+
+
+def test_one_success_and_four_recoverable_failures_preserve_legacy_acceptance_and_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(0, 0.99, 2.0),
+    )
+    calls = 0
+
+    def load(_spec: AudioWindowSpec) -> AudioWindow:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise AudioAlignmentError(
+                "no useful signal",
+                category="insufficient_signal",
+                stage="correlation",
+            )
+        return AudioWindow(np.ones(20), np.ones(20), 0, 0)
+
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=_plan(rate=8000, count=5),
+        config=AlignmentConfig(sample_rate=8000),
+        fps=Fraction(24),
+        analysis_window_loader=load,
+        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+    )
+
+    assert result.applied
+    assert result.sample_offset == 0
+    assert result.score == pytest.approx(0.99)
+    assert result.diagnostic == "accepted"
+    assert result.valid_windows == 1
+    assert result.consensus_windows == 1
+    assert result.consensus_ratio == pytest.approx(1.0)
+    assert result.ambiguity_ratio == pytest.approx(2.0)
+    assert result.decision is not None
+    assert result.decision.state == "trusted_automatic"
+    assert len(result.window_records) == 5
+    assert [record.terminal_category for record in result.window_records] == [
+        "correlated",
+        "insufficient_signal",
+        "insufficient_signal",
+        "insufficient_signal",
+        "insufficient_signal",
+    ]
+
+
+def test_all_recoverable_failures_are_unavailable_without_inventing_zero() -> None:
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=_plan(rate=8000, count=5),
+        config=AlignmentConfig(sample_rate=8000),
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: (_ for _ in ()).throw(
+            AudioAlignmentError(
+                "no useful signal",
+                category="insufficient_signal",
+                stage="correlation",
+            )
+        ),
+        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+    )
+
+    assert not result.applied
+    assert result.sample_offset is None
+    assert result.decision is not None
+    assert result.decision.state == "unavailable"
+    assert result.decision.candidate is None
+    assert len(result.window_records) == 5
+
+
+def test_recoverable_comparison_decode_retains_observed_reference_count() -> None:
+    result = alignment_consensus.estimate_planned_consensus_offset(
+        plan=_plan(rate=8000, count=1),
+        config=AlignmentConfig(sample_rate=8000),
+        fps=Fraction(24),
+        analysis_window_loader=lambda _spec: (_ for _ in ()).throw(
+            AudioAlignmentError(
+                "comparison decode was empty",
+                category="decode_empty",
+                stage="decode",
+                role="comparison",
+                reference_sample_count=20,
+            )
+        ),
+        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+    )
+
+    record = result.window_records[0]
+    assert record.actual_reference_count == 20
+    assert record.actual_comparison_count is None
+    assert record.failed_role == "comparison"
+    assert record.terminal_category == "decode_empty"
+
+
+def test_fatal_ffmpeg_failure_is_not_converted_to_recoverable_abstention() -> None:
+    with pytest.raises(FFmpegError):
+        alignment_consensus.estimate_planned_consensus_offset(
+            plan=_plan(rate=8000, count=1),
+            config=AlignmentConfig(sample_rate=8000),
+            fps=Fraction(24),
+            analysis_window_loader=lambda _spec: (_ for _ in ()).throw(
+                FFmpegError("fatal decode", 1)
+            ),
+            scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+        )
 
 
 def test_winning_group_uses_representative_confidence(

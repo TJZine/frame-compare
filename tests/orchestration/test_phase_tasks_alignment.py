@@ -128,6 +128,8 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert alignment_request.presentation_content is None
     assert alignment_request.generated_dir == ctx.workspace.generated_dir
     assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
+    assert alignment_request.alignment_diagnostics_dir == ctx.workspace.alignment_diagnostics_dir
+    assert alignment_request.alignment_diagnostics_root == ctx.workspace.generated_root
     assert alignment_request.selected_reference_relationship == "auto"
     assert alignment_request.previous_offsets == "disabled"
     assert alignment_request.settings.sample_rate == 12000

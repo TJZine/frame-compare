@@ -154,6 +154,7 @@ def run_align_phase(
             replace(
                 comparison,
                 alignment=alignment,
+                audio_attempt=result.audio_attempt,
             )
         )
     ref_trim, comp_trims = calculate_alignment_trims(
@@ -331,6 +332,8 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         presentation_content=(
             None if common_content is None else format_content_identity(common_content)
         ),
+        alignment_diagnostics_dir=ctx.workspace.alignment_diagnostics_dir,
+        alignment_diagnostics_root=ctx.workspace.generated_root,
     )
 
 

@@ -14,7 +14,12 @@ from typing import Literal, cast
 import numpy as np
 
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentChannelStrategy, AlignmentConfig
+from frame_compare.services.types import (
+    AlignmentChannelStrategy,
+    AlignmentConfig,
+    AudioMetadataMatch,
+    SelectedAudioStreamEvidence,
+)
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import run_subprocess
 
@@ -51,6 +56,8 @@ class AudioStreamTimeline:
     time_base: Fraction | None
     duration_basis: TimelineDurationBasis
     input_start_time: Fraction = Fraction(0)
+    start_time_basis: Literal["metadata", "default_zero"] = "default_zero"
+    input_start_time_basis: Literal["metadata", "default_zero"] = "default_zero"
 
 
 @dataclass(frozen=True)
@@ -268,6 +275,7 @@ def _parse_audio_stream(
     audio_stream_index: int,
     video_path: Path,
     input_start_time: Fraction,
+    input_start_time_basis: Literal["metadata", "default_zero"],
 ) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
         raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
@@ -285,7 +293,8 @@ def _parse_audio_stream(
     tags_obj = stream.get("tags", {})
     tags_dict = cast(dict[str, object], tags_obj) if isinstance(tags_obj, dict) else {}
 
-    start_time = _parse_optional_fraction(stream.get("start_time")) or Fraction(0)
+    parsed_start_time = _parse_optional_fraction(stream.get("start_time"))
+    start_time = parsed_start_time if parsed_start_time is not None else Fraction(0)
     time_base = _parse_time_base(stream.get("time_base"))
     duration_ts = _parse_optional_int(stream.get("duration_ts"))
     duration: Fraction | None = None
@@ -324,6 +333,8 @@ def _parse_audio_stream(
             time_base=time_base,
             duration_basis=duration_basis,
             input_start_time=input_start_time,
+            start_time_basis="metadata" if parsed_start_time is not None else "default_zero",
+            input_start_time_basis=input_start_time_basis,
         ),
     )
 
@@ -356,7 +367,10 @@ def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
     stream_items = cast(list[object], streams_obj)
     format_obj = payload.get("format")
     format_dict = cast(dict[str, object], format_obj) if isinstance(format_obj, dict) else {}
-    input_start_time = _parse_optional_fraction(format_dict.get("start_time")) or Fraction(0)
+    parsed_input_start_time = _parse_optional_fraction(format_dict.get("start_time"))
+    input_start_time = (
+        parsed_input_start_time if parsed_input_start_time is not None else Fraction(0)
+    )
 
     streams = [
         _parse_audio_stream(
@@ -364,6 +378,9 @@ def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
             audio_stream_index=index,
             video_path=video_path,
             input_start_time=input_start_time,
+            input_start_time_basis=(
+                "metadata" if parsed_input_start_time is not None else "default_zero"
+            ),
         )
         for index, stream_obj in enumerate(stream_items)
     ]
@@ -485,6 +502,90 @@ def select_matching_audio_stream(
     return min(
         streams,
         key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
+    )
+
+
+def _bounded_evidence_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return " ".join(value.split())[:256]
+
+
+def _metadata_match(reference: object | None, comparison: object | None) -> AudioMetadataMatch:
+    if reference is None or comparison is None:
+        return "unknown"
+    return "match" if reference == comparison else "mismatch"
+
+
+def selected_stream_evidence(
+    stream: AudioStreamInfo,
+    *,
+    role: Literal["reference", "comparison"],
+    source_identity_digest: str,
+    explicit_override: bool,
+    reference_stream: AudioStreamInfo | None = None,
+) -> SelectedAudioStreamEvidence:
+    """Project the resolved choice into bounded, pathless diagnostic facts."""
+    timeline = stream.timeline
+    duration = timeline.duration
+    time_base = timeline.time_base
+    if role == "reference":
+        rank = (
+            (stream.audio_stream_index,)
+            if explicit_override
+            else _reference_stream_sort_key(stream)
+        )
+        language_match: AudioMetadataMatch = "not_applicable"
+        commentary_match: AudioMetadataMatch = "not_applicable"
+    else:
+        if reference_stream is None:
+            raise ValueError("comparison stream evidence requires the reference stream")
+        rank = (
+            (stream.audio_stream_index,)
+            if explicit_override
+            else _comparison_stream_sort_key(reference_stream, stream)
+        )
+        language_match = _metadata_match(reference_stream.language, stream.language)
+        commentary_match = _metadata_match(
+            reference_stream.is_commentary,
+            stream.is_commentary,
+        )
+    return SelectedAudioStreamEvidence(
+        role=role,
+        source_identity_digest=source_identity_digest,
+        audio_stream_index=stream.audio_stream_index,
+        absolute_stream_index=stream.absolute_stream_index,
+        selection_method="explicit_override" if explicit_override else "automatic_metadata",
+        selection_rank=rank,
+        codec_name=_bounded_evidence_text(stream.codec_name),
+        sample_rate=stream.sample_rate,
+        channels=stream.channels,
+        channel_layout=_bounded_evidence_text(stream.channel_layout),
+        language=_bounded_evidence_text(stream.language),
+        is_default=stream.is_default,
+        is_original=stream.is_original,
+        is_commentary=stream.is_commentary,
+        language_match=language_match,
+        commentary_match=commentary_match,
+        stream_start_num=timeline.start_time.numerator,
+        stream_start_den=timeline.start_time.denominator,
+        stream_start_basis=timeline.start_time_basis,
+        input_start_num=timeline.input_start_time.numerator,
+        input_start_den=timeline.input_start_time.denominator,
+        input_start_basis=timeline.input_start_time_basis,
+        time_base_num=time_base.numerator if time_base is not None else None,
+        time_base_den=time_base.denominator if time_base is not None else None,
+        duration_num=duration.numerator if duration is not None else None,
+        duration_den=duration.denominator if duration is not None else None,
+        duration_basis=timeline.duration_basis,
+    )
+
+
+def normalized_extraction_recipe() -> str:
+    """Describe extraction without retaining media paths or a concrete command line."""
+    return (
+        "ffmpeg [seek] -i <role_input> -map 0:a:<selected_ordinal> -vn "
+        "[channel] -af <bounded_filters> -fs <planned_pcm_bytes> -f f32le -"
     )
 
 
@@ -754,16 +855,48 @@ def extract_audio_window(
 
     payload_len = len(proc.stdout)
     if payload_len == 0:
-        raise AudioAlignmentError(f"empty audio window in {video_path.name}")
+        raise AudioAlignmentError(
+            f"empty audio window in {video_path.name}",
+            category="decode_empty",
+            stage="decode",
+        )
     if payload_len % _FLOAT32_BYTES != 0:
         raise AudioAlignmentError(
-            f"invalid audio window payload from {video_path.name}: {payload_len} bytes"
+            f"invalid audio window payload from {video_path.name}: {payload_len} bytes",
+            category="decode_payload_invalid",
+            stage="decode",
         )
     if payload_len > sample_count * _FLOAT32_BYTES:
         raise AudioAlignmentError(
-            f"audio window from {video_path.name} exceeded the planned sample count"
+            f"audio window from {video_path.name} exceeded the planned sample count",
+            category="decode_output_exceeded",
+            stage="decode",
         )
     return np.frombuffer(proc.stdout, dtype=np.float32)
+
+
+def _extract_audio_window_for_role(
+    video_path: Path,
+    stream: AudioStreamInfo,
+    *,
+    sample_rate: int,
+    start_sample: int,
+    sample_count: int,
+    channel_strategy: AlignmentChannelStrategy,
+    role: Literal["reference", "comparison"],
+) -> np.ndarray:
+    try:
+        return extract_audio_window(
+            video_path,
+            stream,
+            sample_rate=sample_rate,
+            start_sample=start_sample,
+            sample_count=sample_count,
+            channel_strategy=channel_strategy,
+        )
+    except AudioAlignmentError as exc:
+        exc.role = role
+        raise
 
 
 def extract_planned_window(
@@ -777,22 +910,28 @@ def extract_planned_window(
     channel_strategy: AlignmentChannelStrategy,
 ) -> AudioWindow:
     """Decode one planned coarse or requested-rate correlation pair."""
-    reference = extract_audio_window(
+    reference = _extract_audio_window_for_role(
         reference_path,
         reference_stream,
         sample_rate=plan.sample_rate,
         start_sample=spec.reference_start_sample,
         sample_count=spec.reference_sample_count,
         channel_strategy=channel_strategy,
+        role="reference",
     )
-    comparison = extract_audio_window(
-        comparison_path,
-        comparison_stream,
-        sample_rate=plan.sample_rate,
-        start_sample=spec.comparison_start_sample,
-        sample_count=spec.comparison_sample_count,
-        channel_strategy=channel_strategy,
-    )
+    try:
+        comparison = _extract_audio_window_for_role(
+            comparison_path,
+            comparison_stream,
+            sample_rate=plan.sample_rate,
+            start_sample=spec.comparison_start_sample,
+            sample_count=spec.comparison_sample_count,
+            channel_strategy=channel_strategy,
+            role="comparison",
+        )
+    except AudioAlignmentError as exc:
+        exc.reference_sample_count = int(reference.size)
+        raise
     return AudioWindow(
         reference=reference,
         comparison=comparison,
@@ -832,23 +971,33 @@ def extract_aligned_scoring_window(
         comparison_total - comparison_start,
     )
     if sample_count < 1:
-        raise AudioAlignmentError("candidate leaves no selected-stream audio overlap")
-    reference = extract_audio_window(
+        raise AudioAlignmentError(
+            "candidate leaves no selected-stream audio overlap",
+            category="insufficient_overlap",
+            stage="scoring",
+        )
+    reference = _extract_audio_window_for_role(
         reference_path,
         reference_stream,
         sample_rate=rate,
         start_sample=reference_start,
         sample_count=sample_count,
         channel_strategy=channel_strategy,
+        role="reference",
     )
-    comparison = extract_audio_window(
-        comparison_path,
-        comparison_stream,
-        sample_rate=rate,
-        start_sample=comparison_start,
-        sample_count=sample_count,
-        channel_strategy=channel_strategy,
-    )
+    try:
+        comparison = _extract_audio_window_for_role(
+            comparison_path,
+            comparison_stream,
+            sample_rate=rate,
+            start_sample=comparison_start,
+            sample_count=sample_count,
+            channel_strategy=channel_strategy,
+            role="comparison",
+        )
+    except AudioAlignmentError as exc:
+        exc.reference_sample_count = int(reference.size)
+        raise
     return AudioWindow(
         reference=reference,
         comparison=comparison,

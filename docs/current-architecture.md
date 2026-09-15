@@ -314,6 +314,14 @@ recovery requirement.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
 - `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
   manual alignment overrides for the current run
+- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v1,
+  diagnostic-only audio evidence owned by
+  `frame_compare.services.alignment_diagnostics`. Each pathless file is bounded to
+  128 KiB, contains at most 16 primary window outcomes, and is written atomically
+  before optional review. A final review outcome may replace the envelope once while
+  preserving the canonical original-attempt digest. These files are never read by
+  alignment, trim, or shared-cache owners and expire only when the run folder is
+  removed.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
   (VSView's BestSource workspace is not a Frame Compare source-loader change)
@@ -408,8 +416,13 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 `ClipIdentity`, or `ClipFingerprint`.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
-precedence and carries diagnostic-only stability summaries without allowing them to
-change the applied constant offset or trims. `alignment_correlation` converts its raw
+precedence and carries the immutable original audio attempt and diagnostic-only
+stability summaries without allowing them to change the applied constant offset or
+trims. The attempt retains resolved pathless stream facts, one bounded result for
+every planned window, raw candidate/quality facts, aggregate v5 decision evidence,
+and a separate display-only provisional candidate. Manual confirmation replaces
+authority without replacing that original attempt. Immutable `ClipState` carries the
+attempt even when its applied `alignment` remains null. `alignment_correlation` converts its raw
 correlation lag into the signed `reference source frame - comparison source frame`
 contract before consensus results reach hints, caches, or trim calculation. Immutable
 orchestration alignment state carries that summary to warning and human-report owners
@@ -446,7 +459,10 @@ write-source provenance such as `computed_this_run`,
 `shared_previous_offsets`, and
 `preexisting_manual_override`; shared-cache writes consume only current-run
 computed or interactively confirmed provenance rather than inferring eligibility from
-the final flattened `AlignmentResult.source`.
+the final flattened `AlignmentResult.source`. Shared cache schema v2 remains
+accepted-authority-only and does not serialize the richer attempt. Warm cache entries
+therefore report historical stream/window details as unavailable rather than
+inventing them.
 
 Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the

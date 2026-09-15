@@ -67,6 +67,28 @@ are recomputed or reviewed normally. Schema-v1 entries are ignored and recompute
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
 remains a v1 file with the same path and offset semantics.
 
+Fresh computation distinguishes three audio-evidence states. `trusted_automatic`
+means the unchanged v5 policy accepted a candidate and may authorize the existing
+constant offset. `provisional` means a unique display-qualified candidate survived a
+rejected attempt; it is shown only in the pre-review terminal explanation and is never
+applied or passed as a trusted VSView hint. `unavailable` means no unique usable
+candidate exists, and Frame Compare does not invent zero. The
+display-only qualification floor is score 0.90 and peak ratio 1.50; it does not filter
+v5 voting or change an automatic result. Manual confirmation is a separate fact and
+does not rewrite the original audio attempt.
+
+Each run retains that attempt in
+`alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
+schema-v1 file records selected stream metadata, every planned window outcome, raw
+candidate and quality facts, the aggregate decision, and the final review resolution.
+It records the expected media-runtime fingerprint; FFmpeg/ffprobe version fields say
+`not_observed` because this package does not add version-probe subprocesses.
+It contains no media paths, PCM, environment values, credentials, full commands, or
+full subprocess stderr. Source identity digests are pseudonymous rather than anonymous,
+and sharing a run folder also shares its bounded labels and timing facts. The file is
+diagnostic only: editing, corrupting, or deleting it cannot change trims or cache reuse.
+It is retained until the run folder is deleted.
+
 ## Native VSView alignment review
 
 VSView 0.11.0 and the Frame Compare alignment panel are included in the Windows

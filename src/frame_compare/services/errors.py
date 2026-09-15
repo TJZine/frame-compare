@@ -82,7 +82,21 @@ class MetadataError(ProcessingError):
 class AudioAlignmentError(ProcessingError):
     """Audio sync calculation failure (FC-4005)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        category: str = "correlation_failed",
+        stage: str = "correlation",
+        role: str | None = None,
+        reference_sample_count: int | None = None,
+        comparison_sample_count: int | None = None,
+    ) -> None:
+        self.category = category
+        self.stage = stage
+        self.role = role
+        self.reference_sample_count = reference_sample_count
+        self.comparison_sample_count = comparison_sample_count
         super().__init__(
             ErrorContext(
                 code="FC-4005",

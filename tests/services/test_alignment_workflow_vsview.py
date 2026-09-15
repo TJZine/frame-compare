@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +14,7 @@ import pytest
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
+from frame_compare.services.alignment_diagnostics import original_attempt_digest
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
@@ -28,6 +31,7 @@ from tests.services.alignment_request_test_support import (
 from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
+from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int = 1000) -> None:
@@ -108,6 +112,108 @@ def test_confirmed_native_pair_replaces_computed_offset_and_persists_override(
     assert results[0].frame_offset == 12
     assert results[0].source == "manual"
     assert load_manual_overrides(tmp_path)["ref:comparison"].frame_offset == 12
+
+
+def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    attempt = audio_attempt()
+    initial_snapshot: dict[str, object] = {}
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.probe_fps",
+        lambda _path: Fraction(24, 1),
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: AlignmentConsensus(
+            sample_offset=None,
+            score=0.99,
+            applied=False,
+            diagnostic="insufficient_consensus",
+            valid_windows=5,
+            consensus_windows=4,
+            consensus_ratio=0.8,
+            ambiguity_ratio=2.0,
+            window_records=attempt.windows,
+            decision=attempt.decision,
+            audio_attempt=attempt,
+        ),
+    )
+    monkeypatch.setattr(
+        alignment_vsview,
+        "check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        alignment_vsview,
+        "_current_tty_status",
+        lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
+    )
+
+    def launch(*_args: object, **_kwargs: object):
+        prelaunch = capsys.readouterr().err
+        assert "Provisional candidate: +0f (not applied)" in prelaunch
+        assert "Reason: insufficient_consensus" in prelaunch
+        initial_payload = json.loads(
+            (tmp_path / "alignment_diagnostics" / "comparison-1.json").read_text(encoding="utf-8")
+        )
+        assert initial_payload["review_outcome"] == "pending"
+        initial_snapshot["attempt"] = initial_payload["original_audio_attempt"]
+        initial_snapshot["digest"] = initial_payload["original_attempt_digest"]
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(
+                    ConfirmedAlignmentReviewDecision(
+                        comparison_key="ref:comparison",
+                        reference_source_frame=80,
+                        comparison_source_frame=80,
+                    ),
+                ),
+            ),
+        )
+        return session
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(use_vsview=True, cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    request = replace(
+        request,
+        alignment_diagnostics_dir=tmp_path / "alignment_diagnostics",
+        alignment_diagnostics_root=tmp_path.parent,
+    )
+
+    result = align_clips_from_request(request, config)[0]
+
+    assert result.source == "manual"
+    assert result.frame_offset == 0
+    assert result.audio_attempt == attempt
+    artifact = tmp_path / "alignment_diagnostics" / "comparison-1.json"
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["review_outcome"] == "confirmed"
+    assert payload["final_resolution"]["frame_offset"] == 0
+    assert payload["final_resolution"]["reference_source_frame"] == 80
+    assert payload["final_resolution"]["comparison_source_frame"] == 80
+    assert payload["original_audio_attempt"] == initial_snapshot["attempt"]
+    assert payload["original_attempt_digest"] == initial_snapshot["digest"]
+    assert payload["original_attempt_digest"] == original_attempt_digest(attempt)
+    assert payload["original_audio_attempt"]["decision"]["state"] == "provisional"
 
 
 def test_keep_current_native_decision_retains_computed_offset(
