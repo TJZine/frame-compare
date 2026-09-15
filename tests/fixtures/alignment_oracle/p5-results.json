@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "purpose": "p5_ten_second_preroll_scalar_evidence",
+  "baseline_preroll_seconds": 5,
+  "variant_preroll_seconds": 10,
+  "experiment_scope": {
+    "production_changed": false,
+    "changed_operation": "seek context only",
+    "unchanged_filters_crop_resampling_scoring_correction_caps": true,
+    "ffmpeg_window_timeout_seconds": 120,
+    "fixture_source": "P3 deterministic recipes and holdout identities",
+    "original_incident_media_used": false
+  },
+  "environments": {
+    "native_macos_arm64": {
+      "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "alignment_runtime_fingerprint": "c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92",
+      "runtime_kind": "unmanaged",
+      "platform": "macOS-27.0-arm64-arm-64bit-Mach-O"
+    },
+    "docker_linux_arm64": {
+      "ffmpeg": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "alignment_runtime_fingerprint": "ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8",
+      "runtime_kind": "docker",
+      "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+      "debian_ffmpeg_package": "7:7.1.5-0+deb13u1"
+    },
+    "windows_x64_portable": {
+      "status": "outstanding_not_executed"
+    }
+  },
+  "primary_controls": {
+    "positive_start_aac": {
+      "fixture_recipe": "6c82ef07b78542b6bbd362e295c9e11a41942c4b8722ac57bbd84f7d966fe4ea",
+      "requested_count": 2048,
+      "native_macos_arm64": {
+        "baseline_5s": {"bounded_count": 945, "oracle_count": 2048, "lag_samples": 29},
+        "variant_10s": {"bounded_count": 945, "oracle_count": 2048, "lag_samples": 29},
+        "variant_matches_oracle": false
+      },
+      "docker_linux_arm64": {
+        "baseline_5s": {"bounded_count": 2048, "oracle_count": 2048, "lag_samples": 0},
+        "variant_10s": {"bounded_count": 2048, "oracle_count": 2048, "lag_samples": 0},
+        "variant_matches_oracle": true
+      }
+    },
+    "asymmetric_positive_start_aac": {
+      "fixture_recipe": "a9664d853c33282f0496cd52d00a8ff310cc78febf35c4579c0454bf3edf23a8",
+      "expected_frame_offset": 0,
+      "native_macos_arm64": {
+        "baseline_5s": {"sample_offset": 1115, "frame_offset": 1, "score": 0.8713582429603048, "peak_ratio": 6.485486119359482, "coverage_ratio": 0.9965482824586209},
+        "variant_10s": {"sample_offset": 1115, "frame_offset": 1, "score": 0.8713582429603048, "peak_ratio": 6.485486119359482, "coverage_ratio": 0.9965482824586209},
+        "variant_matches_expected_frame": false,
+        "variant_quality_eligible": false
+      },
+      "docker_linux_arm64": {
+        "baseline_5s": {"sample_offset": 0, "frame_offset": 0, "score": 0.9999999999999999, "peak_ratio": 8.034924596973156, "coverage_ratio": 0.9985005395982068},
+        "variant_10s": {"sample_offset": 0, "frame_offset": 0, "score": 0.9999999999999999, "peak_ratio": 8.034924596973156, "coverage_ratio": 0.9985005395982068},
+        "variant_matches_expected_frame": true,
+        "variant_quality_eligible": true
+      }
+    },
+    "decision": "FAIL — ten seconds does not eliminate the reproduced discrepancy on both supported runtimes"
+  },
+  "aac_seek_grid_holdouts": {
+    "native_macos_arm64": {
+      "48000_to_8000": {"allowance_samples": 1, "baseline_max_lag_samples": 0, "variant_max_lag_samples": 0, "variant_within_allowance": true},
+      "44100_to_48000": {"allowance_samples": 6, "baseline_max_lag_samples": 1, "variant_max_lag_samples": 1, "variant_within_allowance": true}
+    },
+    "docker_linux_arm64": {
+      "48000_to_8000": {"allowance_samples": 1, "baseline_max_lag_samples": 3, "variant_max_lag_samples": 1, "variant_within_allowance": true},
+      "44100_to_48000": {"allowance_samples": 6, "baseline_max_lag_samples": 10, "variant_max_lag_samples": 12, "variant_within_allowance": false}
+    },
+    "decision": "FAIL — the Docker 44100-to-48000 holdout remains outside allowance and worsens from 10 to 12 samples"
+  },
+  "holdouts": {
+    "weak_dissent": {
+      "cases_per_runtime": 80,
+      "native_accepted": 80,
+      "docker_accepted": 80,
+      "native_score_range": [0.2152675274718276, 0.23373965616436304],
+      "docker_score_range": [0.215267520165406, 0.23373965616436312],
+      "offset_range_samples": [-2400, 2401]
+    },
+    "localized_edit": {
+      "cases_per_runtime": 80,
+      "native_credible_conflicts": 80,
+      "docker_credible_conflicts": 80,
+      "native_false_accepts": 0,
+      "docker_false_accepts": 0,
+      "native_nonzero_score_range": [0.9997377416490042, 0.9998131959354645],
+      "docker_nonzero_score_range": [0.9997377414524836, 0.9998131960066492]
+    },
+    "signal_stream_and_clean_controls": {
+      "native_variant_changed_outcome": false,
+      "docker_variant_changed_outcome": false,
+      "families": ["clean_zero", "very_quiet_independent", "unrelated", "silence", "steady_tone", "repeated", "wrong_stream", "explicit_matching_stream"]
+    }
+  },
+  "disposition": "p5a_ten_second_preroll_failed_p5b_grid_preserving_design_required"
+}
