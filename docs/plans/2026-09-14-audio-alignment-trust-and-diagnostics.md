@@ -4,1159 +4,779 @@ search:
 ---
 
 Status: Active
-Scope: Audio-alignment trust decisions, retained diagnostics, VSView review UX,
-       and evidence-led estimator robustness
-Owner: Frame Compare implementation session
+Scope: Replace independent audio-window seeks with bounded continuous collection, qualify automatic alignment authority, and complete runtime/release proof.
+Owner: Main GPT-5.6 Sol orchestration task; sequential Codex new tasks with controller-owned integration.
 
-# Audio-alignment trust and diagnostics — implementation plan
+# Audio-alignment redesign — replacement implementation plan
 
 **Repository:** `TJZine/frame-compare`
-**Target branch:** `dev/v0.6.0-review-remediation`
-**Pinned starting SHA:** `326da610a1f6d9baee7ea58d509f05f59af0f004`
-**Intended tracked path:** `docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md`
-**Plan date:** September 14, 2026
-**Execution state:** P1 verified at `14d82237011da0e2efd518ed6c70e64e732d9a21`;
-P2 implementation is complete at `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`
-with physical-Windows acceptance outstanding; P3 is verified at
-`7f342a6208944e53a4e48c77d3449ffdc05e9085`. P3 demonstrated a primary
-extraction discrepancy, so the P5 repair branch must run before P4. P5A's
-fixed-ten-second branch was evaluated at
-`ba5364d9695223f4e866b05a586c5f42c36e7221` and failed its two-runtime
-gate. P5B's single grid-preserving design also failed its two-runtime gate;
-production extraction remains v5 and a newly authorized focused extraction design
-is required. P4 and P6 remain blocked or pending as recorded below.
+**Branch:** `dev/v0.6.0-review-remediation`
+**Tracked path:** `docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md`
+**Original plan date:** September 14, 2026
+**Replacement date:** September 15, 2026
+**Inspected pushed head:** `0df9c369a9abf19de3cce87de95ccd50ef7ecf1a`
+**Original investigation baseline:** `326da610a1f6d9baee7ea58d509f05f59af0f004`
+**Replacement packages:** R0–R7, all not started at authoring.
 
-## Executive recommendation and report adjudication
+This document replaces the previous contents at this path. It is the only active plan for this workstream. Completed historical work remains recorded below and in its immutable commits and scalar evidence. Historical instructions prohibiting continuous production decoding or directing another P5 seek experiment are superseded, not outstanding tasks.
 
-Implement retained evidence and honest review UX before changing automatic acceptance. Preserve one immutable audio attempt, make its decision explicitly **trusted automatic**, **provisional**, or **unavailable**, and keep the offset authorized for trimming separate. Write a bounded, run-local diagnostic snapshot before review. A human decision is a second fact; it must not rewrite the first.
+The latest pushed changes inspected here are test/evidence changes. Production extraction and policy remain `stream-timeline-distributed-2097152-v5`; the automatic-authority safety hold is **not installed yet**. R0 is the first production change. Authoring this replacement did not execute tests, implement code, or establish new runtime measurements. [E1, E2, E3, E4]
 
-Then validate a conservative quality-qualified policy against continuous full-decode oracles and labeled negative controls. Keep `consensus_minimum_ratio = 1.0`; deliberately redefine its denominator to qualified voters in the new estimator policy, disclose that change, and add independent temporal-support requirements plus a credible-contradiction veto. Do not use a numeric majority threshold to excuse a real edit. The proposed fixed quality floors are a testable conservative policy proposal, not a calibrated probability or a finding from the original incident.
+## 1. Decision, scope, and non-negotiable outcomes
 
-The first deliverable is packages P1–P2. They preserve current automatic results, including existing conservative rejections, while making them explainable. P3–P4 are required before claiming that automatic acceptance itself has been improved. P5 provides strictly diagnostic bounded rechecks only where the specified evidence gate justifies them. P6 supplies release acceptance, including visible native Windows proof.
+Replace independent seek-per-window extraction with continuous origin-based streaming collection. Retain distributed analysis windows. Use a second continuous pass at the requested rate when discovery uses a lower rate. This architecture is settled; the completed feasibility program is not repeated.
 
-| Report recommendation or finding | Decision in this plan |
-| --- | --- |
-| Weak successful dissent can veto four strong zero votes; failed windows disappear; evidence is lost before review | **Accept.** The pinned consensus and service sources confirm these mechanisms. They do not identify the original incident's cause. [R1–R4] |
-| Observability before acceptance-policy relaxation | **Accept.** P1–P2 do not change offsets, gates, stream choice, extraction commands, or cache policy identity. |
-| Separate trusted offset from a rejected candidate; preserve the original attempt after manual confirmation | **Accept.** No candidate is ever copied into the existing trusted-offset map. |
-| The report's maximal hierarchy of stream/window/count/consensus/decision/envelope types | **Modify.** Use five small immutable records, reuse existing result/provenance owners, and derive counts and frame-bin distributions. Do not add separate counts, consensus, plan, event-bus, or evidence-repository abstractions. |
-| A run-local audit artifact | **Accept, in P1.** Versioned, bounded, atomic, path-contained, diagnostic-only, and not read by cache lookup or trim application. |
-| Quality-qualified voting and several independent intervals | **Accept as the target policy, gated by P3.** Specify exact support rules below. Weak/ambiguous estimates abstain; credible cross-frame contradictions veto. |
-| Strong majority, a lower default ratio, or weighted votes | **Reject for this workstream.** No `1.0 → 0.8` fix, score-weighted vote, or adjacent-frame merge. |
-| Disputed-window retry and explicit zero verification | **Modify.** At most one short disputed-interval recheck and one short zero-frame diagnostic, with a precomputed reservation and no votes or authority. Do not implement an unconditional retry framework. |
-| Seek/grid, correction-radius, origin-mapping, rounding, algorithm or channel-search changes | **Defer production changes until their specific oracle gate.** Do not change any merely because the incident could involve it. |
-| Missing duration should use container duration or unknown alignment should become zero | **Reject.** Preserve unavailable-timeline handling and the distinction between no correction and no evidence. |
-| One visual zero proves constant alignment | **Reject.** Manual confirmation is a human-selected constant offset, not proof of a globally constant source relationship. |
+The implementation must provide:
 
-**Important compatibility decision:** the future qualified-voter denominator is a public semantic change, not a transparent refactor. Existing numeric user settings remain in force; stronger settings are never lowered. The new policy must be named in normal alignment output and documented in the release/config contract. Users must not be told that `1.0` still means unanimity of every finite correlation. See §6.3.
+- Bounded retained PCM, pipe buffers, stderr, subprocess lifetimes, FFT work, scoring work, and per-comparison diagnostics.
+- Sequential reference/comparison collection and sequential comparison lifetimes; no cross-comparison PCM cache.
+- Truthful sample coordinates and observed-EOF handling, including AAC padding discrepancies.
+- Three separate gates: extraction integrity, estimation quality, and automatic authority.
+- Useful provisional candidates without automatic application, including legitimate `+0f`.
+- Qualified temporal support and a credible-contradiction veto before automatic authority is restored.
+- Existing immutable-attempt, manual-review, persistence, and native validation safeguards.
 
-## 1. Problem statement and evidence baseline
+No new runtime dependency, user-facing tuning switch, independent-seek fallback, temporary whole-track PCM, Python resampler, codec-specific backend registry, adaptive stream search, diagnostic retry, or special zero-check is authorized. Do not increase preroll, correction radii, quality tolerances, or budgets to make fixtures pass. Do not add another planning document or an automatic legacy-cache migration.
 
-### 1.1 What is established
+Continuous decoding is not whole-track retention. It also is not exhaustive edit detection: discarded intervals are not analyzed. Acceptance means sufficiently strong distributed support for one correction without a credible contradiction in sampled evidence, not proof that every source frame or every audio sample matches.
 
-At the pinned snapshot, the normal long-source default selects five distributed 30-second reference windows. Every successfully correlated candidate votes, `minimum_valid_windows` defaults to one, and `consensus_minimum_ratio` defaults to `1.0`. Confidence and ambiguity are winner-level gates, not voter eligibility. Consequently four strong `+0f` candidates and one finite weak cross-frame candidate can reject, while one successful `+0f` candidate and four recoverable window failures can accept. [R1, R2, R5]
+The canonical audio coordinate system does not independently prove the relationship to video frame zero. Preserve the existing `reference source frame - comparison source frame` sign convention and the product's matching-A/V-relationship assumption. Do not add timestamp compensation, silence insertion, stretching, or inferred A/V-origin correction. Independently labeled video/real-media evidence is required for release claims about frame alignment.
 
-The `d7fbb2b8` change already groups by the integer frame correction. Small sample jitter inside a frame bin is not the remaining bug. Adjacent frame bins must remain distinct. `AlignmentConsensus` retains information that `AlignmentResult` discards; rejected sample offsets become null, the VSView map contains only accepted integers or null, and a manual replacement can erase the original rejection from downstream warnings/provenance. [R1–R4]
+## 2. Preserved history and evidence limits
 
-The selected-stream timing and metadata-driven stream choices are real inputs to the estimator. They are not evidence that the tracks contain matching language, mix, or edits. Missing selected-stream duration is an explicit pre-analysis rejection; container duration is not a permitted substitute. Early and late extraction follow different trim/resampling paths. FFmpeg documents that timestamp trimming and counting samples need not agree when timestamps are inexact; this justifies an oracle experiment, not a diagnosis. [R6, R7, X1, X2]
+### 2.1 Historical ledger
 
-The native review boundary already validates session identity, the complete ordered comparison set, raw source-frame bounds, sidecar paths, and typed actions. Metadata and result versioning currently share a v1 constant. The cache is schema v2 and deliberately accepts reusable successful results, not arbitrary rejected attempts. [R8–R11]
-
-### 1.2 Evidence limits and execution honesty
-
-The supplied report's isolated consensus probes are accepted as prior evidence. This planning session read the pinned authority documents, relevant local skills, consensus, result/provenance, stream/planner/extraction, orchestration, cache identity, native contract/panel, and runtime-test surfaces. It did **not** rerun those probes, run pytest, execute FFmpeg, inspect the original media, or launch VSView.
-
-The exact original incident cause remains unknown. Relevant missing facts include the original effective settings, selected streams, per-window data, runtime identity, and checks at separated video positions. Implementation must fix demonstrated mechanisms without recording any causal hypothesis as a confirmed incident diagnosis.
-
-### 1.3 Fixed resource baseline
-
-Preserve the current primary-analysis limits unless a separately approved change explicitly supersedes them: peak FFT size **2,097,152 points**, total **16,777,216 FFT points**, at most **16 selected analysis windows**, requested-rate scoring **3,000,000 samples per pair** and **15,000,000 samples total**, sequential pair lifetimes, ffprobe timeout **15 seconds**, and FFmpeg window timeout **120 seconds**. The current production seek preroll is five seconds. P5 explicitly budgets any additional work rather than treating a retry as free. [R5–R7]
-
-## 2. Goals and explicit non-goals
-
-### Goals
-
-Explain every normal rejected audio attempt before optional VSView launch; distinguish accepted zero, provisional zero, and no candidate; preserve a useful rejected hypothesis without applying it; expose selected-stream and window evidence in terminal/VSView adapters; preserve the computed attempt after human review; close the minimum-one/failed-window support hole; keep genuine contradictory evidence fail-closed; retain bounded deterministic execution, JSON-only stdout, path containment, cache trust, and result validation.
-
-### Non-goals
-
-No claim to reproduce the original incident; no whole-track production decoding; no automatic edit matching, drift compensation, speech recognition, adaptive channel/track search, or new correlation algorithm; no implicit audio/video-origin correction; no adjacent-frame grouping; no weighted votes; no matrix of CLI/config flags; no shared negative cache; no cache-history reconstruction; no rich-evidence cache migration; no generic telemetry/logging framework; no report-viewer redesign; no native dependency update. Missing duration remains a truthful unavailable result rather than prompting unbounded duration discovery.
-
-The proposed quality floors and support rules are safety filters, not estimates of the probability that alignment is correct. A high score, a stable diagnostic, a cache hit, and human confirmation are distinct facts.
-
-## 3. Final product behavior
-
-### 3.1 Three audio decision states and a separate application authority
-
-| Audio decision | Required evidence | Application behavior | Review behavior |
-| --- | --- | --- | --- |
-| `trusted_automatic` | The active estimator policy accepted a concrete candidate | Existing computed authority may populate `frame_offset` and the trusted hint, including integer zero | Show accepted value, policy and support; allow manual replacement or keep-current |
-| `provisional` | Automatic policy rejected, but a unique review-qualified frame group survives | `applied = false`; applied frame/time offsets remain null; the trusted hint stays null | Show the candidate, rejection reasons, disagreement and coverage; never populate confirmation inputs from it |
-| `unavailable` | No single review-qualified candidate: no analysis, all unusable, only weak/ambiguous evidence, or tied qualified groups | No automatic authority or implied zero | Explain the cause; show any raw competing estimates only in details; offer manual input without a suggestion |
-
-These are **audio** states, not a replacement for existing manual/cache provenance. An already validated manual offset may remain current even when historical audio evidence is unavailable. A reused computed result is labeled as previously accepted, not newly analyzed. The current authoritative offset and its origin are separately presented.
-
-For P1–P2, `trusted_automatic` means accepted by the unchanged v5 policy. Do not silently apply the future P4 thresholds to old/cache results. In particular, P1 does not claim to have repaired the one-success/four-failures acceptance case.
-
-### 3.2 Candidate selection for review, beginning in P1
-
-Use a **display-only floor of score ≥ 0.90 and peak ratio ≥ 1.50**, with a finite requested-rate score, meaningful overlap under the existing correlation contract, an in-bounds requested-rate offset, and a valid frame conversion. An unbounded peak ratio may pass; a missing or NaN ratio may not. These fixed, conservative display thresholds are a product choice to avoid presenting arbitrary finite noise as a recommendation; they are not experimentally calibrated automatic thresholds.
-
-For a rejected attempt, group review-qualified windows by the existing `samples_to_frames` conversion. Select a provisional candidate only when one group has a strictly larger support count than every other group. A single strong surviving window may be a **provisional** candidate, explicitly labeled `1 of 5 planned; insufficient temporal support`. Equal-sized qualified groups produce `unavailable` with `no_unique_candidate`, not a score-selected suggestion. Display all groups in details. The candidate's sample representative is an observed lower median from its own supporting windows.
-
-Do **not** apply user automation thresholds to the display floor: a score of 0.99 rejected by an explicit 0.995 automation threshold is still useful for manual review. Show that configured gate as failed. Conversely, a result accepted by the unchanged legacy policy stays accepted even when it would not pass this new display floor; presentation must not retroactively change authority.
-
-A strong rejected nonzero candidate follows exactly the same rules as zero. No branch fabricates a zero candidate from null, from failed analysis, or from a user leaving an input blank.
-
-### 3.3 Normal terminal output
-
-Emit a compact block after computation/cache resolution and **before** launching VSView or reporting that optional review is unavailable. Use the existing stderr/progress presentation boundary, temporarily clearing live progress as needed. This output must not depend on a later final-result warning, which a manual replacement can change.
-
-Representative copy, with numbers populated from evidence:
-
-```text
-Comparison 1 — Audio alignment accepted: +0f.
-No relative audio correction is required. Policy: v5; 5/5 correlated windows agree.
-Streams: Reference a:0 -> Comparison a:1 (automatic metadata selection).
-```
-
-After P4, the support line becomes:
-
-```text
-Policy: quality-qualified-v1; 4/4 qualified windows agree; 3 independent intervals.
-1 weak window abstained. No credible conflicting window was found in the sampled evidence.
-```
-
-Legacy-policy rejection with a useful zero:
-
-```text
-Comparison 1 — Audio alignment requires review. Provisional candidate: +0f (not applied).
-4/5 correlated windows agree; configured consensus requires 100%. 1 weak window disagrees near 00:02:15.
-Streams: Reference a:0 -> Comparison a:1 (automatic metadata selection).
-Opening VSView for manual review. The candidate is a hint, not a confirmed alignment.
-```
-
-Credible contradiction after P4:
-
-```text
-Comparison 1 — Audio alignment requires review. Provisional candidate: +0f (not applied).
-A credible +1f estimate conflicts near 00:02:15. A constant correction is not trusted.
-Review separated points, including the conflicting interval.
-```
-
-Insufficient support:
-
-```text
-Comparison 1 — Audio alignment requires review. Provisional candidate: +0f (not applied).
-Only 1 of 5 planned windows produced qualified evidence; 3 independent intervals are required. 4 windows failed.
-```
-
-No usable evidence:
-
-```text
-Comparison 1 — No usable audio candidate. No automatic correction applied.
-5 windows planned; 0 usable estimates. 5 windows had insufficient signal.
-```
-
-Missing duration:
-
-```text
-Comparison 1 — Audio alignment was not computed. No usable candidate.
-Selected comparison audio a:1 has no usable duration metadata. Container duration was not substituted.
-```
-
-Additional exact behavior:
-
-- Stream summary names selected **audio ordinals**, not just “automatic.” Use `a:N` consistently; absolute stream index and metadata details belong in verbose/UI details. Report explicit selection as `explicit override`, and mixed selection per role rather than calling both automatic.
-- Emit known language/commentary metadata mismatches in normal output: `Selected audio metadata differs (language/commentary); matching content is not established.` Unknown tags are unknown, not a match or a proven mismatch.
-- For rejected results without review, finish with `Continuing without an accepted audio correction; rendering remains best-effort.` Existing source-set/configured trims may still apply. Never say that every source will remain literally untrimmed.
-- Show one successful diagnostic location per run, relative to the run folder: `Audio diagnostics: alignment_diagnostics/`. Do not print an invented path when writing failed.
-- When a strict user threshold caused rejection, include its actual value rather than only `low_confidence`.
-- Reused computed zero: `Reused accepted audio alignment: +0f. Historical window and selected-stream details are unavailable; no audio analysis ran this time.` Do not substitute zero counts for missing counts.
-- Reused human zero: `Reused manually confirmed alignment: +0f. Historical audio details are unavailable.` Do not call it audio-confirmed.
-- After human zero: `Manually confirmed alignment: +0f. Original audio attempt remains rejected (insufficient_consensus); evidence retained.` Only claim retained-on-disk evidence after a successful write; otherwise say `evidence remains available in this run only`.
-
-### 3.4 Verbose, quiet, JSON, plain-text and sanitization rules
-
-Verbose stderr adds the complete bounded per-window table: stable ID, planned reference/search intervals, actual counts, analysis/requested rates, requested sample/frame lag, score and stage, peak ratio and stage, vote/review eligibility, failure category, and retry relation. Include selected ordinals/absolute indexes; codec, language, dispositions, channels/layout, rate; timing values and duration basis; selection ranking facts; configured/effective quality thresholds; all assessed failed gates; frame bins and denominator; independent-support calculation; budget reserved/used/skipped; runtime/policy identity and diagnostic path.
-
-Do not emit raw arrays, full ffprobe payloads, full stderr, terminal control characters, or unsafe markup. Treat metadata labels as data in Rich and as plain text in Qt. Keep finite precision in human text; preserve full finite numeric values in the artifact. Scores are not percentages of correctness. A distribution percentage is explicitly a window fraction.
-
-Reuse the existing verbosity/quiet and `no_color` controls; add no flag. Quiet mode retains the repository's suppression of routine accepted/status output and its minimal final success summary. Actionable rejection/write-failure warnings remain visible; P4 adds the single compatibility notice specified in §6.3 even in quiet mode. These are explicit stderr behavior changes, not a change to quiet success stdout. A requested GUI review always has the concise rejection explanation before launch. Non-TTY output is plain, static and nonblocking, using the existing ASCII status convention (`[OK]`, `[WARN]`, `[SKIP]`) rather than requiring Unicode or color. No reliance on cursor movement or interactive tables is permitted for meaning.
-
-`run --json` stdout keeps its current success/error schema and contains JSON only. Preserve its existing pre-runtime incompatibility with `audio_alignment.use_vsview`, `force_interactive`, and prompted previous-offset reuse; this plan does not introduce JSON-plus-GUI sessions. Suppress new human blocks/tables in JSON mode. Emit rejection/write-failure and P4 policy notices only through the existing structured stderr logging boundary, with bounded scalar fields, not Rich output or a dump of the attempt. Do not add the new attempt object or warning fields to the public JSON result as an incidental dataclass serialization effect. Tests must separately parse stdout, inspect stderr, and prove incompatible JSON/review configurations still fail before estimation or launch. [R15]
-
-### 3.5 Exact VSView presentation and interaction
-
-Each comparison has a persistent **Audio evidence** summary independent of its manual draft. Expandable **Audio details** contains selected streams and the complete bounded window table; it must not import service policy or recompute eligibility. Replace generic `Stable` claims with `Offset variation: stable (diagnostic only)` when that summary is shown.
-
-| State | Summary text | Marker text and behavior |
+| Historical package | Pushed reference | Retained result and current interpretation |
 | --- | --- | --- |
-| Trusted zero | `Audio alignment accepted: +0f` / `No relative audio correction required.` | `[ACCEPTED AUDIO] +0f — reference frame 0` and corresponding comparison marker |
-| Trusted nonzero | `Audio alignment accepted: +Nf` / existing sign-correct trim explanation | `[ACCEPTED AUDIO] +Nf — reference frame R` / `comparison frame C` |
-| Provisional | `Provisional audio candidate: +0f — NOT APPLIED` / reason and support, followed by `Verify manually; this candidate is not a confirmed alignment.` | `[PROVISIONAL — NOT APPLIED] +0f — reference frame R` / comparison equivalent; visually distinct from accepted markers but text carries the distinction |
-| Unavailable | `No usable audio candidate` / specific cause / `Enter known offsets or align the sources manually.` | No candidate marker, including no implicit marker at zero |
-| Cached computed, details absent | `Reused accepted audio alignment: +0f` / `Historical window and selected-stream details unavailable.` | `[REUSED ACCEPTED AUDIO]`; do not claim current-run support |
-| Current human authority | `Current alignment: +0f — manually confirmed` plus the independently accurate audio summary | `[MANUAL ALIGNMENT]`, never an accepted-audio marker |
+| P1 — immutable evidence and diagnostic persistence | `14d82237011da0e2efd518ed6c70e64e732d9a21` | Complete. Retained selected streams, all planned window outcomes, provisional candidates, original-attempt history, and bounded run-local diagnostics. Deliberately preserved v5 acceptance, including one survivor/four failures. Reuse this work. |
+| P2 — terminal/native review | `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29` | Implementation complete. Metadata v2/result v1 and accepted/provisional/unavailable presentation exist. Physical-Windows visible acceptance remained outstanding. Extend, do not rebuild. |
+| P3 — independent continuous oracle and proposed-policy evaluator | `7f342a6208944e53a4e48c77d3449ffdc05e9085`; results recorded by `8e8dacad560c99b9732d3a1880adb977b8069e8d` | Complete investigation with a failed extraction gate. The proposed evaluator passed its finite holdout matrix; that was not deployed v5 authority proof. |
+| P5A — ten-second preroll | `1e79b94c0d4487ff816f4506987757b3f408a97e`; result `624f2e79d25bee84761825e14dfe095b16c9ca90` | Rejected. Positive-start native failure unchanged; Docker 48→8 kHz improved 3→1 samples, while 44.1→48 kHz worsened 10→12. No production change. |
+| P5B — grid-preserving seek/resample/crop experiment | `114928fe6f885c28e2c73cf5eb9fafda2e67c4dd`; result `251d1bf922ae225bdf38eb44e5db77932cf79e79` | Rejected. Repaired the positive-start fixture but did not satisfy the declared cross-runtime extraction gate. No production recipe or estimator change survived. |
+| Continuous-collector feasibility, recorded in `p6-results.json` | `38293b3a2d5dc4b06411f12e4aaf1ce324435921`; completed/corrected by `0df9c369a9abf19de3cce87de95ccd50ef7ecf1a` | Completed feasibility evidence supports the selected direction. Production collector, endpoint semantics, full-pair/resource proof, and Windows proof remain to implement or establish. |
 
-Use the existing canonical signed pair `(max(offset, 0), max(-offset, 0))` for origin hint markers. Validate each marker against raw source-frame bounds. Omit an out-of-range marker and explain it in details; never clamp it into a seemingly valid suggestion. A hint marker is an origin illustration, not a verified content landmark.
+The old plan also names `ba5364d...` and `1f4269fb` for experiments. Their equivalence to the pushed commits above was not independently established in this authoring session. Preserve those identifiers in the linked historical plan; use the inspected pushed lineage for this implementation baseline.
 
-**No new “Accept candidate” button.** A provisional value must not prefill source-frame/known-offset fields, move playheads automatically, mark sources visited, increment readiness, or enable confirmation. Users may deliberately type the displayed value, including zero, and confirm through the existing validated manual route.
+The old plan's unexecuted **P6 release-acceptance package** is not the completed experiment whose scalar filename is `p6-results.json`. R6/R7 below own the remaining production/release gates. Do not mark historical release acceptance complete because a file is named P6. [E1, E2, E3, E4]
 
-Use these primary button labels consistently:
+### 2.2 Measurements carried forward
 
-- Source-frame basis: **Confirm these aligned positions**.
-- Known-offset basis: **Confirm these known offsets**.
-- Secondary whole-set action, in every state: **Keep current alignment**.
+P3 recorded native macOS FFmpeg 9.0.1 returning **945/2,048** samples for positive-start 44.1→48 kHz AAC, with a **29-sample** oracle displacement. Its asymmetric audio pair produced **+1,115 samples / +1 frame**, score **0.8713582429603048**, against a zero audio-content oracle target. Docker FFmpeg 7.1.5 passed that positive-start pair but had late-window discrepancies of **3 samples at 8 kHz** and **10 at 48 kHz**. These findings do not establish the original incident's cause. [E4]
 
-Keep-current help:
+P5B changed the native positive-start result to **2,048/2,048**, zero lag, and a pair result of **0 samples / +0 frames / score 1.0**. Remaining AAC grid discrepancies included native 48→8 kHz **2 samples**, Docker 48→8 kHz **3**, and Docker 44.1→48 kHz **10**. The reported approximately **0.9335** minimum oracle correlations are retained observations, not permission to alter thresholds. [E4]
 
-> Keeps each comparison's existing alignment. Provisional candidates are not applied or confirmed. Comparisons without an accepted or manually confirmed alignment remain unresolved.
+The proposed-policy holdouts retained **80 weak-dissent acceptances** and **80 localized-edit credible conflicts per exercised runtime**, with no localized-edit false acceptance. Important families used PCM-generated fixtures and a test-only evaluator. They do not prove every AAC path or deployed v5 authority. Preserve that distinction in future summaries. [E4]
 
-Keep-current still writes one existing `keep_current` action per comparison; it never writes a confirmed zero for unresolved comparisons. Confirmation still requires every necessary source visit or every valid manual entry, then writes the complete ordered source set once. Do not add per-comparison save actions in this workstream.
+### 2.3 What the completed streaming feasibility proves
 
-Saved per-comparison text:
+At `0df9c369`, native macOS FFmpeg/ffprobe **9.0.1** and Docker/Linux arm64 FFmpeg/ffprobe **7.1.5-0+deb13u1** passed focused retained-window comparisons against each runtime's own continuous oracle. Positive-start AAC was exercised at **8 and 48 kHz**. The selected pre-end windows were sample-equal with zero measured lag. Docker's five focused cases passed with zero skips. [E2, E3]
 
-- Trusted: `Saved — accepted alignment +0f retained.`
-- Provisional: `Saved — no automatic correction applied; provisional +0f was not confirmed.`
-- Unavailable: `Saved — no accepted alignment; no audio candidate was available.`
-- Existing human authority: `Saved — manually confirmed alignment +0f retained.`
-- New manual confirmation after rejection: `Manually confirmed: +0f. Original audio attempt: rejected (insufficient_consensus).`
-- New manual confirmation after accepted audio: `Manually confirmed: +0f. Original audio attempt: accepted (+Nf).`
-- New manual confirmation without a usable candidate: `Manually confirmed: +0f. Original audio attempt: unavailable (<reason>).`
-- New manual confirmation without a current computation: `Manually confirmed: +0f. No current audio attempt; historical audio details unavailable.`
-
-Top-level saved text: `Alignment choices saved — close VSView to continue Frame Compare.` Disable save controls after a successful write, as today. Closing without saving is not keep-current or confirmation; preserve existing optional-versus-forced result handling. An optional missing/rejected result leaves prior authority unchanged; forced review follows the existing failure contract. Mixed trust states retain separate labels and authority throughout the one whole-set action.
-
-## 4. Architecture and ownership decisions
-
-Follow the existing import direction: orchestration → services → VSView → lower utility/runtime layers. VSView must not import `services.types` or implement estimator policy. The service maps its immutable domain evidence into a narrow native-review DTO; the panel renders validated DTOs. Do not introduce a service/orchestration back-reference. [R12]
-
-| Owner seam / likely files | Responsibility and disposition |
-| --- | --- |
-| `services/types.py` | Cohesive growth: immutable attempt, decision and evidence leaf records; extend existing result/provenance by association, not inheritance or a second result workflow |
-| `services/alignment_audio.py`, `services/errors.py` | Cohesive growth: selected stream/selection facts, planned and returned extraction facts, typed recoverable failure detail, and budget accounting. Only P3/P5-approved changes alter executable extraction |
-| `services/alignment_correlation.py` | Correlation/scoring facts and typed signal failures; retain the sign, overlap and mode contracts. No presentation or persistence |
-| `services/alignment_consensus.py` | Sole owner of grouping, review-candidate classification, automatic eligibility, coverage and contradiction policy. Build complete evidence even on rejection |
-| `services/alignment.py` | Sequence original attempt, snapshot, pre-review presentation, native review, final authority and provenance. No new policy recomputation here |
-| One focused adjacent diagnostics IO owner, likely `services/alignment_diagnostics.py` | New present-day responsibility: versioned bounded diagnostic serialization and atomic run-local writes. Not a reusable-offset repository or generic logger |
-| Existing terminal presentation boundary, with a focused adjacent formatter only if needed | Render typed summaries/table to stderr. Move/reuse the existing rejected-warning formatter rather than duplicating reason interpretation in orchestration and UI |
-| `services/alignment_vsview.py` | Translate service evidence into the native DTO; pass only existing trusted authority as the trusted hint; accept only validated whole-set results; report typed review outcome so provenance can distinguish keep-current, no result, and confirmation |
-| `vsview/session_script.py`, `alignment_review_contract.py`, `alignment_review_panel.py` | Coordinated metadata v2 generation/strict parsing/rendering, unchanged result v1 validation, deterministic sessions and explicit UI semantics |
-| `services/alignment_reuse_cache.py`, `alignment_previous_offsets.py` | Reusable accepted authority only. Reconstruct honest absence-of-history; explicitly exclude diagnostic payloads from cache serialization |
-| `orchestration/phase_alignment.py`, `context.py`, relevant execution DTOs | Carry the original immutable attempt separately from applied alignment, including when `alignment` is null. Keep trim calculation dependent only on accepted/manual authority |
-| `utils/types.py` / `WorkspacePaths`, `services/run_folder.py`, `utils/atomic_write.py` | Existing managed-path/atomic-write mechanics; register the new run descendant without changing the shared-cache exceptions |
-
-A single immutable `audio_attempt` association on `AlignmentResult` survives manual replacement. Current-run provenance refers to that same value. At the orchestration boundary, carry it on the comparison's immutable state independently of whether an applied `ClipAlignmentState` exists; rejected attempts must not vanish because `alignment` remains null. Do not retain a parallel mutable dictionary owned by a UI callback.
-
-The existing `AlignmentProvenance.computed_result` continues to mean an **accepted computed result eligible for embedded shared reuse**. Do not repurpose it to serialize rejected attempts into cache v2. The new attempt association supplies audit history instead. Preserve the final manual result's current cache eligibility, while explicitly serializing only the v2 fields it supports.
-
-## 5. Typed contracts and invariants
-
-### 5.1 Small cohesive model
-
-Use five immutable records; the field descriptions are semantic contracts, not mandatory helper/class names. Reuse existing stability types. Do not add one class per stage, reason, counter, frame bin or output renderer.
-
-| Record | Required fields / semantics |
-| --- | --- |
-| **Selected stream evidence** | Role and pathless source identity reference; resolved audio ordinal and absolute stream index; `explicit_override` or `automatic_metadata` selection; selected rank components/tie-break and comparison match/mismatch/unknown facts; codec, rate, channels/layout, language, default/original/commentary flags; stream start, input/container start, time base, selected duration and duration basis. Record normalized rational timing without pretending defaulted values were measured. |
-| **Window record** | Stable logical ID; purpose (`primary`, `disputed_recheck`, `zero_check`); attempt number/parent ID; planned reference/search sample ranges and rates; actual returned counts per role/stage when observed; effective aligned overlap; origin basis (`planned_assumption` versus independently measured); local/coarse/global/requested lags when produced; requested frame candidate; requested-rate score and score stage; peak ratio and peak stage/rate; review-quality and configured-quality assessments; vote disposition; terminal stage/category; missing facts remain null. A zero-check child retains at most two local hypotheses, labeled `zero_bin` and `nonzero_bin`, reusing the candidate fields and their score/peak stages; other rows have no local hypotheses. |
-| **Candidate** | Observed requested-rate sample representative and rate; frame correction; supporting logical IDs; median requested-rate score; minimum peak ratio, with its provenance available through member windows. Diagnostic time is derived from samples/rate, not substituted for frame correction. |
-| **Audio decision** | Explicit tag `trusted_automatic`, `provisional`, or `unavailable`; candidate or null; primary reason; ordered assessed failed gates; unassessed gates when prerequisites were absent. Construction validates tag/candidate/authority relationships. |
-| **Audio attempt** | Pair/source identity; attempt status (`complete`, `preanalysis_rejection`, `aborted`); actual estimator and diagnostic-policy identities; relevant runtime identity; effective config/FPS; selected streams; plan/rate/budget summary; all bounded window records; decision; existing compact stability summary if available. Counts/distribution/support are derived, or checked against the records when serialized. |
-
-No separate `WindowCounts`, `ConsensusEvidence`, `PlanEvidence`, `TrustedAutomatic` subclass hierarchy, or generic `AlignmentEvidence` wrapper is necessary. A tagged decision with validated invariants explicitly represents the three cases. Adapter DTOs at the existing VSView boundary are justified, but are projections of this model rather than a second domain model.
-
-For cache hits and preexisting manual overrides with no current computation, `audio_attempt` is absent with an explicit evidence-availability/origin value on the presentation/provenance boundary. Do not invent an empty current attempt. Cache origin and existing accepted values are sufficient to render the truthful historical state.
-
-### 5.2 Facts retained per window and failure categories
-
-Record one primary row for every planned logical interval, even if extraction or scoring fails. Default maximum primary rows remains 16. P5 records its bounded child checks without counting them as extra votes. Failed attempts must release arrays through the existing `finally` lifetime discipline.
-
-Use finite categories with a separate stage, not regex classification of exception text:
-
-| Stage | Categories to preserve |
-| --- | --- |
-| Selection / planning | `selected_audio_timeline_unavailable`, `selected_audio_timeline_empty`, `analysis_budget_exceeded`, plus the exact existing budget subreason |
-| Decode | `decode_empty`, `decode_payload_invalid`, `decode_output_exceeded`, `decode_failed`, `decode_timeout`, `dependency_unavailable` |
-| Signal / correlation / scoring | `non_finite_signal`, `insufficient_signal`, `insufficient_overlap`, `offset_out_of_bounds`, `scoring_bounds_invalid`, `correlation_failed` |
-| Decision | `low_confidence`, `ambiguous_correlation_peak`, `insufficient_valid_windows`, `insufficient_consensus`, `insufficient_temporal_support`, `credible_conflict`, `no_unique_candidate`, `no_usable_windows` |
-
-Unknown existing recoverable cases may use `correlation_failed` with a stage; never leak stderr to fill an explanatory gap. Preserve which role failed. Counts or origins not returned across a failed boundary are unknown, not zero. Record actual sample counts before releasing a successful pair; do not report the planned full span as decoded coverage when output was short.
-
-Fatal FFmpeg/ffprobe dependency, startup, timeout and nonzero-exit failures retain their existing exception/exit behavior. A best-effort aborted diagnostic may capture their sanitized category, but they are **not** converted into recoverable window abstentions or an optional VSView session. Only the existing recoverable error family, with deliberately typed detail added at its throw sites, participates in the normal window loop.
-
-Record the resolved stream choice at the selection owner, including the actual ranking facts used. Do not reproduce selection in a UI formatter or infer it from the configured override. The reference ranking considers commentary, default/original, channel count and ordinal; comparison ranking records the actual metadata similarity criteria used. Label that rationale “metadata selection,” never “verified matching soundtrack.” [R6]
-
-P1 records measured returned counts, not measured first audio PTS. The current extractor does not return that observation. Mark decoded origins `planned_assumption`; mark audio-to-video origin evidence `not_measured` unless supplied by a genuinely measured later experiment. Retain a `metadata` versus `default_zero` basis for normalized stream/container starts so missing timestamps are distinguishable from a reported zero. Do not add a placeholder “measured origin” copied from the plan.
-
-Runtime identity distinguishes the code-owned expected media-runtime fingerprint from observed FFmpeg/ffprobe version lines. P1 records versions only when already available from the current execution boundary; otherwise they are explicitly `not_observed`. It adds no version-discovery subprocess solely for instrumentation and never labels the expected fingerprint as a measured binary identity. P3's required native experiments record actual version lines independently. This bounded first-package limitation must be visible in verbose/artifact data.
-
-### 5.3 Invariants that must be executable tests
-
-1. Only an accepted automatic result, a validated manual result, or an eligible validated cache entry can authorize application. An artifact, candidate, score, stability label, or panel marker cannot.
-2. `provisional` and `unavailable` computed results have `applied = false` and null applied frame/time offsets. A provisional `+0f` is an integer **inside the candidate only**.
-3. A trusted computed result has a concrete candidate consistent with its applied frame correction. A final manual result may be applied while its attached original audio decision remains provisional/unavailable.
-4. Zero is tested with `is None`, never truthiness. Blank manual input is not zero.
-5. All raw successful estimates, weak estimates and failed-window facts survive. Rejection does not overwrite the candidate's score/sample value with the legacy aggregate placeholder zero.
-6. The candidate's frame value uses the same `samples_to_frames` implementation as application. Retain raw sample jitter and the observed lower median; do not average two frame bins.
-7. No second classifier changes the service's decision in terminal/VSView. Serialized counts and membership must agree with window IDs; retries never increase independent support.
-8. Manual confirmation preserves the original attempt byte-for-byte in canonical diagnostic serialization. The final action is appended to the enclosing record, not merged into the audio decision.
-9. Frames, ordinals and counts reject booleans; numbers are finite and bounded where appropriate. JSON contains neither `NaN` nor numeric `Infinity`. Encode an unbounded peak as the explicit string `"unbounded"`; null means not measured.
-10. Evidence strings have bounded lengths and sanitized control characters. Invalid metadata/state combinations fail validation rather than falling back to zero or “accepted.”
-
-### 5.4 Target acceptance policy after P3 evidence gate
-
-**Quality proposal to validate:** base evidence quality is requested-rate score ≥ **0.90** and correlation peak ratio ≥ **1.50**, with valid signal/overlap/offset facts. These are the same conservative display floors from §3.2, proposed now as additional automatic safety floors. They do not become production acceptance rules until P3's predeclared controls pass.
-
-Define populations separately:
-
-- **Correlated:** a primary logical interval returned a valid, in-bounds requested-rate estimate, regardless of quality.
-- **Credible / review-qualified:** it passes the base evidence-quality floors. This population identifies meaningful competing hypotheses.
-- **Voting-qualified:** it is credible **and** passes the user's configured `confidence_threshold` and `ambiguity_peak_ratio`, and meets the coverage test for its observed overlap.
-- **Independent support:** a temporally non-overlapping subset of the winning voting-qualified primary intervals, measured on the reference timeline's usable overlap. It is not simply a row count.
-
-The configured effective score/peak minima for voting are `max(base_floor, configured_value)`. A raised user threshold must not hide a **credible** competing frame bin: the contradiction veto examines the base-credible population, including credible windows excluded by a stricter user threshold.
-
-The new ratio is:
+The native three-hour traversal measured:
 
 ```text
-qualified_consensus_ratio = winning_voting_qualified_windows / all_voting_qualified_windows
+Source:                    one synthetic 48 kHz AAC source
+Output:                    48 kHz mono float32
+Traversed output:          518,400,000 samples / 2,073,600,000 bytes
+Retained intervals:        16 × 2 seconds
+Retained PCM:              6,144,000 bytes
+Decode wall time:          6.080185584010906 seconds
+Configured spike timeout:  900 seconds
+Pair timing:               not measured
+Combined parent/child RSS: not measured
+Three-hour oracle compare: not run; outside the existing oracle storage cap
 ```
 
-With zero voters the ratio is unavailable, not 1. Failed, weak, ambiguous and invalid/out-of-range intervals abstain from that denominator. They remain in the planned/correlated counts and reduce achievable temporal support. Qualified nonwinning windows count in the denominator and are also credible contradictions.
+The earlier `38293b3a` snapshot separately recorded a three-hour 8 kHz traversal with five 30-second retained intervals, **4,800,000 retained bytes**, and **6.822971500005224 seconds**. These are different runs/configurations, not a controlled performance comparison. Neither measures production comparison margins, full-pair correlation/rescoring, or a production 120-second timeout contract. [E2, E3]
 
-**Hard veto:** any primary credible estimate in a different frame bin prevents automatic acceptance of a constant correction, regardless of majority, configured ratio, stability label, or a favorable diagnostic recheck. A score tie-break never defeats this veto. This deliberately favors manual review for strong localized edits, drift and unresolved cross-frame extraction discrepancies.
+Direct cancellation was exercised on native macOS and Docker. The recorded Docker case required kill escalation and completed in approximately **4.0715 seconds**, after two successive two-second waits. This proves that exercised path only, not general lifecycle safety. The spike's stdout reader uses a finally-delivered EOF sentinel without propagating a stdout-reader exception; do not copy that failure contract into production. [E2, E3]
 
-Automatic acceptance requires all of the following: one selected frame group; configured minimum number of voting-qualified primary windows; configured ratio; configured quality thresholds; the temporal requirements below; no credible cross-frame contradiction; and a valid application-domain frame correction. No diagnostic child check can satisfy a missing requirement.
+### 2.4 Known EOF and proof gaps
 
-Retain `minimum_valid_windows` as an additional user floor, now over voting-qualified primary windows; an explicit value of five is never reduced to three. Retain all assessed failures with deterministic reason precedence: pre-analysis/fatal prerequisite, credible conflict, no candidate, insufficient configured window count, insufficient temporal support, confidence, ratio, ambiguity. P1 preserves the existing primary reason; P4 intentionally adopts the new documented precedence. Evaluate secondary gates only where their prerequisites exist.
+The feasibility pass excluded AAC metadata-padding endpoints from its principal oracle comparisons. Separate excluded probes recorded **1,902/2,048**, **4,014/4,096**, and Docker near-end **1,341/2,048** samples. These are explicit unresolved endpoint observations, not passing complete-window cases. [E2]
 
-**Ratio compatibility consequence:** under this initial conservative policy, a qualified cross-frame dissent already vetoes, so a configured ratio below 1.0 cannot make it safe. Keep the field and its numeric value; document that independent safety gates can dominate it. Do not invent weaker “almost qualified” votes just to make every ratio value change outcomes.
+Insufficient data for release acceptance: production-sized pair retention, actual pair/verification latency, combined RSS, Windows portable execution, external cancellation, reader errors, sustained stderr, timeout/uncooperative-child cases, integrated trust/cache/native behavior, and independently labeled real-media/video checks.
 
-### 5.5 Temporal-support rules
+Keep `p3-results.json`, `p5-results.json`, `p5b-results.json`, and `p6-results.json` as historical scalar records. New production proof goes into one separate test-evidence record, `tests/fixtures/alignment_oracle/streaming-production-results.json`; it is evidence, not a second plan. Never overwrite historical measurements with prospective results.
 
-Use `D`, the finite shared duration of the **selected audio streams**, not the video/container duration. Count support using actual useful aligned sample counts mapped to the reference timeline, explicitly retaining the assumed-origin limitation. Each contributing interval must deliver at least **90% of the aligned overlap that its plan/candidate made available**; preserve the existing minimum-sample/meaningful-signal check as well. This 90% rule is a proposed conservative coverage guard, validated by P3, not a substitute for signal quality.
+## 3. Execution control and skill requirements
 
-| Shared selected-audio duration | Default plan after P4 | Automatic minimum |
+### 3.1 One controller; Codex new tasks, not subagents
+
+The main GPT-5.6 Sol task owns decisions, communications, allowed scope, integration, staging, commits, pushes, and release handoff. Dispatch **one bounded write task at a time**. New tasks must not spawn subagents, create parallel writers, broaden scope, or perform git operations. Repository multi-agent settings are capability limits, not instructions to use them.
+
+Each task receives:
+
+```text
+UNIT | STARTING SHA | OBJECTIVE | OWNER/WRITE BOUNDARY | DEPENDENCIES
+INVARIANTS | ACCEPTANCE | VERIFICATION | EXPECTED RETURN | EFFORT BOUND | STOP CONDITIONS
+```
+
+Each returns:
+
+```text
+RESULT | FILES CHANGED | PROOF EXECUTED/NOT EXECUTED | ASSUMPTIONS | BLOCKERS
+```
+
+The controller inspects every diff and verification output, rejects unrelated edits, integrates the approved change, and records the actual commit and proof state before dispatching the next dependent write. Reuse still-current proof; rerun what a code, fixture, runtime, or integration change invalidates.
+
+### 3.2 Model resolution for this program
+
+Resolve `.codex/config.toml` and its referenced files at every dispatch. At the inspected head:
+
+| Role reference | Resolved file | Configured setting |
 | --- | --- | --- |
-| `D ≤ 30 s` | One window over the full shared duration | One qualified full-overlap interval satisfying the observed-coverage guard, plus any larger explicit `minimum_valid_windows` requirement |
-| `30 s < D < 90 s` | Normally two non-overlapping windows of length `min(30 s, D/2)`, beginning at 0 and `D - length`; explicit higher minimum counts are handled below | At least two non-overlapping qualified intervals reaching early and late coverage; any larger explicit count still applies |
-| `D ≥ 90 s` | Retain five distributed 30-second windows by default | At least three non-overlapping supporting primary intervals, with support reaching the first and last thirds of the shared timeline; explicit larger count still applies |
+| `worker_luna` | `.codex/agents/worker-luna.toml` | `gpt-5.6-luna`, reasoning `max` |
+| `worker` | `.codex/agents/worker.toml` | `gpt-5.6-sol`, reasoning `medium` |
 
-“Reaching” means at least one contributing interval begins at or before `D/3`, and one ends at or after `2D/3`. Intervals selected for independent support must be pairwise disjoint on useful reference coverage, not just have different start times. Compute the maximum disjoint support deterministically by interval scheduling; verify the early/late requirement on an eligible support subset rather than accidentally losing it through an arbitrary greedy tie-break.
+**Explicit task-specific resolution:** the maintainer requested standalone new tasks with Luna **xhigh**, not the configured Luna subagent role. Use that explicit new-task setting and record it as an override of the subagent profile, not as an alias for `max`. Do not silently launch `worker_luna`, edit the role TOML, or assert `max == xhigh`. If the installed new-task launcher cannot honor xhigh, stop dispatch and obtain a resolved setting; do not guess.
 
-The medium-duration default-plan change is intentional: five overlapping 30-second intervals over a 65-second source are not five independent observations. It belongs to P4, with estimator-policy invalidation and native tests, not P1 instrumentation. With default window/stride settings and an explicit larger `minimum_valid_windows`, distribute `max(tier_default_count, minimum_valid_windows)` unique starts over the same available start range, including both endpoints, subject to the existing budgets. Preserve the tier's window length. Additional overlapping rows can satisfy the configured count but do not increase independent support. For example, a 65-second source with an explicit minimum of five gets five bounded 30-second rows and must have five qualified voters plus a qualifying two-interval disjoint subset. When only one unique full-duration window exists, do not duplicate it to satisfy a larger minimum; reject for insufficient valid windows.
+Use Luna xhigh for settled, bounded units with direct proof. Use Sol medium only for the concrete cross-boundary/lifecycle/proof-interpretation risks identified in the unit. The controller reassesses actual risk at dispatch and records any justified change. These are this program's execution instructions, not a new repository-wide model policy. [E5]
 
-For explicit window length/stride, retain the requested shape and bounded sampling grid. Do not silently shorten, densify or widen it to satisfy these safety rules. An explicit shape that cannot yield the required independent support produces provisional/unavailable review with `insufficient_temporal_support`. The numeric config remains valid. An explicit minimum that exceeds work capacity retains the existing budget rejection.
+### 3.3 Skills and Ponytail full mode
 
-Very short sources can pass only when the full meaningful overlap is actually available and unambiguous; no arbitrary three-window requirement is imposed. Silence, repeated tones or too few meaningful samples do not become trusted because the file is short. P3 must include subsecond/short negative controls and the existing three-second positive controls. A single successful window on a long source never becomes trusted.
+Read `AGENTS.md`, the relevant runbook sections, current architecture/CLI contracts, and `importlinter.ini`. Use `execution-plan-authoring` and the controller/checkpoint rules from `large-task-orchestration`, adapted to the explicitly requested new-task workflow. Apply `bounded-worker-execution`, `architecture-boundaries`, `runtime-integration-boundaries`, `persistence-boundaries`, `cli-contract-boundaries`, `python-test-design`, and `closeout-verification` only where each unit touches that boundary.
 
-## 6. Persistence, versioning and compatibility
+Load the **installed Ponytail skill in full mode** and record its actual location/revision at execution bootstrap. Ponytail is not tracked in this repository's inspected skill tree. Its upstream full-mode rules were inspected, but the implementation host's installed revision was not. If it cannot be resolved, report that missing execution prerequisite before a code-writing task; do not invent a skill file or install a plugin silently. [E5, E6]
 
-### 6.1 First-package diagnostic artifact
+Apply its reuse/stdlib/native-first ladder without weakening validation, cleanup, accessibility, tests explicitly required here, or the runbook. No new backend interface, processing framework, persistent cache, retry machinery, or compatibility reader. A single streaming owner is justified by the new subprocess/pipe/lifetime responsibility.
 
-**Required in P1.** Use `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`, where the ordinal is the existing ordered comparison ordinal. Keep path construction in the focused diagnostics/managed-path owner. Do not derive names from untrusted titles or absolute input paths. This directory is a managed child of the reserved run folder, not `shared_alignment_cache_dir`.
+One independent read-only review is justified before activation by the **new concurrent pipe lifetime plus automatic-authority/cache boundary**. Its packet contains the integrated diff, invariants, evidence, and known risks—not implementation transcripts. No habitual planner task, per-unit reviewer, whole-repo audit, or repeated clean review is required.
 
-Schema v1 is one pathless pair envelope:
+## 4. Ownership and internal/public contracts
 
-```text
-schema_version: 1
-purpose: "diagnostic_only"
-pair: reference identity digest, comparison identity digest, comparison ordinal,
-      bounded presentation labels
-original_audio_attempt: complete immutable attempt, or null with explicit historical absence
-original_attempt_digest: canonical digest, or null when absent
-review_outcome: pending | not_requested | confirmed | keep_current | no_result | rejected_result
-final_resolution: validated origin, applied offset or null, and confirmed frame pair when available
-```
-
-Snapshot the completed/rejected attempt **before** starting native review. For runs without review, snapshot it before returning to orchestration. After review, atomically update the enclosing review/final-resolution fields while preserving the original attempt/digest. A fatal failure may write an aborted partial attempt and must re-raise the original exception. At most one pre-review and one final rewrite per pair; no append-only event stream, timestamped retry files or run-to-run accumulation. Compute `original_attempt_digest` as SHA-256 over UTF-8 JSON of the original attempt with sorted keys, compact separators, no numeric NaN/Infinity, and no trailing newline; the envelope, digest field and review/final-resolution fields are excluded. Pretty-printing the enclosing artifact may differ, but the original attempt's canonical bytes must remain identical before and after manual review. This digest detects accidental audit-history changes; it is not a signature or source of authority.
-
-**Bound:** at most 16 primary records and the P5 maximum of two diagnostic child records, with no PCM/waveforms; **128 KiB maximum serialized UTF-8 bytes per comparison file** including the final outcome. At most one such file per comparison, so a run with `N` comparisons uses at most `N × 128 KiB`. This explicit input-scaled bound avoids introducing a new arbitrary source-count limit. Cap individual text fields at 256 characters, runtime version lines at 512, and all collections by the fixed plan/contract limits. The schema must fit its maximum supported records without silently dropping windows. A serializer overflow is a diagnostic write failure and a test/release defect, not permission to truncate the losing votes.
-
-**Retention:** retain with the run folder until the user deletes it; no TTL daemon, automatic cross-run pruning, shared-cache entry, index or lookup path. Normal existing run-folder deletion removes diagnostics. Document that sharing a run folder also shares labels, file identity digests, metadata and timing facts.
-
-**Privacy:** exclude absolute media paths, environment values, credentials, raw media, packet dumps, full subprocess stderr, and full path-bearing commands. Store source identity digests and bounded supplied labels; digests are pseudonymous references, not a promise of anonymization. Record a normalized extraction recipe with role placeholders, not a copied command line. Detailed oracle experiments may save command/PTS data only in their isolated test evidence directory and must be reviewed before sharing.
-
-**Atomic and containment behavior:** use `write_text_atomic`/the current atomic owner with a same-directory temporary file. Validate the managed descendant, parent chain, and existing leaf; reject symlink/junction escapes and non-regular leaves under the existing Windows/POSIX containment contract. Do not follow a path supplied in metadata or a diagnostic file. Preserve the last valid snapshot on a failed final replacement and clean temporary files deterministically. A detected containment violation uses the existing typed fail-closed path behavior; it is not downgraded to a casual warning.
-
-For ordinary disk-full/permission/write failures, preserve in-memory evidence and existing alignment authority, issue one stable stderr/run warning, and continue according to the existing media policy. Diagnostics are not a new prerequisite for trimming. Never claim that the artifact was saved. Tests must prove that a write failure cannot authorize a provisional result, alter a valid manual decision, suppress an original FFmpeg exception, or erase the initial snapshot.
-
-**Trust rule:** production alignment/cache code never reads this artifact to select an offset or skip computation. VSView receives an in-memory-generated projection, not file-authorized evidence. Missing, corrupt, edited or unsupported diagnostic files cannot change trims and cannot become a negative cache. No diagnostic “repair” or migration reader is needed in P1.
-
-### 6.2 Cache schema v2 and historical evidence
-
-Keep shared reuse schema **v2** and run-local manual override schema **v1** throughout this plan. Continue validating the full source-set identity and existing compact stability fields. Do not serialize new rich evidence into the strict stability table. Do not add rejected attempts to the embedded-computed-result slot or write incomplete accepted source sets. Manual confirmation may still make a complete set eligible under existing rules; keep-current on an unresolved pair does not. [R9–R11]
-
-P1–P2 leave the estimator-policy token unchanged because they do not change computation/application. Old/warm cache hits remain valid under existing identity checks, but presentation marks detailed historical evidence unavailable. Never run fresh stream selection merely to present it as the stream used by the historical computation.
-
-A **cache schema bump would be required** if rich history became mandatory for cached authority, required fields/sign semantics changed, rejected attempts became reusable state, or complete-set/origin semantics changed. None is approved here. A diagnostic schema change alone does not force cache invalidation.
-
-### 6.3 Estimator policy and user-configured policy
-
-P4 must advance the estimator policy beyond pinned v5 before any result produced under the qualified-voter/coverage policy becomes reusable. Any production change to stream selection, extraction grid/preroll, effective scoring, rounding, candidate search, acceptance floors, minimum support or trust semantics likewise advances that identity. A display-only diagnostic-policy identity can change without changing reusable authority. If P5's rechecks remain read-only and cannot affect authority, they change diagnostic identity only.
-
-The current estimator token keys both computed and human-confirmed shared entries. Preserve this conservative behavior: a P4 bump invalidates both origins' old shared hits. Do not split cache identities, rewrite old entries in place, or add a legacy-policy execution branch. Run-local explicit manual overrides retain their current precedence/schema.
-
-Keep the configured default ratio at **1.0**. After P4 it means **100% of voting-qualified windows**, not 100% of finite correlations. The configured score, peak and minimum-window settings remain additional user constraints; never lower their explicit values or count fewer windows than requested. A high-quality contradiction remains a veto even for an explicit ratio of 0.8.
-
-To make the semantic change non-silent, P4 must do all of the following in the same package:
-
-1. Update the current CLI/config authority, guide, release notes and estimator identity.
-2. Once per run before fresh estimation, emit stderr: `Audio policy: quality-qualified-v1. Consensus <value> applies to qualified windows; temporal support and credible-conflict checks also apply.` Emit this compatibility notice in quiet human mode too; do not add config-authorship detection or interpret an authored value differently from an equal default. JSON mode uses a structured stderr policy event instead of human text. Cache-only reuse prints no claim that fresh estimation ran.
-3. Explain rejection with both raw and qualified counts, so `4/4` never hides the fifth weak or failed interval.
-4. Make documentation explicit that setting `1.0` no longer requests unanimity of every successful raw correlation. This plan intentionally changes that public meaning; do not describe the release as acceptance-compatible. No special interpretation based on whether an authored `1.0` equals the default is permitted.
-
-No new policy flag or config-authorship plumbing is required: this is one documented, versioned estimator contract, not two maintained estimators. The notice has one settled emission rule above. The numeric ratio is preserved, but its raw-voter meaning is not; release notes must identify this intentional compatibility break rather than suggesting that unchanged numeric configuration guarantees unchanged acceptance.
-
-### 6.4 VSView metadata v2, result v1
-
-Split the shared constant into explicit **metadata version 2** and **result version 1** at `alignment_review_contract.py`; keep the result wire schema and actions unchanged. Update generator, adapter, parser, panel, generated-session tests and native verifier fixtures atomically in P2. Do not ship a generator/parser mismatch. [R8]
-
-Preserve all existing exact-key topology, role/ordinal/name/session fields. Retain `frame_compare_suggested_offset` as the trusted current-alignment integer or null only. Add exactly one metadata key, `frame_compare_audio_review`, whose value is a deterministic, strict JSON string. Its version is governed by metadata v2, not an independently evolving nested version. It contains:
-
-- current entry authority/origin, separate from audio trust;
-- audio decision, candidate/reasons and historical-evidence availability;
-- bounded selected-stream and window projection, thresholds, support/denominator and diagnostic identity.
-
-Freeze the payload's top-level key set as `current_authority`, `evidence_availability`, and `audio_attempt`. `current_authority` contains `origin` and nullable `frame_offset`; `origin` is `computed_this_run`, `shared_computed_offsets`, `interactive_confirmed_this_run`, `shared_previous_offsets`, `preexisting_manual_override`, or `none`. `evidence_availability` is `current_attempt`, `historical_details_unavailable`, or `not_computed`; `audio_attempt` is the bounded pathless projection of §5.1 or null. Each nested record has an explicit exact field set matching that semantic contract; reject duplicate keys and unsupported keys/types instead of relying on permissive dictionary defaults. A rejected current attempt has authority origin `none` unless a separately validated manual authority exists. Historical absence has a null attempt, never synthesized zero counts. The payload uses finite scalars, bounded strings/arrays, and the explicit unbounded-peak encoding. It is capped at **128 KiB per comparison**. Do not include a file path for the panel to follow. The service serializer owns domain projection; the native contract owns validation of that projection. Candidate/decision/trusted-hint consistency is checked, including the valid case of manual current authority with unavailable/rejected original audio.
-
-The panel must never derive accepted authority from the new payload: its candidate information is presentation-only, and keep-current means retain what the service already holds. Only the unchanged result validator can admit manually confirmed frame pairs.
-
-**Old sessions:** metadata v1 and unknown future versions are rejected for review, not upgraded. Exact UI copy: `Alignment review requires a newly generated session. This session uses metadata v1; this version requires v2.` Clear panel-owned markers and disable save controls. Ordinary non-Frame-Compare sessions remain inert without an alarming migration message. Malformed/mixed v2 sessions use the existing rejected-workspace path. An old result file cannot be imported into a fresh session merely because result schema v1 is still supported: session identity, trusted sibling path, absence-at-start, complete order and frame bounds remain mandatory.
-
-Generated script bodies remain deterministic for identical inputs. Derive the diagnostic projection and identifiers from the existing pair/session identities; do not inject new timestamps, random IDs, machine paths or artifact write status into script bodies. Reserve the bounded child-hypothesis field in the v2 projection as empty until a justified P5 branch supplies it; adding that branch must not silently change the v2 key set.
-
-## 7. Ordered implementation packages
-
-Tracking: `[ ]` not started; `[~]` executing; `[x]` verified; `[deferred]` only with the explicit evidence-gate disposition described below. Record actual candidate SHA, commands/results, skips, artifacts and native host for each package; do not replace that record with “tests should pass.”
-
-### [x] P1 — Immutable evidence, preserved rejection and diagnostic persistence
-
-**Outcome.** Every new audio attempt retains selected streams, every planned window and categorized outcomes, plus a separate rejected review candidate. The original attempt survives manual replacement and is snapshotted before review. Automatic offsets and cache reuse remain unchanged.
-
-**Owner seams / likely files.** `services/types.py`, `alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`, `alignment.py`, `alignment_vsview.py`, `alignment_reuse_cache.py`; one adjacent diagnostics IO owner; managed runtime path DTOs; `orchestration/phase_alignment.py` and comparison state. Restrict native-service changes to returning typed review outcome/provenance, not changing result acceptance or wire formats.
-
-**Public behavior.** Add the run-local artifact and a basic pre-review rejection explanation containing reason and candidate/not-applied status. It is acceptable for the old panel to lack rich detail until P2, but the user must have the explanation before it opens. Historical cache details are explicitly unavailable. Record artifact write warnings without adding JSON stdout fields.
-
-**Contracts/invariants.** Implement §5.1–5.3 and §6.1–6.2. Keep the v5 acceptance function's decisions, primary reasons, selected groups, applied samples/frames and cache identity unchanged. Derive the display candidate separately; evaluating additional gates for diagnostics must not affect application. Capture failure facts without broadening recoverable exceptions. Keep existing accepted `computed_result` cache semantics, using the new attempt association for rejected history.
-
-**Dependencies.** None beyond the pinned baseline and authority/skill reads. Preserve unrelated local changes. Investigate any intervening changes at these seams before implementation; do not reset to the pinned SHA automatically.
-
-**Focused automated tests.** Exercise the exported consensus/service seams with controlled loader/correlation boundaries: four strong zeros plus finite weak dissent retains provisional zero; one success/four recoverable failures retains history while preserving legacy acceptance; all failures produce unavailable; same-frame jitter preserves the exact current accepted representative; tied qualified groups expose no single provisional candidate; configured-high-confidence rejection retains a review-qualified candidate. Assert categorized decode/scoring failures, selected override/automatic facts, unknown duration, all assessed gates, finite serialization and no retained arrays. Add manual-zero preservation, complete-set cache eligibility, warm-cache absence, atomic replacement/write-failure, malicious-path/symlink, artifact-size maximum and “artifact editing cannot change trim” tests. Verify unchanged FFmpeg argv/selection and unchanged shared-cache keys.
-
-**Runtime/integration/manual proof.** Run the existing FFmpeg alignment integration suite on an available supported runtime to check trace/stream/count accuracy; if unavailable, record this outstanding rather than claiming the mocks prove it. A native GUI change is not claimed by this package. Inject disk-full/permission failure and verify the original audio record survives where an initial write succeeded.
-
-**Documentation.** Update architecture for evidence ownership, CLI contract for the artifact/pre-review stderr and unchanged JSON, audio-alignment guide for accepted/provisional/unavailable terminology, and this package's execution record. Do not claim revised acceptance yet.
-
-**Acceptance criteria.** Every completed/planner-rejected computed attempt has a bounded immutable record and a truthful reason. A manual zero retains a byte-identical original attempt/digest. The candidate is never in the trusted hint or trim inputs. Cache v2 output remains schema-valid and contains no rejected embedded result. Full Python verification passes, and existing automatic outcome fixtures do not change except assertions about added diagnostics.
-
-**Rollback.** Revert the package coherently before dependent packages land; preserve existing diagnostic files as inert generated output. No estimator or cache schema bump is needed. Never “roll back” by copying candidates into the old field or stripping manual authority checks.
-
-**Stop and replan.** Any changed automatic offset/acceptance/cache key, unbounded retained arrays, required new filesystem trust bypass, fatal dependency error swallowed as abstention, or need for a general provenance/cache migration. Ordinary type/test repairs remain local implementation work.
-
-**Execution record (2026-09-14/15, macOS arm64).** Implemented by
-`14d82237011da0e2efd518ed6c70e64e732d9a21`
-(`feat(alignment): retain audio alignment evidence`). The changed owner seams are the
-service evidence model and v5 consensus instrumentation; selected-stream/timeline
-projection; categorized recoverable error facts; run-local diagnostic persistence;
-typed native-review outcome/provenance; alignment orchestration state and managed run
-paths; and the directly governing architecture, CLI-contract and audio guide text.
-No VSView metadata/result producer or parser, shared-cache serializer/key owner,
-FFmpeg command builder, configuration option or estimator-policy identity changed.
-
-Observed automatic-outcome equivalence was checked by running the existing distributed
-consensus, FFmpeg argv and reuse-cache fixture files from an archive of pinned `HEAD`
-and then from the candidate; both passed. New exact assertions retain these v5 facts:
-
-- four strong same-frame zero estimates (`0`, `+1`, `-1`, `0` samples; scores
-  `0.99/0.98/0.97/0.96`) plus one finite weak cross-frame estimate (`400` samples,
-  score `0.40`) remains unapplied with null legacy sample/frame authority,
-  `insufficient_consensus`, raw `5`, winning `4`, ratio `0.8`, aggregate score
-  `0.975`, minimum winning peak ratio `2.0`; the separate provisional candidate is
-  `0` samples / `+0f` with four supporting window IDs.
-- one successful `0`-sample estimate plus four categorized recoverable failures keeps
-  the v5 accepted result (`applied`, `0` samples, score `0.99`, one valid/consensus
-  window, ratio `1.0`, peak ratio `2.0`) while retaining all five window records.
-  Five unusable windows produce `unavailable` with null candidate and authority.
-- same-frame raw-sample jitter keeps the existing observed lower-median representative;
-  tied review-qualified frame groups remain unavailable. Fatal `FFmpegError` still
-  propagates instead of becoming an abstention.
-
-Manual zero proof snapshots the rejected attempt before native review and then records
-validated source frames `80/80`, final `+0f`, and
-`interactive_confirmed_this_run`; the original attempt object, canonical JSON bytes
-and digest remain unchanged. The representative final artifact is
-`/private/tmp/frame-compare-p1-final.siY9Dw/run/alignment_diagnostics/comparison-1.json`:
-10,330 UTF-8 bytes, five windows, schema v1/purpose `diagnostic_only`, digest
-`138ddec2e9458509170919d9997f16aa1d6b3ff9d07c8538cbbfb7c6e303523e`, and below the
-128 KiB limit. The privacy scan found no generated-root or `/Users/` path, environment
-assignment, token/password/private-key marker, or raw command-line field. The
-maximum-16-primary-row fixture also serializes below the limit and preserves all rows.
-Atomic replacement keeps the last valid snapshot on injected disk-full failure;
-symlink containment fails closed. Edited/corrupt artifacts cannot alter trims or cache
-reuse. Warm schema-v2 cache reuse retains its accepted value and reports
-`historical_details_unavailable` with a null original attempt.
-
-Exact verification commands and outcomes:
-
-```text
-uv sync --group dev --frozen                                      PASS (70 packages audited)
-uv sync --extra vsview --group dev --frozen                       PASS
-uv sync --extra vsview --group dev --group docs --locked          PASS
-uv run --no-sync pytest -q tests/services -k alignment            PASS
-uv run --no-sync pytest -q tests/orchestration -k alignment       PASS
-uv run --no-sync pytest -q tests/cli tests/test_cli_contract_docs.py
-                                                                  PASS; JSON stdout unchanged
-uv run --no-sync pytest -q tests/vsview tests/services/test_alignment_vsview.py tests/services/test_alignment_workflow_vsview.py
-                                                                  PASS; result wire unchanged
-uv run --no-sync pytest -q tests/services/test_alignment_ffmpeg.py tests/services/test_alignment_reuse_cache.py tests/services/test_alignment_previous_offsets.py tests/integration/test_alignment_runtime.py tests/integration/test_alignment_audio_seek.py -rs
-                                                                  PASS
-(cd /tmp/frame-compare-p1-baseline.H0E33j && /Users/tristan/Software/frame-compare/.venv/bin/python -m pytest -q tests/services/test_alignment_distributed.py tests/services/test_alignment_ffmpeg.py tests/services/test_alignment_reuse_cache.py)
-                                                                  PASS at pinned HEAD archive
-uv run --no-sync pytest -q tests/services/test_alignment_distributed.py tests/services/test_alignment_ffmpeg.py tests/services/test_alignment_reuse_cache.py
-                                                                  PASS on candidate
-uv run --no-sync pyright --warnings                               PASS; 0 errors/warnings
-uv run --no-sync ruff check .                                     PASS
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-                                                                  PASS; 0 medium/high issues
-uv run --no-sync pytest -q                                        PASS
-uv run --no-sync lint-imports --config importlinter.ini           PASS; 2 contracts kept
-uv run --no-sync python scripts/generate_api_docs.py --check      PASS
-uv run --no-sync zensical build --clean --strict                  PASS
-git diff --check                                                  PASS
-ffmpeg -version / ffprobe -version                                9.0.1 / 9.0.1
-```
-
-The full suite's recorded skips were host- or opt-in-specific: L-SMASH and libplacebo
-runtime tests unavailable on this macOS runtime; live slow.pics/webhook tests disabled;
-and Windows/PowerShell process, portable build/update and E2E tests unavailable on
-macOS. Installing the locked VSView extra allowed PySide6/VSView static and focused
-tests to pass locally. The canonical Docker integration gate was not run because P1
-does not change FFmpeg execution or runtime integration contracts; native FFmpeg
-alignment integration ran on macOS instead. Visible Windows review and portable
-runtime proof remain P2/P6 gates, and the two-runtime real-media oracle remains P3.
-No P1 stop condition was reached. Residual P1 risk is limited to those outstanding
-host/runtime proofs and the deliberately unobserved FFmpeg/ffprobe version fields in
-run artifacts; the independent native command above records the test host versions.
-
-### [~] P2 — Complete terminal and native review UX, metadata v2
-
-**Outcome.** Terminal and VSView show the same service decision and evidence. Accepted zero, provisional zero and absence are visibly distinct. Keeping current never implies confirmation of an unapplied candidate.
-
-**Owner seams / likely files.** Terminal formatter/presentation owner, `services/alignment.py`, `alignment_vsview.py`, `vsview/session_script.py`, `alignment_review_contract.py`, `alignment_review_panel.py`; native package/verifier fixtures where they embed the contract. Preserve `adapter.py`/launcher behavior except any necessary argument plumbing; do not redesign process lifetime or plugin discovery.
-
-**Public behavior.** Implement all copy, marker, details, normal/verbose and whole-set button behavior in §3. Switch metadata to v2 and reject old sessions with regeneration guidance. Result wire schema remains v1. No automatic-result behavior changes and no new CLI/config options.
-
-**Contracts/invariants.** Coordinate generator/parser/panel rollout in one package. Keep the trusted integer/null field semantics and strict whole-set/session/raw-frame validation. A provisional marker does not seed a manual draft. Native DTO validation is shape/trust validation, not acceptance computation. Embedded projection is independent of the optional diagnostic file's existence.
-
-**Dependencies.** P1's retained model, provenance and writer. Metadata version splitting and native verifiers must land together; do not merge a partly migrated producer/consumer pair.
-
-**Focused automated tests.** `tests/vsview/test_alignment_review_contract.py`, `test_alignment_review_panel.py`, session-script tests and package tests: exact v2 keys, version splitting, mixed/old/malformed sessions, zero/null, stale result paths, duplicate/incomplete decisions, bounds, candidate/authority mismatches, finite/size limits, deterministic scripts, inert ordinary sessions. Assert actual Qt labels, accessible text, primary/secondary button readiness, no autofill/implicit visits, out-of-bounds marker omission, keep-current outcomes, manual zero and mixed trusted/provisional/unavailable comparisons. CLI tests cover normal/verbose/quiet/no-color/non-TTY/JSON and the explanation occurring before the mocked launch boundary.
-
-**Runtime/integration/manual proof.** Run native panel construction/round-trip proof on a compatible host and the existing Linux GUI verifier when available. Execute visible native Windows acceptance for all three states and a mixed source set; capture source SHA, bundle/runtime identity and screenshots. Offscreen Qt assertions alone do not satisfy that gate. Verify that closing without saving, a malformed result, and forced-mode failure leave authority unchanged or fail exactly as documented.
-
-**Documentation.** Current CLI contract, architecture native boundary, guide with exact button names and metadata compatibility; update any supported-runtime verifier notes only where the contract fixture changes. Do not add screenshots to the guide until actual Windows captures exist.
-
-**Acceptance criteria.** No normal rejected route reaches VSView without an explanation. No standalone generic “no trusted audio hint” remains in generated Frame Compare sessions. Panel details include all bounded windows and resolved stream facts from fresh attempts. Mixed comparisons retain their own states. All result-validation negative tests pass. Python and required native integration proof are recorded; Windows-visible proof is a release blocker, not a connector-inferred pass.
-
-**Rollback.** Revert generator, metadata parser, panel and verifier fixtures together, leaving result v1 unchanged. Regenerate sessions under the installed version. Keep P1 evidence/artifacts if reverting only presentation. Do not add a v1-to-v2 trust-upgrade shim.
-
-**Stop and replan.** VSView cannot carry the bounded primitive projection through its actual supported metadata transport; the panel would need to import service policy; deterministic script generation is lost; native result safeguards need weakening; or the UI requires a new result action/per-comparison save model to meet the specified behavior.
-
-**Execution record (2026-09-15, macOS arm64).** Implementation is complete at
-`1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`
-(`feat(vsview): explain audio alignment trust`). The package remains `[~]`, rather
-than `[x]`, solely because the required physical-Windows visible acceptance has not
-been performed. No P2 stop condition was reached.
-
-The service now presents accepted, provisional and unavailable evidence before the
-optional native launch and projects the same immutable attempt into generated session
-metadata. Orchestration forwards existing verbose/quiet/JSON context without adding a
-flag or successful JSON field. Normal output stays compact; verbose output adds the
-bounded stream, timing, threshold, gate, work and per-window facts; quiet suppresses
-routine accepted/status evidence but retains actionable rejection; no-color and
-non-TTY output remain static plain text; JSON suppresses human blocks and logs bounded
-rejection scalars through the existing structured stderr boundary. Cached computed
-and manually confirmed history remain separately labeled without invented current
-details.
-
-Representative terminal states asserted by the focused service tests are:
-
-```text
-Comparison 1 - Audio alignment accepted: +0f.
-No relative audio correction is required. Policy: stream-timeline-distributed-2097152-v5; 4/5 correlated windows agree.
-
-Comparison 1 - Audio alignment requires review. Provisional candidate: +0f (not applied).
-4/5 correlated windows agree; configured consensus requires 100%.
-Reason: insufficient_consensus.
-
-Comparison 1 - No usable audio candidate. No automatic correction applied.
-5 windows planned; 0 usable estimates. Reason: no_usable_windows.
-```
-
-Every fresh-attempt state also reports the selected `Reference a:N -> Comparison
-a:N` stream pair. Provisional launch copy states that the candidate is a hint rather
-than a confirmed alignment; unavailable launch copy states that no automatic candidate
-exists. Historical representatives are `Reused accepted audio alignment: +7f` and
-`Reused manually confirmed alignment: +3f`, with honest detail unavailability.
-
-Metadata and result compatibility are deliberately split. Generated outputs now use
-strict metadata v2. Reference metadata retains only version/session/role/name;
-comparison metadata adds a deterministic, bounded `frame_compare_audio_review` JSON
-string beside the existing trusted integer/null `frame_compare_suggested_offset`.
-The projection contains current authority, evidence availability and the current
-attempt or explicit absence. The parser validates exact keys, finite/bounded primitive
-facts, ordered topology, session identity, stream/window/decision consistency and
-candidate/authority agreement. Metadata v1, unknown and mixed Frame Compare sessions
-fail with regeneration guidance; there is no migration or trust-upgrade shim. Ordinary
-sessions without Frame Compare metadata remain inert. Result schema v1 is byte-shape
-compatible and unchanged: only complete ordered `confirmed`/`keep_current` decisions
-for the exact session and source topology are accepted, with authoritative raw-frame
-bounds and sibling-path containment still enforced.
-
-The native panel's representative states are:
-
-```text
-Audio alignment accepted: +0f
-No relative audio correction required.
-[ACCEPTED AUDIO] +0f - reference/comparison origin marker
-
-Provisional audio candidate: +0f - NOT APPLIED
-insufficient_consensus
-Verify manually; this candidate is not a confirmed alignment.
-[PROVISIONAL - NOT APPLIED] +0f - reference/comparison origin marker
-
-No usable audio candidate
-insufficient_signal
-Enter known offsets or align the sources manually.
-(no marker)
-```
-
-The actual Qt copy uses em dashes where shown in §3.5; the ASCII rendering above keeps
-the ledger portable. `Confirm these aligned positions`, `Confirm these known offsets`
-and `Keep current alignment` are the only whole-set actions. Keep-current writes one
-unchanged result-v1 `keep_current` action per comparison. Saved labels separately state
-accepted authority retained, provisional candidate not confirmed, no accepted
-candidate available, or manually confirmed authority retained. Offscreen tests cover
-accepted/provisional/unavailable/manual mixed sets, accepted and provisional `+0f`,
-cached history, manual authority with retained rejected history, no field prefill,
-no implicit visit/readiness, marker bounds, one ordered save, accessible labels,
-scrolling, focus, close-without-save, write failure and ordinary-session inertness.
-
-Exact verification and observed outcomes:
-
-```text
-uv sync --group dev --frozen                                      PASS
-uv sync --extra vsview --group dev --frozen                       PASS
-uv run --no-sync pytest -q tests/services -k alignment            PASS
-uv run --no-sync pytest -q tests/vsview                            PASS (offscreen Qt/native contract)
-uv run --no-sync pytest -q tests/orchestration -k alignment       PASS
-uv run --no-sync pytest -q tests/cli tests/test_cli_contract_docs.py
-                                                                  PASS
-uv run --no-sync pytest -q tests/windows_portable/test_windows_portable_docs.py tests/workflows/test_docker_gui_contract.py
-                                                                  PASS
-uv run --no-sync pytest -q tests/integration/test_alignment_runtime.py -rs
-                                                                  PASS
-uv run --no-sync pytest -q tests/integration -k alignment -rs     PASS; unrelated L-SMASH/GOP cases skipped
-bash -n tools/verify_docker_gui.sh                                 PASS
-uv run --no-sync pyright --warnings                               PASS; 0 errors/warnings
-uv run --no-sync ruff check .                                     PASS
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-                                                                  PASS; 0 medium/high issues
-uv run --no-sync pytest -q                                        PASS
-uv run --no-sync lint-imports --config importlinter.ini           PASS; 2 contracts kept
-uv build + scripts/verify_distribution.py + clean wheel install + version/help
-                                                                  PASS; wheel and sdist 0.6.0
-uv sync --extra vsview --group dev --group docs --locked          PASS
-uv run --no-sync python scripts/generate_api_docs.py --check      PASS
-uv run --no-sync zensical build --clean --strict                  PASS
-git diff --check                                                  PASS
-ffmpeg -version / ffprobe -version                                9.0.1 / 9.0.1
-```
-
-The first full-suite run exposed one stale orchestration test double that did not
-accept the newly forwarded existing quiet/JSON context; it was repaired and the
-focused test plus complete canonical gate then passed. Recorded full-suite skips were
-host/opt-in surfaces: local L-SMASH and libplacebo integration, live slow.pics/webhook,
-and Windows PowerShell/process/portable/update/install E2E tests. PowerShell was not
-available even for a local parser invocation. The Linux X11 GUI verifier was not run
-because this host is Darwin and has no compatible Linux X11 desktop; its shell syntax,
-fixture contract and generated-session path were tested statically.
-
-**Outstanding physical-Windows handoff.** At candidate
-`1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`, build the portable bundle on Windows and
-record the bundle/runtime identity. In visible VSView, capture accepted `+0f`,
-provisional `+0f`, unavailable and mixed-source-set screenshots; verify marker positions,
-expanded details/scrolling, keyboard and tab navigation, focus after save, both manual
-input bases, no provisional prefill/playhead/readiness effect, keep-current saved labels,
-close-without-save, malformed-result refusal and the actual result-v1 round trip. This
-is the remaining P2 release blocker; macOS offscreen proof is not a substitute.
-
-### [x] P3 — Continuous-decode oracle and predeclared policy evaluation
-
-**Outcome.** Establish whether bounded extraction changes frame decisions or quality eligibility relative to continuous decoding, and whether the fixed P4 policy improves the demonstrated failure without accepting negative controls. This is test/evidence work, not an unbounded production path or a release of new thresholds.
-
-**Owner seams / likely files.** `tests/integration/test_alignment_runtime.py`, a focused adjacent oracle test module/support fixture if needed, `tests/services/test_alignment_distributed.py`, and isolated ignored test evidence. Read the supported runtime matrix; do not update FFmpeg/native versions as part of this package.
-
-**Public behavior.** None. No production flag, new default, alternate estimator execution branch or artifact reader. Candidate display from P1 remains independent of the pending automatic-policy evaluation.
-
-**Experiment definition.** Build deterministic, redistributable synthetic fixtures and supplement them with locally available legally usable real media. Use separate generation seeds for development and holdout controls, declare expected offsets/edit structure before running the target policy, and preserve hashes/commands/settings in the test evidence. Do not relabel a failed fixture after seeing its result.
-
-For each source/rate/channel treatment, decode the selected stream **continuously from its origin**, resampling once, and slice by output sample count. Do not implement the oracle using the same positive-seek/timestamp-trim path being tested. Decode whole **test fixtures only**, each at most 180 seconds, sequentially into temporary storage; use at most one pair plus its comparison workspace at a time and cap retained raw temporary oracle data at 256 MiB per case. Store only scalar findings after cleanup. The production estimator never imports this helper.
-
-Compare bounded windows with oracle slices at: origin; just before/after the five-second seek transition; default early/middle/late positions; and asymmetric reference/comparison origins near search boundaries. Record actual sample counts, independent packet/frame PTS observations, measured sample-grid lag, score, peak ratio, frame bin, runtime version and exact fixture identity. Distinguish a scalar-score change from a frame-bin or acceptance-gate change. Both source arrays must be checked against their own oracle; a same-file self-pair alone can conceal a common bias.
-
-**Required fixture families.** Cover zero and signed nonzero controls; 24 and 24000/1001 FPS; 44.1/48 kHz sources and 4/8/48 kHz requested/analysis paths; PCM/Matroska with 960- and 1001-sample packetization; AAC/priming controls; equivalent remuxes; positive/negative stream/container starts; resampling-sensitive broadband/speech-like signals; explicit A/V-origin differences; short selected audio in longer video; exact silence, very quiet independent noise, steady tones and repeated segments. Include ≥150-second four-to-one cases so support can genuinely be non-overlapping, and move the weak/edited interval through each of the five positions. Include localized edit, insertion/deletion step, drift, unrelated audio, multiple shuffled/commentary/language streams, and explicit matching-stream override.
-
-The weak-dissent fixture must demonstrably return a **finite** nonzero-frame estimate with low quality from the real pipeline; a zero-norm exception is not an acceptable substitute. Freeze/assert its actual window classifications before using it as an acceptance regression. The strong edit must produce credible cross-frame evidence. If the intended construction does not produce those facts, fix the fixture construction rather than loosening expected outcomes.
-
-**Predeclared outcome gates.**
-
-| Observation | Required disposition |
+| Owner | Responsibility in the replacement |
 | --- | --- |
-| Clean zero/known-delay control has a bounded frame bin different from its continuous oracle away from an exact rounding boundary, or bounded extraction alone changes credible/qualified classification | An extraction/scoring discrepancy is demonstrated. Block P4 rollout on that supported path; follow P5's extraction decision branch. Do not blame the original incident or hide it with filtering. |
-| Bounded/oracle raw lags differ only within the existing quantization/refinement allowance and still produce the same expected frame bin and eligibility | Preserve the extraction and correction radius. Record the variance; do not widen the radius merely to make samples identical. |
-| Exact/near half-frame cases disagree | Preserve distinct bins and the existing rounding convention; investigate measured grid uncertainty separately. Do not merge bins. No general rational-rounding rewrite is authorized here. |
-| Fixed quality/coverage proposal passes every mandatory clean zero/nonzero control and every incident-shaped weak-dissent control, while all wrong-stream, credible-edit, drift, silence/repetition and one-success/four-failure negatives remain unapplied | Approve P4 implementation of that exact proposal. P4 must rerun the same cases through its actual production service. |
-| A negative control is automatically accepted under the proposal, or the required weak-dissent positive still fails despite adequate independent support | Do not ship the new acceptance policy and do not tune numeric floors on the holdout set. Keep P1–P2 and record the failing evidence for a new narrowly scoped policy decision. |
+| `services/alignment_audio.py` | Existing stream probing/selection; duration normalization; deterministic discovery/verification planning; exact sample-coordinate conversion; FFmpeg recipe; resource admission. |
+| New adjacent `services/alignment_streaming.py` | One continuous FFmpeg invocation, bounded pipe readers, interval intersection collection, observed counts/end condition, typed failure, cancellation, and cleanup. No trust or cache policy. |
+| `utils/subproc.py` | Existing executable resolution, including Windows portable overrides. Reuse it; do not replace unrelated subprocess callers. |
+| `services/alignment_correlation.py` | Numeric correlation/refinement, bounded scoring work, estimator identity. No subprocess or presentation logic. |
+| `services/alignment_consensus.py` | Staged evidence consumption, review candidate, qualification, useful overlap, temporal support, contradiction veto, and the sole automatic-authority gate. |
+| `services/alignment.py` | Reuse/manual precedence, sequential comparison execution, immutable attempt construction, diagnostics/presentation/native review, final provenance. |
+| `services/types.py`, `services/errors.py` | Existing evidence/results extended only with needed collection/coverage facts and typed failure categories. No class hierarchy per stage. |
+| `services/alignment_diagnostics.py` | Existing bounded path-contained atomic artifact writer and original-attempt digest. |
+| `services/alignment_previous_offsets.py`, `alignment_reuse_cache.py` | Accepted authority only; policy/runtime/config identity checks; no diagnostic-file reads. |
+| `orchestration/phase_alignment.py`, `execution.py` | Cancellation-aware invocation and application of completed phase output; trims consume authorized values only. |
+| `services/alignment_vsview.py`, `vsview/session_script.py`, `alignment_review_contract.py`, `alignment_review_panel.py` | Extend the existing native projection and exact validation together. Preserve result actions, raw-frame bounds, session identity, and whole-set confirmation. |
 
-For clean lossless controls at the requested rate, require origin-grid agreement within one output sample and the correct integer frame result. For fallback paths, compare measured error against the existing `ceil(requested_rate / analysis_rate)` correction allowance and require the correct frame result; anything outside the allowance is a discrepancy, not an automatic recommendation for a wider allowance. Record waveform/score deltas for lossy controls rather than demanding byte-identical AAC output. Correct frame bins and the predeclared eligibility/negative-control results remain mandatory. Exact half-frame tests explicitly assert the current ties behavior instead of using a broad tolerance.
+Keep existing import direction. The streaming owner accepts a prepared argument vector, scalar interval specifications, limits, and cancellation signal; it does not import the planning owner back. Reuse the existing `AudioAnalysisPlan`, `AudioWindowSpec`, and `AudioWindow` concepts instead of adding a parallel domain model. Small immutable interval/collection return records are permitted where the process boundary actually needs them.
 
-Evaluate the fixed quality/coverage proposal against captured real estimator evidence using a test-only specification evaluator; it is not production proof until P4 executes the same matrix. Require the negative suite to contain at least four deterministic holdout seeds per stochastic family, every five-window edit/dissent position, both signs, and both FPS values. Record the finite matrix size and measured results; zero false accepts in this matrix is not a population-level error-rate claim.
+The supported public surface remains CLI/config/output behavior. No new flags or tuning fields are introduced. Numeric configuration ranges remain valid; resource-incompatible requests yield explicit non-applied budget results rather than silently changing the requested window/search. Internal async signatures may change in R4; update all callers and generated API reference rather than preserving a second synchronous workflow. [E5, E7]
 
-For additional real-media confidence, document at least a constant-zero pair, a known-constant-nonzero pair, and a mismatched mix/cut/track pair, with visual checks at early, middle and late positions and near any disputed interval. A single visual match is insufficient. If suitable local media or a supported runtime is unavailable, keep that portion outstanding and do not claim it passed.
+## 5. Collection and estimation sequence
 
-**Contracts/invariants.** Original trace remains immutable; the oracle is independent of production seeking; no production whole-track decode; no cache reuse during fixture measurement; all temporary processes/files have deterministic cleanup/timeouts. Full source identities stay in local test evidence only.
+### 5.1 Freeze selection, source identity, and planning
 
-**Dependencies.** P1 trace/stream evidence; P2 is not necessary to construct oracles, but its candidate UI can aid real-media review. Do not parallelize writes to shared fixture owners without an explicit disjoint boundary.
+Reuse deterministic selected-stream ranking and explicit ordinals. Resolve once per comparison, reuse reference metadata within the run, and freeze the selected streams/channel treatment for both passes. Do not search additional streams after a weak result.
 
-**Focused automated tests.** Oracle slicing/origin sign/count validation; matching and asymmetric extraction; generated finite weak dissent; strong edit/drift/wrong stream negatives; all duration/support boundaries; packetization/resampling; score-stage attribution; resource bounds and cleanup. Existing real FFmpeg integrations must actually run, not skip.
+Check source path/size/mtime identity before and after staged collection. A changed source invalidates the attempt; never combine two revisions. This follows the existing performance-first source-identity contract, not a promise of content-hash identity.
 
-**Runtime/integration/manual proof.** Run on the pinned-supported Docker/Linux FFmpeg and native Windows portable FFmpeg, recording both executable version lines and runtime fingerprints. Use the canonical Docker verifier in addition to the focused alignment tests. Windows comparison results and real-media checks remain separately required. Missing codecs/runtime are explicit blocked cells, not silently dropped dimensions.
+Require usable selected-stream duration metadata. Do not substitute container duration or discover duration with an unbounded scan. Let `D` be the original shared selected-stream duration used for planning.
 
-**Documentation.** Add an execution-results subsection here with fixtures, hashes, version identities, pass/fail tables, maximum observed grid variance and the exact P4 go/no-go. Change current behavior docs only if correcting a false statement, not to describe the proposal as deployed.
+Discovery uses `a = min(requested_rate, 8000)`. If that cannot satisfy FFT admission, try 4000 Hz once when distinct. If neither fits, reject before decode. This deliberately standardizes high-requested-rate discovery at a low rate; it is a versioned estimator change, not a transparent refactor. When `a == requested_rate`, discovery supplies requested-rate evidence and no second pass occurs.
 
-**Acceptance criteria.** A reproducible scalar evidence bundle supports every matrix cell, including holdouts; the P4 gate has a definite pass or stop result; primary clean signed controls match expected frame relationships; no original-incident causation is asserted.
+Preserve explicit window length/stride and offset-search extent. R5 installs the final default duration tiers in §8. Never drop difficult windows after observing their results to recover budget.
 
-**Rollback.** Remove an invalid fixture/helper or revert test-only work without changing production or caches. Preserve failing scalar evidence when revising a fixture. Do not delete contradictory results just because a positive suite passes.
+### 5.2 Canonical continuous sequence
 
-**Stop and replan.** Oracle shares the suspected extraction path, fixture labels cannot be established independently, a supported runtime behaves differently in a trust-relevant way, or the fixed proposal fails a predeclared gate. Additional arbitrary parameter sweeps are outside this package.
-
-**Execution record (2026-09-15, native macOS arm64 and Docker/Linux arm64).**
-Implemented by `7f342a6208944e53a4e48c77d3449ffdc05e9085`
-(`test(alignment): add continuous decode oracle`). The package adds only test-owned
-oracle/evaluator infrastructure, deterministic fixture generation, the focused runtime
-matrix, and pathless scalar evidence at
-`tests/fixtures/alignment_oracle/p3-results.json`. No production source, estimator
-behavior, default, cache identity, extraction command, UI policy, configuration, or
-application-authority owner changed.
-
-The oracle is independent of the bounded path in the exact relevant sense: it invokes
-one FFmpeg input from the selected stream's origin, with no input `-ss` and no `atrim`,
-resamples once, writes raw float32 output to a scoped temporary file, and slices that
-continuous output by output-sample index in Python. It never calls
-`extract_audio_window` to produce expected samples. Each reference and comparison is
-decoded into and compared with its **own** oracle slice before pair-level conclusions
-are evaluated, so equal bounded-path bias in a self-pair cannot cancel. The production
-estimator imports none of this code.
-
-Fixture recipes and labels were frozen before the holdout runs. Recipes use seeded
-PCM source generation and FFmpeg remux/encode commands assembled as argument arrays;
-the scalar evidence records recipe SHA-256 identities, runtime-specific generated-media
-SHA-256 identities, rates, packet observations, positions, signs, FPS values, scores,
-lags, counts, and outcomes. No media, absolute path, environment value, raw sample,
-packet listing, or private metadata is tracked. The real-pipeline policy matrix was:
-
-| Family | Cells | Result under the exact proposed P4 evaluator |
-| --- | ---: | --- |
-| Clean zero and signed ±2,400-sample controls; 24 and 24000/1001 FPS | 6 | 6 accepted; 0 false rejects; minimum requested-rate score `0.9999336239930832`; both sources checked against their own oracle |
-| Finite weak 4:1 dissent; four holdout seeds, all five positions, both signs/FPS | 80 | 80 accepted; weak scores `0.2152675274718276..0.23373965616436304`, offsets `-2400..+2401` samples, minimum strong score `0.9691901406627084` |
-| Credible localized edit; four holdout seeds, all five positions, both signs/FPS | 80 | 80 `credible_conflict`; 0 false accepts; nonzero scores `0.9997668861872178..0.999811440634269` |
-| Insertion/deletion step and drift; four seeds, both signs/FPS | 32 | 0 accepted |
-| Silence, very quiet independent noise, unrelated audio, steady tone, repeated segment; both FPS values | 10 | 0 accepted; all `no_candidate` |
-| One survivor plus four typed failures | 1 | Unapplied: `insufficient_temporal_support` |
-| Wrong automatic stream / explicit matching-stream override | 2 | Wrong stream `no_candidate`; explicit matching override accepted `+0f` |
-| Short/medium/long support boundaries | 8 | Full short, disjoint medium early/late, and distributed long support accepted; overlapping medium and long support missing the final third rejected |
-
-The clean PCM/resampling/packetization cells cover 44.1/48 kHz sources; 4/8/48 kHz
-output paths; Matroska 960/1001-sample packet treatments; origin, 5-second boundary,
-early/middle/late positions; both offset signs; and signed PCM stream starts. AAC cells
-record priming PTS and lossy waveform deltas rather than require byte equality. Exact
-half-frame checks retain the current ties-to-even behavior and distinct adjacent bins.
-The largest clean signed-control PCM grid lag was zero output samples. The largest
-recorded resampled waveform delta was `0.17351511120796204`; this did not change any
-clean frame bin or proposed-policy eligibility.
-
-The extraction gate nevertheless failed, with different available-runtime observations:
-
-- Native macOS FFmpeg 9.0.1, 44.1 kHz AAC resampled to 48 kHz with a +2-second selected
-  stream start, returned only `945/2048` requested bounded samples at origin and a
-  29-sample grid lag. In the asymmetric clean pair, the two independent continuous
-  oracle prefixes were byte-identical at the checked 4,096 samples, while the bounded
-  pipeline produced `+1115` samples / `+1f`, score `0.8713582429603048`, peak ratio
-  `6.485486119359482`, and coverage `0.9965482824586209`; the proposed `0.90` quality
-  floor therefore abstained instead of accepting the oracle's clean `+0f` relationship.
-- Docker Debian FFmpeg 7.1.5 passed that positive-start AAC pair, but ordinary late AAC
-  bounded slices diverged from the continuous grid by 3 samples at an 8 kHz requested
-  path with a 1-sample allowance, and by 10 samples for 44.1→48 kHz with a 6-sample
-  allowance. PCM packetized controls stayed on the oracle grid. These are explicit
-  expected-failure cells, not skips or widened tolerances.
-
-The supported Docker result reaches the first predeclared extraction gate; the
-different unmanaged-native result further narrows the repair experiment. **Disposition:
-a primary extraction discrepancy is demonstrated and
-the P5 repair branch must run before P4.** The fixed P4 quality/coverage proposal itself
-had zero false accepts/rejects in the finite matrix above, but it is not approved for
-production while extraction can change frame/eligibility evidence. No numeric floor was
-tuned on holdouts, no correction allowance was widened, and the evidence makes no claim
-about a population error rate or the original incident's cause.
-
-Actual runtime identities:
+For each source/rate/channel treatment, use one ordinary origin decode:
 
 ```text
-Native macOS arm64: ffmpeg 9.0.1; ffprobe 9.0.1
-alignment fingerprint: c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92
-Docker/Linux arm64: Debian ffmpeg/ffprobe 7.1.5-0+deb13u1
-package: 7:7.1.5-0+deb13u1
-alignment fingerprint: ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8
+selected audio -> existing channel treatment -> aresample at selected output rate
+               -> final atrim end_sample=H -> mono float32 little-endian stdout
 ```
 
-Exact verification commands and observed outcomes:
+`H` is the largest admitted interval endpoint for that source/pass. It is a positive FFmpeg-representable integer. No input `-ss`, `-copyts` special case, per-window trim before resampling, `-fs`, timestamp compensation, or asynchronous sample stretching is used.
+
+Use the same mono-downmix or existing best-channel treatment as the current contract. Do not combine this change with a channel-mixing revision. The only permitted trim is the final post-resample sample endpoint; production proof must show it does not alter retained prefixes relative to the untrimmed continuous oracle.
+
+The collector counts every emitted complete float32 sample, including discarded gaps, and copies only interval intersections. A retained sample's coordinate is its ordinal in this continuous output sequence—not a timestamp-derived assertion or an independently measured video origin.
+
+### 5.3 Sequential discovery
+
+Collect reference intervals, then comparison intervals. There is at most one FFmpeg child at a time. Retain both sources' bounded interval stores and analyze window pairs sequentially with one numeric workspace.
+
+Preserve every planned logical window and actual counts. Convert local lags using the actual retained interval starts. Collect bounded scalar estimates for all windows, then release all discovery PCM before requested-rate collection.
+
+No reference PCM survives into another comparison; retain neither arrays in diagnostic records nor failure tracebacks in a per-window history. Duplicate/overlapping intervals may be stored separately within the charged bound; a deduplicating interval-cache abstraction is unnecessary.
+
+### 5.4 Continuous requested-rate verification
+
+When `a != R`, convert each usable coarse candidate and interval to requested-rate coordinates using exact rational arithmetic and the existing rounding convention. Freeze all verification intervals before starting their I/O. Reserve their worst-case cost when admitting discovery, not opportunistically after weak windows fail.
+
+Preserve the existing global correction radius `h = ceil(R/a)`. Add up to `h` requested-rate samples on each comparison side when available so the admitted hypotheses can be scored without accidentally losing their intended overlap. Charge those samples. Clip physical intervals to nonnegative coordinates and known bounds; never pad unavailable edges.
+
+Crucial coordinate invariant: a comparison halo changes the pair's local origin delta. Evaluate the same global hypotheses `[d0-h, d0+h]`, intersected with configured offset bounds. Translate those global hypotheses into local scoring coordinates; do not blindly recenter a local `±h` search around the halo-shifted origin.
+
+Collect requested-rate reference intervals continuously, then comparison intervals continuously. Score each pair sequentially. Requested-rate score determines qualification; the discovery peak ratio retains its discovery-stage/rate label. A candidate that cannot be verified within the original admitted neighborhood remains non-authoritative. No search expansion or re-decode follows failure.
+
+At most **two FFmpeg decodes per comparison** when rates match, **four** when verification is needed. No extra decode per window or per hypothesis.
+
+### 5.5 Observed-EOF semantics
+
+A successful collection has all of: stdout fully consumed through its termination condition, no partial float, no reader error, successful FFmpeg exit, and completed reader/process cleanup.
+
+Distinguish:
+
+| Condition | Meaning and treatment |
+| --- | --- |
+| Exactly `H` samples returned successfully | `planned_end_reached`; total source length is not measured. Do not call this natural EOF. |
+| Successful exit with `E < H` complete samples | `observed_eof`; record `E` and clamp each interval to its intersection with `[0,E)`. Preserve original planned endpoints/counts and mark shortened/empty rows. |
+| Timeout, cancellation, reader failure, invalid trailing bytes, excess output, or nonzero exit | Failed/aborted collection. Reject its PCM, even if a requested interval had already filled. Counts may survive as scalar diagnostics only. |
+
+For each planned interval `[s,e)`, usable output is `[s,min(e,E))` at observed EOF; if `s >= E`, it is empty. Do not remove the last window as the spike did. Do not backfill from an earlier interval, pad zeros, duplicate a neighbor, or re-label a short interval complete.
+
+Compute useful aligned overlap from actual source intersections and the candidate offset. For the signed sample correction `d = reference - comparison`, shift the comparison interval by `+d` into reference coordinates and intersect it with the reference core interval. The resulting start/end are the useful support interval. Comparison search margins and verification halos are not additional reference support. Apply the same geometry to the pre-EOF planned core/source limits for the expected denominator. Coverage is:
 
 ```text
-uv run --no-sync pytest -q tests/integration/test_alignment_continuous_decode_oracle.py -m 'not slow' -rsx
-    PASS: 124 passed, 2 expected extraction failures
-uv run --no-sync pytest -q tests/integration/test_alignment_continuous_decode_oracle.py -m slow -rs
-    PASS: 4 passed
-uv run --no-sync pytest -q tests/integration/test_alignment_runtime.py tests/integration/test_alignment_audio_seek.py -rs
-    PASS: 12 passed
-bash tools/verify_docker_integration.sh --no-build --pytest-path tests/integration/test_alignment_continuous_decode_oracle.py
-    PASS: 126 passed, 2 expected Debian AAC extraction failures, 0 skips;
-    canonical runtime/provenance/native-linkage/Vulkan/application artifact proof passed
-uv run --no-sync pyright --warnings                           PASS; 0 errors/warnings
-uv run --no-sync ruff check .                                  PASS
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-                                                               PASS; 0 medium/high issues
-git diff --check                                               PASS
+actual useful aligned samples / candidate-available samples expected before observed EOF
 ```
 
-Each full 180-second, 48 kHz mono oracle is at most 34,560,000 bytes; two sources
-total 69,120,000 bytes below the 256 MiB cap. Decodes and pair work are sequential.
-Every subprocess has an explicit timeout. `TemporaryDirectory` owns raw files and the
-memmap is released before directory cleanup, including exception unwinding; only scalar
-evidence survives.
+The denominator includes ordinary geometric clipping by the candidate and original selected-stream limits, but is **not reduced merely because decode ended early**. Preserve both counts. For voting, require at least 90% coverage plus signal/quality/support gates. A clean EOF-clamped interval may qualify under those rules while remaining explicitly labeled short. An empty or lower-coverage interval cannot vote.
 
-Windows portable FFmpeg execution and the required early/middle/late visual real-media
-checks remain outstanding. The downloaded investigation explicitly states that the
-original media was not supplied; no locally identifiable incident media was available,
-so no incident-cause claim or single-point zero inference was made. This outstanding
-evidence does not reverse the demonstrated cross-runtime extraction stop condition.
+Do not lower the duration tier or redefine `D` after an unexpectedly early EOF to turn poor long-source coverage into a short-source success. Known natural EOF can cap subsequent physical reads, but cannot shrink the previously reserved work or evidence denominator. Actual requested-rate counts are independently observed; do not assume scaled discovery EOF is an exact requested-rate endpoint.
 
-### [ ] P4 — Quality-qualified voting, temporal quorum and contradiction veto
+## 6. Production resource contract
 
-**Outcome.** Close both demonstrated voting pathologies under a deliberate estimator version: weak estimates abstain, failed windows cannot leave a long source trusted by one survivor, and credible edits remain unapplied.
+All limits below are enforced or measured as specified; none is inferred from the spike's small retained buffers.
 
-**Owner seams / likely files.** `alignment_consensus.py`, `alignment_audio.py` for default short/medium planning and budget-compatible counts, `alignment_correlation.py` for the policy identity, relevant service/config DTO documentation and cache identity tests. Preserve config schema fields and valid ranges; do not add switches or change the default ratio.
+### 6.1 Hard admission and allocation limits
 
-**Public behavior.** Implement §5.4–5.5, the policy notice and semantic migration in §6.3. More conservative acceptance is expected for thin coverage and weak-only evidence; qualified unanimous distributed support can now pass despite weak abstentions. Medium-duration default planning changes as specified. Warm old-policy shared results miss, including human-confirmed entries under the current key design.
+| Resource | Contract |
+| --- | --- |
+| Primary windows | At most 16; no auxiliary retries/checks. |
+| Peak logical correlation FFT | 2,097,152 points. |
+| Total logical correlation FFT work | 16,777,216 points; charge every correlation invocation. |
+| Requested-rate verification PCM per pair | At most 3,000,000 samples across both sources, including halos and rounding. |
+| Requested-rate verification PCM total | At most 15,000,000 samples, including halos and rounding. |
+| Active comparisons / FFmpeg children / numeric workspaces | One of each. |
+| Active PCM stores | One comparison's discovery store OR verification store, never both. |
+| Stdout read size / queue | 65,536 bytes / at most eight chunks, retaining the spike's fixed queue capacity. |
+| Stderr | Drain continuously; retain at most 65,536 bytes plus counters/truncation flag. |
+| Partial float carry | At most three bytes. |
+| ffprobe timeout | 15 seconds per invocation. |
+| FFmpeg timeout | 120 seconds per invocation, not the spike's 900 seconds. |
+| Production PCM disk use | Zero. |
+| Persistent diagnostic artifact | At most 128 KiB per comparison; one initial write and at most one final review-envelope replacement. |
 
-**Contracts/invariants.** Use base-credible windows for the contradiction veto and configured-qualified windows for votes/support. Never lower explicit user thresholds, minimum or ratio. Retain every abstention in diagnostics. Independent interval selection uses actual useful support and is deterministic. Default ratio remains 1.0, zero voters are not unanimous, and no retry/oracle artifact contributes authority. Stable classifications remain diagnostic-only.
+Kernel pipe buffers are finite platform-managed buffers, not included in the Python queue claim. Charge in-flight reader/consumer chunks separately; keep total application-owned transport buffers below 1 MiB excluding small thread/object overhead. No `communicate()` or `capture_output=True` for PCM, growing chunk list, or whole-output concatenation.
 
-**Dependencies.** P1; P3 passing oracle/policy gate on the supported paths; P2 before public release. Any demonstrated primary extraction discrepancy must first be resolved through P5's bounded extraction branch or this package stays blocked. No policy bump is required merely to prototype the evaluator in tests, but it is mandatory before production acceptance changes.
+### 6.2 Retained PCM formulas
 
-**Focused automated tests.** Four strong `+0f` windows plus one finite weak cross-frame dissent accepts only with adequate independent support; repeat with the weak interval at all five positions. Four strong zeros plus a credible shifted edit stays provisional even for configured ratio 0.8. A stricter configured threshold that excludes the dissent from voting must not remove a base-credible contradiction. One success/four failures remains provisional on long sources; all unusable is unavailable; same-frame jitter accepts without modifying raw samples. Test ties, all failed gates, explicit minimum five, configured threshold 0.995, explicit ambiguity above the floor, budgets, short/medium/long boundaries around 30/90 seconds, overlapping custom windows, and two independent short-source intervals. Verify both cache origins miss on the new policy and unchanged schema v2 serialization.
-
-**Runtime/integration/manual proof.** Rerun the P3 labeled matrix through the actual updated `align_clips_from_request` path without cache. Require the same zero-false-accept negative result and all mandatory positives. Run full Python and Docker gates, supported Windows FFmpeg tests and real-media checks. Compare primary extraction counts/total FFT/scoring budgets with the recorded baseline; no unbounded extra search is permitted.
-
-**Documentation.** Same-pass CLI/config semantics, guide examples, architecture policy ownership/default duration behavior, release notes and estimator migration warning. Describe both the improvement and intentional thin-evidence conservatism. Record the actual policy token in this plan.
-
-**Acceptance criteria.** All specified primary/negative controls have their intended state; candidate preservation and manual-zero provenance still pass. Actual configured values and denominator are visible. No old-policy cache entry bypasses the new safeguards. Required runtime cells are executed, not skipped, and caps are enforced at all supported requested rates.
-
-**Rollback.** Revert the policy/planning change as a unit while retaining P1–P2 observability. Assign a **new** estimator identity for a behavioral rollback so results from the withdrawn policy cannot be reused under the restored code. Leave schema v2 intact; do not rewrite reusable cache records. Clearly state that the legacy one-survivor acceptance limitation returns if the old acceptance policy is restored.
-
-**Stop and replan.** Any credible edit/wrong-stream negative is accepted, the holdout improvement requires lowered thresholds or weighted voting, configuration meaning cannot be disclosed, coverage depends on fabricated decoded origins, or primary work budgets must increase. Do not mask these failures with retry-to-majority logic.
-
-### [~] P5 — Evidence-gated extraction repair and bounded local diagnostics
-
-**Outcome.** Repair a specifically demonstrated extraction-grid defect at its smallest owner, if one exists. Add only those short diagnostic rechecks that the experiments show provide useful explanations. Do not use local rechecks to promote a rejected constant offset.
-
-**Owner seams / likely files.** `alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`, diagnostic serializers/adapters and the focused runtime/oracle tests. No CLI/config flags and no general retry scheduler.
-
-**Dependencies.** P1–P3. The extraction-repair subpart precedes P4 rollout when P3 found a trust-relevant primary-path discrepancy. Diagnostic-only rechecks can follow P4 and are not required to ship P1–P2. Record `deferred — no demonstrated benefit` rather than installing dormant retry branches if the gate below fails.
-
-**Production extraction decision tree.** Execute this ordered experiment, not a collection of unresolved implementation alternatives:
-
-1. If P3 found no trust-relevant discrepancy, retain current seeking, resampling and refinement exactly. Do not increase preroll “for safety.”
-2. If P3 reproduced a discrepancy, repeat the same controlled cases with a fixed ten-second preroll, keeping all other operations unchanged. If this alone eliminates every reproduced discrepancy on both supported runtimes and introduces none in holdouts, adopt that smallest bounded repair. Keep FFT/output/scoring caps and timeouts unchanged; document the new maximum preroll/decode-work estimate and bump estimator identity.
-3. If ten seconds does not fix the discrepancy, do not ship it. Test one bounded grid-preserving extraction design that keeps decoded preroll through resampling and crops against an independently observed/validated output-sample origin. Adopt it only if origin/count/frame and negative-control gates all pass with the same bounded resource contracts. Do not label requested positions as measured origins to make the test pass.
-4. If neither bounded design satisfies the oracle gates, retain the existing production path and block claims/new acceptance rollout on the affected supported path. Record the failing codec/runtime/timing cases and stop for a focused extraction design. No whole-track fallback, container-start correction, or larger unconstrained refinement radius is authorized.
-
-The third step permits local implementation judgment about the exact filter/PTS plumbing; its origin semantics, boundedness, experiment and acceptance are fixed. Audio-to-video frame-zero mapping changes, alternative correlation/preprocessing defaults, adaptive stream/channel search, exact-rational rounding conversion and widened requested-rate correction radii are **not** bundled into this repair. They need their own demonstrated failure and decision/proof, even when the oracle has exposed a nearby problem.
-
-**Disputed-window recheck decision.** Implement one diagnostic recheck only if P3 demonstrates a recoverable window failure or seek/grid-related discrepancy for which a bounded re-extraction supplies additional, reproducible evidence. The runtime experiment must distinguish the new facts from merely returning the majority's desired answer. If there is no demonstrated benefit, do not implement this production branch.
-
-For an already provisional primary result, choose the earliest credible nonwinning interval; otherwise the earliest failed interval; otherwise the earliest weak/ambiguous interval. Break ties by logical ID. Recheck the central **two seconds** of that interval, clipped deterministically to its actual selected-stream bounds. Retain the parent ID and both original and recheck facts. Use the P3-validated bounded extraction recipe; do not vary recipes repeatedly until one agrees. A successful short subsection is not a replacement for the original full interval.
-
-**Explicit zero-frame diagnostic decision.** Implement only for an existing provisional `+0f` candidate, and only after P3's silence/repetition/nonzero negative controls prove the diagnostic distinguishes useful zero-bin support from lack of signal. Use the same disputed interval selection; if none exists, use the earliest primary interval supporting the candidate. Analyze one central two-second subsection. Compare the best zero-**frame-bin** hypothesis with the strongest nonzero-bin alternative under the existing bounded search range, then score those at the requested rate. Do not constrain the search to zero and announce success because no alternative was evaluated. Exact sample zero is not the hypothesis; use the existing sample-to-frame mapping, including its boundary convention.
-
-Local outcomes are `zero_supported_locally`, `alternative_supported_locally`, or `inconclusive`. Zero is locally supported only when its requested-rate score passes the effective configured/base quality threshold and its peak dominance over the nonzero alternative passes the effective peak threshold with meaningful signal/overlap. An alternative meeting those conditions wins locally; other cases are inconclusive. Show `Local zero-frame check supports +0f; automatic alignment is still not accepted.` rather than “zero verified.” These outcomes never change the primary audio decision or application authority.
-
-**Fixed auxiliary budget.** After the primary trace fixes eligibility and target intervals, construct and reserve one deterministic auxiliary plan before any auxiliary IO. Examine at most the two eligible operations in order (disputed recheck, then zero check); include an operation only when its complete worst-case cost fits the remaining primary-plus-auxiliary caps, otherwise record `auxiliary_budget_unavailable` for that operation. Do not spend failed/skipped decoding's unused allowance opportunistically: charge the reserved primary work. The zero check may fit when a recheck was ineligible; neither operation retries admission after seeing the other's result. Do not remove/shorten primary windows, widen offset search, change configured sample rates, or exceed existing caps:
-
-- At most **two auxiliary analysis checks** per pair: one disputed recheck and one zero check.
-- Each uses at most **two seconds** of reference content plus the existing comparison search margin.
-- At most **three extra requested-rate scoring pairs**: one for the recheck and two for zero-versus-alternative.
-- All primary and auxiliary FFT work shares the **16,777,216-point total** and **2,097,152-point peak** caps. Reuse a bounded correlation workspace for the zero/nonzero-bin peak comparison; count every actual correlation invocation, not just the eventual candidate.
-- At most **16 analysis-check invocations in total**. A primary plan using all 16 gets no auxiliaries. Retries are not free slots.
-- All separately decoded scoring pairs share the existing **15,000,000-sample total** and **3,000,000-sample per-pair** caps. Existing primary accounting remains intact; new auxiliary scoring is always charged.
-- Retain finite per-process timeouts, sequential extraction, one decoded pair/workspace at a time and deterministic release on failure. No retry of a retry.
-
-At the demanding default fallback/scoring case of five 30-second pairs at 48 kHz:
+For discovery pair `i`:
 
 ```text
-primary scoring = 5 × 2 streams × 30 s × 48,000 samples/s = 14,400,000 samples
-auxiliary scoring = 3 pairs × 2 streams × 2 s × 48,000 samples/s = 576,000 samples
-combined = 14,976,000 samples < 15,000,000 samples
-headroom = 24,000 samples
+Fi = next_power_of_two(n_reference_i + n_comparison_i - 1)
+n_reference_i + n_comparison_i <= Fi + 1
+B_discovery <= 4 * sum(Fi + 1)
+            <= 4 * (16,777,216 + 16)
+            = 67,108,928 bytes
 ```
 
-That calculation covers nominal scoring samples, not the separately charged search/FFT work, and is not permission to ignore rounded endpoints. Reserve exact integer counts, overlap rounding and required padding; if they exhaust the headroom or FFT/check capacity, omit that complete auxiliary operation under the admission rule above. Never shrink primary evidence to make a diagnostic fit. Priority is disputed recheck, then zero check. The total number and duration of operations remain determined by the reserved primary plan and frozen trace, not wall-clock opportunity.
+This is 64 MiB plus 64 bytes. Preallocate only admitted interval capacities; retain read-only views of initialized samples without whole-store copying. Numeric float64 conversions/FFT scratch are additional but restricted to one active pair/workspace.
 
-**Public behavior.** Details/verbose output may contain the local recheck and zero-test outcomes; normal output remains the primary decision with at most one short relevant note. A credible primary contradiction still forces review even when a child recheck favors zero. A changed extraction recipe is a documented estimator change and invalidates affected shared identities; pure diagnostic checks do not.
-
-**Contracts/invariants.** Primary decision/support are frozen before auxiliary checks. Construct the complete immutable audio attempt once primary and admitted auxiliary work settles, then snapshot it before manual review; do not mutate a frozen attempt or its digest later. Neither child may add a vote, meet an independent-support minimum, erase a failed/disputed parent, alter the selected stream, or make a candidate newly authoritative. Retain both local hypothesis scores/rates in a bounded child record for the zero check. Rechecks never run to invent a zero when no candidate exists. New fatal subprocess failures retain typed external-boundary behavior; they are not converted into successful verification or a vote.
-
-**Focused automated tests.** Deterministic target selection; zero-bin boundaries and a stronger nonzero alternative; silence/repetition inconclusive; 14,976,000-sample planning arithmetic with rounding headroom; max-rate/custom-budget/max-16-window skips; no shortened primary plan; no extra vote; contradictory parent survives favorable child; recheck failure cleanup and abort semantics; evidence/DTO byte bounds; identical inputs yield identical auxiliary plan. Verify no estimator bump for truly diagnostic-only checks, and a mandatory new token for an actual extraction repair.
-
-**Runtime/integration/manual proof.** Execute before/after P3 oracle cases on both supported FFmpeg runtimes; demonstrate each shipped auxiliary branch's concrete benefit, correct local labels, unchanged primary trust, bounded commands and peak lifetimes. Run Docker/full Python gates and native Windows review of a child result. Record real decode work and latency; excessive latency without diagnostic value is a no-ship outcome, not justification for more switches.
-
-**Documentation.** CLI/architecture/guide budget and diagnostic-only explanation; record the selected extraction branch or explicit no-change outcome, actual policy identities and measured results here. No claim of global zero confirmation.
-
-**Acceptance criteria.** A shipped extraction repair eliminates the reproduced discrepancy without breaking holdouts or resource caps. Every shipped diagnostic branch adds demonstrable truthful local information while leaving automatic authority identical. Unjustified branches are absent, not hidden behind unused config.
-
-**Rollback.** Remove diagnostic-only branches without invalidating accepted caches. For extraction behavior rollback, issue a new estimator identity and rerun oracle/negative controls. Keep original evidence and report the withdrawn recipe. Never substitute a favorable child for the frozen primary record.
-
-**Stop and replan.** A repair requires unbounded prefix decode, measured origins cannot be established, runtime results disagree, a recheck changes automatic trust, zero verification avoids evaluating alternatives, the fixed budget does not fit the proposed operation, or added latency is not justified by observable diagnostic benefit.
-
-#### P5A execution record — fixed ten-second preroll (2026-09-15)
-
-P5A executed the predeclared fixed-ten-second branch as a test-only experiment
-at candidate `ba5364d9695223f4e866b05a586c5f42c36e7221`
-(`test(alignment): evaluate ten-second extraction
-preroll`). The test patches only the existing test-visible
-`_SEEK_PREROLL_SECONDS` value before calling the production extractor. It
-asserts that the only FFmpeg command change is the `-ss` seek-context value;
-filters, crop, resampling, scoring, correction, output caps and the 120-second
-window timeout remain unchanged. No production source, cache identity,
-estimator token or authority behavior changed. The fixtures are deterministic
-P3 recipes and holdout identities; the original incident media was not used.
-
-The required runtime cells were:
-
-| Runtime | Primary positive-start AAC | Asymmetric positive-start AAC | Grid holdouts |
-| --- | --- | --- | --- |
-| Native macOS arm64, FFmpeg/ffprobe 9.0.1, fingerprint `c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92` | 5s and 10s both returned 945/2048 samples with 29-sample lag; oracle match **false** | 5s and 10s both returned +1115 samples / +1 frame, score `0.8713582429603048`; expected +0f and quality eligibility **false** | 48→8 kHz max lag 0→0 within 1-sample allowance; 44.1→48 kHz max lag 1→1 within 6-sample allowance |
-| Canonical Docker Linux arm64, Debian FFmpeg/ffprobe 7.1.5-0+deb13u1, fingerprint `ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8` | 5s and 10s both returned 2048/2048 samples with zero lag; oracle match **true** | 5s and 10s both returned +0 samples / +0 frames, score `0.9999999999999999`; expected +0f and quality eligibility **true** | 48→8 kHz max lag 3→1 within 1-sample allowance; 44.1→48 kHz max lag 10→12, outside the 6-sample allowance and worse with 10s |
-
-The broader holdouts did not show policy corruption: each runtime accepted all
-80 weak-dissent cases, retained credible conflict for all 80 localized-edit
-cases with zero false accepts, and kept clean, very-quiet, unrelated, silence,
-steady-tone, repeated, wrong-stream and explicit-matching-stream outcomes
-unchanged. The full 160-case matrix and scalar runtime results are recorded in
-`tests/fixtures/alignment_oracle/p5-results.json`.
-
-**P5A disposition: FAIL.** Ten seconds does not eliminate the reproduced
-discrepancy on both supported runtimes, and the Docker 44.1→48 kHz grid holdout
-remains outside allowance and worsens. The ten-second repair is therefore not
-adopted, no estimator identity is bumped, and P4 remains blocked. The next
-authorized branch is **P5B grid-preserving design required**. P5B was not
-executed in this bounded delegation. Windows portable proof and original-media
-reproduction remain outstanding and are not claimed here.
-
-**Verification.** Native `uv run --no-sync pytest -q
-tests/integration/test_alignment_ten_second_preroll.py -rs` passed, including
-the 160-case matrix. The canonical command
-`bash tools/verify_docker_integration.sh --no-build --pytest-path
-tests/integration/test_alignment_ten_second_preroll.py` passed with `6 passed
-in 411.03s`, followed by the Docker runtime/application proof with zero skips.
-The repository-wide `uv run --no-sync pytest -q` exited 0; its expected
-environment-gated skips and the two predeclared P3 XFAIL controls remain
-visible in the report. Ruff, Pyright with the VSView extra, Bandit, and
-`lint-imports --config importlinter.ini` all passed. The first Docker attempt
-hit the container's temporary-disk limit while retaining all 160 generated
-media cases; the test now uses per-case `TemporaryDirectory` cleanup and the
-canonical rerun passed.
-
-#### P5B execution record — grid-preserving resample/PTS crop (2026-09-15)
-
-P5B's test/evidence surface was implemented by `1f4269fb`
-(`test(alignment): evaluate grid-preserving extraction`). It tested exactly one bounded
-design. The experiment sought one selected-stream time-base tick
-before the existing five-second context with `-noaccurate_seek`, retained the decoded
-boundary packet and preroll through `aresample`, normalized the output time base to
-`1/requested_rate`, and cropped with `atrim start_pts/end_pts` against the validated
-selected-stream output-sample origin. The final sample trim, raw output byte cap,
-120-second process timeout, sequential pair lifetime, FFT/scoring limits and window
-limits stayed unchanged. The origin was independently checked against each source's
-continuous decode; requested positions were not recorded as measured origins. The
-test-only recipe and pathless scalar results are retained in
-`tests/integration/test_alignment_grid_preserving_extraction.py` and
-`tests/fixtures/alignment_oracle/p5b-results.json`. No original incident media was
-used.
-
-The design repaired the native macOS positive-start AAC symptom: the origin window
-changed from `945/2048` samples with a 29-sample oracle lag to `2048/2048` with zero
-lag, and the asymmetric clean pair changed from `+1115` samples / `+1f`, score
-`0.8713582429603048`, to `0` samples / `+0f`, score `1.0`. Docker remained correct
-for that pair at `0` samples / `+0f`, score `0.9999999999999999`.
-
-The required grid gate still failed. On native macOS FFmpeg 9.0.1, 48→8 kHz AAC
-worsened from a maximum zero-sample lag to 2 samples against the unchanged one-sample
-allowance. The native 44.1→48 kHz maximum stayed at 1 within its six-sample allowance,
-but its minimum late-window oracle correlation was `0.9335095988695936`. On Debian
-FFmpeg 7.1.5, 48→8 kHz remained 3 samples against allowance 1 and 44.1→48 kHz remained
-10 against allowance 6; its minimum late-window oracle correlation was
-`0.9336318557269901`. Thus validating crop coordinates fixes the boundary-origin
-loss, but bounded AAC resampling still uses a runtime/rate/seek-position-dependent
-sample phase relative to continuous decode.
-
-The safety holdouts remained intact on both runtimes: clean zero, very quiet
-independent noise, unrelated audio, silence, steady tone, repetition, wrong-stream and
-explicit-matching-stream outcomes did not change; all 80 weak-dissent cases per
-runtime remained accepted by the frozen proposal; all 80 localized-edit cases per
-runtime remained credible conflicts with zero false acceptance. All returned primary
-control windows recorded their actual 2,048-sample counts. These negative results do
-not override the failed grid gate.
-
-**P5B disposition: STOP / no ship.** The experimental production edit and tentative
-v6 estimator token were reverted before evidence retention. Production extraction,
-estimator policy `stream-timeline-distributed-2097152-v5`, and shared-cache identity
-are unchanged. No second design, diagnostic recheck, zero-frame diagnostic, widened
-correction radius, whole-track fallback, or P4 work was attempted. P4 remains blocked;
-a focused extraction redesign requires controller and maintainer input.
-
-Observed verification:
+Verification store bound:
 
 ```text
-uv run --no-sync pytest -q tests/integration/test_alignment_grid_preserving_extraction.py -m 'not slow' -rs
-    PASS: 3 passed (tracked evidence plus native primary/grid and clean/signal/stream holdouts)
-uv run --no-sync pytest -q tests/integration/test_alignment_grid_preserving_extraction.py -m slow -rs
-    PASS: 1 passed (native 80 weak-dissent + 80 localized-edit cases)
-docker compose run --rm ... pytest ... -m 'not slow' / -m slow
-    PASS: Docker scalar evidence runs
-bash tools/verify_docker_integration.sh --no-build --pytest-path tests/integration/test_alignment_grid_preserving_extraction.py
-    PASS: 3 passed in 423.01s, zero skips; canonical runtime/application proof passed
+B_verification <= 4 * 15,000,000 = 60,000,000 bytes
 ```
 
-Windows portable and unrelated real-media proof remain outstanding and are not
-claimed. They cannot reverse the demonstrated native-and-Docker stop condition.
+These are alternative phase stores, not additive persistent allocations.
 
-### [ ] P6 — Cross-boundary acceptance, migration rehearsal and release handoff
+### 6.3 Production-sized default example
 
-**Outcome.** Prove the integrated trust/persistence/UI behavior on the actual release candidate and clearly distinguish delivered observability from any estimator work still blocked.
+For a sufficiently long source, five 30-second windows, a 30-second maximum offset, and 8 kHz discovery:
 
-**Owner seams / likely files.** Tests and active authority docs across the preceding owners; native verification fixtures; this plan and release notes. No unrelated cleanup or new release machinery.
+```text
+Reference per interior window:  30 * 8,000 = 240,000 samples
+Comparison search interval:    (30 + 2*30) * 8,000 = 720,000 samples
+Pair total:                    960,000 samples
+FFT size:                      1,048,576 points
+Five-window FFT total:         5,242,880 points
+Conservative retained PCM:     5 * 960,000 * 4 = 19,200,000 bytes
+```
 
-**Public behavior.** No additional product features. Publish the final documented state, cache miss expectations, session regeneration requirement, diagnostic privacy/retention and accepted/provisional/unavailable terminology.
+Ordinary first/last boundary clipping reduces the five-window retention to **17,280,000 bytes** when both selected durations coincide. Admission uses actual integer intervals; 19.2 MB is the conservative unclipped example, not a measured RSS result.
 
-**Contracts/invariants.** Revalidate end-to-end authority flow after integration: raw attempt → snapshot/terminal → metadata v2 → manual/keep-current result v1 → final result/provenance → cache v2 → trim calculation. No stage may substitute a candidate into authority. Verify every warning and preserved attempt after manual zero and after mixed-set keep-current.
+For 48 kHz verification after 8 kHz discovery, `h=6`:
 
-**Dependencies.** P1–P2 for an observability-only release; P3–P4 and any required P5 extraction repair for a release claiming estimator robustness. Optional P5 diagnostic branches must either pass their gate or be explicitly recorded as not implemented. Do not mark an unexecuted package complete to close the plan.
+```text
+One pair with comparison halo:  2*30*48,000 + 2*6 = 2,880,012 samples
+Five pairs:                    14,400,060 samples
+Retained PCM:                  57,600,240 bytes
+Headroom under total cap:      599,940 samples
+```
 
-**Focused automated tests.** Whole-service multi-comparison scenario containing accepted `+0f`, provisional `+0f`, unavailable, and a nonzero trusted/manual value. Test no-save, keep-current, manual confirmation, malformed result and artifact write failure; final trimming must use only authorized values and the normal shared-source-set normalization. Rehearse old cache/schema handling, both cache origins across a policy bump, old sessions, and existing run-local override precedence. Parse JSON stdout independently of all stderr messages.
+Six such pairs exceed the total scoring cap. A request for more qualifying windows must be rejected at planning when it cannot fit; never decode 16 full-size pairs and then discard inconvenient evidence. The spike's 16 two-second intervals do not establish this production capacity.
 
-**Runtime/integration/manual proof.** Run all §8 mandatory gates against the integrated candidate. Physical Windows evidence includes visible text, marker positions, keyboard/tab navigation, focus after saving, scrolling/detailed evidence, no accidental candidate prefill, all input bases, mixed comparisons, close-without-save, and invalid-result refusal. Record the exact tested source/bundle SHA. Hosted/offscreen proof is not a visible desktop pass.
+### 6.4 Scoring and decode work
 
-**Documentation.** Finish same-pass authority updates, add only genuine current screenshots, complete the execution/proof ledger and release notes. When the agreed workstream is complete, mark the tracked plan historical under the runbook. If estimator work remains blocked after a P1–P2 release, keep the workstream active and state the outstanding gate.
+Retain the current maximum of 65,536 sampled positions per overlap-score evaluation. Reserve initial scoring, optional local refinement, and every requested-rate correction hypothesis:
 
-**Acceptance criteria.** All required gates have inspected output at the candidate SHA; every skipped/unsupported cell is identified; no release-blocking Windows, runtime, trust or persistence proof is outstanding for the claimed scope. The release description does not claim the original incident was reproduced or fixed by a known cause.
+```text
+Q = sum_i K_i * min(overlap_i, 65,536)
+```
 
-**Rollback.** Use the coherent rollback boundary of the package being withdrawn. Preserve inert diagnostics, never reuse old session files as migration, and invalidate withdrawn acceptance behavior with a fresh policy identity. No force reset or automatic deletion of user media/generated history.
+Under the selected rate/refinement domains, admit no more than 512 score evaluations per primary window; verify that bound against all supported rate/rounding transitions. Thus `Q <= 16*512*65,536 = 536,870,912` scored positions. Use the actual smaller reservation for normal requests. No uncharged rescoring or diagnostic FFT is allowed.
 
-**Stop and replan.** A final path promotes an untrusted candidate, current docs contradict code, cache/session migration bypasses validation, release packaging excludes tested changes, or physical Windows acceptance exposes unusable/misleading review behavior.
+FFT-point accounting retains the current per-correlation definition; it is not a claim that a correlation performs only one physical FFT transform.
 
-## 8. Verification matrix and canonical commands
+Decode work is bounded by each finite endpoint `H`, the 120-second process deadline, and at most two/four source decodes per comparison. Media duration may increase traversed bytes and latency, not retained PCM. The decode portion is at most 240/480 seconds before bounded cleanup and probes; numerical work is separately admitted. Run totals scale explicitly with the finite comparison count.
 
-All rows are **pending** at plan delivery. Prior report probes and this source inspection are not new execution results. Tests should target exported behavior and boundary effects, using typed/local fixtures; avoid reproducing implementation branches in mocks. [R13]
+### 6.5 RSS and latency release gates
 
-### 8.1 Required proof surfaces
+Require production-size short, 150-second, and multi-hour cases on the supported runtimes. Record absolute and incremental **simultaneously sampled** application-plus-active-FFmpeg RSS; do not add separate historical maxima and call that combined peak. Record sampling cadence, maximum sampling gap, baseline, sample count, and platform method. Target sampling at 20 ms or faster; separately label process high-water measurements.
 
-| Surface | Expected proof / final disposition | Packages | Environment |
-| --- | --- | --- | --- |
-| Four strong zero windows + finite weak cross-frame dissent | P1 retains provisional zero under v5; P4 accepts only qualified support with independent coverage. A finite weak estimate is mandatory, not an injected silence exception | P1, P3, P4 | Unit + real FFmpeg on Linux/Windows |
-| Four strong zeros + strong localized shifted edit | Candidate remains visible but automatic result stays unapplied, including ratio 0.8 and a raised user threshold that excludes the dissent from voting | P1, P3, P4 | Unit + real negative fixture |
-| One success + four recoverable extraction failures | P1 records all failures and preserves legacy outcome; P4 rejects long-source trust and retains a provisional candidate if qualified | P1, P4 | Unit + service integration |
-| All windows unusable | Unavailable; no zero candidate/marker/authority; cause counts survive | P1, P2, P4 | Unit + silent/invalid-signal FFmpeg fixture |
-| Same-frame raw-sample jitter | Same integer bin, observed median, raw values unchanged | P1, P4 | Unit + packetized real fixture |
-| Stream mismatch / explicit override | Actual selected ordinals, metadata rationale and unknown/mismatch facts retained; matching override changes analyzed stream, not labels alone | P1, P3, P4 | Unit + multi-track FFmpeg |
-| Selected duration missing | Preanalysis unavailable, zero work, exact stream/reason retained, no container fallback | P1, P2 | Planner/service/UI |
-| Early/late/asymmetric bounded extraction vs full oracle | Independent output-grid/count/frame/quality comparison; supported-runtime agreement or blocked policy rollout | P3, P5 | Local FFmpeg + Docker/runtime + Windows FFmpeg |
-| Packetization/resampling/priming | 960/1001-sample PCM packets; 44.1/48 kHz; direct/fallback; AAC; both FPS values and offset signs | P3–P5 | Real supported runtimes |
-| Short media / overlapping windows | Full-window short policy; two medium independent intervals; long three-interval rule; custom shapes cannot inflate support | P3, P4 | Unit + short/medium FFmpeg |
-| Accepted +0f / provisional +0f / no candidate | Distinct typed states, exact copy and markers, no truthiness collapse, no implicit confirmation | P1, P2 | Unit + offscreen + visible Windows |
-| Manual zero after rejection | Original attempt/digest preserved; final authority manual; rejected computed result not written as reusable computed evidence | P1, P2, P6 | Service/persistence + native UI |
-| Warm cache without rich history | Honest historical absence; no fabricated stream choice/counts; no fresh analysis solely for display | P1, P2, P6 | Cache/service/UI |
-| Multi-comparison mixed states | One ordered whole-set action; per-pair authority and saved labels; unresolved pairs do not authorize source-set trims | P2, P6 | Service + native Windows |
-| Normal/verbose/quiet/no-color/non-TTY/JSON | Prelaunch explanation, bounded verbose table, no blocking non-TTY read, no ANSI/markup injection, JSON-only stdout and unchanged public shape | P1, P2, P4, P6 | CLI tests, redirected console smoke |
-| Metadata versions / old sessions | v2 accepted; v1/unknown/mixed/malformed rejected; ordinary sessions inert; result v1 still strictly session/bounds/topology validated | P2, P6 | Contract + native package round-trip |
-| Diagnostic artifact safety | Bounded bytes, atomic last-valid snapshot, privacy/path/symlink/IO failures, never cache/trim authority | P1, P6 | Unit/filesystem, Windows path tests |
-| Retry / zero diagnostic | Fixed budget and target, parent preserved, no vote or authority, local zero compared with alternative | P5 | Unit + supported FFmpeg + native details |
-| Native Windows visible acceptance | Accurate text/markers/focus/buttons, actual result round-trip, mixed-set behavior and manual provenance at candidate SHA | P2, P6 | **Physical Windows desktop** |
+The release acceptance ceiling is **512 MiB incremental combined sampled RSS above the pre-alignment baseline**, alongside allocation assertions and a duration-independent retained-memory plateau. This is a measured release gate, not an OS memory sandbox or proof that no sub-sampling transient existed. Unavailable RSS remains an unpassed gate.
 
-### 8.2 Command canon
+Measure actual two-source discovery and, when needed, verification plus correlation/scoring. Report cold/warm filesystem conditions, input container/codec/channels, hardware, tool versions, and each phase's wall time. Do not multiply the single-source 6.080-second spike result into a claimed pair measurement.
 
-Bootstrap exactly as the runbook specifies:
+Keep the 120-second production deadline. If required representative sources cannot complete within it, keep automatic authority held and return the concrete evidence for a bounded resource-contract decision. Do not silently increase timeouts, add a seek fallback, or reopen feasibility by parameter sweep.
+
+## 7. Subprocess lifecycle and cancellation
+
+### 7.1 Streaming owner
+
+Use `Popen` with explicit argument arrays, resolved executable, `shell=False`, binary pipes, and `stdin=DEVNULL`. Preserve portable executable overrides and DLL/PATH isolation. Use unbuffered or equivalently bounded reads so partial chunks are observable without waiting for a full requested read.
+
+Use two owned readers: stdout to the fixed queue; stderr to the fixed capture/counters. Reader completion and reader errors must be distinct from data/EOF. An error must reach the caller even when the data queue is full; an out-of-band first-error slot plus completion/stop events is sufficient. No generic event bus is needed.
+
+Enter cleanup ownership immediately after process creation, including failures while starting either reader or allocating/collecting data. A reader exception is not EOF. A filled interval is not success until process exit, both readers, and payload validation succeed.
+
+Use one monotonic execution deadline through output drainage and normal process completion. Initial OS process creation may itself be non-interruptible; do not claim a stronger wall-clock guarantee than the platform provides. [E8]
+
+### 7.2 Deterministic stop sequence
+
+On timeout, cancellation, reader error, or payload/consumer failure:
+
+1. Record the first causal category and request stop; wake any queue-pressure loop.
+2. Request termination once; allow at most two seconds.
+3. If still running, request kill once; allow at most two further seconds to reap.
+4. Close owned pipes in safe order and join both readers under one additional shared one-second deadline.
+5. Release all PCM and scratch. Preserve the original failure; report cleanup failure separately.
+
+Do not reproduce the spike's second terminate/wait cycle. Queue waits/checks are at most 100 ms. A leftover child or reader is `cleanup_failed`, never successful cleanup or usable PCM. The orchestration boundary must treat incomplete cleanup as fatal rather than continue rendering with a live worker.
+
+On Windows, use supported process termination APIs through `Popen`; do not depend on POSIX signals, `select()` on anonymous pipes, process-group behavior, or FFmpeg reading console input. `kill()` is not a stronger independent signal than `terminate()` on Windows; validate handle release and process exit rather than expecting a POSIX return code. [E8]
+
+The supported launcher is the directly resolved FFmpeg executable, not a shell/wrapper tree. Do not introduce a process-tree manager absent an observed need.
+
+### 7.3 Cancellation through the actual application
+
+Current alignment is invoked synchronously inside the async phase executor. A collector-local synthetic cancellation counter is insufficient. [E7]
+
+R4 makes the internal service/phase invocation awaitable and runs **only the blocking audio computation** in one owned worker thread with a thread-safe cancellation event. Keep cache prompts, diagnostic publication, and existing native-review sequencing in their established execution context; do not move the whole interactive workflow into a thread.
+
+On outer task cancellation, set the event, wait for the worker's cooperative cleanup using a shielded completion path, then re-raise the original cancellation. Cancelling an await does not by itself stop a running thread. No phase output, shared-cache write, review launch, or trim application may occur after cancellation. [E8]
+
+Check cancellation before each process, while consuming output, between comparisons/windows, and between bounded scoring hypotheses. A native FFT already executing is allowed to reach its bounded safe boundary; do not promise instantaneous interruption or kill Python threads. Measure end-to-end cancellation at maximum admitted work.
+
+Preserve existing service error translation and outer optional-versus-forced alignment behavior for ordinary dependency/decode failures. Cancellation must not become a warn-only alignment failure. Incomplete cleanup is explicitly fatal. A best-effort aborted diagnostic may retain scalar facts, but must never mask the original exception or launch optional review from failed PCM.
+
+## 8. Integrity, quality, and authority gates
+
+### 8.1 Gate I — extraction integrity
+
+Require the canonical recipe, frozen source/stream/channel identity, admitted bounds, valid finite retained samples, truthful coordinates/counts/end status, successful process/readers, and complete cleanup. Planned endpoint completion and valid observed EOF are different successful transport outcomes. Failure invalidates that collection's PCM.
+
+For same-runtime/source/recipe tests, retained intervals must match the independent continuous oracle's indexed samples. Do not demand bit-identical output or equal total decoded sample counts between FFmpeg versions. Do not reuse a single-source oracle tolerance derived from a pair's refinement radius.
+
+### 8.2 Gate Q — candidate quality and support
+
+Preserve all successful, weak, failed, short, and unattempted primary rows. Do not collapse missing evidence into zero.
+
+**Base credible/review-qualified:** finite requested-rate score at least **0.90**, peak ratio at least **1.50**, meaningful finite signal/overlap, valid in-range candidate, and correct score-stage provenance. An explicitly unbounded peak may pass; missing/NaN does not. These are policy floors, not calibrated probabilities.
+
+**Voting-qualified:** base credible, at least 90% useful coverage, and thresholds at least `max(base_floor, configured_value)`. Preserve any larger configured minimum-window count. A stricter user threshold must not hide a base-credible contradiction.
+
+**Hard veto:** any base-credible primary estimate in a different applied frame bin prevents automatic acceptance, regardless of majority, configured ratio, diagnostic stability, or a favorable other window. No weighting, adjacent-bin merge, retry-to-majority, or weak-vote denominator manipulation.
+
+Default `consensus_minimum_ratio` stays 1.0 and now means unanimity of voting-qualified windows. Zero voters have no consensus. A ratio below 1.0 cannot override the contradiction veto. Report raw, credible, voting, winning, and independent counts explicitly.
+
+Use the existing `samples_to_frames` convention. Keep raw offsets and the observed lower median within the winning bin. Exact half-frame cases are non-authoritative even though math tests retain the existing tie conversion. For requested-rate verification, a best score at a search edge or an admitted global correction neighborhood crossing a frame-bin boundary is provisional: do not expand the search to force certainty. This is a conservative guard on the existing search domain, not a calibrated statistical error interval.
+
+### 8.3 Temporal support
+
+| Original shared duration `D` | Default plan | Automatic support requirement |
+| --- | --- | --- |
+| `D <= 30 s` | One full shared-duration interval | One qualified interval covering at least 90% of the full candidate-available shared overlap, plus any larger configured minimum. A small custom window is not full-source support merely because it filled. |
+| `30 s < D < 90 s` | Two disjoint endpoint intervals, each `min(30 s, D/2)` | At least two disjoint useful intervals reaching early and late coverage, plus configured minimum. |
+| `D >= 90 s` | Five distributed 30-second intervals | At least three disjoint useful intervals, with one beginning at/before `D/3` and one ending at/after `2D/3`, plus configured minimum. |
+
+For explicit length/stride, preserve the requested shape. Extra rows may satisfy a configured count but overlapping useful intervals do not become independent. No duplicate logical interval can satisfy a larger minimum. Budget-incompatible plans reject before collection; support-incompatible evidence remains provisional/unavailable.
+
+Find a deterministic qualifying disjoint subset using actual useful reference intervals. With at most 16 rows, a bounded subset enumeration of at most 65,536 subsets is acceptable and simpler than a new interval-graph abstraction. Endpoint requirements must hold for the selected subset, not unrelated rows outside it.
+
+One successful window and four failures on a long source never authorize trimming. Same-bin jitter is not by itself a credible cross-frame contradiction. No drift compensation or exhaustive edit guarantee is introduced.
+
+### 8.4 Gate A — automatic authority
+
+Only one service-owned decision path can create `trusted_automatic` and an applied computed result. It requires Gate I, Gate Q, valid application-domain offset, current estimator/cache identity, and the release safety hold being disabled.
+
+While held, an otherwise qualified candidate remains provisional with reason `automatic_authority_held`; other rejection reasons remain visible too. Applied frame/time fields and trusted native hints are null for every computed result. Low-quality or tied evidence stays unavailable rather than being promoted to a hint.
+
+A provisional candidate comes from the unique largest base-review-qualified frame group; ties expose competing details but no single suggestion. Candidates never prefill confirmation inputs, move playheads, satisfy readiness, or enter trim/cache authority.
+
+Manual confirmation is a separate validated fact. Preserve the original attempt object and canonical digest. Keep-current on an unresolved comparison is not zero confirmation.
+
+## 9. Evidence, native projection, identity, and public behavior
+
+### 9.1 Reuse P1/P2 and extend only required facts
+
+Retain the existing immutable attempt/result/provenance association, diagnostic writer, pre-review presentation, and native panel. Add at most four bounded collection summaries per comparison: phase/role, output rate, requested horizon, emitted and retained counts/bytes, completion/end category, observed EOF when known, elapsed time, and cleanup/failure counters.
+
+Window evidence must preserve original planned counts, actual discovery/verification counts, `continuous_sample_count` origin basis, actual useful reference interval, pre-EOF expected overlap, actual coverage, short/empty status, and quality/vote disposition. Derive counts from records or validate redundant serialized totals against them. No raw PCM, arbitrary exception objects, full stderr, media paths, or full commands enter the attempt.
+
+The revised strict evidence shape requires a coordinated **diagnostic schema v2 / native metadata v3** change. Keep native **result v1**, shared-cache **v2**, and manual-override **v1**. New metadata is generated and parsed together; old metadata requires session regeneration. Old diagnostic files remain inert and are not migrated/read for authority. Both diagnostic artifacts and native projections stay within **128 KiB per comparison**.
+
+R2 installs the schema extension before collection integration. During the brief held-v5 intermediate state, collection summaries are explicitly absent/not observed; no fake streaming facts are emitted. This is not a compatibility reader for old native sessions.
+
+Preserve one pre-review snapshot and at most one final envelope update, the original-attempt digest, containment/symlink defenses, and ordinary write-failure warnings without changing authority. Sharing diagnostics still shares bounded labels, source identity digests, stream metadata, and timing facts.
+
+### 9.2 Safety hold and estimator identity
+
+Use one internal release-authority latch, initially held. It has no config, environment, CLI, GUI, or artifact override. Isolated tests may exercise both states; production users cannot bypass it.
+
+Use distinct estimator identities at behavior-changing checkpoints, reserving these descriptive values unless the controller discovers a collision:
+
+```text
+R0: audio-authority-hold-2097152-v6
+R3: continuous-origin-distributed-2097152-v7-held
+R5: continuous-origin-qualified-2097152-v8-held
+R7: continuous-origin-qualified-2097152-v9
+```
+
+Every later extraction/scoring/trust change or behavioral rollback gets a fresh identity. Never restore an old token to resurrect withdrawn cached authority.
+
+Preserve the existing full source-set/config/FPS/trim/selection identity and managed-runtime alignment fingerprint. A policy bump invalidates both computed and shared human-confirmed entries under the existing key design. That conservative inconvenience is preferable to splitting cache identities here. Run-local explicit manual overrides retain precedence; newly confirmed manual results remain eligible under the current identity.
+
+While held, no computed result or embedded computed result is cache-write eligible. Old-policy computed entries cannot bypass the hold. Keep cache schema v2 and accepted-only semantics; do not persist rejected attempts or rich traces there.
+
+Unmanaged-runtime fingerprint limitations remain the existing documented contract: changing unmanaged FFmpeg/decoder binaries requires clearing generated caches/indexes. Do not silently claim binary attestation or add a new runtime-fingerprinting project. Acceptance evidence records actual executable version lines/package/build identities; production fields remain `not_observed` unless actually observed. [E5]
+
+### 9.3 User-facing behavior
+
+Normal stderr, before optional review:
+
+```text
+Audio alignment automatic application is temporarily disabled.
+Audio evidence is available for manual review; no computed correction was applied.
+Comparison 1: provisional +0f. Reason: automatic_authority_held.
+```
+
+Show actual failure/quality/coverage reasons when those gates also fail. After activation, show the new qualified-window policy, raw versus qualified counts, independent support, and any EOF-clamped evidence. Display zero, provisional zero, and absence distinctly.
+
+Use existing quiet/no-color/non-TTY behavior. Actionable rejection/hold notices remain visible in quiet mode. `run --json` stdout is unchanged JSON only; notices are bounded structured stderr events. Preserve existing JSON/interactive incompatibilities, optional/forced review semantics, native whole-set actions, and source-frame validation.
+
+Do not say every source is literally untrimmed: explicit/manual offsets and common-domain normalization may still affect geometry. The guarantee is that computed audio evidence cannot authorize an automatic correction during the hold.
+
+Update current architecture/CLI/guide text in each behavior-changing package. Remove the existing overstated claim that five-second early handling avoids cross-version AAC grids. Do not describe proposed later behavior as already deployed.
+
+## 10. Sequential implementation packages
+
+### Common dispatch, proof, and commit rules
+
+Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R7**. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
+
+Each unit has an effort boundary of one objective, its directly affected callers/tests/docs, and repairs caused by that change. It does not include unrelated cleanup or another architecture experiment. A consequential scope/contract change returns to the controller before dependent work proceeds. Read-only investigation inside the unit and routine implementation judgment do not require a separate planning task.
+
+Use the verification groups in §12. Distinguish `implemented/local proof complete` from `required runtime acceptance complete`. A controller-reviewed candidate commit may be needed for Windows packaging; that commit is not permission to release. Missing host proof stays in the ledger and blocks activation. A failed required test is not converted into a skip or passing gate.
+
+Before R0, the controller installs this replacement at the existing path, verifies its preamble/references and `git diff --check`, and uses:
+
+```text
+docs(plan): replace audio alignment implementation plan
+```
+
+That is a plan-only checkpoint, not another implementation package.
+
+### R0 — Install the automatic-authority safety hold
+
+**Dispatch:** Luna xhigh. The outcome and authority/cache invariants are settled and directly testable.
+**Dependencies:** Installed replacement plan and resolved execution prerequisites.
+
+**Write boundary / likely files:** `services/alignment_consensus.py`, `alignment_correlation.py`, `alignment.py`, `alignment_previous_offsets.py`, `alignment_reuse_cache.py`, their service/orchestration tests, and governing CLI/guide text. Extend existing types only if necessary; do not change extraction or native wire shape here.
+
+**Work:** Install the service-owned internal hold and R0 estimator identity. Reuse existing review-qualified candidate selection, preserving all v5 evidence while making every computed result non-applied. Cover fresh computed results, shared computed hits, and embedded computed results in human-origin cache entries. Preserve explicit/manual authority and original-attempt history. Record the safety-hold reason without pretending other failed gates passed.
+
+**Public behavior:** Explain the hold before review; no computed correction reaches trims. Old shared identities miss, including shared human entries under the existing key design. Newly validated manual results still work and can be cached without embedding rejected computed authority.
+
+**Acceptance/tests:** Through `align_clips_from_request` and the orchestration trim boundary, assert null applied offsets, `applied=false`, null trusted hints, and no computed cache writes for ordinary strong positives and the asymmetric positive-start case. Verify default permissive settings, one survivor/four failures, both offset signs, zero, old computed/embedded cache entries, manual zero, mixed manual/unresolved comparisons, and keep-current. Do not use only the test-only policy evaluator.
+
+**Verification:** G1, G2, G5. Existing native fixture execution supplies regression evidence where available; no extraction change is claimed.
+
+**Rollback:** Do not roll back to trusted v5. Repair the hold or withdraw the candidate; keep manual operation and diagnostics. Any replacement hold identity is fresh.
+
+**Stop/replan:** Any computed/cache path still authorizes trims, a manual decision loses its attempt, or the fix requires weakening native/session validation.
+
+**Controller commit:** `fix(alignment): hold automatic audio authority`
+
+### R1 — Build the production continuous collector
+
+**Dispatch:** Sol medium, justified by pipe concurrency, exception precedence, and Windows process/reader lifetime.
+**Dependencies:** R0.
+
+**Write boundary / likely files:** New `services/alignment_streaming.py`, `services/errors.py`, existing executable-resolution usage, new `tests/services/test_alignment_streaming.py`, focused real-FFmpeg integration tests, and the architecture owner description. Do not replace unrelated `run_subprocess` callers.
+
+**Work:** Implement §§5.2, 5.5, and 7.1–7.2 with preallocated admitted interval buffers, explicit complete/EOF-clamped results, distinct reader errors, one execution deadline, and bounded termination/kill/join. Return PCM only after successful transport and cleanup. Failures expose bounded scalar facts, not a partially usable collection. The owner may be independently tested before R3 wires it into normal alignment.
+
+**Public behavior:** No extraction switch yet; the R0 hold remains. No new configuration or dependencies.
+
+**Acceptance/tests:** Use controlled child processes and injected stream failures to cover fragmented float bytes, EOF, overlapping/disjoint intervals, discarded gaps, excess output, source errors after filled windows, stdout-reader and stderr-reader failure, full queues, sustained stderr beyond 64 KiB, second-reader startup failure, timeout with no output, uncooperative child, and cleanup failure. Use the existing oracle fixtures against the production collector for sample-index regression. These are implementation tests, not a new feasibility program.
+
+**Verification:** G1; focused new owner tests; G3/G4 and Windows process tests as available, with remaining platform cells explicitly pending. Assert readers and children actually terminate rather than merely checking an error return.
+
+**Rollback:** Before integration, remove the unused collector coherently while R0 remains. After R3, withdraw dependent collection behavior under a fresh held identity; do not restore trusted seeks.
+
+**Stop/replan:** Unbounded capture/queues, reader errors disappearing as EOF, a blocked cleanup path, required native dependency, or a need to return failed PCM as usable data.
+
+**Controller commit:** `feat(alignment): add bounded continuous audio collector`
+
+### R2 — Extend retained evidence and the existing native contract
+
+**Dispatch:** Luna xhigh. The existing owners and coordinated schema transition are explicit; proof is contract-focused.
+**Dependencies:** R0–R1; collector scalar return facts are frozen.
+
+**Write boundary / likely files:** `services/types.py`, `alignment_diagnostics.py`, `alignment.py`, `alignment_vsview.py`; `vsview/session_script.py`, `alignment_review_contract.py`, `alignment_review_panel.py`; matching service/native/package contract tests and authority docs.
+
+**Work:** Add only the collection, endpoint, expected/actual useful-overlap, and vote facts in §9.1. Coordinate diagnostic v2/native metadata v3; retain result v1/cache v2/manual v1. Reuse the existing panel, buttons, markers, original-attempt digest, bounded serializer, and atomic writer. During held-v5 operation, new collection facts are explicitly unobserved rather than fabricated.
+
+**Public behavior:** Existing accepted/provisional/unavailable and manual/history presentation remains. New sessions require metadata v3; old sessions are regenerated. Details explain observed EOF and held authority without becoming an authority input.
+
+**Acceptance/tests:** Exact field/topology validation, nonfinite/boolean/bounds rejection, maximum 16-window/four-collection serialization under 128 KiB, old metadata refusal, no candidate autofill/readiness effect, manual-zero digest preservation, mixed-source results, original-attempt retention, disk-full/containment failures, and artifact tampering unable to change application. Native result v1 remains unchanged.
+
+**Verification:** G1, G2, G5, G6; offscreen native contract tests now, physical Windows acceptance in R6. Update existing packaging/verifier fixtures only where they embed the changed metadata contract.
+
+**Rollback:** Revert generator/parser/panel/fixture changes together and regenerate sessions. Leave historical diagnostics inert; no compatibility reader or inferred trust upgrade.
+
+**Stop/replan:** Producer/parser disagreement, serialization overflow, service-policy imports in the panel, changed result actions, or original-attempt mutation.
+
+**Controller commit:** `feat(alignment): retain continuous collection evidence`
+
+### R3 — Integrate staged collection, EOF handling, and production budgets
+
+**Dispatch:** Sol medium, justified by rate/origin translation, verification halos, lifetime transitions, and the production/test extraction boundary.
+**Dependencies:** R0–R2.
+
+**Write boundary / likely files:** `alignment_audio.py`, `alignment.py`, `alignment_consensus.py`, narrowly necessary scoring signatures in `alignment_correlation.py`; distributed/planner/FFmpeg/service tests and the continuous integration fixtures. Update architecture/CLI/guide descriptions and generated API reference.
+
+**Work:** Implement §5's low-rate discovery, sequential reference/comparison stores, scalar candidate staging, complete discovery-store release, and conditional continuous requested-rate verification. Enforce §6's exact worst-case admission, halo accounting, and scoring work. Implement observed EOF without dropping endpoint rows or shrinking evidence denominators/duration tiers. Install the R3 held identity.
+
+Remove independent seeking from the production path. Migrate active regression tests to the new owner/entrypoint and retire obsolete recipe-only experimental runners when they no longer have a live target. Preserve all P3/P5/P6 scalar evidence and immutable historical source links. Do not keep a second production extractor or copy an old seek backend into tests simply to keep obsolete assertions green. Preserve the underlying positive, negative, and boundary regressions.
+
+**Public behavior:** Continuous extraction supplies diagnostics/manual candidates; automatic authority remains held. Oversized requests reject before decoding. No extra stream search, opportunistic retry, or cross-comparison PCM reuse.
+
+**Acceptance/tests:** Actual 30-second windows with 30-second margins; 4/8/48 kHz and noninteger conversion ratios; both signs; asymmetric starts; exact global hypotheses after halos; direct-rate operation; EOF-clamped/empty endpoints; 90% coverage boundary; source identity change between passes; maximum windows/scoring/FFT limits; one active child/workspace; noncoexisting phase stores. Verify known-zero/nonzero candidates through the service without changing correction radius.
+
+**Verification:** G1–G5, including a new production-facing `tests/integration/test_alignment_continuous_pipeline.py`. Same-runtime oracle comparisons exercise the final endpoint-limited recipe, not only the spike primitive. Old expected failures do not count as proof of the replacement.
+
+**Rollback:** Return to held diagnostic/manual operation with a fresh identity. A coherent withdrawal may remove R3 and dependent work, but cannot reactivate old computed cache entries or trusted seeks.
+
+**Stop/replan:** Any sample-origin change is unexplained, expected coverage depends on padded/fabricated samples, actual reservations exceed caps, or a second full decode per individual window becomes necessary.
+
+**Controller commit:** `refactor(alignment): collect distributed windows continuously`
+
+### R4 — Propagate real application cancellation
+
+**Dispatch:** Sol medium, justified by async-to-thread ownership and cancellation across computation, phase output, and subsequent review/cache work.
+**Dependencies:** R0–R3.
+
+**Write boundary / likely files:** `services/alignment.py`, cancellation parameters in the collector/numeric loop, `orchestration/phase_alignment.py`, `execution.py`, service/phase call sites and test support, typed cleanup failure, and directly governing docs.
+
+**Work:** Implement §7.3. Make internal alignment invocation awaitable, offloading only blocking audio computation to one owned thread. Propagate a cancellation event and wait for cleanup before re-raising cancellation. Keep interactive/cache/presentation owners in their established context. Add incomplete-cleanup failure to the phase's fatal handling; ordinary service failure retains its existing outer optional/forced treatment.
+
+**Public behavior:** Cancelling alignment stops further audio work and cannot apply partial phase output, publish a new cache entry, or launch review afterward. No new cancel flag, signal-handler framework, or synchronous compatibility entrypoint.
+
+**Acceptance/tests:** Cancel the actual application task during a discarded gap, queue pressure, requested-rate collection, and bounded scoring; verify no next comparison, phase-output application, review launch, or cache write. Test repeated cancellation while cleanup is awaited, worker error plus cancellation, Ctrl+C behavior, and Windows reader/process release. Measure completion at maximum admitted numeric work; a running native FFT is not represented as instantly interruptible.
+
+**Verification:** G1–G5; focused service and orchestration cancellation tests must execute the real ownership path, not just `cancel_after_samples` in the spike. Update all affected async callers/tests and API reference.
+
+**Rollback:** Keep authority held and revert the caller/worker/cancellation seam coherently. Do not leave an abandoned background worker or revert only one side of an async signature.
+
+**Stop/replan:** The event loop still cannot request cancellation during audio work, cleanup is unawaited, GUI/manual work must be moved into the computation thread, or partial output escapes after cancellation.
+
+**Controller commit:** `fix(alignment): propagate cancellation through audio collection`
+
+### R5 — Implement qualified trust and independent temporal support
+
+**Dispatch:** Luna xhigh. The policy, owner, populations, thresholds, and expected outcomes are settled in §8.
+**Dependencies:** R0–R4.
+
+**Write boundary / likely files:** `alignment_consensus.py`, default-tier planning in `alignment_audio.py`, estimator identity in `alignment_correlation.py`, existing evidence projections as required, policy/planner/service tests, and CLI/guide/architecture text.
+
+**Work:** Implement all three gates, the duration-tier plan, base-credible veto, voting populations, pre-EOF coverage, actual useful support intervals, frame-boundary guard, and unique review candidate. Keep the safety hold enabled and install the R5 held identity. Do not tune floors, add weights, merge frame bins, or broaden correction search.
+
+**Public behavior:** Explain raw versus qualified evidence, shortages, EOF clamping, and credible contradictions. Document the changed meaning of ratio/minimum-window settings. Users' stronger requirements are never reduced. Held results remain provisional/unavailable even when the future authority policy would pass.
+
+**Acceptance/tests:** Four strong windows plus finite weak dissent can satisfy the prospective policy only with independent support; credible shifted evidence vetoes even at ratio 0.8 or with a stricter user threshold excluding it from voting. One survivor/four failures stays provisional. Cover silence, repeated/unrelated audio, wrong streams, exact and neighboring frame boundaries, short/medium/long/custom shapes, overlapping support, explicit minimum five, coverage just below/at 90%, and all failed reasons. Test both internal hold states in isolation without exposing a runtime bypass.
+
+**Verification:** G1–G5. Run labeled controls through the actual production service/policy, not only `evaluate_predeclared_policy`. R6 extends the production codec/runtime/real-media proof.
+
+**Rollback:** Restore held authority under a fresh identity, retaining evidence. Do not restore permissive v5 acceptance or a withdrawn cache identity.
+
+**Stop/replan:** Any credible contradiction is accepted, a failed positive requires tuning against holdouts, actual useful support cannot be established, or the policy needs a different product contract.
+
+**Controller commit:** `fix(alignment): qualify distributed audio evidence`
+
+### R6 — Complete production runtime, resource, and real-media acceptance
+
+**Dispatch:** Sol medium, justified by interpreting cross-runtime measurements, simultaneous RSS, failure precedence, and real-media labels.
+**Dependencies:** R0–R5; R5 policy and collector frozen for measurement.
+
+**Write boundary / likely files:** Production integration tests, `tests/integration/test_alignment_continuous_pipeline.py`, a focused `test_alignment_streaming_resources.py`, existing Windows/runtime verifier fixtures where necessary, scalar `tests/fixtures/alignment_oracle/streaming-production-results.json`, and this ledger/current docs. No estimator tuning is bundled into an evidence task.
+
+**Work:** Complete §11 using production-sized collection, actual two-source discovery and verification, the 120-second process deadline, retained-allocation assertions, simultaneous RSS, and actual application cancellation. Add only test-side platform measurement plumbing; use standard-library/platform facilities rather than a production monitoring dependency. Preserve old scalar files unchanged.
+
+Reuse historical fixture recipes and still-current evidence where applicable. Do not rerun the spike to choose the architecture. Required new executions prove the production implementation, endpoint behavior, policy, full-pair resource use, and previously untested hosts/failures.
+
+Exercise prospective automatic authority through isolated tests of the existing internal latch; the shipped default remains held. Run the one bounded independent read-only review of integrated pipe lifetime and authority/cache paths described in §3.3. The controller adjudicates findings; material fixes return to their bounded owner with a fresh proof record, not an unbounded review loop.
+
+**Acceptance:** Every mandatory matrix cell has an observed result or remains explicitly blocking. Record native/Docker/Windows executable identities, source/bundle SHA, platform/hardware, fixture identity/settings, counts, end status, frame/quality/authority outcomes, phase/pair timings, retained bytes, sampled RSS methodology/results, and cancellation/cleanup. Physical Windows visible review completes the outstanding P2 requirement on the updated metadata contract. Include at least real constant-zero, known signed-offset, and mismatched mix/cut/track pairs with separated visual checks.
+
+**Verification:** G1–G6 plus all §11 measurements. A successful fixture import, skipped long test, offscreen panel, or unchanged historical JSON is not the missing native proof. Candidate commits may precede packaging measurements; record exactly which SHA each execution tested.
+
+**Rollback:** Keep authority held; correct invalid test/instrumentation evidence without erasing the original record. Do not reinterpret failed production proof as successful feasibility.
+
+**Stop/replan:** Any negative gains authority, production-sized allocations/RSS/deadlines fail, required endpoint or cancellation behavior differs across supported runtimes, real-media labels contradict the assumed frame relationship, or a required host is unavailable. Missing proof blocks activation, not the already settled architecture by itself.
+
+**Controller commit:** `test(alignment): verify continuous alignment release gates`
+
+### R7 — Activate only the verified integrated estimator
+
+**Dispatch:** Luna xhigh for the bounded latch/identity/documentation change after the controller verifies R6 acceptance.
+**Dependencies:** R0–R6 accepted; consequential review findings resolved; no missing required runtime/real-media/resource/physical-Windows gate.
+
+**Write boundary / likely files:** The service-owned authority latch, estimator identity, explicit activation/cache/trim tests, release/CLI/guide/architecture text, and this ledger. No extraction, thresholds, planner, or scoring changes.
+
+**Work:** Disable the hold, install the R7 fresh identity, and document the exact delivered support and residual sampling/A/V assumptions. Remove temporary hold-specific user copy from the active path, but keep regression proof and the conservative rollback route.
+
+**Acceptance/tests:** Run unpatched production-default positive and negative service/CLI tests. Verify actual trusted zero/nonzero, provisional/unavailable outcomes, trim inputs, manual preservation, old held-policy cache misses, and current accepted-cache reuse. Rebuild the candidate package from committed source and obtain matching-SHA runtime/visible-native smoke for the changed authority presentation. Do not publish while candidate proof is pending.
+
+**Verification:** G1–G6, reusing unchanged measurements only with an explicit relevance explanation. The unpatched default authority and its cache/UI/trim integration require fresh proof; they are not satisfied by R6's isolated latch tests.
+
+**Rollback:** If activation proof fails, immediately restore the hold in a controller-owned follow-up commit with another fresh estimator identity; do not reuse any earlier token or release the failed candidate. Preserve manual overrides and inert history.
+
+**Stop/replan:** Any default differs from isolated proof, a stale cache bypasses the gates, packaged source differs from tested source, or activation would require an algorithm change. Return that change to its bounded owner and repeat invalidated acceptance.
+
+**Controller commit:** `feat(alignment): enable verified continuous audio alignment`
+
+## 11. Mandatory production verification matrix
+
+This is a covering matrix with explicit required intersections, not a claim that every theoretical Cartesian combination has been exercised. Record cells, recipes, and results. Codec/rate rows require both sources to be compared to their own oracle; pair-authority rows require the actual service and trim boundary.
+
+| Surface | Required cells and assertions |
+| --- | --- |
+| Codec/rates | PCM and AAC, 44.1/48 kHz inputs, 4/8/48 kHz outputs; direct and discovery/verification paths; asymmetric input rates/codecs; both channel strategies and representative multichannel sources. Verify sample coordinates/counts and expected frame/qualification, not cross-build byte equality. |
+| Origins and positions | Origin; former five-second boundary ± one sample; early/middle/late; final windows included. Zero/positive selected-stream starts, negative PTS, common timestamp shifts, asymmetric starts, and independently labeled A/V-origin cases. No padding or automatic timestamp compensation. |
+| EOF integrity | Complete horizon, clean early EOF, the excluded AAC endpoint families, empty last interval, counts above/below 90% coverage, and metadata duration excess. Keep planned rows/denominators and original duration tier. Failed process/reader output cannot use the clean-EOF path. |
+| Frame decisions | Both signs, clean zero, known signed offsets; 24 and 24000/1001 FPS; exact/neighboring half-frame values; halo/global-coordinate conversion; best hypothesis at verification edge. No boundary merge or wider search. |
+| Duration/support | Subsecond, 3, 30, 31, 65, 90, 150–180 seconds; two and three hours. Short full overlap, medium disjoint endpoints, long three-region support, custom overlapping shapes, explicit counts, one survivor/four failures. |
+| Safety controls | Preserve the 80 weak-dissent and 80 localized-edit recipe families plus insertion/deletion/drift controls, all positions/signs/FPS. Extend representative controls to AAC/resampling, not only PCM. Silence, quiet independent noise, unrelated audio, tones, repeats, wrong/explicit streams, stricter user thresholds. No false automatic acceptance in the labeled matrix. |
+| Sampling limitations | Include a local edit inside an analyzed interval and one entirely between intervals. Observed credible conflict must veto; an unseen edit documents the sampling limitation rather than forcing an impossible exhaustive guarantee. |
+| Production resources | Five actual 30-second windows with ±30-second comparison margins; 48 kHz verification plus halos; maximum admitted custom FFT/scoring/window plans and rejected neighbors. Assert allocation formulas, no simultaneous phase stores, zero PCM disk, and one active child/workspace. |
+| RSS/latency | Native macOS, canonical Docker/Linux, and Windows portable. Short and multi-hour pairs; real large containers/storage, not only audio-only synthetic files. Simultaneous parent/child sampling, absolute and incremental RSS, plateau, actual discovery/verification/numeric/pair time, exact 120-second production deadline. |
+| Failure/lifetime | Spawn failure, reader startup/failure, partial float, nonfinite retained data, excess output, source replacement, nonzero exit after filled windows, sustained stderr, full queue, no-output timeout, ignored termination, cleanup failure, repeated cancellation. Observe child/reader/handle release on each supported platform. |
+| Application cancellation | Cancel the real outer task/CLI during discarded gaps, verification, and admitted scoring. No review/cache write/phase application/next comparison afterward. Preserve cancellation and original failure precedence; incomplete cleanup is fatal. |
+| Persistence/authority | Fresh/cached/embedded computed results under hold and activation; manual zero; mixed source sets; keep-current; old identities; malicious diagnostics; metadata mismatch. Only eligible computed or validated manual authority reaches trims. |
+| Native UI/release | Physical Windows, packaged candidate SHA, metadata v3/result v1: accepted/provisional/unavailable and mixed states, details/EOF labels, no prefill, marker bounds, keyboard/focus, both manual bases, close-without-save, keep-current, malformed-result refusal, digest preservation. Offscreen/hosted proof is separate. |
+| Real media | At least constant zero, signed known offset, and mismatched mix/cut/track pairs. Check early/middle/late and disputed intervals visually; record selected streams/runtime/settings privately with share-safe scalar findings. Original incident reproduction is optional and must not be fabricated. |
+
+Controlled tests require correct expected decisions, not only “no exception.” Preserve any failing record before repairs. Unsupported/missing codecs or unavailable platforms are explicit blocked cells, not silently reduced matrix scope.
+
+## 12. Verification command groups
+
+Run commands from the repository root. These are instructions, not executions performed while authoring. Use exact candidate checkout and locked dependencies; inspect test skips. New test paths below become commands only after their owning package creates them.
+
+### G1 — Canonical full Python verification
 
 ```bash
 uv sync --group dev --frozen
-```
-
-Focused selections (adjust a selection only after inspecting the actual local test layout; do not silently replace real integrations with mocks):
-
-```bash
-uv run --no-sync pytest -q tests/services -k alignment
-uv run --no-sync pytest -q tests/vsview
-uv run --no-sync pytest -q tests/orchestration -k alignment
-uv run --no-sync pytest -q tests/cli tests/test_cli_contract_docs.py
-uv run --no-sync pytest -q tests/integration/test_alignment_runtime.py -rs
-# Include the new oracle module once P3 creates it; this selection also reports skips.
-uv run --no-sync pytest -q tests/integration -k alignment -rs
-```
-
-Full Verification, required for product behavior/authority changes in these service/UI/CLI seams:
-
-```bash
 uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
 uv run --no-sync pytest -q
 uv run --no-sync lint-imports --config importlinter.ini
+git diff --check
 ```
 
-Record the exact real tools used by the oracle:
+### G2 — Focused service, orchestration, CLI, and native-contract proof
+
+```bash
+uv run --no-sync pytest -q tests/services -k alignment
+uv run --no-sync pytest -q tests/orchestration -k alignment
+uv run --no-sync pytest -q tests/cli tests/test_cli_contract_docs.py
+uv run --no-sync pytest -q tests/vsview
+# From R1 onward:
+uv run --no-sync pytest -q tests/services/test_alignment_streaming.py
+```
+
+Load the locked VSView extra when required: `uv sync --extra vsview --group dev --frozen`. A mocked missing native runtime does not prove native media behavior.
+
+### G3 — Production native FFmpeg integration and measurements
 
 ```bash
 ffmpeg -version
 ffprobe -version
+uv run --no-sync pytest -q tests/integration -k alignment -rsx
+# From R3 onward:
+uv run --no-sync pytest -q tests/integration/test_alignment_continuous_pipeline.py -rsx
+# From R6 onward; this explicit file must execute its production long/resource cases:
+FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 uv run --no-sync pytest -q tests/integration/test_alignment_streaming_resources.py -rsx
 ```
 
-Canonical Docker/runtime gate, required for changed FFmpeg execution or real runtime integration contracts:
+Mark the expensive resource tests `integration` and `slow`, and require the test-only opt-in `FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1`; no production code reads it. The explicit command above enables those cases. Every mandatory selected resource case must execute; a missing measurement capability or platform prerequisite blocks acceptance rather than becoming a passed skip. Do not use the spike's 900-second override for production acceptance.
+
+Version commands must refer to the executables actually used. In a portable environment, resolve the existing executable overrides and record those binaries' version lines; unrelated PATH versions are insufficient.
+
+### G4 — Canonical Docker/runtime verification
 
 ```bash
 bash tools/verify_docker_integration.sh
 ```
 
-This gate does not prove VSView. A compatible Linux X11 host can additionally execute:
+Select the production pipeline through the existing verifier option, then run the expensive resource tests explicitly in the same verified image:
 
 ```bash
-bash tools/verify_docker_gui.sh
+bash tools/verify_docker_integration.sh --pytest-path tests/integration/test_alignment_continuous_pipeline.py
+docker compose run --rm --no-deps \
+  -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 \
+  --entrypoint python frame-compare-test \
+  -m pytest -q tests/integration/test_alignment_streaming_resources.py -rsx
 ```
 
-That is separate host-dependent GUI/offscreen proof; it does not replace visible Windows acceptance. Do not claim native macOS Docker GUI support or widen X11 access to make a check pass.
+The targeted verifier invocation may satisfy the canonical gate above when its full runtime/application checks run; do not repeat an identical clean gate solely for its default spelling. Use `--no-build` only when the tested image/source/runtime identity is already established as current. Confirm the resource command uses that same candidate image and no stale bind mount. Record Debian package identity, FFmpeg/ffprobe versions, architecture, image/build context, candidate SHA, and output. Docker does not prove native Windows or visible VSView.
 
-Windows portable build/validation route:
+### G5 — Documentation, public contracts, and generated reference
+
+```bash
+uv run --no-sync python scripts/generate_api_docs.py --check
+uv run --no-sync pytest -q tests/test_cli_contract_docs.py
+git diff --check
+```
+
+When signatures change, regenerate with `uv run --no-sync python scripts/generate_api_docs.py` and inspect the generated diff. For the strict site build, use the runbook's locked docs environment:
+
+```bash
+uv sync --group dev --group docs --locked
+uv run --no-sync zensical build --clean --strict
+```
+
+Do not leave new behavior described only in this internal plan; update the current architecture, CLI contract, and audio guide in the package that changes it.
+
+### G6 — Distribution and Windows portable/visible acceptance
+
+Use the runbook's Python distribution verification for new module inclusion and changed installed/internal entrypoints:
+
+```bash
+distribution_dir=$(mktemp -d "${TMPDIR:-/tmp}/frame-compare-dist.XXXXXX")
+uv build --out-dir "$distribution_dir"
+uv venv "$distribution_dir/venv" --python 3.13
+"$distribution_dir/venv/bin/python" scripts/verify_distribution.py "$distribution_dir"
+uv pip install --python "$distribution_dir/venv/bin/python" "$distribution_dir"/*.whl
+"$distribution_dir/venv/bin/frame-compare" version
+"$distribution_dir/venv/bin/frame-compare" --help
+```
+
+On Windows:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 -PublicKeyPath tools/windows_portable/update_public_key.xml
@@ -1164,114 +784,53 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_porta
 dist/frame-compare-portable-win-x64/frame-compare.ps1 doctor --json
 ```
 
-Use an isolated generated fixture config with `audio_alignment.use_vsview = true` for optional review and the existing `--force-interactive-alignment` route for forced validation. Generate sessions through Frame Compare, not a hand-authored script that bypasses its expected source set. Run the visible scenarios in §8.1 and save evidence outside tracked product outputs unless intentionally added to documentation.
+Extend the existing build-owned native Python proof to exercise the production collector and service with generated fixtures, reusing its interpreter, executable overrides, and runtime setup. Do not assume pytest is installed in a clean bundle or add test dependencies to the release artifact. Run the larger failure matrix in the test environment against the packaged media executables, and separately measure the actual bundled application through its existing launcher. Record which layer each proof covers. Capture visible native review on the physical Windows desktop through Frame Compare-generated sessions, not hand-authored metadata.
 
-**Packaging caveat:** the pinned Windows builder packages application source and wheel metadata from committed `HEAD`, excluding uncommitted application changes. Record the packaged SHA and relevant worktree differences. A successful old-HEAD bundle does not verify an uncommitted candidate. Candidate commits/build dispatches require implementation/release authorization; this planning task does not grant it. Hosted matching-SHA packaging/offscreen success still leaves the physical Windows UI pass outstanding. [R13]
+The portable builder packages application source/wheel metadata from committed HEAD. A clean old-HEAD bundle cannot validate uncommitted source edits. Candidate commits are controller-owned checkpoints; publication remains blocked until matching-SHA proof passes. Hosted package/offscreen success cannot replace physical Windows acceptance. No unrelated updater/signing/native-runtime refresh is part of this workstream. [E5]
 
-If P2 changes package inclusion or installed entry-point behavior, also run the runbook's Python distribution verification or observe the matching-SHA `package` job; existing entry-point tests are not a substitute. No native dependency or signing/updater change is planned, so do not expand this task into a media-runtime refresh.
+## 13. Evidence recording, release posture, and execution ledger
 
-Documentation/structural checks:
+### 13.1 Evidence handling
 
-```bash
-git diff --check
-uv run --no-sync python scripts/generate_api_docs.py --check
-uv run --no-sync pytest -q tests/test_cli_contract_docs.py
-```
+Keep `p3-results.json`, `p5-results.json`, `p5b-results.json`, and `p6-results.json` as historical evidence. Do not overwrite their dispositions with production outcomes. New production scalar evidence records its own purpose, schema, tested source SHA, runtime identity, exact executed commands, fixtures/settings, results, and explicit limitations.
 
-Regenerate `docs/api.md` with the canonical generator if tracked API output changes. For a strict documentation-site build, use the runbook environment transition:
+Store no real media, PCM, absolute private paths, credentials, full stderr, or packet dumps in tracked scalar evidence. Retain fixture recipe identities and safe hashes/labels as appropriate. Measurements of retained bytes, sampled combined RSS, process high-water memory, and whole-pair latency are distinct fields. Null/unavailable is not zero or passed.
 
-```bash
-uv sync --only-group docs --locked
-uv run --no-sync python scripts/generate_api_docs.py --check
-uv run --no-sync zensical build --clean --strict
-# Restore both environments before subsequent Python gates.
-uv sync --group dev --group docs --locked
-```
+No test count alone establishes a population error rate. An evaluator result is not the final service result; a source-only oracle match is not an A/V mapping proof; single-source traversal is not pair timing; a collector-local cancellation test is not outer application cancellation.
 
-No test command, successful exit, or CI check may be reported as proving a cell that skipped or did not exercise its actual boundary. Reuse still-current observed proof; rerun affected checks when code, fixtures or runtime identity changes.
+### 13.2 Immediate and final release posture
 
-## 9. Migration and rollout strategy
+Until R7 passes, automatic computed authority remains held. A diagnostics/manual-only release may proceed only with its own complete applicable Python/native/physical-Windows acceptance and clear hold disclosure. It must not claim the estimator redesign or original incident is fixed.
 
-**Stage A — diagnostic release (P1–P2).** Keep v5 automatic behavior and shared schema v2. Introduce diagnostic schema v1, metadata v2/result v1, original-attempt preservation and exact UI language. Old cache entries remain eligible under current identity; their detailed history is unavailable. Regenerate VSView sessions after upgrading. This release fixes diagnostic loss and manual-review ambiguity, not the acceptance policy's one-survivor safety limitation.
+Do not ship either rejected P5 extraction experiment, trusted v5 as a rollback, a PCM-only policy branch, an unbounded whole-track path, or an unverified timeout/RSS claim. Required missing evidence keeps the hold; it does not justify bypass flags or another automatic fallback.
 
-**Stage B — measured policy release (P3–P4).** Require the oracle and negative-control gate, fix any reproduced primary extraction defect first, then ship quality-qualified voting/coverage under a new estimator token. Keep the default ratio 1.0 and publish its new denominator/minimum-window semantics prominently. Expect fresh computation/review because the current cache key invalidates both old computed and human-confirmed shared entries. Preserve accepted-cache schema v2; no migration/backfill.
+After activation, publish the actual qualified policy, cache invalidation, session regeneration, EOF handling, resource ceilings, and finite-sampling/A/V limitations. Manual confirmation remains separate from computed evidence. Record rollback as a new held identity, never an old-policy resurrection.
 
-**Stage C — justified local diagnostics (P5).** Ship a recheck/zero diagnostic only when the fixed gate demonstrates benefit and its primary-decision invariance is proven. Otherwise record it as not implemented; no placeholder flags, unused types or hidden runtime switches. A standalone extraction repair must use its own changed policy identity and cannot be smuggled into a supposedly diagnostic-only rollout.
+### 13.3 Controller-maintained ledger
 
-**Acceptance rehearsal (P6).** Start with a warm v2 cache lacking detailed history; open a fresh metadata-v2 session containing mixed states; manually confirm a rejected zero; reopen the resulting run diagnostic; verify its original attempt/digest; validate the final cache contains only eligible authority; then repeat under the new estimator token to prove misses for both old origins. Exercise rollback without deleting old artifacts or accepting stale session files.
-
-Before local implementation, compare the working branch with the pinned source at the changed seams. Preserve unrelated work and record any rebase/integration differences. Only one active plan should govern this workstream; consolidate any overlapping active plan under the runbook rather than creating competing authorities.
-
-## 10. Risks, rollback notes and explicit release blockers
-
-| Risk | Mitigation / blocking condition |
-| --- | --- |
-| Candidate accidentally enters trusted-offset field or normalized trims | End-to-end authority tests are mandatory. Any occurrence blocks every rollout, including diagnostic-only releases. |
-| Fixed quality floors reject useful legitimate mixes | Floors are a conservative proposal with required positives/holdouts; failed gate keeps P1–P2 only. Do not tune on the holdout set or claim score calibration. |
-| Filtering hides a real edit | Base-credible contradiction veto, independent coverage and per-window trace. A raised configured threshold cannot hide a credible dissent. Any negative false acceptance blocks P4. |
-| Five rows mistaken for independent observations | Non-overlap and first/last-third support checks; medium-source planning; custom-window failures remain explicit. |
-| Bounded extraction has runtime-dependent sample origins | Independent continuous oracle on both supported runtimes; no assumed-as-measured timestamps or blind offset correction. A trust-relevant discrepancy blocks new acceptance on that supported path. |
-| Manual confirmation launders an audio rejection into computed provenance | Immutable original attempt plus separate human outcome; accepted-only cache serialization. Manual zero regression is release-blocking. |
-| Cached authority shown as fresh analysis | Historical availability state and separate manual/computed provenance; never fabricate windows or selected streams. |
-| Audit files leak media paths or become a cache | Pathless bounded schema, documented sharing/retention, no engine read path, adversarial artifact tests. |
-| Metadata/result version coupling or stale-session acceptance | Separate versions, coordinated producer/consumer rollout, explicit regeneration and unchanged result session/frame checks. |
-| Auxiliary probes hide contradictions or consume unbounded work | At most two short checks/three scoring pairs within fixed caps; primary decision frozen; no retry loop or vote. |
-| UI passes offscreen but is confusing on Windows | Visible physical-host acceptance with captures, keyboard and mixed-state checks. Connector/source review cannot clear this blocker. |
-| Rollback reuses withdrawn-policy cache entries | New estimator identity for behavioral rollback; no in-place migration or re-adoption of an old token. |
-
-**Release blockers for Stage A:** provisional-to-authority leakage; missing prelaunch explanation; manual attempt loss; JSON stdout drift; uncontained/unsafe writes; misleading historical claims; mixed-state/result-validation failures; metadata producer/consumer mismatch; required full/native tests not executed; visible Windows review not accepted.
-
-**Additional Stage B blockers:** any mandatory oracle/policy control failure, any strong-edit/wrong-stream/drift false acceptance, one-survivor long-source acceptance, changed policy without cache invalidation, concealed config semantic change, or exceeded primary budgets. Stage A may still ship as diagnostic-only with those Stage B blockers explicitly open.
-
-**Additional P5 blockers:** no demonstrated diagnostic benefit, a child alters authority/support, zero testing omits alternatives, fixed auxiliary reservation cannot cover actual work, or an extraction change lacks two-runtime oracle proof. Do not add a configuration switch to route around a failed gate.
-
-No rollback may authorize untrusted offsets, weaken session validation, remove containment, default null to zero, restore whole-track production decoding, or delete user media. Retained diagnostic files are safe to leave behind because they are never authority.
-
-## 11. First executable implementation handoff
-
-**Execute P1 only after implementation is authorized.** Start from the named branch and compare its relevant owners to `326da610a1f6d9baee7ea58d509f05f59af0f004`; preserve local work. Read `AGENTS.md`, the runbook's planning/full-verification/persistence sections, current architecture/CLI sections, and the execution-plan, persistence, CLI, runtime, architecture and test-design skills. This plan settles product behavior; helper names, local test organization and routine source discovery remain implementation judgment.
-
-The first slice is:
-
-1. Add the minimal immutable attempt/decision/leaf contracts and tests proving that provisional `+0f` cannot be an applied offset.
-2. Capture selected-stream facts and one bounded record per planned interval, including failure categories/counts, without changing FFmpeg argv or the current v5 acceptance gates.
-3. Derive a rejected review candidate separately using the fixed display floor and unique-group rule; preserve raw estimates and legacy automatic results.
-4. Carry the original attempt through `AlignmentResult`, current-run provenance, validated manual replacement and immutable orchestration state. Keep cache `computed_result` accepted-only.
-5. Add the contained atomic diagnostic writer, pre-review snapshot, final human-outcome update and basic prelaunch explanation. Keep JSON stdout and shared schema/policy unchanged.
-6. Run focused service/persistence/CLI regressions, then the full canonical Python gate and available relevant FFmpeg integration proof. Inspect the diff and artifact schema/size. Record any missing runtime proof honestly.
-
-**P1 handback must include:** changed owner seams; observed before/after automatic-outcome equivalence; the four-strong/one-weak provisional-zero example; the manual-zero preserved-attempt example and digest; a warm-cache historical-absence example; actual diagnostic file location/size/privacy check; stdout/stderr assertions; exact tests executed/skipped; and unresolved native/runtime gates. Do not proceed to quality filtering, a ratio change, metadata v2, unbounded probes or extraction redesign while completing this first package.
-
-**Completion ledger — populate during authorized implementation:**
-
-| Package | Status | Candidate SHA / proof references | Outstanding blockers |
+| Unit | Initial state | Integrated SHA | Proof and outstanding acceptance |
 | --- | --- | --- | --- |
-| P1 — evidence and persistence | Complete | `14d82237011da0e2efd518ed6c70e64e732d9a21`; execution record above | None; later-package native/oracle gates remain scoped to P2/P3/P6 |
-| P2 — terminal/native UX | Implementation complete; native acceptance outstanding | `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`; execution record above | Physical-Windows visible VSView and portable bundle proof |
-| P3 — oracle and policy gate | Complete; extraction stop gate reached | `7f342a6208944e53a4e48c77d3449ffdc05e9085`; execution record and tracked scalar evidence above | Windows portable and identifiable real-media evidence outstanding |
-| P4 — acceptance policy | Blocked on focused extraction redesign | None | P3, P5A and P5B leave supported-runtime primary extraction discrepancies unresolved |
-| P5 — extraction/local checks | P5A failed; P5B stopped/no ship | P5A `ba5364d9695223f4e866b05a586c5f42c36e7221`; P5B `1f4269fb`; execution records and scalar evidence above | Both predeclared bounded designs failed the two-runtime grid gate; a newly authorized focused extraction design is required |
-| P6 — integrated release proof | Not started | None | Scope-appropriate gates above |
+| Plan replacement | Authored; installation pending | — | No implementation/test execution claimed by authoring. |
+| R0 safety hold | Not started | — | Hold is absent at inspected head. |
+| R1 streaming owner | Not started | — | Production failure/lifecycle and Windows proof required. |
+| R2 evidence/native extension | Not started | — | Reuse P1/P2; extend exact contract and complete visible acceptance. |
+| R3 staged extraction | Not started | — | Production endpoints/margins/rate coordinates/budgets required. |
+| R4 application cancellation | Not started | — | Outer-task cancellation and cleanup required. |
+| R5 trust policy | Not started | — | Actual policy and service proof; authority still held. |
+| R6 production acceptance | Not started | — | Runtime, RSS, real-media, Windows, and bounded independent review required. |
+| R7 activation | Blocked by R0–R6 acceptance | — | Unpatched defaults and packaged candidate proof required. |
 
-## Source and authority record
+For each checkpoint record task model/effort actually used, owner disposition, files, commit, commands/results/skips, evidence locations, unresolved risks, and the next permitted unit. Do not mark a package accepted from intended tests. When the workstream and release handoff are complete, change this file to `Status: Historical` in the same pass; otherwise keep the unresolved gate explicit.
 
-Repository references below are pinned to the starting SHA. They establish the existing behavior and ownership, not successful execution of this plan. Numeric display/quality/coverage floors, duration tiers, artifact byte bounds and auxiliary reservations are **new design decisions in this plan**, subject to the explicit gates above where they affect automatic acceptance.
+## 14. Source record
 
-**R1 — Supplied investigation:** “Frame Compare audio-alignment false negatives and diagnostic UX,” supplied as `frame-compare-audio-alignment-investigation.md` (mounted upload name included `(1)`). The uploaded bytes have SHA-256 `16fcd933880be679946b931d9112139d07c3c671a2b732a129e7e9a2cf428838`. The report's isolated execution and commit analysis are prior evidence, not tests rerun here.
+Repository references are pinned to the inspected pushed state unless explicitly historical. Source inspection is separate from recorded measurements; proposed contracts/budgets in this replacement are design decisions, not claims that current production already implements them.
 
-- **R2:** [Pinned consensus owner](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/services/alignment_consensus.py): all-successful voting, winner-level gates, skip behavior and evidence loss.
-- **R3:** [Pinned alignment service](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/services/alignment.py): result projection, trusted-offset map, manual replacement and provenance sequencing.
-- **R4:** [Pinned service types](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/services/types.py): existing result/provenance/config/stability contracts; [orchestration alignment phase](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/orchestration/phase_alignment.py): applied-result invariant, final warnings and trim inputs.
-- **R5:** [Current CLI contract, audio alignment](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/docs/current-cli-contract.md#L1359-L1500): public defaults, exact sign convention, cache policy and fixed budgets.
-- **R6:** [Pinned audio IO/selection owner](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/services/alignment_audio.py): typed timing, stream rankings, default planning and extraction facts.
-- **R7:** [Pinned planner/extractor implementation](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/services/alignment_audio.py#L534-L840): budget accounting and early/late paths.
-- **R8:** [Native review contract](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/vsview/alignment_review_contract.py): metadata/result v1 constants, exact topology, trusted paths and typed results.
-- **R9:** [Native review panel](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/vsview/alignment_review_panel.py): draft readiness, marker behavior, manual inputs and whole-set keep/save actions.
-- **R10:** [Shared alignment reuse cache](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/src/frame_compare/services/alignment_reuse_cache.py): schema v2, source-set identity and estimator token participation.
-- **R11:** [Audio-alignment guide](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/docs/guides/audio-alignment.md): cache/manual versions, native workflow and visual verification limits.
-- **R12:** [Current architecture](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/docs/current-architecture.md#L334-L470) and [import layers](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/importlinter.ini): managed paths, immutable alignment state, service/native boundaries and allowed direction.
-- **R13:** [Engineering runbook](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/docs/ENGINEERING_RUNBOOK.md), [AGENTS.md](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/AGENTS.md), and [repo-local skills](https://github.com/TJZine/frame-compare/tree/326da610a1f6d9baee7ea58d509f05f59af0f004/.agents/skills): command canon, risk/verification, active-plan policy and simplicity/boundary guidance. Read for this plan: `execution-plan-authoring`, `persistence-boundaries`, `cli-contract-boundaries`, `runtime-integration-boundaries`, `architecture-boundaries`, `python-test-design`.
-- **R14:** [Runtime alignment tests](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/tests/integration/test_alignment_runtime.py) and [native-review tests](https://github.com/TJZine/frame-compare/tree/326da610a1f6d9baee7ea58d509f05f59af0f004/tests/vsview): existing fixture/boundary test locations. Further exact test discovery belongs to implementation.
-- **R15:** [Current CLI stream/mode contract](https://github.com/TJZine/frame-compare/blob/326da610a1f6d9baee7ea58d509f05f59af0f004/docs/current-cli-contract.md#L355-L505): JSON/VSView incompatibility, structured stderr versus human output, quiet success behavior and ASCII non-TTY presentation.
-- **X1:** [Official FFmpeg filters: atrim](https://ffmpeg.org/ffmpeg-filters.html#atrim), checked September 14, 2026: timestamp-based and sample-count trimming have different semantics when timestamps are inexact or nonzero.
-- **X2:** [Official FFmpeg command documentation](https://ffmpeg.org/ffmpeg.html), checked September 14, 2026: input seek/accurate-seek and timestamp behavior. This is supporting rationale for the oracle, not evidence that the repository's specific media incident was caused by seeking.
+- **E1 — Pushed lineage and preserved plan:** [inspected head](https://github.com/TJZine/frame-compare/commit/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a), [initial collector feasibility](https://github.com/TJZine/frame-compare/commit/38293b3a2d5dc4b06411f12e4aaf1ce324435921), and [the pre-replacement active plan, including historical execution records](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md).
+- **E2 — Completed feasibility scalar evidence:** [p6-results.json](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/tests/fixtures/alignment_oracle/p6-results.json). These are prior measured results, not production acceptance.
+- **E3 — Feasibility implementation and oracle:** [test_alignment_continuous_streaming_collector.py](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/tests/integration/test_alignment_continuous_streaming_collector.py) and [alignment_oracle.py](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/tests/integration/alignment_oracle.py).
+- **E4 — Preserved failed-extraction and policy evidence:** [P3](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/tests/fixtures/alignment_oracle/p3-results.json), [P5A](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/tests/fixtures/alignment_oracle/p5-results.json), and [P5B](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/tests/fixtures/alignment_oracle/p5b-results.json); historical execution details remain in E1.
+- **E5 — Workflow and current contract:** [AGENTS.md](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/AGENTS.md), [runbook](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/docs/ENGINEERING_RUNBOOK.md), [architecture](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/docs/current-architecture.md), [CLI contract](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/docs/current-cli-contract.md), [.codex/config.toml](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/.codex/config.toml), [Luna profile](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/.codex/agents/worker-luna.toml), [Sol profile](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/.codex/agents/worker.toml), and [repo-local skills](https://github.com/TJZine/frame-compare/tree/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/.agents/skills).
+- **E6 — Ponytail:** [upstream full-mode skill inspected for this plan](https://github.com/DietrichGebert/ponytail/blob/main/skills/ponytail/SKILL.md), Git blob `02c0712c86277d49d18a77da3a2b825657bf02d1`. This does not identify the implementation host's installed version; resolve that at bootstrap.
+- **E7 — Production owners inspected:** [alignment services](https://github.com/TJZine/frame-compare/tree/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/src/frame_compare/services), [phase_alignment.py](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/src/frame_compare/orchestration/phase_alignment.py), [execution.py](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/src/frame_compare/orchestration/execution.py), and [subproc.py](https://github.com/TJZine/frame-compare/blob/0df9c369a9abf19de3cce87de95ccd50ef7ecf1a/src/frame_compare/utils/subproc.py).
+- **E8 — Python primary documentation:** [Python 3.13 subprocess](https://docs.python.org/3.13/library/subprocess.html) and [Python 3.13 asyncio task/thread/cancellation APIs](https://docs.python.org/3.13/library/asyncio-task.html). Platform and cancellation facts support the lifecycle contract; they are not evidence that the new implementation has been tested.
