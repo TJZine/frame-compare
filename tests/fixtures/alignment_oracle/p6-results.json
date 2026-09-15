@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "purpose": "p6_continuous_streaming_collector_scalar_evidence",
+  "environment": {
+    "alignment_runtime_fingerprint": "c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92",
+    "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffprobe": "ffprobe version 9.0.1 Copyright (c) 2007-2026 the FFmpeg developers",
+    "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+    "runtime_kind": "unmanaged"
+  },
+  "additional_environments": {
+    "docker_linux_arm64": {
+      "alignment_runtime_fingerprint": "ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8",
+      "ffmpeg": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 7.1.5-0+deb13u1 Copyright (c) 2007-2026 the FFmpeg developers",
+      "focused_cases": 4,
+      "focused_pytest_wall_clock_seconds": 4.12,
+      "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+      "runtime_kind": "docker",
+      "status": "passed_zero_skips"
+    },
+    "windows_x64_portable": {
+      "status": "outstanding_not_executed"
+    }
+  },
+  "experiment": {
+    "collector_output_sample_rate": 8000,
+    "collector_argv_recipe_sha256": "c463c5b423396a7f86d08cf9cad2e00ecc91117f2802d53a451cac167b110840",
+    "float32_bytes": 4,
+    "fixed_stdout_read_chunk_bytes": 65536,
+    "bounded_stderr_capture_bytes": 65536,
+    "bounded_pipe_queue_chunks": 8,
+    "retention_policy": "incremental chunks; interval intersections only; intervening samples discarded",
+    "production_changed": false,
+    "public_contract_changed": false,
+    "peak_rss": {
+      "bytes": null,
+      "reason": "portable combined parent/child peak RSS requires platform-specific sampling or a new dependency; no approximation recorded",
+      "status": "unavailable"
+    },
+    "boundary_note": "AAC stream tags include encoder padding; discrepancy evidence uses fully observable pre-end planned intervals and records that endpoint exclusion."
+  },
+  "sections": {
+    "short_deterministic_control_native": {
+      "source": {
+        "codec": "pcm_s16le",
+        "duration_seconds": 12.0,
+        "input_sample_rate": 48000,
+        "output_sample_rate": 8000,
+        "stream_start_seconds": 0.0
+      },
+      "planned_interval_starts": [0, 24000, 48000, 72000, 94000],
+      "expected_counts": [2000, 2000, 2000, 2000, 2000],
+      "returned_counts": [2000, 2000, 2000, 2000, 2000],
+      "planned_interval_count": 5,
+      "total_output_bytes": 384000,
+      "total_output_samples": 96000,
+      "max_retained_bytes": 40000,
+      "wall_clock_decode_seconds": 0.03598966599383857,
+      "oracle_equal_samples": true,
+      "maximum_oracle_lag_samples": 0,
+      "minimum_oracle_correlation": 0.9999999999999998,
+      "process": {
+        "exit_code": 0,
+        "timed_out": false,
+        "cleanup_completed": true,
+        "stderr_bytes_drained": 0
+      }
+    },
+    "positive_start_aac_native": {
+      "source": {
+        "codec": "aac",
+        "duration_seconds": 12.023,
+        "input_sample_rate": 44100,
+        "output_sample_rate": 8000,
+        "stream_start_seconds": 2.0
+      },
+      "planned_interval_starts": [0, 32000, 64000],
+      "expected_counts": [2048, 2048, 2048],
+      "returned_counts": [2048, 2048, 2048],
+      "planned_interval_count": 3,
+      "total_output_bytes": 384152,
+      "total_output_samples": 96038,
+      "max_retained_bytes": 24576,
+      "wall_clock_decode_seconds": 0.04031741699145641,
+      "oracle_equal_samples": true,
+      "maximum_oracle_lag_samples": 0,
+      "independent_seek_baseline_48k": {
+        "bounded_count": 945,
+        "oracle_count": 2048,
+        "measured_lag_samples": 29,
+        "correlation": 0.2849456268582016
+      },
+      "process": {
+        "exit_code": 0,
+        "timed_out": false,
+        "cleanup_completed": true,
+        "stderr_bytes_drained": 0
+      }
+    },
+    "ordinary_late_aac_native": {
+      "source": {
+        "codec": "aac",
+        "duration_seconds": 12.021,
+        "input_sample_rate": 48000,
+        "output_sample_rate": 8000,
+        "stream_start_seconds": 0.0
+      },
+      "planned_interval_starts": [0, 32000, 64000],
+      "expected_counts": [4096, 4096, 4096],
+      "returned_counts": [4096, 4096, 4096],
+      "planned_interval_count": 3,
+      "total_output_bytes": 384344,
+      "total_output_samples": 96086,
+      "max_retained_bytes": 49152,
+      "wall_clock_decode_seconds": 0.04174337501171976,
+      "oracle_equal_samples": true,
+      "maximum_oracle_lag_samples": 0,
+      "independent_seek_baseline": {
+        "bounded_count": 4096,
+        "oracle_count": 4096,
+        "measured_lag_samples": 1,
+        "correlation": 0.9406339937020306
+      },
+      "process": {
+        "exit_code": 0,
+        "timed_out": false,
+        "cleanup_completed": true,
+        "stderr_bytes_drained": 0
+      }
+    },
+    "cancellation_cleanup_native": {
+      "source": {
+        "codec": "aac",
+        "duration_seconds": 30.0,
+        "input_sample_rate": 48000,
+        "output_sample_rate": 8000,
+        "stream_start_seconds": 0.0
+      },
+      "expected_counts": [240000],
+      "returned_counts": [16384],
+      "planned_interval_count": 1,
+      "total_output_bytes": 65536,
+      "total_output_samples": 16384,
+      "max_retained_bytes": 65536,
+      "wall_clock_decode_seconds": 0.03402958399965428,
+      "process": {
+        "cancelled": true,
+        "exit_code": 255,
+        "timed_out": false,
+        "termination_requested": true,
+        "kill_requested": false,
+        "cleanup_completed": true,
+        "stderr_bytes_drained": 0
+      }
+    },
+    "long_compressed_traversal_native": {
+      "source": {
+        "codec": "aac",
+        "duration_seconds": 10800.0,
+        "input_sample_rate": 48000,
+        "output_sample_rate": 8000,
+        "stream_start_seconds": 0.0
+      },
+      "planned_interval_starts": [0, 21540000, 43080000, 64620000, 86160000],
+      "expected_counts": [240000, 240000, 240000, 240000, 240000],
+      "returned_counts": [240000, 240000, 240000, 240000, 240000],
+      "planned_interval_count": 5,
+      "total_output_bytes": 345600000,
+      "total_output_samples": 86400000,
+      "max_retained_bytes": 4800000,
+      "wall_clock_decode_seconds": 6.822971500005224,
+      "oracle_comparison": "not_run; three-hour output exceeds the existing 256 MiB oracle cap",
+      "process": {
+        "exit_code": 0,
+        "timed_out": false,
+        "cleanup_completed": true,
+        "stderr_bytes_drained": 0
+      }
+    },
+    "docker_focused_cases": {
+      "short_deterministic_control": "passed",
+      "positive_start_aac": {
+        "collector_counts": [2048, 2048, 2048],
+        "collector_total_output_samples": 96224,
+        "collector_max_retained_bytes": 24576,
+        "collector_wall_clock_decode_seconds": 0.06432691699592397,
+        "oracle_equal_samples": true,
+        "maximum_oracle_lag_samples": 0,
+        "independent_seek_baseline": {
+          "bounded_count": 2048,
+          "oracle_count": 2048,
+          "measured_lag_samples": 0,
+          "correlation": 0.9980300688371073
+        }
+      },
+      "ordinary_late_aac": {
+        "collector_counts": [4096, 4096, 4096],
+        "collector_total_output_samples": 96256,
+        "collector_max_retained_bytes": 49152,
+        "collector_wall_clock_decode_seconds": 0.0635837919980986,
+        "oracle_equal_samples": true,
+        "maximum_oracle_lag_samples": 0,
+        "independent_seek_baseline": {
+          "bounded_count": 4096,
+          "oracle_count": 4096,
+          "measured_lag_samples": 4,
+          "correlation": 0.9999997169865329
+        }
+      },
+      "cancellation_cleanup": {
+        "returned_counts": [16384],
+        "total_output_bytes": 65536,
+        "total_output_samples": 16384,
+        "wall_clock_decode_seconds": 2.105345750998822,
+        "termination_requested": true,
+        "kill_requested": true,
+        "cleanup_completed": true,
+        "exit_code": -9
+      }
+    }
+  },
+  "decision": {
+    "status": "CONDITIONAL",
+    "reason": "Correctness, bounded interval retention, and cleanup passed native and Docker focused cases. Native three-hour traversal is 6.822971500005224 seconds, a material interactive-latency input that needs product validation; combined parent/child peak RSS is unavailable and Windows portable proof remains outstanding.",
+    "recommendation": "GPT Pro should account for full-stream traversal latency, fixed pipe/retention bounds, explicit cancellation escalation, AAC metadata-padding endpoints, and separate Docker/Windows resource validation before treating this as a production design."
+  }
+}
