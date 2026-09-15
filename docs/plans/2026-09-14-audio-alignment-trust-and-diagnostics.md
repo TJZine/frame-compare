@@ -19,8 +19,10 @@ Owner: Frame Compare implementation session
 P2 implementation is complete at `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`
 with physical-Windows acceptance outstanding; P3 is verified at
 `7f342a6208944e53a4e48c77d3449ffdc05e9085`. P3 demonstrated a primary
-extraction discrepancy, so the P5 repair branch must run before P4. P4 and P6
-remain blocked or pending as recorded below.
+extraction discrepancy, so the P5 repair branch must run before P4. P5A's
+fixed-ten-second branch was evaluated at
+`ba5364d9695223f4e866b05a586c5f42c36e7221` and failed its two-runtime
+gate; P5B is required. P4 and P6 remain blocked or pending as recorded below.
 
 ## Executive recommendation and report adjudication
 
@@ -874,7 +876,7 @@ evidence does not reverse the demonstrated cross-runtime extraction stop conditi
 
 **Stop and replan.** Any credible edit/wrong-stream negative is accepted, the holdout improvement requires lowered thresholds or weighted voting, configuration meaning cannot be disclosed, coverage depends on fabricated decoded origins, or primary work budgets must increase. Do not mask these failures with retry-to-majority logic.
 
-### [ ] P5 — Evidence-gated extraction repair and bounded local diagnostics
+### [~] P5 — Evidence-gated extraction repair and bounded local diagnostics
 
 **Outcome.** Repair a specifically demonstrated extraction-grid defect at its smallest owner, if one exists. Add only those short diagnostic rechecks that the experiments show provide useful explanations. Do not use local rechecks to promote a rejected constant offset.
 
@@ -935,6 +937,55 @@ That calculation covers nominal scoring samples, not the separately charged sear
 **Rollback.** Remove diagnostic-only branches without invalidating accepted caches. For extraction behavior rollback, issue a new estimator identity and rerun oracle/negative controls. Keep original evidence and report the withdrawn recipe. Never substitute a favorable child for the frozen primary record.
 
 **Stop and replan.** A repair requires unbounded prefix decode, measured origins cannot be established, runtime results disagree, a recheck changes automatic trust, zero verification avoids evaluating alternatives, the fixed budget does not fit the proposed operation, or added latency is not justified by observable diagnostic benefit.
+
+#### P5A execution record — fixed ten-second preroll (2026-09-15)
+
+P5A executed the predeclared fixed-ten-second branch as a test-only experiment
+at candidate `ba5364d9695223f4e866b05a586c5f42c36e7221`
+(`test(alignment): evaluate ten-second extraction
+preroll`). The test patches only the existing test-visible
+`_SEEK_PREROLL_SECONDS` value before calling the production extractor. It
+asserts that the only FFmpeg command change is the `-ss` seek-context value;
+filters, crop, resampling, scoring, correction, output caps and the 120-second
+window timeout remain unchanged. No production source, cache identity,
+estimator token or authority behavior changed. The fixtures are deterministic
+P3 recipes and holdout identities; the original incident media was not used.
+
+The required runtime cells were:
+
+| Runtime | Primary positive-start AAC | Asymmetric positive-start AAC | Grid holdouts |
+| --- | --- | --- | --- |
+| Native macOS arm64, FFmpeg/ffprobe 9.0.1, fingerprint `c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92` | 5s and 10s both returned 945/2048 samples with 29-sample lag; oracle match **false** | 5s and 10s both returned +1115 samples / +1 frame, score `0.8713582429603048`; expected +0f and quality eligibility **false** | 48→8 kHz max lag 0→0 within 1-sample allowance; 44.1→48 kHz max lag 1→1 within 6-sample allowance |
+| Canonical Docker Linux arm64, Debian FFmpeg/ffprobe 7.1.5-0+deb13u1, fingerprint `ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8` | 5s and 10s both returned 2048/2048 samples with zero lag; oracle match **true** | 5s and 10s both returned +0 samples / +0 frames, score `0.9999999999999999`; expected +0f and quality eligibility **true** | 48→8 kHz max lag 3→1 within 1-sample allowance; 44.1→48 kHz max lag 10→12, outside the 6-sample allowance and worse with 10s |
+
+The broader holdouts did not show policy corruption: each runtime accepted all
+80 weak-dissent cases, retained credible conflict for all 80 localized-edit
+cases with zero false accepts, and kept clean, very-quiet, unrelated, silence,
+steady-tone, repeated, wrong-stream and explicit-matching-stream outcomes
+unchanged. The full 160-case matrix and scalar runtime results are recorded in
+`tests/fixtures/alignment_oracle/p5-results.json`.
+
+**P5A disposition: FAIL.** Ten seconds does not eliminate the reproduced
+discrepancy on both supported runtimes, and the Docker 44.1→48 kHz grid holdout
+remains outside allowance and worsens. The ten-second repair is therefore not
+adopted, no estimator identity is bumped, and P4 remains blocked. The next
+authorized branch is **P5B grid-preserving design required**. P5B was not
+executed in this bounded delegation. Windows portable proof and original-media
+reproduction remain outstanding and are not claimed here.
+
+**Verification.** Native `uv run --no-sync pytest -q
+tests/integration/test_alignment_ten_second_preroll.py -rs` passed, including
+the 160-case matrix. The canonical command
+`bash tools/verify_docker_integration.sh --no-build --pytest-path
+tests/integration/test_alignment_ten_second_preroll.py` passed with `6 passed
+in 411.03s`, followed by the Docker runtime/application proof with zero skips.
+The repository-wide `uv run --no-sync pytest -q` exited 0; its expected
+environment-gated skips and the two predeclared P3 XFAIL controls remain
+visible in the report. Ruff, Pyright with the VSView extra, Bandit, and
+`lint-imports --config importlinter.ini` all passed. The first Docker attempt
+hit the container's temporary-disk limit while retaining all 160 generated
+media cases; the test now uses per-case `TemporaryDirectory` cleanup and the
+canonical rerun passed.
 
 ### [ ] P6 — Cross-boundary acceptance, migration rehearsal and release handoff
 
@@ -1133,7 +1184,7 @@ The first slice is:
 | P2 — terminal/native UX | Implementation complete; native acceptance outstanding | `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`; execution record above | Physical-Windows visible VSView and portable bundle proof |
 | P3 — oracle and policy gate | Complete; extraction stop gate reached | `7f342a6208944e53a4e48c77d3449ffdc05e9085`; execution record and tracked scalar evidence above | Windows portable and identifiable real-media evidence outstanding |
 | P4 — acceptance policy | Blocked on P5 extraction repair | None | P3 demonstrated runtime-dependent primary extraction discrepancies; rerun this exact matrix after P5 |
-| P5 — extraction/local checks | Required extraction branch; not started | P3 evidence above | Execute the predeclared ten-second-preroll decision branch on both supported runtimes before any P4 work |
+| P5 — extraction/local checks | P5A failed; P5B required | `ba5364d9695223f4e866b05a586c5f42c36e7221`; execution record and `tests/fixtures/alignment_oracle/p5-results.json` above | Ten seconds does not pass the two-runtime oracle/holdout gate; execute the predeclared grid-preserving P5B branch before any P4 work |
 | P6 — integrated release proof | Not started | None | Scope-appropriate gates above |
 
 ## Source and authority record

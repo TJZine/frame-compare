@@ -14,7 +14,7 @@
   "environments": {
     "native_macos_arm64": {
       "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
-      "ffprobe": "ffprobe version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 9.0.1 Copyright (c) 2007-2026 the FFmpeg developers",
       "alignment_runtime_fingerprint": "c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92",
       "runtime_kind": "unmanaged",
       "platform": "macOS-27.0-arm64-arm-64bit-Mach-O"
