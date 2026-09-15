@@ -192,6 +192,7 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     probe_code = mock_run.call_args.args[0][2]
     assert "import PySide6" in probe_code
     assert "import vsview" in probe_code
+    assert probe_code.index("preload_vapoursynth_runtime()") < probe_code.index("import PySide6")
     assert "from vsview import set_output" in probe_code
     assert "frame-compare-alignment-review" in probe_code
     assert "eps[0].load()" in probe_code
@@ -237,6 +238,60 @@ def test_managed_python_children_ignore_hostile_inherited_python_paths(
     assert not shadow_marker.exists()
 
 
+def test_preloaded_vapoursynth_wins_over_hostile_generated_session_module(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    session = write_vsview_session_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key=_audio_review_map({"ref:comparison": 0}),
+        cache_dir=workspace / "generated",
+    )
+    hostile_marker = tmp_path / "hostile-vapoursynth-imported"
+    (session.parent / "vapoursynth.py").write_text(
+        f"from pathlib import Path\nPath({str(hostile_marker)!r}).touch()\n"
+        "raise RuntimeError('hostile VapourSynth shadow loaded')\n",
+        encoding="utf-8",
+    )
+
+    runtime_dir = tmp_path / "selected-runtime"
+    runtime_dir.mkdir()
+    safe_marker = tmp_path / "selected-vapoursynth-imported"
+    (runtime_dir / "vapoursynth.py").write_text(
+        f"from pathlib import Path\nPath({str(safe_marker)!r}).touch()\ncore = object()\n",
+        encoding="utf-8",
+    )
+    source_dir = Path(__file__).parents[2] / "src"
+    probe_code = f"""
+import sys
+sys.path.insert(0, {str(source_dir)!r})
+sys.path.insert(0, {str(runtime_dir)!r})
+from frame_compare.vsview.launcher import preload_vapoursynth_runtime
+preload_vapoursynth_runtime()
+sys.path.insert(0, {str(session.parent)!r})
+import vapoursynth
+assert vapoursynth.__file__ == {str(runtime_dir / "vapoursynth.py")!r}
+"""
+
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-c", probe_code],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=10.0,
+        env=_build_vsview_child_env(no_color=False),
+        cwd=Path(sys.executable).resolve().parent,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert safe_marker.exists()
+    assert not hostile_marker.exists()
+
+
 def test_launch_rejects_missing_panel_entry_point(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,7 +327,6 @@ def test_windows_startup_readiness_preloads_before_vsview(
 ) -> None:
     mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-    monkeypatch.setattr("frame_compare.vsview.adapter.runtime_kind", lambda: "windows-portable")
 
     _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
 
@@ -508,7 +562,6 @@ def _execute_generated_script(
             if audio_review_by_key is None
             else audio_review_by_key
         ),
-        bootstrap_paths=[tmp_path],
         frame_props_by_stem=default_props,
         presentation_names_by_stem=presentation_names_by_stem,
     )
@@ -712,7 +765,6 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         comparisons=[tmp_path / "a.mkv"],
         suggested_offsets_by_key={"ref:a": 0},
         audio_review_by_key=_audio_review_map({"ref:a": 0}),
-        bootstrap_paths=[tmp_path],
     )
 
     assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 3

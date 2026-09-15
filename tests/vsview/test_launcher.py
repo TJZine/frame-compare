@@ -65,7 +65,7 @@ def test_windows_portable_visible_launcher_keeps_font_warmup(monkeypatch) -> Non
     assert events == ["vapoursynth", "run:vsview:__main__:True"]
 
 
-def test_unmanaged_launcher_only_runs_vsview(
+def test_unmanaged_launcher_preloads_before_vsview(
     monkeypatch,
 ) -> None:
     events: list[str] = []
@@ -91,7 +91,7 @@ def test_unmanaged_launcher_only_runs_vsview(
 
     launcher.main()
 
-    assert events == ["run:vsview:__main__:True"]
+    assert events == ["vapoursynth", "run:vsview:__main__:True"]
 
 
 def test_preload_vapoursynth_runtime_uses_managed_environment(monkeypatch) -> None:

@@ -1,4 +1,4 @@
-"""Managed Windows VSView bootstrap."""
+"""Managed VSView runtime bootstrap."""
 
 from __future__ import annotations
 
@@ -27,10 +27,12 @@ def disable_offscreen_cjk_warmup() -> None:
 
 
 def main() -> None:
-    if runtime_kind().casefold() == "windows-portable":
-        preload_vapoursynth_runtime()
-        if os.environ.get("QT_QPA_PLATFORM", "").casefold() == "offscreen":
-            disable_offscreen_cjk_warmup()
+    preload_vapoursynth_runtime()
+    if (
+        runtime_kind().casefold() == "windows-portable"
+        and os.environ.get("QT_QPA_PLATFORM", "").casefold() == "offscreen"
+    ):
+        disable_offscreen_cjk_warmup()
     runpy.run_module("vsview", run_name="__main__", alter_sys=True)
 
 

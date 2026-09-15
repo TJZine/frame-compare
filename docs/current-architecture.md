@@ -486,9 +486,9 @@ applying confirmed offsets; its service, persistence, override, cache, and CLI/c
 boundaries remain unchanged and it does not parse terminal input. The
 `frame_compare.vsview.adapter` remains the composition boundary for the current
 interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
-child-process lifetime. On the Windows portable runtime, `frame_compare.vsview.launcher`
-loads the managed VapourSynth environment before VSView. For Qt's headless `offscreen`
-platform only, the launcher skips VSView's Windows CJK font-cache warmup because that
+child-process lifetime. `frame_compare.vsview.launcher` loads the selected VapourSynth
+environment before VSView on every runtime. For Qt's headless `offscreen` platform on
+Windows portable only, the launcher skips VSView's CJK font-cache warmup because that
 upstream worker stalls in the non-display Windows runtime; visible launches retain it.
 
 ## External Boundaries
@@ -884,7 +884,7 @@ Runtime ownership matrix:
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
-| VSView availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
+| VSView availability, launch adapter, and selected media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |

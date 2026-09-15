@@ -20,7 +20,6 @@ from pathlib import Path
 
 import structlog
 
-from frame_compare.vs.runtime_contract import runtime_kind
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewSession,
@@ -264,11 +263,10 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
         "    raise RuntimeError('Frame Compare alignment panel entry point is unavailable')\n"
         "eps[0].load()\n"
     )
-    if runtime_kind().casefold() == "windows-portable":
-        probe_code = (
-            "from frame_compare.vsview.launcher import preload_vapoursynth_runtime; "
-            f"preload_vapoursynth_runtime(); {probe_code}"
-        )
+    probe_code = (
+        "from frame_compare.vsview.launcher import preload_vapoursynth_runtime; "
+        f"preload_vapoursynth_runtime(); {probe_code}"
+    )
     probe_command = [sys.executable, "-c", probe_code]
     try:
         result = subprocess.run(  # nosec B603
@@ -373,7 +371,7 @@ def _resolve_launch_command(script_path: Path) -> list[str]:
     """Resolve the launch command for VSView.
 
     The managed launcher keeps VSView and the packaged Frame Compare panel in the
-    current interpreter. On Windows it also preloads VapourSynth before Qt.
+    current interpreter and preloads VapourSynth before Qt on every runtime.
     """
     return [
         sys.executable,

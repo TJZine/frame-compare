@@ -1,8 +1,7 @@
-"""VSView session script generation and workspace bootstrapping.
+"""VSView session script generation.
 
 This module is responsible for construction of the VapourSynth session script
-used for interactive alignment verification, including workspace root detection
-and path bootstrapping.
+used for interactive alignment verification.
 """
 
 from __future__ import annotations
@@ -52,14 +51,11 @@ def write_vsview_session_script(
     sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
-    bootstrap_paths = _resolve_bootstrap_paths(cache_dir)
-
     script_content = _build_script_content(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
         audio_review_by_key=audio_review_by_key,
-        bootstrap_paths=bootstrap_paths,
         frame_props_by_stem=frame_props_by_stem,
         presentation_names_by_stem=presentation_names_by_stem,
     )
@@ -98,38 +94,6 @@ def _reserve_empty_file(path: Path) -> bool:
     return reserved
 
 
-def _resolve_bootstrap_paths(cache_dir: Path) -> list[Path]:
-    """Resolve stable bootstrap import roots for generated VSView scripts."""
-    resolved_cache_dir = cache_dir.resolve()
-    workspace_root = _find_workspace_root(resolved_cache_dir)
-    project_root = _find_project_root(resolved_cache_dir, workspace_root)
-
-    bootstrap_paths: list[Path] = []
-    for candidate in (project_root, project_root / "src", workspace_root):
-        if candidate not in bootstrap_paths:
-            bootstrap_paths.append(candidate)
-    return bootstrap_paths
-
-
-def _find_workspace_root(cache_dir: Path) -> Path:
-    """Find the nearest ancestor that looks like a Frame Compare workspace root."""
-    for candidate in (cache_dir, *cache_dir.parents):
-        if (candidate / "config").is_dir():
-            return candidate
-
-    if cache_dir.name == "cache" and cache_dir.parent.name == "generated":
-        return cache_dir.parent.parent
-    return cache_dir.parent
-
-
-def _find_project_root(cache_dir: Path, workspace_root: Path) -> Path:
-    """Find the nearest ancestor that can import the local frame_compare package."""
-    for candidate in (cache_dir, *cache_dir.parents):
-        if (candidate / "src" / "frame_compare").is_dir():
-            return candidate
-    return workspace_root
-
-
 def _build_script_header() -> str:
     return '''\
 #!/usr/bin/env python3
@@ -157,22 +121,6 @@ logging.getLogger("vsview.app.workspace.loader").addFilter(
     )
 )
 '''
-
-
-def _build_bootstrap_section(bootstrap_paths: list[Path]) -> str:
-    bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
-    return f"""\
-# ─── sys.path Bootstrap ───────────────────────────────────────────────────────
-# Make imports work in "run from repo" mode without deriving roots from __file__
-_BOOTSTRAP_PATHS = [
-{bootstrap_path_lines}
-]
-
-for _raw_path in _BOOTSTRAP_PATHS:
-    _p = Path(_raw_path)
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-"""
 
 
 def _build_helpers_section() -> str:
@@ -678,7 +626,6 @@ def _build_script_content(
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int | None],
     audio_review_by_key: dict[str, str],
-    bootstrap_paths: list[Path],
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
 ) -> str:
@@ -687,7 +634,6 @@ def _build_script_content(
     This content is deterministic for the same inputs (no timestamp in body).
     """
     header = _build_script_header()
-    bootstrap = _build_bootstrap_section(bootstrap_paths)
     helpers = _build_helpers_section()
     clip_data = _build_clip_data_section(
         reference,
@@ -699,4 +645,4 @@ def _build_script_content(
     )
     main_execution = _build_main_execution_section()
 
-    return f"{header}\n\n{bootstrap}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"
+    return f"{header}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"
