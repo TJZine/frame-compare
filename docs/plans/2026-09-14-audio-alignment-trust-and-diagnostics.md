@@ -15,8 +15,12 @@ Owner: Frame Compare implementation session
 **Pinned starting SHA:** `326da610a1f6d9baee7ea58d509f05f59af0f004`
 **Intended tracked path:** `docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md`
 **Plan date:** September 14, 2026
-**Execution state:** P1 verified at `14d82237011da0e2efd518ed6c70e64e732d9a21`.
-P2–P6 remain pending or evidence-gated as recorded below.
+**Execution state:** P1 verified at `14d82237011da0e2efd518ed6c70e64e732d9a21`;
+P2 implementation is complete at `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`
+with physical-Windows acceptance outstanding; P3 is verified at
+`7f342a6208944e53a4e48c77d3449ffdc05e9085`. P3 demonstrated a primary
+extraction discrepancy, so the P5 repair branch must run before P4. P4 and P6
+remain blocked or pending as recorded below.
 
 ## Executive recommendation and report adjudication
 
@@ -686,7 +690,7 @@ input bases, no provisional prefill/playhead/readiness effect, keep-current save
 close-without-save, malformed-result refusal and the actual result-v1 round trip. This
 is the remaining P2 release blocker; macOS offscreen proof is not a substitute.
 
-### [ ] P3 — Continuous-decode oracle and predeclared policy evaluation
+### [x] P3 — Continuous-decode oracle and predeclared policy evaluation
 
 **Outcome.** Establish whether bounded extraction changes frame decisions or quality eligibility relative to continuous decoding, and whether the fixed P4 policy improves the demonstrated failure without accepting negative controls. This is test/evidence work, not an unbounded production path or a release of new thresholds.
 
@@ -735,6 +739,116 @@ For additional real-media confidence, document at least a constant-zero pair, a 
 **Rollback.** Remove an invalid fixture/helper or revert test-only work without changing production or caches. Preserve failing scalar evidence when revising a fixture. Do not delete contradictory results just because a positive suite passes.
 
 **Stop and replan.** Oracle shares the suspected extraction path, fixture labels cannot be established independently, a supported runtime behaves differently in a trust-relevant way, or the fixed proposal fails a predeclared gate. Additional arbitrary parameter sweeps are outside this package.
+
+**Execution record (2026-09-15, native macOS arm64 and Docker/Linux arm64).**
+Implemented by `7f342a6208944e53a4e48c77d3449ffdc05e9085`
+(`test(alignment): add continuous decode oracle`). The package adds only test-owned
+oracle/evaluator infrastructure, deterministic fixture generation, the focused runtime
+matrix, and pathless scalar evidence at
+`tests/fixtures/alignment_oracle/p3-results.json`. No production source, estimator
+behavior, default, cache identity, extraction command, UI policy, configuration, or
+application-authority owner changed.
+
+The oracle is independent of the bounded path in the exact relevant sense: it invokes
+one FFmpeg input from the selected stream's origin, with no input `-ss` and no `atrim`,
+resamples once, writes raw float32 output to a scoped temporary file, and slices that
+continuous output by output-sample index in Python. It never calls
+`extract_audio_window` to produce expected samples. Each reference and comparison is
+decoded into and compared with its **own** oracle slice before pair-level conclusions
+are evaluated, so equal bounded-path bias in a self-pair cannot cancel. The production
+estimator imports none of this code.
+
+Fixture recipes and labels were frozen before the holdout runs. Recipes use seeded
+PCM source generation and FFmpeg remux/encode commands assembled as argument arrays;
+the scalar evidence records recipe SHA-256 identities, runtime-specific generated-media
+SHA-256 identities, rates, packet observations, positions, signs, FPS values, scores,
+lags, counts, and outcomes. No media, absolute path, environment value, raw sample,
+packet listing, or private metadata is tracked. The real-pipeline policy matrix was:
+
+| Family | Cells | Result under the exact proposed P4 evaluator |
+| --- | ---: | --- |
+| Clean zero and signed ±2,400-sample controls; 24 and 24000/1001 FPS | 6 | 6 accepted; 0 false rejects; minimum requested-rate score `0.9999336239930832`; both sources checked against their own oracle |
+| Finite weak 4:1 dissent; four holdout seeds, all five positions, both signs/FPS | 80 | 80 accepted; weak scores `0.2152675274718276..0.23373965616436304`, offsets `-2400..+2401` samples, minimum strong score `0.9691901406627084` |
+| Credible localized edit; four holdout seeds, all five positions, both signs/FPS | 80 | 80 `credible_conflict`; 0 false accepts; nonzero scores `0.9997668861872178..0.999811440634269` |
+| Insertion/deletion step and drift; four seeds, both signs/FPS | 32 | 0 accepted |
+| Silence, very quiet independent noise, unrelated audio, steady tone, repeated segment; both FPS values | 10 | 0 accepted; all `no_candidate` |
+| One survivor plus four typed failures | 1 | Unapplied: `insufficient_temporal_support` |
+| Wrong automatic stream / explicit matching-stream override | 2 | Wrong stream `no_candidate`; explicit matching override accepted `+0f` |
+| Short/medium/long support boundaries | 8 | Full short, disjoint medium early/late, and distributed long support accepted; overlapping medium and long support missing the final third rejected |
+
+The clean PCM/resampling/packetization cells cover 44.1/48 kHz sources; 4/8/48 kHz
+output paths; Matroska 960/1001-sample packet treatments; origin, 5-second boundary,
+early/middle/late positions; both offset signs; and signed PCM stream starts. AAC cells
+record priming PTS and lossy waveform deltas rather than require byte equality. Exact
+half-frame checks retain the current ties-to-even behavior and distinct adjacent bins.
+The largest clean signed-control PCM grid lag was zero output samples. The largest
+recorded resampled waveform delta was `0.17351511120796204`; this did not change any
+clean frame bin or proposed-policy eligibility.
+
+The extraction gate nevertheless failed, with different available-runtime observations:
+
+- Native macOS FFmpeg 9.0.1, 44.1 kHz AAC resampled to 48 kHz with a +2-second selected
+  stream start, returned only `945/2048` requested bounded samples at origin and a
+  29-sample grid lag. In the asymmetric clean pair, the two independent continuous
+  oracle prefixes were byte-identical at the checked 4,096 samples, while the bounded
+  pipeline produced `+1115` samples / `+1f`, score `0.8713582429603048`, peak ratio
+  `6.485486119359482`, and coverage `0.9965482824586209`; the proposed `0.90` quality
+  floor therefore abstained instead of accepting the oracle's clean `+0f` relationship.
+- Docker Debian FFmpeg 7.1.5 passed that positive-start AAC pair, but ordinary late AAC
+  bounded slices diverged from the continuous grid by 3 samples at an 8 kHz requested
+  path with a 1-sample allowance, and by 10 samples for 44.1→48 kHz with a 6-sample
+  allowance. PCM packetized controls stayed on the oracle grid. These are explicit
+  expected-failure cells, not skips or widened tolerances.
+
+The supported Docker result reaches the first predeclared extraction gate; the
+different unmanaged-native result further narrows the repair experiment. **Disposition:
+a primary extraction discrepancy is demonstrated and
+the P5 repair branch must run before P4.** The fixed P4 quality/coverage proposal itself
+had zero false accepts/rejects in the finite matrix above, but it is not approved for
+production while extraction can change frame/eligibility evidence. No numeric floor was
+tuned on holdouts, no correction allowance was widened, and the evidence makes no claim
+about a population error rate or the original incident's cause.
+
+Actual runtime identities:
+
+```text
+Native macOS arm64: ffmpeg 9.0.1; ffprobe 9.0.1
+alignment fingerprint: c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92
+Docker/Linux arm64: Debian ffmpeg/ffprobe 7.1.5-0+deb13u1
+package: 7:7.1.5-0+deb13u1
+alignment fingerprint: ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8
+```
+
+Exact verification commands and observed outcomes:
+
+```text
+uv run --no-sync pytest -q tests/integration/test_alignment_continuous_decode_oracle.py -m 'not slow' -rsx
+    PASS: 124 passed, 2 expected extraction failures
+uv run --no-sync pytest -q tests/integration/test_alignment_continuous_decode_oracle.py -m slow -rs
+    PASS: 4 passed
+uv run --no-sync pytest -q tests/integration/test_alignment_runtime.py tests/integration/test_alignment_audio_seek.py -rs
+    PASS: 12 passed
+bash tools/verify_docker_integration.sh --no-build --pytest-path tests/integration/test_alignment_continuous_decode_oracle.py
+    PASS: 126 passed, 2 expected Debian AAC extraction failures, 0 skips;
+    canonical runtime/provenance/native-linkage/Vulkan/application artifact proof passed
+uv run --no-sync pyright --warnings                           PASS; 0 errors/warnings
+uv run --no-sync ruff check .                                  PASS
+uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+                                                               PASS; 0 medium/high issues
+git diff --check                                               PASS
+```
+
+Each full 180-second, 48 kHz mono oracle is at most 34,560,000 bytes; two sources
+total 69,120,000 bytes below the 256 MiB cap. Decodes and pair work are sequential.
+Every subprocess has an explicit timeout. `TemporaryDirectory` owns raw files and the
+memmap is released before directory cleanup, including exception unwinding; only scalar
+evidence survives.
+
+Windows portable FFmpeg execution and the required early/middle/late visual real-media
+checks remain outstanding. The downloaded investigation explicitly states that the
+original media was not supplied; no locally identifiable incident media was available,
+so no incident-cause claim or single-point zero inference was made. This outstanding
+evidence does not reverse the demonstrated cross-runtime extraction stop condition.
 
 ### [ ] P4 — Quality-qualified voting, temporal quorum and contradiction veto
 
@@ -1017,9 +1131,9 @@ The first slice is:
 | --- | --- | --- | --- |
 | P1 — evidence and persistence | Complete | `14d82237011da0e2efd518ed6c70e64e732d9a21`; execution record above | None; later-package native/oracle gates remain scoped to P2/P3/P6 |
 | P2 — terminal/native UX | Implementation complete; native acceptance outstanding | `1d29ef131d6c307a1efa6f3b3512524ed8fd1d29`; execution record above | Physical-Windows visible VSView and portable bundle proof |
-| P3 — oracle and policy gate | Not started | None | Supported runtime matrix and controls |
-| P4 — acceptance policy | Blocked on P3 | None | Exact policy go/no-go |
-| P5 — extraction/local checks | Evidence-gated | None | Demonstrated discrepancy/benefit only |
+| P3 — oracle and policy gate | Complete; extraction stop gate reached | `7f342a6208944e53a4e48c77d3449ffdc05e9085`; execution record and tracked scalar evidence above | Windows portable and identifiable real-media evidence outstanding |
+| P4 — acceptance policy | Blocked on P5 extraction repair | None | P3 demonstrated runtime-dependent primary extraction discrepancies; rerun this exact matrix after P5 |
+| P5 — extraction/local checks | Required extraction branch; not started | P3 evidence above | Execute the predeclared ten-second-preroll decision branch on both supported runtimes before any P4 work |
 | P6 — integrated release proof | Not started | None | Scope-appropriate gates above |
 
 ## Source and authority record
