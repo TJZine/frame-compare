@@ -40,6 +40,7 @@ from tests.integration.alignment_oracle import (
 from tests.integration.test_alignment_continuous_decode_oracle import _mux_audio
 
 _OUTPUT_SAMPLE_RATE = 8000
+_REQUESTED_OUTPUT_SAMPLE_RATE = 48000
 _FLOAT32_BYTES = np.dtype("<f4").itemsize
 _READ_CHUNK_BYTES = 64 * 1024
 _STDERR_CHUNK_BYTES = 4096
@@ -50,6 +51,7 @@ _READER_JOIN_TIMEOUT_SECONDS = 2.0
 _LONG_SOURCE_DEFAULT_SECONDS = 3 * 60 * 60
 _LONG_SOURCE_GENERATION_TIMEOUT_SECONDS = 900.0
 _LONG_SOURCE_DECODE_TIMEOUT_SECONDS = 900.0
+_LONG_SOURCE_WINDOW_LENGTH_SECONDS = 2.0
 _LONG_SOURCE_ENV = "FRAME_COMPARE_CONTINUOUS_COLLECTOR_LONG"
 _LONG_SOURCE_SECONDS_ENV = "FRAME_COMPARE_CONTINUOUS_COLLECTOR_LONG_SECONDS"
 _LONG_SOURCE_TIMEOUT_ENV = "FRAME_COMPARE_CONTINUOUS_COLLECTOR_TIMEOUT_SECONDS"
@@ -157,6 +159,7 @@ def _collect_continuous_windows(
     stream: AudioStreamInfo,
     intervals: Sequence[_SampleInterval],
     *,
+    sample_rate: int,
     timeout_seconds: float,
     cancel_after_samples: int | None = None,
 ) -> _CollectorResult:
@@ -165,6 +168,8 @@ def _collect_continuous_windows(
         raise ValueError("continuous collector requires at least one interval")
     if timeout_seconds <= 0:
         raise ValueError("continuous collector timeout must be positive")
+    if sample_rate not in (_OUTPUT_SAMPLE_RATE, _REQUESTED_OUTPUT_SAMPLE_RATE):
+        raise ValueError("continuous collector supports only 8 kHz and 48 kHz evidence")
     if cancel_after_samples is not None and cancel_after_samples <= 0:
         raise ValueError("continuous collector cancellation point must be positive")
     if any(interval.start_sample < 0 or interval.sample_count <= 0 for interval in intervals):
@@ -178,7 +183,7 @@ def _collect_continuous_windows(
         continuous_decode_argv(
             media,
             stream,
-            sample_rate=_OUTPUT_SAMPLE_RATE,
+            sample_rate=sample_rate,
             channel_strategy="mono_downmix",
         ),
         stdin=subprocess.DEVNULL,
@@ -330,7 +335,6 @@ def _intervals_for_role(
     plan: AudioAnalysisPlan,
     role: Literal["reference", "comparison"],
 ) -> tuple[_SampleInterval, ...]:
-    assert plan.sample_rate == _OUTPUT_SAMPLE_RATE
     if role == "reference":
         return tuple(
             _SampleInterval(spec.reference_start_sample, spec.reference_sample_count)
@@ -345,11 +349,16 @@ def _intervals_for_role(
 def _fully_observable_intervals(
     plan: AudioAnalysisPlan,
     role: Literal["reference", "comparison"],
+    *,
+    max_interval_count: int | None = None,
 ) -> tuple[_SampleInterval, ...]:
-    """Drop only the AAC metadata-padding endpoint from the planned evidence set."""
+    """Keep a pre-end grid while excluding AAC metadata-padding endpoints."""
     intervals = _intervals_for_role(plan, role)
     assert len(intervals) > 1
-    return intervals[:-1]
+    intervals = intervals[:-1]
+    if max_interval_count is not None:
+        intervals = intervals[:max_interval_count]
+    return intervals
 
 
 def _plan_for_media(
@@ -357,6 +366,7 @@ def _plan_for_media(
     *,
     window_length_seconds: float,
     window_stride_seconds: float = 0.0,
+    output_sample_rate: int = _OUTPUT_SAMPLE_RATE,
 ) -> tuple[AudioStreamInfo, AudioAnalysisPlan]:
     stream = select_reference_audio_stream(media)
     plan = plan_audio_analysis(
@@ -364,17 +374,23 @@ def _plan_for_media(
         stream,
         config=AlignmentConfig(
             cache_results=False,
-            sample_rate=_OUTPUT_SAMPLE_RATE,
+            sample_rate=output_sample_rate,
             max_offset_seconds=1.0,
             window_length_seconds=window_length_seconds,
             window_stride_seconds=window_stride_seconds,
         ),
     )
     assert isinstance(plan, AudioAnalysisPlan)
+    assert plan.sample_rate == output_sample_rate
     return stream, plan
 
 
-def _source_record(media: Path, stream: AudioStreamInfo) -> dict[str, object]:
+def _source_record(
+    media: Path,
+    stream: AudioStreamInfo,
+    *,
+    output_sample_rate: int,
+) -> dict[str, object]:
     return {
         "media_sha256": sha256_file(media),
         "codec": stream.codec_name,
@@ -384,7 +400,7 @@ def _source_record(media: Path, stream: AudioStreamInfo) -> dict[str, object]:
             float(stream.timeline.duration) if stream.timeline.duration is not None else None
         ),
         "duration_basis": stream.timeline.duration_basis,
-        "output_sample_rate": _OUTPUT_SAMPLE_RATE,
+        "output_sample_rate": output_sample_rate,
     }
 
 
@@ -445,18 +461,20 @@ def _collect_against_oracle(
     stream: AudioStreamInfo,
     intervals: Sequence[_SampleInterval],
     *,
+    sample_rate: int,
     timeout_seconds: float,
 ) -> tuple[_CollectorResult, list[dict[str, object]]]:
     with continuous_decode(
         media,
         stream,
-        sample_rate=_OUTPUT_SAMPLE_RATE,
+        sample_rate=sample_rate,
         channel_strategy="mono_downmix",
     ) as oracle:
         result = _collect_continuous_windows(
             media,
             stream,
             intervals,
+            sample_rate=sample_rate,
             timeout_seconds=timeout_seconds,
         )
         comparisons: list[dict[str, object]] = []
@@ -569,6 +587,10 @@ def _record_evidence(section: str, payload: dict[str, object]) -> None:
                 "production_changed": False,
                 "public_contract_changed": False,
                 "output_sample_rate": _OUTPUT_SAMPLE_RATE,
+                "requested_rate_grid": [
+                    _OUTPUT_SAMPLE_RATE,
+                    _REQUESTED_OUTPUT_SAMPLE_RATE,
+                ],
                 "collector_argv_recipe": recipe_identity(
                     {
                         "source": "<selected-media>",
@@ -678,6 +700,20 @@ def test_tracked_scalar_evidence_records_collector_scope() -> None:
     assert evidence["experiment"]["production_changed"] is False
     assert evidence["experiment"]["public_contract_changed"] is False
     assert evidence["experiment"]["peak_rss"]["status"] == "unavailable"
+    assert evidence["experiment"]["requested_rate_grid"] == [8000, 48000]
+    assert "positive_start_aac_48k_native" in evidence["sections"]
+    assert (
+        evidence["sections"]["long_compressed_traversal_native"]["source"]["output_sample_rate"]
+        == 48000
+    )
+    assert (
+        evidence["sections"]["docker_focused_cases"]["cancellation_cleanup"]["kill_requested"]
+        is True
+    )
+    assert evidence["limitations"]["endpoint_handling"]["status"] == "unresolved"
+    assert evidence["limitations"]["retention_and_memory"]["combined_parent_child_peak_rss"] == (
+        "Unavailable; no combined RSS claim is made."
+    )
     assert "/Users/" not in raw
     assert "raw_samples" not in raw
 
@@ -699,19 +735,25 @@ def test_continuous_collector_short_control_matches_oracle(
         media,
         window_length_seconds=0.25,
         window_stride_seconds=3.0,
+        output_sample_rate=_OUTPUT_SAMPLE_RATE,
     )
     intervals = _intervals_for_role(plan, "reference")
     result, comparisons = _collect_against_oracle(
         media,
         stream,
         intervals,
+        sample_rate=_OUTPUT_SAMPLE_RATE,
         timeout_seconds=180.0,
     )
     _assert_success(result, intervals, comparisons)
     _record_evidence(
         "short_deterministic_control",
         {
-            "source": _source_record(media, stream),
+            "source": _source_record(
+                media,
+                stream,
+                output_sample_rate=_OUTPUT_SAMPLE_RATE,
+            ),
             "plan": _plan_record(plan, intervals),
             "collector": _collector_record(result, intervals, comparisons),
             "retained_windows_equal_continuous_oracle": True,
@@ -720,9 +762,32 @@ def test_continuous_collector_short_control_matches_oracle(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("output_sample_rate", "section", "collector_key", "window_length_seconds"),
+    [
+        pytest.param(
+            _OUTPUT_SAMPLE_RATE,
+            "positive_start_aac",
+            "collector_8k",
+            0.256,
+            id="8k",
+        ),
+        pytest.param(
+            _REQUESTED_OUTPUT_SAMPLE_RATE,
+            "positive_start_aac_48k",
+            "collector_48k",
+            2048 / _REQUESTED_OUTPUT_SAMPLE_RATE,
+            id="48k",
+        ),
+    ],
+)
 def test_continuous_collector_repairs_positive_start_aac_grid(
     tmp_path: Path,
     require_ffmpeg: None,
+    output_sample_rate: int,
+    section: str,
+    collector_key: str,
+    window_length_seconds: float,
 ) -> None:
     source_rate = 44100
     wave_path = tmp_path / "positive-start.wav"
@@ -741,14 +806,20 @@ def test_continuous_collector_repairs_positive_start_aac_grid(
     )
     stream, plan = _plan_for_media(
         media,
-        window_length_seconds=0.256,
+        window_length_seconds=window_length_seconds,
         window_stride_seconds=4.0,
+        output_sample_rate=output_sample_rate,
     )
-    intervals = _fully_observable_intervals(plan, "reference")
+    intervals = _fully_observable_intervals(
+        plan,
+        "reference",
+        max_interval_count=3,
+    )
     result, comparisons = _collect_against_oracle(
         media,
         stream,
         intervals,
+        sample_rate=output_sample_rate,
         timeout_seconds=180.0,
     )
     _assert_success(result, intervals, comparisons)
@@ -760,13 +831,18 @@ def test_continuous_collector_repairs_positive_start_aac_grid(
         sample_count=2048,
     )
     _record_evidence(
-        "positive_start_aac",
+        section,
         {
-            "source": _source_record(media, stream),
+            "source": _source_record(
+                media,
+                stream,
+                output_sample_rate=output_sample_rate,
+            ),
             "plan": _plan_record(plan, intervals),
             "metadata_padding_endpoint_excluded": True,
+            "pre_end_grid_selection": "first three pre-end windows only",
             "independent_seek_baseline_48k": baseline,
-            "collector_8k": _collector_record(result, intervals, comparisons),
+            collector_key: _collector_record(result, intervals, comparisons),
             "collector_retained_windows_equal_continuous_oracle": True,
         },
     )
@@ -790,12 +866,14 @@ def test_continuous_collector_repairs_late_aac_window_grid(
         media,
         window_length_seconds=0.512,
         window_stride_seconds=4.0,
+        output_sample_rate=_OUTPUT_SAMPLE_RATE,
     )
     intervals = _fully_observable_intervals(plan, "reference")
     result, comparisons = _collect_against_oracle(
         media,
         stream,
         intervals,
+        sample_rate=_OUTPUT_SAMPLE_RATE,
         timeout_seconds=180.0,
     )
     _assert_success(result, intervals, comparisons)
@@ -810,7 +888,11 @@ def test_continuous_collector_repairs_late_aac_window_grid(
     _record_evidence(
         "ordinary_late_aac",
         {
-            "source": _source_record(media, stream),
+            "source": _source_record(
+                media,
+                stream,
+                output_sample_rate=_OUTPUT_SAMPLE_RATE,
+            ),
             "plan": _plan_record(plan, intervals),
             "metadata_padding_endpoint_excluded": True,
             "late_interval_index": len(intervals) - 1,
@@ -828,12 +910,17 @@ def test_continuous_collector_cancellation_reaps_ffmpeg(
 ) -> None:
     media = tmp_path / "cancellation.m4a"
     command = _encode_synthetic_aac(media, duration_seconds=30)
-    stream, plan = _plan_for_media(media, window_length_seconds=0.0)
+    stream, plan = _plan_for_media(
+        media,
+        window_length_seconds=0.0,
+        output_sample_rate=_OUTPUT_SAMPLE_RATE,
+    )
     intervals = _intervals_for_role(plan, "reference")
     result = _collect_continuous_windows(
         media,
         stream,
         intervals,
+        sample_rate=_OUTPUT_SAMPLE_RATE,
         timeout_seconds=60.0,
         cancel_after_samples=8192,
     )
@@ -849,7 +936,11 @@ def test_continuous_collector_cancellation_reaps_ffmpeg(
     _record_evidence(
         "cancellation_cleanup",
         {
-            "source": _source_record(media, stream),
+            "source": _source_record(
+                media,
+                stream,
+                output_sample_rate=_OUTPUT_SAMPLE_RATE,
+            ),
             "generation_recipe_sha256": recipe_identity(command),
             "plan": _plan_record(plan, intervals),
             "collector": _collector_record(result, intervals, []),
@@ -869,12 +960,17 @@ def test_continuous_collector_three_hour_aac_traversal(
     duration_seconds = _long_duration_seconds()
     media = tmp_path / "long-aac.m4a"
     command = _encode_synthetic_aac(media, duration_seconds=duration_seconds)
-    stream, plan = _plan_for_media(media, window_length_seconds=0.0)
+    stream, plan = _plan_for_media(
+        media,
+        window_length_seconds=_LONG_SOURCE_WINDOW_LENGTH_SECONDS,
+        output_sample_rate=_REQUESTED_OUTPUT_SAMPLE_RATE,
+    )
     intervals = _intervals_for_role(plan, "reference")
     result = _collect_continuous_windows(
         media,
         stream,
         intervals,
+        sample_rate=_REQUESTED_OUTPUT_SAMPLE_RATE,
         timeout_seconds=_long_timeout_seconds(),
     )
     expected_counts = [interval.sample_count for interval in intervals]
@@ -887,10 +983,21 @@ def test_continuous_collector_three_hour_aac_traversal(
         "long_compressed_traversal",
         {
             "generation_recipe_sha256": recipe_identity(command),
-            "source": _source_record(media, stream),
+            "source": _source_record(
+                media,
+                stream,
+                output_sample_rate=_REQUESTED_OUTPUT_SAMPLE_RATE,
+            ),
             "plan": _plan_record(plan, intervals),
             "collector": _collector_record(result, intervals, []),
+            "metadata_padding_endpoint_excluded": False,
             "oracle_comparison": "not_run; three-hour output exceeds the existing 256 MiB oracle cap",
+            "pair_decode": {
+                "measured": False,
+                "source_decode_count": 1,
+                "pair_wall_clock_seconds": None,
+                "note": "only one continuous source traversal was measured; reference/comparison pair timing was not measured",
+            },
             "configured_decode_timeout_seconds": _long_timeout_seconds(),
             "duration_selection": {
                 "requested_seconds": duration_seconds,
