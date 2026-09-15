@@ -294,6 +294,7 @@ def maybe_launch_alignment_vsview(
     reference: AlignmentClipRequest,
     comparisons: list[AlignmentClipRequest],
     offsets_by_key: dict[str, int | None],
+    audio_review_by_key: dict[str, str],
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
@@ -343,6 +344,7 @@ def maybe_launch_alignment_vsview(
                 reference=reference_path,
                 comparisons=comparison_paths,
                 suggested_offsets_by_key=offsets_by_key,
+                audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
                 frame_props_by_stem=frame_props_by_stem,
                 presentation_names_by_stem={

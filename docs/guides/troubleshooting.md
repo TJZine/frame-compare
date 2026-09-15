@@ -24,7 +24,7 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify with the native Frame Compare VSView panel when available |
 | Doctor reports the Frame Compare alignment panel is missing | Install `frame-compare[vsview]` in the same Python environment that runs Frame Compare; PATH-only VSView discovery is unsupported |
 | The native alignment panel is inactive | Open a Frame Compare-generated session; ordinary VSView sessions and malformed/mixed output metadata intentionally remain inert |
-| The panel closed before saving | No typed result sidecar was written; reopen the generated session, visit every source, and choose **Use these aligned positions** or **Keep audio-derived alignment** |
+| The panel closed before saving | No typed result sidecar was written; reopen the generated session, visit every source, and choose **Confirm these aligned positions** or **Keep current alignment** |
 | Native review result was rejected | The sidecar is missing, malformed, stale, mixed-session, duplicated, incomplete, or outside raw source bounds; generate a fresh session and review again |
 | Requested frames cannot survive alignment | Reduce trims or frame counts and inspect the final shared overlap; user frames are not silently replaced |
 | Docker cannot write config or generated data | Export host UID/GID values and pre-create `config`, `comparison_videos`, and `generated` as the host user |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -34,12 +35,33 @@ from frame_compare.vsview.session_script import (
 )
 
 
+def _audio_review_map(offsets: dict[str, int | None]) -> dict[str, str]:
+    return {
+        key: json.dumps(
+            {
+                "current_authority": {
+                    "origin": "shared_computed_offsets" if offset is not None else "none",
+                    "frame_offset": offset,
+                },
+                "evidence_availability": (
+                    "historical_details_unavailable" if offset is not None else "not_computed"
+                ),
+                "audio_attempt": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for key, offset in offsets.items()
+    }
+
+
 def _session_request(tmp_path: Path) -> VSViewSessionRequest:
     return VSViewSessionRequest(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comparison.mkv"],
         suggested_offsets_by_key={"ref:comparison": 4},
         cache_dir=tmp_path,
+        audio_review_by_key=_audio_review_map({"ref:comparison": 4}),
     )
 
 
@@ -399,6 +421,8 @@ def _execute_generated_script(
     unusable_index_stems: set[str] | None = None,
     cache_free_failure_stems: set[str] | None = None,
     output_sink: list[tuple[str, int, str]] | None = None,
+    audio_review_by_key: dict[str, str] | None = None,
+    overlay_sink: list[str] | None = None,
 ) -> tuple[
     list[tuple[str, int, str]],
     list[dict[str, object]],
@@ -447,8 +471,10 @@ def _execute_generated_script(
             return clips[stem]
 
     class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+        def Text(self, clip: FakeClip, text: str, *, alignment: int) -> FakeClip:
             assert alignment == 7
+            if overlay_sink is not None:
+                overlay_sink.append(text)
             return clip
 
     class FakeStd:
@@ -477,6 +503,11 @@ def _execute_generated_script(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
+        audio_review_by_key=(
+            _audio_review_map(suggested_offsets_by_key)
+            if audio_review_by_key is None
+            else audio_review_by_key
+        ),
         bootstrap_paths=[tmp_path],
         frame_props_by_stem=default_props,
         presentation_names_by_stem=presentation_names_by_stem,
@@ -519,7 +550,7 @@ def test_generated_session_registers_named_outputs_in_input_order(
         1,
         2,
     ]
-    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {1}
+    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {2}
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
     assert [stem for stem, _cachefile, _cache in loader_calls].count("ref") == 1
 
@@ -584,6 +615,73 @@ def test_generated_session_keeps_bt709_defaults_and_overlay_hints(
     assert applied_props["ref"] == {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1}
 
 
+def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlays: list[str] = []
+    reviews = {
+        "ref:accepted": json.dumps(
+            {
+                "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "trusted_automatic",
+                        "candidate": {"frame_offset": 0},
+                        "primary_reason": "accepted",
+                    }
+                },
+            }
+        ),
+        "ref:provisional": json.dumps(
+            {
+                "current_authority": {"origin": "none", "frame_offset": None},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "provisional",
+                        "candidate": {"frame_offset": 0},
+                        "primary_reason": "insufficient_consensus",
+                    }
+                },
+            }
+        ),
+        "ref:unavailable": json.dumps(
+            {
+                "current_authority": {"origin": "none", "frame_offset": None},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "unavailable",
+                        "candidate": None,
+                        "primary_reason": "insufficient_signal",
+                    }
+                },
+            }
+        ),
+    }
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        comparison_stems=("accepted", "provisional", "unavailable"),
+        suggested_offsets_by_key={
+            "ref:accepted": 0,
+            "ref:provisional": None,
+            "ref:unavailable": None,
+        },
+        audio_review_by_key=reviews,
+        overlay_sink=overlays,
+    )
+
+    joined = "\n".join(overlays)
+    assert "Audio alignment accepted: +0f" in joined
+    assert "Provisional +0f — NOT APPLIED" in joined
+    assert "No usable audio candidate" in joined
+    assert "no trusted audio hint" not in joined
+
+
 def test_generated_script_suppresses_only_redundant_vsview_load_success() -> None:
     logger = logging.getLogger("vsview.app.workspace.loader")
     existing_filters = tuple(logger.filters)
@@ -613,6 +711,7 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "a.mkv"],
         suggested_offsets_by_key={"ref:a": 0},
+        audio_review_by_key=_audio_review_map({"ref:a": 0}),
         bootstrap_paths=[tmp_path],
     )
 
@@ -637,12 +736,14 @@ def test_write_vsview_session_script_is_atomic_and_deterministic_body(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
     second = write_vsview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
 
@@ -679,6 +780,7 @@ def test_write_vsview_session_script_retries_uuid_path_collision(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
 

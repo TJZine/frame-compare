@@ -178,6 +178,7 @@ class VSViewSessionRequest:
     reference: Path
     comparisons: list[Path]
     suggested_offsets_by_key: dict[str, int | None]
+    audio_review_by_key: dict[str, str]
     cache_dir: Path
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None
     presentation_names_by_stem: dict[str, str] | None = None
@@ -361,6 +362,7 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
         reference=request.reference,
         comparisons=request.comparisons,
         suggested_offsets_by_key=request.suggested_offsets_by_key,
+        audio_review_by_key=request.audio_review_by_key,
         cache_dir=request.cache_dir,
         frame_props_by_stem=request.frame_props_by_stem,
         presentation_names_by_stem=request.presentation_names_by_stem,

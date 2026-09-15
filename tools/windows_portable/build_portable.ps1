@@ -934,6 +934,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import os
 import subprocess
 import sys
@@ -1254,6 +1255,24 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         suggested_offsets_by_key={
             f"{media_path.stem}:{comparison_one_media_path.stem}": 0,
             f"{media_path.stem}:{comparison_two_media_path.stem}": 0,
+        },
+        audio_review_by_key={
+            key: json.dumps(
+                {
+                    "current_authority": {
+                        "origin": "shared_computed_offsets",
+                        "frame_offset": 0,
+                    },
+                    "evidence_availability": "historical_details_unavailable",
+                    "audio_attempt": None,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for key in (
+                f"{media_path.stem}:{comparison_one_media_path.stem}",
+                f"{media_path.stem}:{comparison_two_media_path.stem}",
+            )
         },
         cache_dir=cache_dir,
         frame_props_by_stem={

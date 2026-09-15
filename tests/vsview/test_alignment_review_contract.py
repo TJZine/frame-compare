@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+    ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     ALIGNMENT_REVIEW_METADATA_NAME_KEY,
     ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
     ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
     ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+    ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
-    ALIGNMENT_REVIEW_SCHEMA_VERSION,
+    ALIGNMENT_REVIEW_RESULT_VERSION,
     AlignmentReviewContractError,
     AlignmentReviewExpectedComparison,
     AlignmentReviewOutputCandidate,
@@ -26,8 +30,26 @@ from frame_compare.vsview.alignment_review_contract import (
     read_alignment_review_result,
     write_alignment_review_result,
 )
+from tests.services.test_alignment_diagnostics import audio_attempt
 
 _SESSION_ID = "12345678123456781234567812345678"
+
+
+def _audio_review(suggestion: int | None) -> str:
+    return json.dumps(
+        {
+            "current_authority": {
+                "origin": "shared_computed_offsets" if suggestion is not None else "none",
+                "frame_offset": suggestion,
+            },
+            "evidence_availability": (
+                "historical_details_unavailable" if suggestion is not None else "not_computed"
+            ),
+            "audio_attempt": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 @pytest.fixture
@@ -53,7 +75,7 @@ def _reference_output(
         output_id=output_id,
         source_frame_count=frame_count,
         metadata={
-            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_METADATA_VERSION,
             ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: session_id,
             ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "reference",
             ALIGNMENT_REVIEW_METADATA_NAME_KEY: "Reference",
@@ -69,18 +91,22 @@ def _comparison_output(
     suggestion: int | None = 12,
     session_id: str = _SESSION_ID,
     frame_count: int = 100,
+    audio_review: str | None = None,
 ) -> AlignmentReviewOutputCandidate:
     return AlignmentReviewOutputCandidate(
         output_id=output_id,
         source_frame_count=frame_count,
         metadata={
-            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_METADATA_VERSION,
             ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: session_id,
             ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: key,
             ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY: ordinal,
             ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "comparison",
             ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"Comparison {ordinal}",
             ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY: suggestion,
+            ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY: (
+                _audio_review(suggestion) if audio_review is None else audio_review
+            ),
         },
     )
 
@@ -103,6 +129,118 @@ def test_workspace_metadata_accepts_one_reference_and_ordered_comparisons() -> N
     ]
     assert workspace.comparisons[0].comparison_key == "ref:a"
     assert workspace.comparisons[0].source_frame_count == 100
+
+
+def test_workspace_metadata_accepts_provisional_attempt_without_trusted_offset() -> None:
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(audio_attempt()),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+
+    decision = workspace.comparisons[0].audio_review.audio_attempt
+    assert decision is not None
+    assert cast(dict[str, object], decision["decision"])["state"] == "provisional"
+
+
+def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> None:
+    payload = {
+        "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
+        "evidence_availability": "current_attempt",
+        "audio_attempt": asdict(audio_attempt()),
+    }
+    review = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    with pytest.raises(AlignmentReviewContractError, match="provisional audio evidence"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
+        )
+
+
+@pytest.mark.parametrize("old_version", [1, 99])
+def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
+    old_version: int,
+) -> None:
+    old_comparison = _comparison_output(1, 1)
+    old_metadata = dict(old_comparison.metadata)
+    old_metadata[ALIGNMENT_REVIEW_METADATA_VERSION_KEY] = old_version
+    if old_version == 1:
+        old_metadata.pop(ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY)
+    old_comparison = AlignmentReviewOutputCandidate(
+        output_id=1,
+        source_frame_count=100,
+        metadata=old_metadata,
+    )
+
+    with pytest.raises(
+        AlignmentReviewContractError,
+        match=rf"newly generated session.*metadata v{old_version}.*requires v2",
+    ):
+        parse_alignment_review_workspace_metadata((_reference_output(0), old_comparison))
+
+
+def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
+    old_reference = _reference_output(0)
+    old_reference = AlignmentReviewOutputCandidate(
+        output_id=0,
+        source_frame_count=100,
+        metadata=dict(old_reference.metadata) | {ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1},
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v2"):
+        parse_alignment_review_workspace_metadata((_comparison_output(1, 1), old_reference))
+
+
+@pytest.mark.parametrize(
+    "audio_review",
+    [
+        '{"current_authority":{"origin":"none","origin":"none",'
+        '"frame_offset":null},"evidence_availability":"not_computed",'
+        '"audio_attempt":null}',
+        "x" * (128 * 1024 + 1),
+    ],
+)
+def test_workspace_metadata_rejects_duplicate_or_oversized_audio_review(
+    audio_review: str,
+) -> None:
+    with pytest.raises(AlignmentReviewContractError):
+        parse_alignment_review_workspace_metadata(
+            (
+                _reference_output(0),
+                _comparison_output(1, 1, suggestion=None, audio_review=audio_review),
+            )
+        )
+
+
+def test_workspace_metadata_rejects_nonfinite_or_inconsistent_attempt_evidence() -> None:
+    payload = {
+        "current_authority": {"origin": "none", "frame_offset": None},
+        "evidence_availability": "current_attempt",
+        "audio_attempt": asdict(audio_attempt()),
+    }
+    attempt = cast(dict[str, object], payload["audio_attempt"])
+    attempt["confidence_threshold"] = float("nan")
+
+    with pytest.raises(AlignmentReviewContractError, match="confidence_threshold"):
+        parse_alignment_review_workspace_metadata(
+            (
+                _reference_output(0),
+                _comparison_output(
+                    1,
+                    1,
+                    suggestion=None,
+                    audio_review=json.dumps(payload),
+                ),
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -137,7 +275,7 @@ def test_workspace_metadata_rejects_incomplete_duplicate_or_mixed_outputs(
     ("field", "value"),
     [
         (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, True),
-        (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, 2),
+        (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, 1),
         (ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY, True),
         (ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY, True),
         (ALIGNMENT_REVIEW_METADATA_ROLE_KEY, "other"),
@@ -215,6 +353,7 @@ def _expected() -> tuple[AlignmentReviewExpectedComparison, ...]:
 
 
 def test_result_round_trip_accepts_confirmed_and_keep_current(tmp_path: Path) -> None:
+    assert ALIGNMENT_REVIEW_RESULT_VERSION == 1
     session = _session(tmp_path)
     result = AlignmentReviewResult(
         session_id=session.session_id,

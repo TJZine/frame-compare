@@ -70,8 +70,9 @@ remains a v1 file with the same path and offset semantics.
 Fresh computation distinguishes three audio-evidence states. `trusted_automatic`
 means the unchanged v5 policy accepted a candidate and may authorize the existing
 constant offset. `provisional` means a unique display-qualified candidate survived a
-rejected attempt; it is shown only in the pre-review terminal explanation and is never
-applied or passed as a trusted VSView hint. `unavailable` means no unique usable
+rejected attempt; it is shown as a clearly unaccepted review hint in the terminal and
+native panel and is never applied or passed as the authoritative integer/null field.
+`unavailable` means no unique usable
 candidate exists, and Frame Compare does not invent zero. The
 display-only qualification floor is score 0.90 and peak ratio 1.50; it does not filter
 v5 voting or change an automatic result. Manual confirmation is a separate fact and
@@ -115,32 +116,55 @@ uses documented `from vsview import set_output` registration with explicit `Refe
 and `Comparison N` names, while preserving source order, multi-comparison behavior,
 Frame Compare overlays, and BT.709 preview defaults.
 
-The terminal reports only the generated session, bounded readiness, inherited decoder
-diagnostics, and the final review outcome. It does not prompt for frames or read
-review input. Open **Frame Compare Alignment Review** from VSView's Tool Panel, unlink
+Before review, normal terminal output identifies accepted, provisional, or unavailable
+evidence, support/reason, and selected audio ordinals. Verbose output adds bounded
+stream, gate, runtime/policy, work, and per-window facts. Quiet mode hides routine
+accepted/status evidence but leaves actionable rejection and write-failure warnings;
+JSON keeps its existing stdout schema and uses structured stderr for actionable
+rejection. No-color and redirected output stay plain and nonblocking.
+
+The terminal does not prompt for frames or read review input. Open **Frame Compare
+Alignment Review** from VSView's Tool Panel, unlink
 the playheads, and visit `Reference` and every `Comparison N` output. Leave each on the
 same visible moment. The live source lineup records one current untrimmed source frame
 per output, reports `ready / total`, and previews `reference - comparison` plus the
 plain-language trim direction.
 
-Select **Use these aligned positions** once the complete lineup is ready. It writes one
+Select **Confirm these aligned positions** once the complete lineup is ready. It writes one
 ordered result for the whole source set; the reference appears once and the decision is
-made for the full lineup in one action. **Keep audio-derived alignment** is
-the secondary whole-set option. It retains the alignment Frame Compare entered with,
-including the no-change case when no trusted suggestion exists.
+made for the full lineup in one action. Known-offset entry uses **Confirm these known
+offsets**. **Keep current alignment** is the secondary whole-set option. It retains each
+comparison's existing accepted or manually confirmed authority; provisional candidates
+are not applied or confirmed, and unresolved comparisons remain unresolved.
 
 For a known value, expand **Enter alignment manually...**. **Source frames** accepts one
 non-negative untrimmed frame per source; **Known offsets** accepts one signed integer per
 comparison using `reference - comparison`. Both bases feed the same whole-set save
 action and explain the trim direction immediately. Positive offsets trim the reference;
 negative offsets trim that comparison. Manual fields are an escape hatch, not a second
-result workflow.
+result workflow. Provisional values never prefill those fields, move a playhead, mark a
+source visited, increase readiness, or enable confirmation.
+
+The persistent **Audio evidence** section distinguishes `Audio alignment accepted:
++0f`, `Provisional audio candidate: +0f — NOT APPLIED`, and `No usable audio candidate`.
+Expandable **Audio details** shows the validated bounded attempt. Accepted,
+provisional, reused accepted, and manual markers have separate labels; unavailable
+evidence has no marker. After keep-current, each comparison reports whether an accepted
+alignment was retained, a provisional candidate was not confirmed, no accepted
+candidate existed, or a manually confirmed alignment was retained.
 
 The result sidecar is written atomically only by a complete whole-set action; closing
 VSView without saving writes no result. Missing, malformed, stale, mixed-session,
 duplicate, incomplete, or out-of-bounds sidecars are rejected before any offset is
 applied. Missing modern `_Range` is reported once but remains unset, preserving
 VSView's native range inference; other native diagnostics remain inherited.
+
+Generated Frame Compare sessions use metadata v2 while the result sidecar remains v1.
+Metadata v1, unknown-version, mixed-version, and malformed Frame Compare sessions must
+be regenerated after upgrading; they are not migrated into trust. Ordinary VSView
+sessions without Frame Compare metadata remain inert. Shared alignment cache schema v2,
+diagnostic artifact schema v1, and manual override schema v1 are separate contracts and
+are unchanged by this session-metadata update.
 
 The native-panel workflow uses each source exactly once, named outputs, public
 VSView callbacks, current frame/property surfaces, explicit lineup status and trim
@@ -170,7 +194,7 @@ different edit.
 | Good early match but later drift | FPS or timing mismatch | Recheck effective FPS and source structure; do not treat a constant offset as sufficient |
 | VSView/panel cannot launch | Missing same-environment UI dependencies or desktop/runtime issue | Run `doctor`, install `frame-compare[vsview]` in the environment that runs Frame Compare, use the Windows portable bundle, or continue without optional review |
 | Panel stays inactive | The session is ordinary, metadata is malformed/mixed, or the generated script/result identity is not trusted | Generate a fresh session through Frame Compare; do not open a hand-authored script or provide a PATH-only VSView executable |
-| Panel closes before saving | No complete typed result sidecar was written | Reopen the generated session, visit every source, and use **Use these aligned positions** or **Keep audio-derived alignment** |
+| Panel closes before saving | No complete typed result sidecar was written | Reopen the generated session, visit every source, and use **Confirm these aligned positions** or **Keep current alignment** |
 | Review result is rejected | Sidecar is missing, malformed, stale, duplicated, incomplete, or outside raw source-frame bounds | Discard the sidecar, generate a fresh session, and repeat the panel review; forced mode fails closed |
 | Reused offset no longer looks correct | Source or runtime changed outside the reusable identity assumptions | Reject reuse, clear the alignment cache entry, and recompute |
 | Selected frames disappear after alignment | Shared overlap is smaller than the initial reference-domain plan | Reduce trims or requested counts and review the warning/error context |

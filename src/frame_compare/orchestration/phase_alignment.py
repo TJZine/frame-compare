@@ -54,7 +54,12 @@ log = structlog.get_logger()
 
 
 def run_align_phase(
-    ctx: RunContext, *, selected_frames: list[int], verbose: bool = False
+    ctx: RunContext,
+    *,
+    selected_frames: list[int],
+    verbose: bool = False,
+    quiet: bool = False,
+    json_output: bool = False,
 ) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
@@ -103,6 +108,8 @@ def run_align_phase(
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
         verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
     )
 
     updated_comparisons: list[ClipState] = []

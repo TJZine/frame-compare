@@ -164,6 +164,8 @@ def build_phases_before_align(
                 run_align_phase,
                 selected_frames=state.selected_frames,
                 verbose=request.verbose,
+                quiet=request.quiet,
+                json_output=request.json_output,
             ),
             state=state,
             monotonic_timer=monotonic_timer,

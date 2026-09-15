@@ -502,6 +502,22 @@ unchanged.
   and `not applied` status, or stating that no usable candidate exists. This does not
   add a successful JSON field or write human text to JSON stdout. The run-local
   diagnostic location is reported only after a successful write.
+- The pre-review evidence block keeps accepted `+0f`, provisional `+0f`, and absence
+  distinct. Accepted evidence reports `Audio alignment accepted: +Nf`; rejected
+  evidence with a display candidate reports `Provisional candidate: +Nf (not
+  applied)`; and rejected evidence without one reports `No usable audio candidate. No
+  automatic correction applied.` Selected stream rows name each audio ordinal as
+  `a:N` and distinguish automatic metadata selection from an explicit override.
+  Historical computed and human reuse are labeled separately and do not fabricate
+  current stream/window details.
+- `--verbose` adds bounded selected-stream, threshold, gate, runtime/policy, work, and
+  per-window evidence. `--quiet` suppresses routine accepted/status evidence but
+  retains actionable rejection and diagnostic-write warnings. `--no-color` and
+  redirected/non-TTY output remain static plain text without cursor control or a
+  blocking read.
+- `run --json` suppresses the human alignment blocks and tables. Actionable rejection
+  uses the existing structured stderr logging boundary with bounded scalar fields;
+  successful JSON stdout retains its existing schema exactly.
 - Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
@@ -1202,12 +1218,13 @@ Normal VSView labels reuse the release-aware presentation identities prepared by
 typed alignment request. Paths and stems remain the internal source, suggested
 offset, manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
-output per comparison. In the native panel, the default workflow unlinks playheads, visits
-every output, and positions each source on the same visible moment. Manual source-frame
-or known-offset entry and keep-current completion do not require viewer visits. Public current-
-output/current-frame callbacks update the live source lineup; the panel does not
-inspect or change hidden playheads or synchronization mode. **Use these aligned
-positions** writes the complete ordered result once. **Keep audio-derived alignment**
+output per comparison. In the native panel, the default workflow unlinks playheads,
+visits every output, and positions each source on the same visible moment. Manual
+source-frame or known-offset entry and keep-current completion do not require viewer
+visits. Public current-output/current-frame callbacks update the live source lineup;
+the panel does not inspect or change hidden playheads or synchronization mode.
+**Confirm these aligned positions** writes the complete ordered result once; the
+known-offset equivalent is **Confirm these known offsets**. **Keep current alignment**
 writes one `keep_current` decision for every comparison. The collapsed manual
 disclosure offers source-frame or known-offset input, and both use the same whole-set
 save action. The panel calculates `reference - comparison` and shows the trim meaning;
@@ -1218,15 +1235,27 @@ initial `Content loaded successfully` INFO record because `[OK] VSView Ready` al
 owns that success confirmation; reload, clipboard, warning, error, and other native
 diagnostics remain unchanged.
 
+Each comparison has a persistent **Audio evidence** summary and collapsed **Audio
+details** independent of its manual draft. Accepted, provisional, unavailable,
+historically reused, and human-authoritative alignments use distinct text and marker
+labels. A provisional marker is display-only: it never prefills a field, moves a
+playhead, marks an output visited, increases readiness, enables confirmation, writes
+an accepted marker, or authorizes trimming/cache reuse. Unavailable evidence has no
+marker.
+
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 
 The generated session carries an explicit UUID session identity, one reference role,
-ordered comparison roles/keys/ordinals, presentation names, and bounded audio
-suggestions in strict metadata schema v1. The panel derives display bounds from public
+ordered comparison roles/keys/ordinals, presentation names, the authoritative integer
+or null offset, and one bounded primitive audio-evidence projection in strict metadata
+schema v2. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
 the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
-sidecar uses the same schema v1 contract and exact ordered whole-set decision shape. Frame Compare
+sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
+exact ordered whole-set decision shape. Metadata v1, unknown, or mixed Frame Compare
+sessions are rejected with instructions to generate a new session; there is no
+trust-upgrade shim. Ordinary non-Frame-Compare sessions remain inert. Frame Compare
 derives the sibling result path from the trusted generated script path, then rejects
 missing, malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds
 results. It never trusts panel-supplied paths or counts.

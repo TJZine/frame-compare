@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeGuard, cast
+from typing import Any, Literal, TypeGuard, cast
 
 from frame_compare.utils.atomic_write import write_text_atomic
 
-ALIGNMENT_REVIEW_SCHEMA_VERSION = 1
+ALIGNMENT_REVIEW_METADATA_VERSION = 2
+ALIGNMENT_REVIEW_RESULT_VERSION = 1
 ALIGNMENT_REVIEW_RESULT_SUFFIX = ".alignment-result.json"
 VSVIEW_SESSIONS_DIR_NAME = "vsview_sessions"
 
@@ -23,6 +25,7 @@ ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY = "frame_compare_comparison_ordinal"
 ALIGNMENT_REVIEW_METADATA_ROLE_KEY = "frame_compare_output_role"
 ALIGNMENT_REVIEW_METADATA_NAME_KEY = "frame_compare_presentation_name"
 ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY = "frame_compare_suggested_offset"
+ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY = "frame_compare_audio_review"
 ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS = frozenset(
     {
         ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
@@ -40,6 +43,7 @@ ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS = frozenset(
         ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
         ALIGNMENT_REVIEW_METADATA_NAME_KEY,
         ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+        ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     }
 )
 
@@ -91,6 +95,28 @@ class AlignmentReviewReferenceMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class AlignmentReviewCurrentAuthority:
+    origin: Literal[
+        "computed_this_run",
+        "shared_computed_offsets",
+        "interactive_confirmed_this_run",
+        "shared_previous_offsets",
+        "preexisting_manual_override",
+        "none",
+    ]
+    frame_offset: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewAudioReview:
+    current_authority: AlignmentReviewCurrentAuthority
+    evidence_availability: Literal[
+        "current_attempt", "historical_details_unavailable", "not_computed"
+    ]
+    audio_attempt: Mapping[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
 class AlignmentReviewComparisonMetadata:
     output_id: int
     source_frame_count: int
@@ -99,6 +125,7 @@ class AlignmentReviewComparisonMetadata:
     comparison_ordinal: int
     presentation_name: str
     suggested_offset: int | None
+    audio_review: AlignmentReviewAudioReview
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +211,10 @@ type AlignmentReviewDecision = ConfirmedAlignmentReviewDecision | KeepCurrentAli
 class AlignmentReviewResult:
     session_id: str
     decisions: tuple[AlignmentReviewDecision, ...]
-    schema_version: Literal[1] = ALIGNMENT_REVIEW_SCHEMA_VERSION
+    schema_version: Literal[1] = ALIGNMENT_REVIEW_RESULT_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
+        if self.schema_version != ALIGNMENT_REVIEW_RESULT_VERSION:
             raise ValueError("unsupported alignment review result schema")
         _validated_session_id(self.session_id)
 
@@ -326,6 +353,13 @@ def _parse_output_metadata(
     if not _is_int(candidate.source_frame_count) or candidate.source_frame_count <= 0:
         raise AlignmentReviewContractError("alignment review output frame count must be positive")
     metadata = candidate.metadata
+    version = metadata.get(ALIGNMENT_REVIEW_METADATA_VERSION_KEY)
+    if not _is_int(version) or version != ALIGNMENT_REVIEW_METADATA_VERSION:
+        rendered = str(version) if _is_int(version) else "unknown"
+        raise AlignmentReviewContractError(
+            "Alignment review requires a newly generated session. "
+            f"This session uses metadata v{rendered}; this version requires v2."
+        )
     role = metadata.get(ALIGNMENT_REVIEW_METADATA_ROLE_KEY)
     if role == "reference":
         expected_keys = ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS
@@ -335,11 +369,8 @@ def _parse_output_metadata(
         raise AlignmentReviewContractError("alignment review output role is invalid")
     if set(metadata) != set(expected_keys):
         raise AlignmentReviewContractError("alignment review output metadata fields are invalid")
-    version = metadata[ALIGNMENT_REVIEW_METADATA_VERSION_KEY]
     session_id = metadata[ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY]
     name = metadata[ALIGNMENT_REVIEW_METADATA_NAME_KEY]
-    if not _is_int(version) or version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
-        raise AlignmentReviewContractError("unsupported alignment review output metadata version")
     if not isinstance(session_id, str):
         raise AlignmentReviewContractError("alignment review output session identifier is invalid")
     session_id = _validated_session_id(session_id)
@@ -355,12 +386,18 @@ def _parse_output_metadata(
     comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
     ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
     suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
+    audio_review_raw = metadata[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY]
     if not isinstance(comparison_key, str) or not comparison_key:
         raise AlignmentReviewContractError("alignment review output comparison key is invalid")
     if not _is_int(ordinal) or ordinal <= 0:
         raise AlignmentReviewContractError("alignment review output ordinal is invalid")
     if suggested_offset is not None and not _is_int(suggested_offset):
         raise AlignmentReviewContractError("alignment review suggested offset is invalid")
+    audio_review = _parse_audio_review(
+        audio_review_raw,
+        suggested_offset=suggested_offset,
+        comparison_ordinal=ordinal,
+    )
     return AlignmentReviewComparisonMetadata(
         output_id=candidate.output_id,
         source_frame_count=candidate.source_frame_count,
@@ -369,7 +406,517 @@ def _parse_output_metadata(
         comparison_ordinal=ordinal,
         presentation_name=name,
         suggested_offset=suggested_offset,
+        audio_review=audio_review,
     )
+
+
+_CURRENT_AUTHORITY_ORIGINS = {
+    "computed_this_run",
+    "shared_computed_offsets",
+    "interactive_confirmed_this_run",
+    "shared_previous_offsets",
+    "preexisting_manual_override",
+    "none",
+}
+_EVIDENCE_AVAILABILITY = {
+    "current_attempt",
+    "historical_details_unavailable",
+    "not_computed",
+}
+_ATTEMPT_KEYS = {
+    "reference_identity_digest",
+    "comparison_identity_digest",
+    "comparison_ordinal",
+    "status",
+    "estimator_policy",
+    "diagnostic_policy",
+    "media_runtime_fingerprint",
+    "ffmpeg_version",
+    "ffprobe_version",
+    "extraction_recipe",
+    "sample_rate",
+    "fps_num",
+    "fps_den",
+    "confidence_threshold",
+    "ambiguity_peak_ratio",
+    "minimum_valid_windows",
+    "consensus_minimum_ratio",
+    "selected_streams",
+    "analysis_rate",
+    "planned_window_count",
+    "peak_fft_points",
+    "total_fft_points",
+    "planning_reason",
+    "windows",
+    "decision",
+    "stability",
+}
+_STREAM_KEYS = {
+    "role",
+    "source_identity_digest",
+    "audio_stream_index",
+    "absolute_stream_index",
+    "selection_method",
+    "selection_rank",
+    "codec_name",
+    "sample_rate",
+    "channels",
+    "channel_layout",
+    "language",
+    "is_default",
+    "is_original",
+    "is_commentary",
+    "language_match",
+    "commentary_match",
+    "stream_start_num",
+    "stream_start_den",
+    "stream_start_basis",
+    "input_start_num",
+    "input_start_den",
+    "input_start_basis",
+    "time_base_num",
+    "time_base_den",
+    "duration_num",
+    "duration_den",
+    "duration_basis",
+}
+_WINDOW_KEYS = {
+    "logical_id",
+    "purpose",
+    "attempt_number",
+    "parent_id",
+    "planned_reference_start",
+    "planned_reference_count",
+    "planned_comparison_start",
+    "planned_comparison_count",
+    "analysis_rate",
+    "requested_rate",
+    "actual_reference_count",
+    "actual_comparison_count",
+    "scoring_reference_count",
+    "scoring_comparison_count",
+    "effective_aligned_overlap",
+    "origin_basis",
+    "local_lag",
+    "global_analysis_lag",
+    "requested_sample_lag",
+    "requested_frame_candidate",
+    "requested_score",
+    "score_stage",
+    "peak_ratio",
+    "peak_stage",
+    "peak_rate",
+    "review_qualified",
+    "configured_quality",
+    "vote_disposition",
+    "terminal_stage",
+    "terminal_category",
+    "failed_role",
+}
+_DECISION_KEYS = {
+    "state",
+    "candidate",
+    "primary_reason",
+    "raw_correlated_windows",
+    "consensus_windows",
+    "consensus_ratio",
+    "aggregate_score",
+    "minimum_peak_ratio",
+    "failed_gates",
+    "unassessed_gates",
+}
+_CANDIDATE_KEYS = {
+    "sample_offset",
+    "sample_rate",
+    "frame_offset",
+    "supporting_window_ids",
+    "median_score",
+    "minimum_peak_ratio",
+}
+_STABILITY_KEYS = {
+    "classification",
+    "valid_windows",
+    "offset_min_frames",
+    "offset_max_frames",
+    "first_offset_frames",
+    "last_offset_frames",
+    "largest_adjacent_jump_frames",
+    "change_position_seconds",
+}
+
+
+def _parse_audio_review(
+    raw: object, *, suggested_offset: int | None, comparison_ordinal: int
+) -> AlignmentReviewAudioReview:
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 128 * 1024:
+        raise AlignmentReviewContractError("alignment review audio evidence is invalid")
+    try:
+        decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
+    root = _strict_dict(
+        decoded,
+        {"current_authority", "evidence_availability", "audio_attempt"},
+        "audio evidence",
+    )
+    authority_raw = _strict_dict(
+        root["current_authority"], {"origin", "frame_offset"}, "current authority"
+    )
+    origin = authority_raw["origin"]
+    frame_offset = authority_raw["frame_offset"]
+    if origin not in _CURRENT_AUTHORITY_ORIGINS:
+        raise AlignmentReviewContractError("alignment review current authority origin is invalid")
+    if frame_offset is not None and not _is_int(frame_offset):
+        raise AlignmentReviewContractError("alignment review current authority offset is invalid")
+    if (origin == "none") != (frame_offset is None):
+        raise AlignmentReviewContractError("alignment review current authority is inconsistent")
+    if suggested_offset != frame_offset:
+        raise AlignmentReviewContractError("alignment review trusted offset is inconsistent")
+    availability = root["evidence_availability"]
+    if availability not in _EVIDENCE_AVAILABILITY:
+        raise AlignmentReviewContractError("alignment review evidence availability is invalid")
+    attempt = root["audio_attempt"]
+    if availability == "current_attempt":
+        _validate_audio_attempt(
+            attempt,
+            suggested_offset=suggested_offset,
+            authority_origin=origin,
+            comparison_ordinal=comparison_ordinal,
+        )
+    elif attempt is not None:
+        raise AlignmentReviewContractError(
+            "historical alignment evidence must not invent an attempt"
+        )
+    return AlignmentReviewAudioReview(
+        current_authority=AlignmentReviewCurrentAuthority(
+            origin=cast(Any, origin), frame_offset=frame_offset
+        ),
+        evidence_availability=cast(Any, availability),
+        audio_attempt=cast(Mapping[str, object] | None, attempt),
+    )
+
+
+def _validate_audio_attempt(
+    raw: object,
+    *,
+    suggested_offset: int | None,
+    authority_origin: object,
+    comparison_ordinal: int,
+) -> None:
+    attempt = _strict_dict(raw, _ATTEMPT_KEYS, "audio attempt")
+    _bounded_text_fields(
+        attempt,
+        (
+            "estimator_policy",
+            "diagnostic_policy",
+            "media_runtime_fingerprint",
+            "ffmpeg_version",
+            "ffprobe_version",
+            "extraction_recipe",
+        ),
+    )
+    _require_int_fields(
+        attempt,
+        (
+            "comparison_ordinal",
+            "sample_rate",
+            "fps_num",
+            "fps_den",
+            "minimum_valid_windows",
+            "planned_window_count",
+        ),
+    )
+    if attempt["comparison_ordinal"] != comparison_ordinal:
+        raise AlignmentReviewContractError("alignment review attempt ordinal is inconsistent")
+    for digest_name in ("reference_identity_digest", "comparison_identity_digest"):
+        digest = attempt[digest_name]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            raise AlignmentReviewContractError("alignment review source identity is invalid")
+    if attempt["status"] not in {"complete", "preanalysis_rejection", "aborted"}:
+        raise AlignmentReviewContractError("alignment review attempt status is invalid")
+    if (
+        cast(int, attempt["sample_rate"]) <= 0
+        or cast(int, attempt["fps_num"]) <= 0
+        or cast(int, attempt["fps_den"]) <= 0
+        or cast(int, attempt["minimum_valid_windows"]) <= 0
+        or not 0 <= cast(int, attempt["planned_window_count"]) <= 16
+    ):
+        raise AlignmentReviewContractError("alignment review attempt bounds are invalid")
+    _require_number_fields(
+        attempt,
+        ("confidence_threshold", "ambiguity_peak_ratio", "consensus_minimum_ratio"),
+    )
+    _require_nullable_int_fields(attempt, ("analysis_rate", "peak_fft_points", "total_fft_points"))
+    streams = attempt["selected_streams"]
+    windows = attempt["windows"]
+    if not isinstance(streams, list):
+        raise AlignmentReviewContractError("alignment review selected streams are invalid")
+    typed_streams = cast(list[object], streams)
+    if len(typed_streams) != 2:
+        raise AlignmentReviewContractError("alignment review selected streams are invalid")
+    typed_stream_data: list[dict[str, object]] = []
+    for stream in typed_streams:
+        data = _strict_dict(stream, _STREAM_KEYS, "selected stream")
+        typed_stream_data.append(data)
+        _require_int_fields(
+            data,
+            (
+                "audio_stream_index",
+                "absolute_stream_index",
+                "stream_start_num",
+                "stream_start_den",
+                "input_start_num",
+                "input_start_den",
+            ),
+        )
+        _require_nullable_int_fields(
+            data,
+            (
+                "sample_rate",
+                "channels",
+                "time_base_num",
+                "time_base_den",
+                "duration_num",
+                "duration_den",
+            ),
+        )
+        _require_bool_fields(data, ("is_default", "is_original", "is_commentary"))
+        if (
+            cast(int, data["audio_stream_index"]) < 0
+            or cast(int, data["absolute_stream_index"]) < 0
+            or cast(int, data["stream_start_den"]) <= 0
+            or cast(int, data["input_start_den"]) <= 0
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review selected stream bounds are invalid"
+            )
+        if data["selection_method"] not in {"explicit_override", "automatic_metadata"}:
+            raise AlignmentReviewContractError("alignment review stream selection is invalid")
+        if data["stream_start_basis"] not in {"metadata", "default_zero"} or data[
+            "input_start_basis"
+        ] not in {"metadata", "default_zero"}:
+            raise AlignmentReviewContractError("alignment review stream timing basis is invalid")
+        for match_name in ("language_match", "commentary_match"):
+            if data[match_name] not in {"match", "mismatch", "unknown", "not_applicable"}:
+                raise AlignmentReviewContractError("alignment review stream match is invalid")
+        _validate_scalar_tree(data)
+    if tuple(stream["role"] for stream in typed_stream_data) != ("reference", "comparison"):
+        raise AlignmentReviewContractError("alignment review selected stream roles are invalid")
+    if (
+        typed_stream_data[0]["source_identity_digest"] != attempt["reference_identity_digest"]
+        or typed_stream_data[1]["source_identity_digest"] != attempt["comparison_identity_digest"]
+    ):
+        raise AlignmentReviewContractError("alignment review selected stream identity is invalid")
+    if not isinstance(windows, list):
+        raise AlignmentReviewContractError("alignment review windows are invalid")
+    typed_windows = cast(list[object], windows)
+    if len(typed_windows) > 18:
+        raise AlignmentReviewContractError("alignment review windows are invalid")
+    window_ids: list[str] = []
+    primary_count = 0
+    correlated_count = 0
+    for window in typed_windows:
+        data = _strict_dict(window, _WINDOW_KEYS, "window")
+        logical_id = data["logical_id"]
+        if not isinstance(logical_id, str) or not logical_id:
+            raise AlignmentReviewContractError("alignment review window identifier is invalid")
+        window_ids.append(logical_id)
+        if data["purpose"] == "primary":
+            primary_count += 1
+        elif data["purpose"] not in {"disputed_recheck", "zero_check"}:
+            raise AlignmentReviewContractError("alignment review window purpose is invalid")
+        if data["terminal_category"] == "correlated":
+            correlated_count += 1
+        _require_int_fields(
+            data,
+            (
+                "attempt_number",
+                "planned_reference_start",
+                "planned_reference_count",
+                "planned_comparison_start",
+                "planned_comparison_count",
+                "analysis_rate",
+                "requested_rate",
+            ),
+        )
+        _require_nullable_int_fields(
+            data,
+            (
+                "actual_reference_count",
+                "actual_comparison_count",
+                "scoring_reference_count",
+                "scoring_comparison_count",
+                "effective_aligned_overlap",
+                "requested_sample_lag",
+                "requested_frame_candidate",
+                "peak_rate",
+            ),
+        )
+        _require_bool_fields(data, ("review_qualified", "configured_quality"))
+        if (
+            cast(int, data["attempt_number"]) <= 0
+            or cast(int, data["planned_reference_start"]) < 0
+            or cast(int, data["planned_reference_count"]) < 0
+            or cast(int, data["planned_comparison_start"]) < 0
+            or cast(int, data["planned_comparison_count"]) < 0
+            or cast(int, data["analysis_rate"]) <= 0
+            or cast(int, data["requested_rate"]) <= 0
+        ):
+            raise AlignmentReviewContractError("alignment review window bounds are invalid")
+        if data["origin_basis"] not in {"planned_assumption", "not_measured"}:
+            raise AlignmentReviewContractError("alignment review window origin is invalid")
+        if data["vote_disposition"] not in {"voted", "abstained", "failed"}:
+            raise AlignmentReviewContractError("alignment review window vote is invalid")
+        _require_nullable_number_fields(
+            data,
+            ("local_lag", "global_analysis_lag", "requested_score", "peak_ratio"),
+        )
+        _validate_scalar_tree(data)
+    if len(set(window_ids)) != len(window_ids):
+        raise AlignmentReviewContractError("alignment review window identifiers are duplicated")
+    if primary_count != attempt["planned_window_count"]:
+        raise AlignmentReviewContractError("alignment review planned window count is inconsistent")
+    decision = _strict_dict(attempt["decision"], _DECISION_KEYS, "audio decision")
+    _validate_scalar_tree(decision, skip=("candidate",))
+    state = decision["state"]
+    candidate = decision["candidate"]
+    if state not in {"trusted_automatic", "provisional", "unavailable"}:
+        raise AlignmentReviewContractError("alignment review audio decision is invalid")
+    _require_int_fields(decision, ("raw_correlated_windows", "consensus_windows"))
+    if decision["raw_correlated_windows"] != correlated_count:
+        raise AlignmentReviewContractError(
+            "alignment review correlated window count is inconsistent"
+        )
+    if not 0 <= cast(int, decision["consensus_windows"]) <= correlated_count:
+        raise AlignmentReviewContractError("alignment review consensus window count is invalid")
+    _require_nullable_number_fields(
+        decision, ("consensus_ratio", "aggregate_score", "minimum_peak_ratio")
+    )
+    if state == "unavailable":
+        if candidate is not None:
+            raise AlignmentReviewContractError("unavailable audio evidence has a candidate")
+    else:
+        candidate_data = _strict_dict(candidate, _CANDIDATE_KEYS, "audio candidate")
+        _require_int_fields(candidate_data, ("sample_offset", "sample_rate", "frame_offset"))
+        _require_number_fields(candidate_data, ("median_score",))
+        _require_peak_ratio(candidate_data, "minimum_peak_ratio", nullable=False)
+        _validate_scalar_tree(candidate_data)
+        supporting = candidate_data["supporting_window_ids"]
+        if not isinstance(supporting, list):
+            raise AlignmentReviewContractError("alignment review candidate support is invalid")
+        typed_supporting = cast(list[object], supporting)
+        if not typed_supporting or any(not isinstance(item, str) for item in typed_supporting):
+            raise AlignmentReviewContractError("alignment review candidate support is invalid")
+        supporting_ids = cast(list[str], typed_supporting)
+        if len(set(supporting_ids)) != len(supporting_ids) or not set(supporting_ids) <= set(
+            window_ids
+        ):
+            raise AlignmentReviewContractError("alignment review candidate support is invalid")
+        candidate_offset = candidate_data["frame_offset"]
+        if not _is_int(candidate_offset):
+            raise AlignmentReviewContractError("alignment review candidate offset is invalid")
+        if state == "trusted_automatic":
+            if authority_origin != "computed_this_run" or suggested_offset != candidate_offset:
+                raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
+        elif authority_origin in {"computed_this_run", "shared_computed_offsets"}:
+            raise AlignmentReviewContractError("provisional audio evidence became authoritative")
+    stability = attempt["stability"]
+    if stability is not None:
+        stability_data = _strict_dict(stability, _STABILITY_KEYS, "stability")
+        _require_int_fields(stability_data, ("valid_windows",))
+        _require_nullable_int_fields(
+            stability_data,
+            (
+                "offset_min_frames",
+                "offset_max_frames",
+                "first_offset_frames",
+                "last_offset_frames",
+                "largest_adjacent_jump_frames",
+            ),
+        )
+        _require_nullable_number_fields(stability_data, ("change_position_seconds",))
+        _validate_scalar_tree(stability_data)
+    _validate_scalar_tree(attempt, skip=("selected_streams", "windows", "decision", "stability"))
+
+
+def _bounded_text_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if not isinstance(value, str) or len(value) > 512:
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_int_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        if not _is_int(data[name]):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_nullable_int_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if value is not None and not _is_int(value):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_bool_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        if not isinstance(data[name], bool):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_number_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+        if not math.isfinite(value):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_nullable_number_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if value is None:
+            continue
+        if name in {"peak_ratio", "minimum_peak_ratio"}:
+            _require_peak_ratio(data, name, nullable=True)
+        else:
+            _require_number_fields(data, (name,))
+
+
+def _require_peak_ratio(data: Mapping[str, object], name: str, *, nullable: bool) -> None:
+    value = data[name]
+    if nullable and value is None:
+        return
+    if value == "unbounded":
+        return
+    _require_number_fields(data, (name,))
+
+
+def _validate_scalar_tree(data: Mapping[str, object], *, skip: tuple[str, ...] = ()) -> None:
+    for key, value in data.items():
+        if key in skip or value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, str):
+            if len(value) > 512 or any(ord(char) < 32 for char in value):
+                raise AlignmentReviewContractError("alignment review text evidence is invalid")
+            continue
+        if _is_int(value):
+            continue
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise AlignmentReviewContractError("alignment review numeric evidence is invalid")
+            continue
+        if isinstance(value, list) and all(
+            isinstance(item, str) or _is_int(item) for item in cast(list[object], value)
+        ):
+            continue
+        raise AlignmentReviewContractError(f"alignment review {key} is invalid")
 
 
 def _validated_session_id(value: str) -> str:

@@ -72,10 +72,26 @@ def _call(
 ) -> AlignmentVSViewOutcome:
     reference = _clip(tmp_path / "ref.mkv")
     resolved_comparisons = comparisons or [_clip(tmp_path / "comparison.mkv", frame_count=150)]
+    offsets = {f"ref:{comparison.path.stem}": 3 for comparison in resolved_comparisons}
     return maybe_launch_alignment_vsview(
         reference=reference,
         comparisons=resolved_comparisons,
-        offsets_by_key={f"ref:{comparison.path.stem}": 3 for comparison in resolved_comparisons},
+        offsets_by_key=offsets,
+        audio_review_by_key={
+            key: json.dumps(
+                {
+                    "current_authority": {
+                        "origin": "shared_computed_offsets",
+                        "frame_offset": offset,
+                    },
+                    "evidence_availability": "historical_details_unavailable",
+                    "audio_attempt": None,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for key, offset in offsets.items()
+        },
         cache_dir=tmp_path,
         config=config,
         progress=None,
@@ -441,6 +457,20 @@ def test_progress_is_resumed_after_review_failure(
         reference=reference,
         comparisons=[comparison],
         offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key={
+            "ref:comparison": json.dumps(
+                {
+                    "current_authority": {
+                        "origin": "shared_computed_offsets",
+                        "frame_offset": 0,
+                    },
+                    "evidence_availability": "historical_details_unavailable",
+                    "audio_attempt": None,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        },
         cache_dir=tmp_path,
         config=AlignmentConfig(use_vsview=True),
         progress=progress,

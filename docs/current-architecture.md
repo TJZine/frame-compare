@@ -467,16 +467,19 @@ inventing them.
 Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
-serializing role/key/ordinal/name/suggestion metadata as schema v1. The
+serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
+service-projected audio evidence as metadata schema v2. The
 typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
-strict v1 metadata/result topology, trusted sibling-sidecar path, atomic
+strict metadata-v2/result-v1 topology and primitive DTO validation, trusted
+sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it remains inert for ordinary or
-rejected sessions, observes only public current-output/current-frame callbacks after
+rejected sessions, renders accepted/provisional/unavailable evidence without importing
+service policy, observes only public current-output/current-frame callbacks after
 activation, requires each source to be visited for the default viewer-position
 workflow, and writes only a complete typed
 sidecar through one whole-set action. The panel's manual source-frame and known-offset
-inputs feed that same result model; its secondary keep-audio action writes one
+inputs feed that same result model; its secondary keep-current action writes one
 `keep_current` decision per comparison. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
@@ -920,9 +923,9 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and schema-v1 metadata required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict schema-v1 metadata/result validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
-| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v2 transport required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v2/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
+| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
 | `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |

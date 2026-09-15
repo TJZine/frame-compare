@@ -7,6 +7,7 @@ from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -155,10 +156,16 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
         lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
     )
 
-    def launch(*_args: object, **_kwargs: object):
+    def launch(*args: object, **_kwargs: object):
         prelaunch = capsys.readouterr().err
         assert "Provisional candidate: +0f (not applied)" in prelaunch
         assert "Reason: insufficient_consensus" in prelaunch
+        native_request = cast(Any, _kwargs["request"])
+        review = json.loads(native_request.audio_review_by_key["ref:comparison"])
+        assert review["current_authority"] == {"origin": "none", "frame_offset": None}
+        assert review["evidence_availability"] == "current_attempt"
+        assert review["audio_attempt"]["decision"]["state"] == "provisional"
+        assert native_request.suggested_offsets_by_key == {"ref:comparison": None}
         initial_payload = json.loads(
             (tmp_path / "alignment_diagnostics" / "comparison-1.json").read_text(encoding="utf-8")
         )

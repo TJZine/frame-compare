@@ -91,13 +91,13 @@ continues to use Frame Compare's L-SMASH-Works source/index path; VSView's BestS
 workspace is UI-only. Open Frame Compare Alignment Review from VSView's Tool Panel,
 unlink the playheads, and, when using viewer positions, visit Reference and every
 Comparison N output on the same visible moment. The live source lineup records the untrimmed source frames and previews
-the signed reference-to-comparison trim. Selecting **Use these aligned positions** writes
-one complete ordered result for the whole source set. **Keep audio-derived alignment** is
-the secondary whole-set action and retains the alignment Frame Compare entered with,
-including the no-change case when no trusted suggestion exists. Expand Enter alignment
+the signed reference-to-comparison trim. Selecting **Confirm these aligned positions** writes
+one complete ordered result for the whole source set. **Keep current alignment** is the
+secondary whole-set action and preserves existing authority without confirming an
+unapplied candidate. Expand Enter alignment
 manually for Source frames or Known offsets; both use the same whole-set action. Closing
-VSView without saving writes no result. The generated session metadata and typed sibling
-result sidecar both use schema v1; strict session/result validation
+VSView without saving writes no result. Generated session metadata uses v2 while the
+typed sibling result sidecar remains v1; strict session/result validation
 and authoritative raw frame bounds remain unchanged.
 
 ## Environment variables and secrets

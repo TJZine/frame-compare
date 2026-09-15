@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -93,6 +94,41 @@ def _build_offsets_map(
         res = results_map.get(key)
         offsets_by_key[key] = res.frame_offset if res is not None and res.applied else None
     return offsets_by_key
+
+
+def _build_audio_review_map(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+) -> dict[str, str]:
+    payloads: dict[str, str] = {}
+    for comparison in comparisons:
+        key = _alignment_key(reference, comparison)
+        result = results_map[key]
+        provenance = provenances[key]
+        payload = {
+            "current_authority": {
+                "origin": provenance.provenance if result.applied else "none",
+                "frame_offset": result.frame_offset if result.applied else None,
+            },
+            "evidence_availability": provenance.evidence_availability,
+            "audio_attempt": asdict(result.audio_attempt)
+            if result.audio_attempt is not None
+            else None,
+        }
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        if len(encoded.encode("utf-8")) > 128 * 1024:
+            raise AudioAlignmentError("Native alignment-review audio evidence exceeds 128 KiB.")
+        payloads[key] = encoded
+    return payloads
 
 
 def _apply_confirmed_vsview_offsets(
@@ -538,36 +574,214 @@ def _record_interactive_provenance(
         )
 
 
-def _present_pre_review_evidence(
+def _format_stream_summary(attempt: AudioAlignmentAttempt) -> str:
+    reference, comparison = attempt.selected_streams
+    reference_method = (
+        "explicit override"
+        if reference.selection_method == "explicit_override"
+        else "automatic metadata selection"
+    )
+    comparison_method = (
+        "explicit override"
+        if comparison.selection_method == "explicit_override"
+        else "automatic metadata selection"
+    )
+    methods = (
+        reference_method
+        if reference_method == comparison_method
+        else f"Reference {reference_method}; Comparison {comparison_method}"
+    )
+    return (
+        f"Streams: Reference a:{reference.audio_stream_index} -> "
+        f"Comparison a:{comparison.audio_stream_index} ({methods})."
+    )
+
+
+def _normal_evidence_lines(
+    *, ordinal: int, result: AlignmentResult, provenance: AlignmentProvenance
+) -> list[str]:
+    if result.audio_attempt is None:
+        offset = result.frame_offset
+        if result.applied and offset is not None:
+            origin = provenance.provenance
+            human_authority = origin in {
+                "interactive_confirmed_this_run",
+                "shared_previous_offsets",
+                "preexisting_manual_override",
+            }
+            prefix = (
+                "Reused manually confirmed alignment"
+                if human_authority
+                else "Reused accepted audio alignment"
+            )
+            detail = (
+                "Historical audio details are unavailable."
+                if human_authority
+                else "Historical window and selected-stream details are unavailable; "
+                "no audio analysis ran this time."
+            )
+            return [f"Comparison {ordinal} - {prefix}: {offset:+d}f.", detail]
+        return [f"Comparison {ordinal} - Audio alignment was not computed. No usable candidate."]
+
+    attempt = result.audio_attempt
+    decision = attempt.decision
+    candidate = decision.candidate
+    if decision.state == "trusted_automatic":
+        if candidate is None:
+            raise ValueError("trusted audio decision is missing its candidate")
+        lines = [f"Comparison {ordinal} - Audio alignment accepted: {candidate.frame_offset:+d}f."]
+        lines.append(
+            "No relative audio correction is required."
+            if candidate.frame_offset == 0
+            else _trim_explanation(candidate.frame_offset) + "."
+        )
+        lines[-1] += (
+            f" Policy: {attempt.estimator_policy}; {decision.consensus_windows}/"
+            f"{decision.raw_correlated_windows} correlated windows agree."
+        )
+    elif decision.state == "provisional":
+        if candidate is None:
+            raise ValueError("provisional audio decision is missing its candidate")
+        lines = [
+            f"Comparison {ordinal} - Audio alignment requires review. "
+            f"Provisional candidate: {candidate.frame_offset:+d}f (not applied).",
+            (
+                f"{decision.consensus_windows}/{decision.raw_correlated_windows} correlated "
+                f"windows agree; configured consensus requires "
+                f"{attempt.consensus_minimum_ratio:.0%}."
+            ),
+            f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
+        ]
+    else:
+        lines = [
+            f"Comparison {ordinal} - No usable audio candidate. No automatic correction applied.",
+            f"{attempt.planned_window_count} windows planned; "
+            f"{decision.raw_correlated_windows} usable estimates. "
+            f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
+        ]
+    lines.append(_format_stream_summary(attempt))
+    _reference, comparison = attempt.selected_streams
+    mismatches: list[str] = []
+    if comparison.language_match == "mismatch":
+        mismatches.append("language")
+    if comparison.commentary_match == "mismatch":
+        mismatches.append("commentary")
+    if mismatches:
+        lines.append(
+            f"Selected audio metadata differs ({'/'.join(mismatches)}); matching content is not established."
+        )
+    return lines
+
+
+def _trim_explanation(offset: int) -> str:
+    if offset > 0:
+        return f"Trim {offset}f from the reference"
+    return f"Trim {abs(offset)}f from the comparison"
+
+
+def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
+    decision = attempt.decision
+    lines = [
+        f"  Runtime/policy: {attempt.media_runtime_fingerprint}; {attempt.estimator_policy}; "
+        f"diagnostic={attempt.diagnostic_policy}",
+        f"  Thresholds: score={attempt.confidence_threshold}; peak={attempt.ambiguity_peak_ratio}; "
+        f"minimum windows={attempt.minimum_valid_windows}; consensus={attempt.consensus_minimum_ratio}",
+        f"  Decision: state={decision.state}; reason={decision.primary_reason}; "
+        f"failed={','.join(decision.failed_gates) or 'none'}; "
+        f"unassessed={','.join(decision.unassessed_gates) or 'none'}",
+        f"  Work: planned={attempt.planned_window_count}; analysis rate={attempt.analysis_rate}; "
+        f"FFT peak/total={attempt.peak_fft_points}/{attempt.total_fft_points}; "
+        f"planning={attempt.planning_reason or 'complete'}",
+        "  Audio details:",
+    ]
+    for stream in attempt.selected_streams:
+        lines.append(
+            f"    {stream.role}: a:{stream.audio_stream_index} (absolute {stream.absolute_stream_index}), "
+            f"codec={stream.codec_name or 'unknown'}, language={stream.language or 'unknown'}, "
+            f"channels={stream.channels or 'unknown'}/{stream.channel_layout or 'unknown'}, "
+            f"rate={stream.sample_rate or 'unknown'}, selection={stream.selection_method}, "
+            f"rank={stream.selection_rank}, start={stream.stream_start_num}/{stream.stream_start_den} "
+            f"({stream.stream_start_basis}), input={stream.input_start_num}/{stream.input_start_den} "
+            f"({stream.input_start_basis}), duration={stream.duration_num}/{stream.duration_den} "
+            f"({stream.duration_basis}), language-match={stream.language_match}, "
+            f"commentary-match={stream.commentary_match}"
+        )
+    for window in attempt.windows:
+        peak = window.peak_ratio if window.peak_ratio is not None else "unknown"
+        lines.append(
+            f"    {window.logical_id}: ref={window.planned_reference_start}+{window.planned_reference_count}, "
+            f"cmp={window.planned_comparison_start}+{window.planned_comparison_count}, "
+            f"actual={window.actual_reference_count}/{window.actual_comparison_count}, "
+            f"scoring={window.scoring_reference_count}/{window.scoring_comparison_count}, "
+            f"overlap={window.effective_aligned_overlap}, origin={window.origin_basis}, "
+            f"rates={window.analysis_rate}/{window.requested_rate}, "
+            f"lag={window.local_lag}/{window.global_analysis_lag}/{window.requested_sample_lag}, "
+            f"frame={window.requested_frame_candidate}, score={window.requested_score} "
+            f"({window.score_stage}), peak={peak} ({window.peak_stage}@{window.peak_rate}), "
+            f"quality={window.configured_quality}, vote={window.vote_disposition}, "
+            f"review={window.review_qualified}, result={window.terminal_stage}/{window.terminal_category}, "
+            f"relation={window.purpose}/{window.parent_id or 'root'}"
+        )
+    return lines
+
+
+def _present_alignment_evidence(
     *,
     request: AlignmentRequest,
     results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
     config: AlignmentConfig,
     progress: ProgressReporter | None,
+    verbose: bool,
+    quiet: bool,
+    json_output: bool,
+    diagnostics_written: bool,
 ) -> None:
-    if not (config.use_vsview or config.force_interactive):
-        return
     lines: list[str] = []
     for ordinal, comparison in enumerate(request.comparisons, start=1):
-        result = results_map[_alignment_key(request.reference.path, comparison.path)]
-        attempt = result.audio_attempt
-        if result.applied or attempt is None:
+        key = _alignment_key(request.reference.path, comparison.path)
+        result = results_map[key]
+        provenance = provenances[key]
+        decision = result.audio_attempt.decision if result.audio_attempt is not None else None
+        actionable = not result.applied or (
+            decision is not None and decision.state != "trusted_automatic"
+        )
+        if json_output:
+            if actionable:
+                log.warning(
+                    "audio_alignment_requires_review",
+                    comparison_ordinal=ordinal,
+                    decision_state=decision.state if decision is not None else "unavailable",
+                    candidate_frame=(
+                        decision.candidate.frame_offset
+                        if decision is not None and decision.candidate is not None
+                        else None
+                    ),
+                    reason=(decision.primary_reason if decision is not None else result.diagnostic),
+                )
             continue
-        decision = attempt.decision
-        if decision.state == "provisional":
-            candidate = decision.candidate
-            if candidate is None:
-                raise ValueError("provisional audio decision is missing its candidate")
+        if quiet and not actionable:
+            continue
+        lines.extend(_normal_evidence_lines(ordinal=ordinal, result=result, provenance=provenance))
+        if verbose and not quiet and result.audio_attempt is not None:
+            lines.extend(_verbose_evidence_lines(result.audio_attempt))
+        if actionable and (config.use_vsview or config.force_interactive):
+            if decision is not None and decision.candidate is not None:
+                lines.append(
+                    "Opening VSView for manual review. The candidate is a hint, not a "
+                    "confirmed alignment."
+                )
+            else:
+                lines.append(
+                    "Opening VSView for manual review. No automatic candidate is available; "
+                    "align the sources manually."
+                )
+        elif actionable:
             lines.append(
-                f"Comparison {ordinal} - Audio alignment requires review. "
-                f"Provisional candidate: {candidate.frame_offset:+d}f (not applied)."
+                "Continuing without an accepted audio correction; rendering remains best-effort."
             )
-        else:
-            lines.append(
-                f"Comparison {ordinal} - No usable audio candidate. "
-                "No automatic correction applied."
-            )
-        lines.append(f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.")
+    if diagnostics_written and not quiet and not json_output:
+        lines.append("Audio diagnostics: alignment_diagnostics/.")
     if not lines:
         return
     if progress is not None:
@@ -637,6 +851,8 @@ def align_clips_from_request(
     reference_fps: Fraction | None = None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     verbose: bool = False,
+    quiet: bool = False,
+    json_output: bool = False,
 ) -> list[AlignmentResult]:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     reference = request.reference.path
@@ -714,27 +930,39 @@ def align_clips_from_request(
         provenances=provenances,
         review_outcome=initial_outcome,
     )
+    _present_alignment_evidence(
+        request=request,
+        results_map=results_map,
+        provenances=provenances,
+        config=config,
+        progress=progress,
+        verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
+        diagnostics_written=bool(diagnostic_keys),
+    )
     if completed_confirmed_reuse and not requested_comparisons:
         return [
             results_map[_alignment_key(reference, comparison.path)]
             for comparison in request.comparisons
         ]
 
-    _present_pre_review_evidence(
-        request=request,
-        results_map=results_map,
-        config=config,
-        progress=progress,
-    )
     offsets_by_key = _build_offsets_map(
         reference=reference,
         comparisons=comparisons,
         results_map=results_map,
     )
+    audio_review_by_key = _build_audio_review_map(
+        reference=reference,
+        comparisons=comparisons,
+        results_map=results_map,
+        provenances=provenances,
+    )
     review = maybe_launch_alignment_vsview(
         reference=request.reference,
         comparisons=request.comparisons,
         offsets_by_key=offsets_by_key,
+        audio_review_by_key=audio_review_by_key,
         cache_dir=request.generated_dir,
         config=config,
         progress=progress,

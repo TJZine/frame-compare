@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Generator
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -16,27 +17,127 @@ pytest.importorskip("vsview")
 
 # Qt must see the offscreen platform before PySide6 and VSView are imported.
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 from vsengine.loops import get_loop, set_loop  # noqa: E402
 from vsview.vsenv import QtEventLoop  # noqa: E402
 
 from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
+    ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     ALIGNMENT_REVIEW_METADATA_NAME_KEY,
     ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
     ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
     ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+    ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
-    ALIGNMENT_REVIEW_SCHEMA_VERSION,
 )
 from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
+from tests.services.test_alignment_diagnostics import audio_attempt  # noqa: E402
 
 _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
+
+
+def _audio_review(suggestion: int | None) -> str:
+    return json.dumps(
+        {
+            "current_authority": {
+                "origin": "shared_computed_offsets" if suggestion is not None else "none",
+                "frame_offset": suggestion,
+            },
+            "evidence_availability": (
+                "historical_details_unavailable" if suggestion is not None else "not_computed"
+            ),
+            "audio_attempt": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _provisional_audio_review(ordinal: int = 1) -> str:
+    attempt = asdict(audio_attempt())
+    attempt["comparison_ordinal"] = ordinal
+    return json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _accepted_audio_review(ordinal: int = 1) -> str:
+    payload = cast(dict[str, Any], json.loads(_provisional_audio_review(ordinal)))
+    payload["current_authority"] = {"origin": "computed_this_run", "frame_offset": 0}
+    attempt = cast(dict[str, Any], payload["audio_attempt"])
+    attempt["consensus_minimum_ratio"] = 0.8
+    decision = cast(dict[str, Any], attempt["decision"])
+    decision.update(
+        state="trusted_automatic",
+        primary_reason="accepted",
+        failed_gates=[],
+    )
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _unavailable_audio_review(ordinal: int = 1) -> str:
+    payload = cast(dict[str, Any], json.loads(_provisional_audio_review(ordinal)))
+    attempt = cast(dict[str, Any], payload["audio_attempt"])
+    windows = cast(list[dict[str, Any]], attempt["windows"])
+    for window in windows:
+        window.update(
+            requested_sample_lag=None,
+            requested_frame_candidate=None,
+            requested_score=None,
+            peak_ratio=None,
+            peak_rate=None,
+            review_qualified=False,
+            configured_quality=False,
+            vote_disposition="failed",
+            terminal_stage="signal_validation",
+            terminal_category="insufficient_signal",
+        )
+    decision = cast(dict[str, Any], attempt["decision"])
+    decision.update(
+        state="unavailable",
+        candidate=None,
+        primary_reason="insufficient_signal",
+        raw_correlated_windows=0,
+        consensus_windows=0,
+        consensus_ratio=None,
+        aggregate_score=None,
+        minimum_peak_ratio=None,
+        failed_gates=["insufficient_signal"],
+    )
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _manual_audio_review(offset: int = 0) -> str:
+    payload = {
+        "current_authority": {
+            "origin": "preexisting_manual_override",
+            "frame_offset": offset,
+        },
+        "evidence_availability": "historical_details_unavailable",
+        "audio_attempt": None,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _manual_with_provisional_audio_review() -> str:
+    payload = cast(dict[str, Any], json.loads(_provisional_audio_review()))
+    payload["current_authority"] = {
+        "origin": "interactive_confirmed_this_run",
+        "frame_offset": 0,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -71,7 +172,7 @@ def _reference_output(*, frame_count: int = 200) -> Any:
         vs_index=0,
         vs_output=SimpleNamespace(clip=SimpleNamespace(num_frames=frame_count)),
         kwargs={
-            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_METADATA_VERSION,
             ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: _SESSION_ID,
             ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "reference",
             ALIGNMENT_REVIEW_METADATA_NAME_KEY: "Reference master",
@@ -84,18 +185,22 @@ def _comparison_output(
     suggestion: int | None,
     *,
     frame_count: int = 200,
+    audio_review: str | None = None,
 ) -> Any:
     return SimpleNamespace(
         vs_index=ordinal,
         vs_output=SimpleNamespace(clip=SimpleNamespace(num_frames=frame_count)),
         kwargs={
-            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_SCHEMA_VERSION,
+            ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_METADATA_VERSION,
             ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY: _SESSION_ID,
             ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: f"ref:comparison-{ordinal}",
             ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY: ordinal,
             ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "comparison",
             ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"Comparison {ordinal} source",
             ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY: suggestion,
+            ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY: (
+                _audio_review(suggestion) if audio_review is None else audio_review
+            ),
         },
     )
 
@@ -107,6 +212,9 @@ def _panel(
     comparison_count: int = 1,
     initialize_output: bool = False,
     frame_count: int = 200,
+    audio_review: str | None = None,
+    suggestions: tuple[int | None, ...] | None = None,
+    audio_reviews: tuple[str, ...] | None = None,
 ) -> tuple[AlignmentReviewPanel, Any, Path]:
     sessions = tmp_path / "vsview_sessions"
     sessions.mkdir()
@@ -115,7 +223,14 @@ def _panel(
     outputs = [
         _reference_output(frame_count=frame_count),
         *(
-            _comparison_output(ordinal, suggestion, frame_count=frame_count)
+            _comparison_output(
+                ordinal,
+                suggestions[ordinal - 1] if suggestions is not None else suggestion,
+                frame_count=frame_count,
+                audio_review=(
+                    audio_reviews[ordinal - 1] if audio_reviews is not None else audio_review
+                ),
+            )
             for ordinal in range(1, comparison_count + 1)
         ),
     ]
@@ -189,9 +304,16 @@ def test_viewer_callbacks_update_only_current_source_and_revisits_replace_it(
     assert panel.source_outcome_labels[1].text().startswith("+11 frames")
 
 
-def test_panel_is_inert_for_ordinary_workspace() -> None:
+def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
     timeline = _Timeline()
-    api = SimpleNamespace(file_path=None, timeline=timeline)
+    script = tmp_path / "ordinary.py"
+    script.write_text("# ordinary VSView session\n", encoding="utf-8")
+    output = SimpleNamespace(
+        vs_index=0,
+        vs_output=SimpleNamespace(clip=SimpleNamespace(num_frames=200)),
+        kwargs={"unrelated_plugin_metadata": "untouched"},
+    )
+    api = SimpleNamespace(file_path=script, voutputs=[output], timeline=timeline)
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
     panel.setParent(None)
@@ -204,13 +326,16 @@ def test_panel_is_inert_for_ordinary_workspace() -> None:
     assert timeline.cleared == [("frame_compare_alignment_review", True)]
 
 
-def test_malformed_output_proxy_keeps_panel_inert(tmp_path: Path) -> None:
+def test_malformed_frame_compare_output_proxy_reports_unavailable(tmp_path: Path) -> None:
     sessions = tmp_path / "vsview_sessions"
     sessions.mkdir()
     script = sessions / f"alignment_{_SESSION_ID}.py"
     script.write_text("# session\n", encoding="utf-8")
     timeline = _Timeline()
-    malformed = SimpleNamespace(vs_index=0, kwargs={})
+    malformed = SimpleNamespace(
+        vs_index=0,
+        kwargs={ALIGNMENT_REVIEW_METADATA_VERSION_KEY: ALIGNMENT_REVIEW_METADATA_VERSION},
+    )
     api = SimpleNamespace(file_path=script, voutputs=[malformed], timeline=timeline)
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
@@ -223,6 +348,28 @@ def test_malformed_output_proxy_keeps_panel_inert(tmp_path: Path) -> None:
     assert str(tmp_path) not in panel.error_label.text()
     assert timeline.added == []
     assert not script.with_name(f"{script.stem}.alignment-result.json").exists()
+
+
+def test_metadata_v1_session_requires_regeneration(tmp_path: Path) -> None:
+    sessions = tmp_path / "vsview_sessions"
+    sessions.mkdir()
+    script = sessions / f"alignment_{_SESSION_ID}.py"
+    script.write_text("# old session\n", encoding="utf-8")
+    reference = _reference_output()
+    reference.kwargs[ALIGNMENT_REVIEW_METADATA_VERSION_KEY] = 1
+    api = SimpleNamespace(file_path=script, voutputs=[reference], timeline=_Timeline())
+    parent = QWidget()
+    panel = AlignmentReviewPanel(parent, cast(Any, api))
+    panel.setParent(None)
+
+    _call_hook(panel.on_workspace_loaded)
+
+    assert panel.error_label.text() == (
+        "Alignment review requires a newly generated session. "
+        "This session uses metadata v1; this version requires v2."
+    )
+    assert "Inactive" in panel.progress_label.text()
+    assert not panel.keep_button.isEnabled()
 
 
 def test_session_read_failure_is_bounded_and_sanitized(
@@ -279,7 +426,7 @@ def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
     assert panel.manual_toggle.accessibleName() == "Enter alignment manually"
     assert panel.body_scroll.accessibleName() == "Alignment source lineup and manual inputs"
     assert not panel.manual_group.isVisible()
-    assert panel.use_positions_button.text() == "Use these aligned positions"
+    assert panel.use_positions_button.text() == "Confirm these aligned positions"
 
 
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
@@ -313,7 +460,7 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
         "Suggestion unavailable",
         "Suggestion unavailable",
     ]
-    assert "remains unchanged" in panel.keep_help_label.text()
+    assert "remain unresolved" in panel.keep_help_label.text()
     assert panel.keep_button.isEnabled()
 
     panel.keep_button.click()
@@ -323,7 +470,7 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
         {"comparison_key": "ref:comparison-1", "action": "keep_current"},
         {"comparison_key": "ref:comparison-2", "action": "keep_current"},
     ]
-    assert "Alignment saved" in panel.progress_label.text()
+    assert "Alignment choices saved" in panel.progress_label.text()
     assert all("retained" in label.text() for label in panel.source_status_labels)
 
 
@@ -358,6 +505,94 @@ def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) ->
 
     assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
     assert api.timeline.added == []
+    assert "marker omitted" in panel.audio_detail_groups[0].findChild(QLabel).text().lower()
+
+
+def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: Path) -> None:
+    panel, api, script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=_provisional_audio_review(),
+    )
+
+    assert "Provisional audio candidate: +0f — NOT APPLIED" in panel.audio_summary_labels[0].text()
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert panel.progress_label.text() == "0 / 2 sources ready"
+    assert not panel.use_positions_button.isEnabled()
+
+    _visit(panel, api, 0, 12)
+
+    assert panel.progress_label.text() == "1 / 2 sources ready"
+    assert not panel.use_positions_button.isEnabled()
+    assert api.timeline.added[0][3].startswith("[PROVISIONAL — NOT APPLIED] +0f")
+
+    panel.keep_button.click()
+
+    assert _read_result(script)["decisions"] == [
+        {"comparison_key": "ref:comparison-1", "action": "keep_current"}
+    ]
+    assert panel.source_outcome_labels[1].text() == (
+        "Saved — no automatic correction applied; provisional +0f was not confirmed."
+    )
+
+
+def test_mixed_states_keep_separate_authority_and_saved_labels(tmp_path: Path) -> None:
+    panel, api, script = _panel(
+        tmp_path,
+        comparison_count=4,
+        suggestions=(0, None, None, 0),
+        audio_reviews=(
+            _accepted_audio_review(),
+            _provisional_audio_review(2),
+            _unavailable_audio_review(3),
+            _manual_audio_review(),
+        ),
+    )
+
+    assert [label.text().splitlines()[0] for label in panel.audio_summary_labels] == [
+        "Audio alignment accepted: +0f",
+        "Provisional audio candidate: +0f — NOT APPLIED",
+        "No usable audio candidate",
+        "Current alignment: +0f — manually confirmed",
+    ]
+    assert [field.text() for field in panel.offset_inputs] == ["", "", "", ""]
+    _visit(panel, api, 0, 0)
+    marker_text = [cast(str, marker[3]) for marker in api.timeline.added]
+    assert marker_text == [
+        "[ACCEPTED AUDIO] +0f — reference frame 0",
+        "[PROVISIONAL — NOT APPLIED] +0f — reference frame 0",
+        "[MANUAL ALIGNMENT] +0f — reference frame 0",
+    ]
+
+    panel.keep_button.click()
+
+    assert _read_result(script)["decisions"] == [
+        {"comparison_key": f"ref:comparison-{ordinal}", "action": "keep_current"}
+        for ordinal in range(1, 5)
+    ]
+    assert [label.text() for label in panel.source_outcome_labels[1:]] == [
+        "Saved — accepted alignment +0f retained.",
+        "Saved — no automatic correction applied; provisional +0f was not confirmed.",
+        "Saved — no accepted alignment; no audio candidate was available.",
+        "Saved — manually confirmed alignment +0f retained.",
+    ]
+
+
+def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
+    tmp_path: Path,
+) -> None:
+    panel, api, _script = _panel(
+        tmp_path,
+        suggestion=0,
+        audio_review=_manual_with_provisional_audio_review(),
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert "Current alignment: +0f — manually confirmed" in summary
+    assert "Provisional audio candidate: +0f — NOT APPLIED" in summary
+    _visit(panel, api, 0, 0)
+    assert api.timeline.added[0][3] == "[MANUAL ALIGNMENT] +0f — reference frame 0"
 
 
 def test_one_primary_action_saves_complete_viewer_positions(tmp_path: Path) -> None:
@@ -436,7 +671,7 @@ def test_known_offsets_are_whole_set_and_serialize_canonical_pairs(tmp_path: Pat
     assert panel.guidance_label.text() == (
         "Enter one known signed offset for every comparison; viewer visits are not required."
     )
-    assert panel.use_positions_button.text() == "Use these known offsets"
+    assert panel.use_positions_button.text() == "Confirm these known offsets"
     assert not panel.offset_inputs_group.isHidden()
     assert panel.frame_inputs_group.isHidden()
     panel.offset_inputs[0].setText("+12")
@@ -499,13 +734,13 @@ def test_switching_basis_never_combines_readiness(tmp_path: Path) -> None:
 
     panel.basis_selector.setCurrentIndex(1)
     assert panel.progress_label.text() == "0 / 1 comparisons ready"
-    assert panel.use_positions_button.text() == "Use these known offsets"
+    assert panel.use_positions_button.text() == "Confirm these known offsets"
     assert not panel.use_positions_button.isEnabled()
 
     panel.basis_selector.setCurrentIndex(0)
     assert panel.progress_label.text() == "2 / 2 sources ready"
     assert "visit every source" in panel.guidance_label.text()
-    assert panel.use_positions_button.text() == "Use these aligned positions"
+    assert panel.use_positions_button.text() == "Confirm these aligned positions"
     assert panel.use_positions_button.isEnabled()
 
 
@@ -528,7 +763,7 @@ def test_workspace_reload_restores_collapsed_source_frame_manual_defaults(
     assert panel.offset_inputs_group.isHidden()
     assert panel.basis_status_label.text() == "Input basis: Source frames"
     assert "visit every source" in panel.guidance_label.text()
-    assert panel.use_positions_button.text() == "Use these aligned positions"
+    assert panel.use_positions_button.text() == "Confirm these aligned positions"
 
 
 def test_save_failure_stays_editable_unsaved_and_redacted(

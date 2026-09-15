@@ -23,6 +23,7 @@ from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress_protocol import ProgressReporter
 from tests.services.alignment_request_test_support import alignment_request
+from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def test_alignment_duplicate_stems_fail_before_starting_progress(tmp_path: Path) -> None:
@@ -215,6 +216,7 @@ def test_alignment_full_manual_hit_stays_in_parent_align_phase(
     mock_estimate: MagicMock,
     mock_probe: MagicMock,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -251,6 +253,7 @@ def test_alignment_full_manual_hit_stays_in_parent_align_phase(
     reporter.advance.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
     assert descriptions == ["ALIGN | Checking saved offsets"]
+    assert "Reused manually confirmed alignment: +3f" in capsys.readouterr().err
 
 
 @patch("frame_compare.services.alignment._estimate_audio_pair")
@@ -440,3 +443,159 @@ def test_computed_attempt_retains_resolved_stream_and_window_facts(
     assert attempt.windows[0].actual_reference_count == 200
     assert attempt.windows[0].actual_comparison_count == 400
     assert attempt.windows[0].requested_sample_lag == 0
+
+
+def _presented_attempt_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    state: str,
+    verbose: bool = False,
+    quiet: bool = False,
+    json_output: bool = False,
+) -> None:
+    attempt = audio_attempt()
+    decision = attempt.decision
+    if state == "trusted_automatic":
+        decision = replace(decision, state="trusted_automatic", primary_reason="accepted")
+        consensus = AlignmentConsensus(
+            0,
+            0.99,
+            True,
+            "accepted",
+            5,
+            4,
+            0.8,
+            2.0,
+            audio_attempt=replace(attempt, decision=decision),
+        )
+    elif state == "unavailable":
+        decision = replace(
+            decision,
+            state="unavailable",
+            candidate=None,
+            primary_reason="no_usable_windows",
+            raw_correlated_windows=0,
+            consensus_windows=0,
+            consensus_ratio=None,
+            aggregate_score=None,
+            minimum_peak_ratio=None,
+        )
+        windows = tuple(
+            replace(window, terminal_category="insufficient_signal") for window in attempt.windows
+        )
+        consensus = AlignmentConsensus(
+            None,
+            0.0,
+            False,
+            "no_usable_windows",
+            0,
+            0,
+            0.0,
+            None,
+            window_records=windows,
+            decision=decision,
+            audio_attempt=replace(attempt, windows=windows, decision=decision),
+        )
+    else:
+        consensus = AlignmentConsensus(
+            None,
+            0.99,
+            False,
+            "insufficient_consensus",
+            5,
+            4,
+            0.8,
+            2.0,
+            window_records=attempt.windows,
+            decision=attempt.decision,
+            audio_attempt=attempt,
+        )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: consensus,
+    )
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    align_clips_from_request(
+        request,
+        config,
+        reference_fps=Fraction(24),
+        verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
+    )
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("trusted_automatic", "Audio alignment accepted: +0f"),
+        ("provisional", "Provisional candidate: +0f (not applied)"),
+        ("unavailable", "No usable audio candidate"),
+    ],
+)
+def test_normal_terminal_distinguishes_audio_states(
+    state: str,
+    expected: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _presented_attempt_result(tmp_path, monkeypatch, state=state)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert expected in captured.err
+    assert "Streams: Reference a:0 -> Comparison a:0" in captured.err
+    assert "\x1b[" not in captured.err
+
+
+def test_verbose_terminal_adds_bounded_stream_and_window_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _presented_attempt_result(tmp_path, monkeypatch, state="provisional", verbose=True)
+
+    captured = capsys.readouterr()
+    assert "Audio details:" in captured.err
+    assert "primary-00:" in captured.err
+    assert "actual=8000/8000" in captured.err
+    assert captured.out == ""
+
+
+def test_quiet_suppresses_routine_acceptance_but_keeps_actionable_rejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _presented_attempt_result(tmp_path, monkeypatch, state="trusted_automatic", quiet=True)
+    accepted = capsys.readouterr()
+    _presented_attempt_result(tmp_path, monkeypatch, state="provisional", quiet=True)
+    rejected = capsys.readouterr()
+
+    assert accepted.out == accepted.err == ""
+    assert rejected.out == ""
+    assert "Provisional candidate: +0f (not applied)" in rejected.err
+
+
+def test_json_mode_emits_no_human_alignment_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _presented_attempt_result(tmp_path, monkeypatch, state="provisional", json_output=True)
+
+    captured = capsys.readouterr()
+    assert "Provisional candidate" not in captured.out + captured.err
+    assert "audio_alignment_requires_review" in captured.out + captured.err

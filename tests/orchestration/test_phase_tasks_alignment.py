@@ -70,6 +70,9 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     output = phase_alignment.run_align_phase(ctx, selected_frames=selected_frames)
 
     assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert captured["verbose"] is False
+    assert captured["quiet"] is False
+    assert captured["json_output"] is False
     assert captured["frame_props_by_stem"] == {
         "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
         "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},

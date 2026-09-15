@@ -175,12 +175,12 @@ and visit every output. Leave each source on the same visible moment. The live s
 lineup records the latest untrimmed source frame, reports `ready / total`, and previews
 the signed `reference - comparison` relationship and trim direction.
 
-Choose **Use these aligned positions** once every source is ready. It writes one
+Choose **Confirm these aligned positions** once every source is ready. It writes one
 typed, atomic sibling sidecar named `vsview_*.alignment-result.json` for the complete
 source set; there is no per-comparison confirmation or later completion step. **Keep
-audio-derived alignment** is the secondary whole-set action and retains the alignment
-Frame Compare entered with, including the no-change case when no trusted suggestion
-exists.
+current alignment** is the secondary whole-set action and retains each comparison's
+existing accepted or manually confirmed authority without confirming a provisional
+candidate.
 
 For known values, expand **Enter alignment manually...** and choose **Source frames** or
 **Known offsets**. Source frames accepts one non-negative untrimmed frame per source;
@@ -294,7 +294,7 @@ revisions in the build manifest and generated inventory remain authoritative.
 | Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
 | Doctor reports the alignment panel is missing | Reinstall the complete bundle or rebuild it; the VSView runtime and `frame-compare-alignment-review` entry point must come from the same environment |
 | Alignment panel is inactive | Open the Frame Compare-generated session; ordinary sessions and untrusted/mixed metadata intentionally remain inert |
-| Panel closes before saving | No result sidecar was written; reopen the generated session, visit every source, and choose **Use these aligned positions** or **Keep audio-derived alignment** |
+| Panel closes before saving | No result sidecar was written; reopen the generated session, visit every source, and choose **Confirm these aligned positions** or **Keep current alignment** |
 | Native review result is rejected | Generate a fresh session; Frame Compare rejects missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds sidecars |
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 

@@ -79,8 +79,12 @@ enable = false
         reference_fps=None,
         frame_props_by_stem=None,
         verbose=False,
+        quiet=False,
+        json_output=False,
     ):
         assert verbose is False
+        assert quiet is False
+        assert json_output is False
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path
         assert [comparison.identity.path for comparison in request.comparisons] == [

@@ -257,6 +257,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
 
 def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and_allows_vsview(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -314,6 +315,15 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
     assert mock_vs.call_args.kwargs["offsets_by_key"] == {"ref:comp": 7}
+    review = json.loads(mock_vs.call_args.kwargs["audio_review_by_key"]["ref:comp"])
+    assert review == {
+        "audio_attempt": None,
+        "current_authority": {"frame_offset": 7, "origin": "shared_computed_offsets"},
+        "evidence_availability": "historical_details_unavailable",
+    }
+    terminal = capsys.readouterr().err
+    assert "Reused accepted audio alignment: +7f" in terminal
+    assert "Historical window and selected-stream details are unavailable" in terminal
     mock_save_shared.assert_not_called()
 
 
