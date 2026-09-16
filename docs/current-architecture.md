@@ -318,8 +318,8 @@ recovery requirement.
   diagnostic-only audio evidence owned by
   `frame_compare.services.alignment_diagnostics`. Each pathless file is bounded to
   128 KiB, contains at most 16 primary window outcomes and four optional collection
-  summaries, and is written atomically before optional review. Held-v5 attempts mark
-  continuous collection facts `not_observed` rather than synthesizing streaming data.
+  summaries, and is written atomically before optional review. Current attempts retain
+  observed continuous collection facts; preanalysis rejections remain `not_observed`.
   A final review outcome may replace the envelope once while preserving the canonical
   original-attempt digest. These files are never read by alignment, trim, or
   shared-cache owners and expire only when the run folder is removed.
@@ -424,7 +424,7 @@ stability summaries without allowing them to change the applied constant offset 
 trims. The attempt retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate v5 decision evidence,
 and a separate display-only provisional candidate. The shipped
-`audio-authority-hold-2097152-v6` policy keeps computed authority held: an otherwise
+`continuous-origin-distributed-2097152-v7-held` policy keeps computed authority held: an otherwise
 qualified computed result records `automatic_authority_held`, has null applied
 offsets, and cannot reach trims or shared-cache writes. Manual confirmation replaces
 authority without replacing that original attempt. Immutable `ClipState` carries the
@@ -440,22 +440,25 @@ evidence; only validated human-confirmed authority can be reused through the
 
 Computed alignment work is planned against typed timing for each selected audio stream.
 `alignment_audio` owns stream-relative duration/origin normalization, the fixed peak and
-total FFT-work budgets, requested-rate scoring budgets, distributed window selection,
-and seek-with-preroll followed by absolute post-decode trimming. The fixed preroll
-bounds early-window decoding but is not a cross-version AAC-grid guarantee.
+total FFT-work budgets, requested-rate PCM and scoring budgets, distributed window
+selection, exact rate conversion, verification halos, and the canonical FFmpeg recipe.
+Discovery runs at `min(requested rate, 8000)` with one 4 kHz admission retry when
+needed. Each source/rate/channel treatment is decoded once from origin, resampled,
+bounded by one final sample endpoint, and retained only at admitted logical intervals.
 `alignment_streaming` is the adjacent, independently exercisable continuous-collection
 owner. It accepts a caller-prepared FFmpeg argument vector, scalar admitted intervals,
 the final sample horizon, an explicit retained-sample ceiling, hard deadline, and
 optional cancellation event; resolves the executable through `utils.subproc`; and owns
 one child, bounded stdout/stderr readers,
 interval intersection copies, endpoint classification, typed transport failures, and
-deterministic cleanup. It imports neither alignment planning nor trust/cache policy and
-is not selected by the normal alignment path until staged extraction is integrated.
-Requested-rate
-correlation is preferred. When it cannot fit, a bounded coarse pair finds the lag, is
-released, and a fresh aligned pair at the configured rate refines the rate-ratio
-neighborhood and supplies confidence, so only one decoded pair and one correlation
-workspace are live. `alignment_consensus`
+deterministic cleanup. It imports neither alignment planning nor trust/cache policy.
+The production path collects the reference and comparison sequentially, analyzes one
+numeric pair at a time, and releases the discovery store before any requested-rate
+verification collection. When discovery and requested rates differ, all verification
+intervals and halos are frozen before I/O and the original bounded global hypotheses are
+translated through their local origins. Direct-rate work uses at most two decodes per
+comparison; verification uses at most four. No PCM survives into another comparison.
+`alignment_consensus`
 translates local unequal-window lag through the two stream origins before applying the
 public sign convention. All successfully correlated selected windows participate in
 frame-equivalent majority consensus, with score used only for ties and the winning
@@ -465,7 +468,8 @@ outside the fixed internal work budget produce a typed non-applied
 `analysis_budget_exceeded` consensus rather than widening config validation, truncating
 the requested search silently, or attempting unbounded work. The estimator-policy token
 includes this strategy so older computed cache entries are not reused. The current
-safety hold also prevents computed results from authorizing trims or new cache writes.
+`continuous-origin-distributed-2097152-v7-held` safety policy also prevents computed
+results from authorizing trims or new cache writes.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr

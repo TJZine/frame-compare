@@ -72,8 +72,9 @@ remains a v1 file with the same path and offset semantics.
 
 Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
 a unique display-qualified candidate survived an attempt; under the internal
-`audio-authority-hold-2097152-v6` policy it is shown as a clearly unaccepted review hint
-and is never applied or passed as the authoritative integer/null field. Its decision
+`continuous-origin-distributed-2097152-v7-held` policy it is shown as a clearly
+unaccepted review hint and is never applied or passed as the authoritative integer/null
+field. Its decision
 records `automatic_authority_held` when the remaining v5 gates qualify it. `unavailable`
 means no unique usable
 candidate exists, and Frame Compare does not invent zero. The
@@ -86,8 +87,10 @@ Each run retains that attempt in
 schema-v2 file records selected stream metadata, every planned window outcome, raw
 candidate and quality facts, the aggregate decision, and the final review resolution.
 It also retains bounded continuous-collection summaries and useful-overlap/coverage
-facts when observed. Held-v5 attempts explicitly mark collection facts as
-`not_observed`; they never fabricate streaming counts, endpoints, or timing.
+facts when observed. Continuous collection decodes each selected source from its audio
+origin once per phase, keeps only admitted distributed intervals in memory, and records
+clean endpoint versus observed-EOF counts without padding or backfilling short windows.
+A lower-rate discovery pass is followed by requested-rate verification only when needed.
 It records the expected media-runtime fingerprint; FFmpeg/ffprobe version fields say
 `not_observed` because this package does not add version-probe subprocesses.
 It contains no media paths, PCM, environment values, credentials, full commands, or

@@ -17,9 +17,9 @@ from tests.integration.alignment_oracle import (
     continuous_decode,
     continuous_decode_argv,
     deterministic_signal,
+    mux_audio,
     write_pcm_wave,
 )
-from tests.integration.test_alignment_continuous_decode_oracle import _mux_audio
 
 
 def _endpoint_limited_argv(argv: list[str], planned_end_sample: int) -> list[str]:
@@ -43,7 +43,7 @@ def test_positive_start_aac_matches_same_runtime_continuous_oracle(
         deterministic_signal(seed=7301, sample_rate=44100, duration_seconds=12),
         sample_rate=44100,
     )
-    _mux_audio(media, wave_path, source_rate=44100, codec="aac", start_seconds=2)
+    mux_audio(media, wave_path, source_rate=44100, codec="aac", start_seconds=2)
     stream = select_reference_audio_stream(media)
     planned_end = 7 * output_rate
     intervals = (
@@ -96,7 +96,7 @@ def test_final_endpoint_preserves_untrimmed_continuous_prefix(
         deterministic_signal(seed=7302, sample_rate=48000, duration_seconds=6),
         sample_rate=48000,
     )
-    _mux_audio(media, wave_path, source_rate=48000, codec="pcm")
+    mux_audio(media, wave_path, source_rate=48000, codec="pcm")
     stream = select_reference_audio_stream(media)
     planned_end = 3 * output_rate + 123
     intervals = (AudioSampleInterval(planned_end - 4096, 4096),)

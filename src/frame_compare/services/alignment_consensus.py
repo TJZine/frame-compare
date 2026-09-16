@@ -7,9 +7,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from statistics import median_low
+from typing import Literal
 
 import numpy as np
 
+from frame_compare.services import alignment_audio
 from frame_compare.services.alignment_audio import AudioAnalysisPlan, AudioWindow, AudioWindowSpec
 from frame_compare.services.alignment_correlation import (
     CorrelationEstimate,
@@ -26,6 +28,7 @@ from frame_compare.services.types import (
     AlignmentWindowEvidence,
     AudioAlignmentAttempt,
     AudioAlignmentCandidate,
+    AudioAlignmentCollectionRecord,
     AudioAlignmentDecision,
     AudioAlignmentWindowRecord,
     AudioPeakRatio,
@@ -241,6 +244,19 @@ class AlignmentConsensus:
     window_records: tuple[AudioAlignmentWindowRecord, ...] = ()
     decision: AudioAlignmentDecision | None = None
     audio_attempt: AudioAlignmentAttempt | None = None
+    collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = ()
+
+
+@dataclass
+class _StagedWindow:
+    index: int
+    logical_id: str
+    spec: AudioWindowSpec
+    actual_reference_count: int
+    actual_comparison_count: int
+    local_estimate: CorrelationEstimate
+    local_lag: float
+    global_analysis_offset: Fraction
 
 
 def _valid_evidence(
@@ -463,203 +479,140 @@ def _finish_consensus(
     )
 
 
-def estimate_planned_consensus_offset(
+def _support_facts(
+    *,
+    reference_start: int,
+    reference_count: int,
+    comparison_start: int,
+    comparison_count: int,
+    planned_reference_start: int,
+    planned_reference_count: int,
+    planned_comparison_start: int,
+    planned_comparison_count: int,
+    requested_offset: int,
+) -> tuple[int, int, int, float, Literal["complete", "short", "empty"]]:
+    actual_start = max(reference_start, comparison_start + requested_offset)
+    actual_end = min(
+        reference_start + reference_count,
+        comparison_start + comparison_count + requested_offset,
+    )
+    actual_end = max(actual_start, actual_end)
+    expected_start = max(
+        planned_reference_start,
+        planned_comparison_start + requested_offset,
+    )
+    expected_end = min(
+        planned_reference_start + planned_reference_count,
+        planned_comparison_start + planned_comparison_count + requested_offset,
+    )
+    expected = max(0, expected_end - expected_start)
+    actual = actual_end - actual_start
+    coverage = actual / expected if expected else 0.0
+    if reference_count == 0 or comparison_count == 0 or actual == 0:
+        state = "empty"
+    elif reference_count < planned_reference_count or comparison_count < planned_comparison_count:
+        state = "short"
+    else:
+        state = "complete"
+    return actual_start, actual_end, expected, min(1.0, coverage), state
+
+
+def estimate_staged_consensus_offset(
     *,
     plan: AudioAnalysisPlan,
     config: AlignmentConfig,
     fps: Fraction,
-    analysis_window_loader: Callable[[AudioWindowSpec], AudioWindow],
-    scoring_window_loader: Callable[[AudioWindowSpec, int], AudioWindow],
+    discovery_phase_loader: Callable[[], alignment_audio.CollectedAudioPhase],
+    verification_phase_loader: Callable[
+        [tuple[alignment_audio.AudioVerificationSpec, ...]], alignment_audio.CollectedAudioPhase
+    ],
+    verification_spec_builder: Callable[
+        [tuple[tuple[int, Fraction], ...]], tuple[alignment_audio.AudioVerificationSpec, ...]
+    ],
 ) -> AlignmentConsensus:
-    """Analyze planned windows sequentially and score fallback lags at the requested rate."""
+    """Collect each phase once, then analyze its logical windows sequentially."""
     local_config = replace(config, sample_rate=plan.sample_rate)
     margin = math.ceil(config.max_offset_seconds * plan.sample_rate)
     requested_limit = int(config.max_offset_seconds * plan.requested_sample_rate)
-    candidates: list[CorrelationEstimate] = []
-    candidate_ids: list[str] = []
-    evidence: list[AlignmentWindowEvidence] = []
-    window_records: list[AudioAlignmentWindowRecord] = []
-    for index, spec in enumerate(plan.windows, start=1):
-        logical_id = f"primary-{index:02d}"
-        actual_reference_count: int | None = None
-        actual_comparison_count: int | None = None
-        scoring_reference_count: int | None = None
-        scoring_comparison_count: int | None = None
-        local_lag: float | None = None
-        global_analysis_lag: float | None = None
-        requested_offset: int | None = None
-        score: float | None = None
-        peak_ratio: float | None = None
-        score_stage: str | None = None
-        scoring_started = False
-        try:
-            window: AudioWindow | None = None
-            try:
-                window = analysis_window_loader(spec)
-                actual_reference_count = int(window.reference.size)
-                actual_comparison_count = int(window.comparison.size)
-                origin_delta = window.reference_start_sample - window.comparison_start_sample
-                local_estimate = estimate_alignment_offset(
-                    window.reference,
-                    window.comparison,
-                    config=local_config,
-                    alignment_offset_bounds_samples=(
-                        -margin - origin_delta,
-                        margin - origin_delta,
-                    ),
-                )
-                local_offset = (
-                    local_estimate.subsample_offset
-                    if local_estimate.subsample_offset is not None
-                    else local_estimate.sample_offset
-                )
-                local_lag = float(local_offset)
-                global_analysis_offset = local_offset + origin_delta
-                global_analysis_lag = float(global_analysis_offset)
-                peak_ratio = local_estimate.peak_ratio
-            finally:
-                del window
-
-            score = local_estimate.score
-            score_stage = "analysis_rate"
-            if plan.sample_rate != plan.requested_sample_rate:
-                scoring_window: AudioWindow | None = None
-                try:
-                    scoring_started = True
-                    scoring_window = scoring_window_loader(spec, round(global_analysis_offset))
-                    scoring_reference_count = int(scoring_window.reference.size)
-                    scoring_comparison_count = int(scoring_window.comparison.size)
-                    scoring_origin_delta = (
-                        scoring_window.reference_start_sample
-                        - scoring_window.comparison_start_sample
-                    )
-                    correction_radius = math.ceil(plan.requested_sample_rate / plan.sample_rate)
-                    correction, score = refine_aligned_score(
-                        scoring_window.reference,
-                        scoring_window.comparison,
-                        preprocessing_mode=config.preprocessing_mode,
-                        correction_bounds_samples=(
-                            max(-correction_radius, -requested_limit - scoring_origin_delta),
-                            min(correction_radius, requested_limit - scoring_origin_delta),
-                        ),
-                    )
-                    requested_offset = scoring_origin_delta + correction
-                    score_stage = "requested_rate"
-                finally:
-                    del scoring_window
-            else:
-                requested_offset = round(global_analysis_offset)
-        except AudioAlignmentError as exc:
-            if scoring_started:
-                scoring_reference_count = (
-                    exc.reference_sample_count
-                    if exc.reference_sample_count is not None
-                    else scoring_reference_count
-                )
-                scoring_comparison_count = (
-                    exc.comparison_sample_count
-                    if exc.comparison_sample_count is not None
-                    else scoring_comparison_count
-                )
-            else:
-                actual_reference_count = (
-                    exc.reference_sample_count
-                    if exc.reference_sample_count is not None
-                    else actual_reference_count
-                )
-                actual_comparison_count = (
-                    exc.comparison_sample_count
-                    if exc.comparison_sample_count is not None
-                    else actual_comparison_count
-                )
-            window_records.append(
-                AudioAlignmentWindowRecord(
-                    logical_id=logical_id,
-                    purpose="primary",
-                    attempt_number=1,
-                    parent_id=None,
-                    planned_reference_start=spec.reference_start_sample,
-                    planned_reference_count=spec.reference_sample_count,
-                    planned_comparison_start=spec.comparison_start_sample,
-                    planned_comparison_count=spec.comparison_sample_count,
-                    analysis_rate=plan.sample_rate,
-                    requested_rate=plan.requested_sample_rate,
-                    actual_reference_count=actual_reference_count,
-                    actual_comparison_count=actual_comparison_count,
-                    scoring_reference_count=scoring_reference_count,
-                    scoring_comparison_count=scoring_comparison_count,
-                    local_lag=local_lag,
-                    global_analysis_lag=global_analysis_lag,
-                    requested_score=score,
-                    score_stage=score_stage,
-                    peak_ratio=_peak_value(peak_ratio) if peak_ratio is not None else None,
-                    peak_stage="analysis_rate" if peak_ratio is not None else None,
-                    peak_rate=plan.sample_rate if peak_ratio is not None else None,
-                    terminal_stage=exc.stage,
-                    terminal_category=exc.category,
-                    failed_role=(
-                        "reference"
-                        if exc.role == "reference"
-                        else "comparison"
-                        if exc.role == "comparison"
-                        else None
-                    ),
-                )
-            )
-            continue
-
-        assert requested_offset is not None
-        assert score is not None
-        if abs(requested_offset) > requested_limit:
-            window_records.append(
-                AudioAlignmentWindowRecord(
-                    logical_id=logical_id,
-                    purpose="primary",
-                    attempt_number=1,
-                    parent_id=None,
-                    planned_reference_start=spec.reference_start_sample,
-                    planned_reference_count=spec.reference_sample_count,
-                    planned_comparison_start=spec.comparison_start_sample,
-                    planned_comparison_count=spec.comparison_sample_count,
-                    analysis_rate=plan.sample_rate,
-                    requested_rate=plan.requested_sample_rate,
-                    actual_reference_count=actual_reference_count,
-                    actual_comparison_count=actual_comparison_count,
-                    scoring_reference_count=scoring_reference_count,
-                    scoring_comparison_count=scoring_comparison_count,
-                    local_lag=local_lag,
-                    global_analysis_lag=global_analysis_lag,
-                    requested_sample_lag=requested_offset,
-                    requested_score=score,
-                    score_stage=score_stage,
-                    peak_ratio=_peak_value(peak_ratio),
-                    peak_stage="analysis_rate",
-                    peak_rate=plan.sample_rate,
-                    terminal_stage="scoring",
-                    terminal_category="offset_out_of_bounds",
-                )
-            )
-            continue
-
-        estimate = CorrelationEstimate(
-            sample_offset=requested_offset,
-            score=score,
-            peak_ratio=local_estimate.peak_ratio,
-        )
-        candidates.append(estimate)
-        candidate_ids.append(logical_id)
-        review_qualified = bool(
-            math.isfinite(score)
-            and score >= _REVIEW_SCORE_FLOOR
-            and not math.isnan(local_estimate.peak_ratio)
-            and local_estimate.peak_ratio >= _REVIEW_PEAK_RATIO_FLOOR
-        )
-        configured_quality = bool(
-            score >= config.confidence_threshold
-            and local_estimate.peak_ratio >= config.ambiguity_peak_ratio
-        )
-        window_records.append(
+    try:
+        discovery = discovery_phase_loader()
+    except AudioAlignmentError as exc:
+        window_records = tuple(
             AudioAlignmentWindowRecord(
+                logical_id=f"primary-{index + 1:02d}",
+                purpose="primary",
+                attempt_number=1,
+                parent_id=None,
+                planned_reference_start=spec.reference_start_sample,
+                planned_reference_count=spec.reference_sample_count,
+                planned_comparison_start=spec.comparison_start_sample,
+                planned_comparison_count=spec.comparison_sample_count,
+                analysis_rate=plan.sample_rate,
+                requested_rate=plan.requested_sample_rate,
+                quality_disposition="rejected",
+                terminal_stage=exc.stage,
+                terminal_category=exc.category,
+                failed_role=(
+                    "reference"
+                    if exc.role == "reference"
+                    else "comparison"
+                    if exc.role == "comparison"
+                    else None
+                ),
+            )
+            for index, spec in enumerate(plan.windows)
+        )
+        result = _finish_consensus(
+            [],
+            [],
+            [],
+            list(window_records),
+            config=config,
+            fps=fps,
+        )
+        return replace(result, collection_summaries=exc.collection_summaries)
+    if len(discovery.windows) != len(plan.windows):
+        raise ValueError("discovery collection does not match the admitted plan")
+
+    staged: list[_StagedWindow] = []
+    records: dict[int, AudioAlignmentWindowRecord] = {}
+    for index, (spec, window) in enumerate(zip(plan.windows, discovery.windows, strict=True)):
+        logical_id = f"primary-{index + 1:02d}"
+        reference_count = int(window.reference.size)
+        comparison_count = int(window.comparison.size)
+        try:
+            origin_delta = window.reference_start_sample - window.comparison_start_sample
+            estimate = estimate_alignment_offset(
+                window.reference,
+                window.comparison,
+                config=local_config,
+                alignment_offset_bounds_samples=(
+                    -margin - origin_delta,
+                    margin - origin_delta,
+                ),
+            )
+            local_offset = (
+                estimate.subsample_offset
+                if estimate.subsample_offset is not None
+                else estimate.sample_offset
+            )
+            exact_local_offset = Fraction(local_offset).limit_denominator(
+                config.refinement_sample_rate or plan.sample_rate
+            )
+            staged.append(
+                _StagedWindow(
+                    index=index,
+                    logical_id=logical_id,
+                    spec=spec,
+                    actual_reference_count=reference_count,
+                    actual_comparison_count=comparison_count,
+                    local_estimate=estimate,
+                    local_lag=float(local_offset),
+                    global_analysis_offset=exact_local_offset + origin_delta,
+                )
+            )
+        except AudioAlignmentError as exc:
+            records[index] = AudioAlignmentWindowRecord(
                 logical_id=logical_id,
                 purpose="primary",
                 attempt_number=1,
@@ -670,53 +623,235 @@ def estimate_planned_consensus_offset(
                 planned_comparison_count=spec.comparison_sample_count,
                 analysis_rate=plan.sample_rate,
                 requested_rate=plan.requested_sample_rate,
-                actual_reference_count=actual_reference_count,
-                actual_comparison_count=actual_comparison_count,
+                actual_reference_count=reference_count,
+                actual_comparison_count=comparison_count,
+                discovery_reference_count=reference_count,
+                discovery_comparison_count=comparison_count,
+                quality_disposition="rejected",
+                terminal_stage=exc.stage,
+                terminal_category=exc.category,
+                failed_role=(
+                    "reference"
+                    if exc.role == "reference"
+                    else "comparison"
+                    if exc.role == "comparison"
+                    else None
+                ),
+            )
+        del window
+
+    summaries = discovery.summaries
+    verification_failure: AudioAlignmentError | None = None
+    verification_by_index: dict[int, tuple[alignment_audio.AudioVerificationSpec, AudioWindow]] = {}
+    if plan.sample_rate != plan.requested_sample_rate and staged:
+        frozen = verification_spec_builder(
+            tuple((item.index, item.global_analysis_offset) for item in staged)
+        )
+        if frozen:
+            # Dropping the last discovery owner before verification enforces the
+            # phase-store lifetime even when the caller keeps no other reference.
+            del discovery
+            try:
+                verification = verification_phase_loader(frozen)
+            except AudioAlignmentError as exc:
+                summaries += exc.collection_summaries
+                verification_failure = exc
+                verification = None
+            if verification is None:
+                frozen = ()
+            else:
+                if len(verification.windows) != len(frozen):
+                    raise ValueError("verification collection does not match its frozen plan")
+                summaries += verification.summaries
+                verification_by_index = {
+                    spec.window_index: (spec, window)
+                    for spec, window in zip(frozen, verification.windows, strict=True)
+                }
+
+    candidates: list[CorrelationEstimate] = []
+    candidate_ids: list[str] = []
+    evidence: list[AlignmentWindowEvidence] = []
+    for item in staged:
+        spec = item.spec
+        score = item.local_estimate.score
+        requested_offset = round(item.global_analysis_offset)
+        score_stage = "analysis_rate"
+        scoring_reference_count: int | None = None
+        scoring_comparison_count: int | None = None
+        support_reference_start = spec.reference_start_sample
+        support_reference_count = item.actual_reference_count
+        support_comparison_start = spec.comparison_start_sample
+        support_comparison_count = item.actual_comparison_count
+        planned_reference_start = spec.reference_start_sample
+        planned_reference_count = spec.reference_sample_count
+        planned_comparison_start = spec.comparison_start_sample
+        planned_comparison_count = spec.comparison_sample_count
+        continuous_origin = "discovery"
+        try:
+            if plan.sample_rate != plan.requested_sample_rate:
+                verified = verification_by_index.get(item.index)
+                if verified is None:
+                    if verification_failure is not None:
+                        raise AudioAlignmentError(
+                            str(verification_failure),
+                            category=verification_failure.category,
+                            stage=verification_failure.stage,
+                            role=verification_failure.role,
+                        )
+                    raise AudioAlignmentError(
+                        "candidate leaves no selected-stream audio overlap",
+                        category="insufficient_overlap",
+                        stage="scoring",
+                    )
+                verification_spec, window = verified
+                scoring_reference_count = int(window.reference.size)
+                scoring_comparison_count = int(window.comparison.size)
+                origin_delta = window.reference_start_sample - window.comparison_start_sample
+                correction, score = refine_aligned_score(
+                    window.reference,
+                    window.comparison,
+                    preprocessing_mode=config.preprocessing_mode,
+                    correction_bounds_samples=(
+                        verification_spec.global_lower_offset - origin_delta,
+                        verification_spec.global_upper_offset - origin_delta,
+                    ),
+                )
+                requested_offset = origin_delta + correction
+                score_stage = "requested_rate"
+                support_reference_start = window.reference_start_sample
+                support_reference_count = scoring_reference_count
+                support_comparison_start = window.comparison_start_sample
+                support_comparison_count = scoring_comparison_count
+                planned_reference_start = verification_spec.reference_start_sample
+                planned_reference_count = verification_spec.reference_sample_count
+                planned_comparison_start = verification_spec.comparison_start_sample
+                planned_comparison_count = verification_spec.comparison_sample_count
+                continuous_origin = "verification"
+        except AudioAlignmentError as exc:
+            records[item.index] = AudioAlignmentWindowRecord(
+                logical_id=item.logical_id,
+                purpose="primary",
+                attempt_number=1,
+                parent_id=None,
+                planned_reference_start=spec.reference_start_sample,
+                planned_reference_count=spec.reference_sample_count,
+                planned_comparison_start=spec.comparison_start_sample,
+                planned_comparison_count=spec.comparison_sample_count,
+                analysis_rate=plan.sample_rate,
+                requested_rate=plan.requested_sample_rate,
+                actual_reference_count=item.actual_reference_count,
+                actual_comparison_count=item.actual_comparison_count,
                 scoring_reference_count=scoring_reference_count,
                 scoring_comparison_count=scoring_comparison_count,
-                effective_aligned_overlap=min(
-                    scoring_reference_count or actual_reference_count or 0,
-                    scoring_comparison_count or actual_comparison_count or 0,
-                ),
-                local_lag=local_lag,
-                global_analysis_lag=global_analysis_lag,
-                requested_sample_lag=requested_offset,
-                requested_frame_candidate=samples_to_frames(
-                    requested_offset,
-                    config.sample_rate,
-                    fps,
-                ),
-                requested_score=score,
-                score_stage=score_stage,
-                peak_ratio=_peak_value(local_estimate.peak_ratio),
+                discovery_reference_count=item.actual_reference_count,
+                discovery_comparison_count=item.actual_comparison_count,
+                verification_reference_count=scoring_reference_count,
+                verification_comparison_count=scoring_comparison_count,
+                quality_disposition="rejected",
+                local_lag=item.local_lag,
+                global_analysis_lag=float(item.global_analysis_offset),
+                peak_ratio=_peak_value(item.local_estimate.peak_ratio),
                 peak_stage="analysis_rate",
                 peak_rate=plan.sample_rate,
-                review_qualified=review_qualified,
-                configured_quality=configured_quality,
-                vote_disposition="voted",
-                terminal_stage="decision",
-                terminal_category="correlated",
+                terminal_stage=exc.stage,
+                terminal_category=exc.category,
+                failed_role=(
+                    "reference"
+                    if exc.role == "reference"
+                    else "comparison"
+                    if exc.role == "comparison"
+                    else None
+                ),
             )
+            continue
+
+        useful_start, useful_end, expected, coverage, coverage_state = _support_facts(
+            reference_start=support_reference_start,
+            reference_count=support_reference_count,
+            comparison_start=support_comparison_start,
+            comparison_count=support_comparison_count,
+            planned_reference_start=planned_reference_start,
+            planned_reference_count=planned_reference_count,
+            planned_comparison_start=planned_comparison_start,
+            planned_comparison_count=planned_comparison_count,
+            requested_offset=requested_offset,
         )
-        valid = _valid_evidence(
-            estimate,
-            start=round(
-                spec.reference_start_sample * plan.requested_sample_rate / plan.sample_rate
-            ),
-            end=round(
-                (spec.reference_start_sample + spec.reference_sample_count)
-                * plan.requested_sample_rate
-                / plan.sample_rate
-            ),
-            config=config,
+        if abs(requested_offset) > requested_limit:
+            terminal_category = "offset_out_of_bounds"
+            review_qualified = configured_quality = False
+        else:
+            terminal_category = "correlated"
+            review_qualified = bool(
+                math.isfinite(score)
+                and score >= _REVIEW_SCORE_FLOOR
+                and not math.isnan(item.local_estimate.peak_ratio)
+                and item.local_estimate.peak_ratio >= _REVIEW_PEAK_RATIO_FLOOR
+            )
+            configured_quality = bool(
+                score >= config.confidence_threshold
+                and item.local_estimate.peak_ratio >= config.ambiguity_peak_ratio
+            )
+            estimate = CorrelationEstimate(requested_offset, score, item.local_estimate.peak_ratio)
+            candidates.append(estimate)
+            candidate_ids.append(item.logical_id)
+            valid = _valid_evidence(
+                estimate,
+                start=planned_reference_start,
+                end=planned_reference_start + planned_reference_count,
+                config=config,
+            )
+            if valid is not None:
+                evidence.append(valid)
+        records[item.index] = AudioAlignmentWindowRecord(
+            logical_id=item.logical_id,
+            purpose="primary",
+            attempt_number=1,
+            parent_id=None,
+            planned_reference_start=spec.reference_start_sample,
+            planned_reference_count=spec.reference_sample_count,
+            planned_comparison_start=spec.comparison_start_sample,
+            planned_comparison_count=spec.comparison_sample_count,
+            analysis_rate=plan.sample_rate,
+            requested_rate=plan.requested_sample_rate,
+            actual_reference_count=item.actual_reference_count,
+            actual_comparison_count=item.actual_comparison_count,
+            scoring_reference_count=scoring_reference_count,
+            scoring_comparison_count=scoring_comparison_count,
+            discovery_reference_count=item.actual_reference_count,
+            discovery_comparison_count=item.actual_comparison_count,
+            verification_reference_count=scoring_reference_count,
+            verification_comparison_count=scoring_comparison_count,
+            continuous_sample_count=useful_end - useful_start,
+            continuous_sample_count_origin=continuous_origin,
+            actual_useful_reference_start=useful_start,
+            actual_useful_reference_end=useful_end,
+            pre_eof_expected_overlap=expected,
+            actual_coverage=coverage,
+            coverage_state=coverage_state,
+            quality_disposition="qualified" if review_qualified else "rejected",
+            effective_aligned_overlap=useful_end - useful_start,
+            local_lag=item.local_lag,
+            global_analysis_lag=float(item.global_analysis_offset),
+            requested_sample_lag=requested_offset,
+            requested_frame_candidate=samples_to_frames(requested_offset, config.sample_rate, fps),
+            requested_score=score,
+            score_stage=score_stage,
+            peak_ratio=_peak_value(item.local_estimate.peak_ratio),
+            peak_stage="analysis_rate",
+            peak_rate=plan.sample_rate,
+            review_qualified=review_qualified,
+            configured_quality=configured_quality,
+            vote_disposition="voted" if terminal_category == "correlated" else "failed",
+            terminal_stage="decision" if terminal_category == "correlated" else "scoring",
+            terminal_category=terminal_category,
         )
-        if valid is not None:
-            evidence.append(valid)
-    return _finish_consensus(
+
+    result = _finish_consensus(
         candidates,
         candidate_ids,
         evidence,
-        window_records,
+        [records[index] for index in range(len(plan.windows))],
         config=config,
         fps=fps,
     )
+    return replace(result, collection_summaries=summaries)

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from frame_compare.services.types import AudioAlignmentCollectionRecord
 
 from frame_compare.errors import (
     ErrorContext,
@@ -91,12 +95,14 @@ class AudioAlignmentError(ProcessingError):
         role: str | None = None,
         reference_sample_count: int | None = None,
         comparison_sample_count: int | None = None,
+        collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = (),
     ) -> None:
         self.category = category
         self.stage = stage
         self.role = role
         self.reference_sample_count = reference_sample_count
         self.comparison_sample_count = comparison_sample_count
+        self.collection_summaries = collection_summaries
         super().__init__(
             ErrorContext(
                 code="FC-4005",

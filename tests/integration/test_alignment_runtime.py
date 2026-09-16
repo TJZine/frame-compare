@@ -346,7 +346,7 @@ def test_long_non_packet_aligned_media_accepts_frame_equivalent_window_offsets(
         confidence_threshold=0.9,
     )
     captured: list[alignment_consensus.AlignmentConsensus] = []
-    estimate_consensus = alignment_consensus.estimate_planned_consensus_offset
+    estimate_consensus = alignment_consensus.estimate_staged_consensus_offset
 
     def capture_consensus(**kwargs: object) -> alignment_consensus.AlignmentConsensus:
         result = estimate_consensus(**kwargs)  # type: ignore[arg-type]
@@ -355,7 +355,7 @@ def test_long_non_packet_aligned_media_accepts_frame_equivalent_window_offsets(
 
     monkeypatch.setattr(
         alignment_consensus,
-        "estimate_planned_consensus_offset",
+        "estimate_staged_consensus_offset",
         capture_consensus,
     )
     request = alignment_request(
@@ -373,7 +373,7 @@ def test_long_non_packet_aligned_media_accepts_frame_equivalent_window_offsets(
     assert len(captured) == 1
     sample_offsets = [item.sample_offset for item in captured[0].window_evidence]
     assert len(sample_offsets) == 5
-    assert len(set(sample_offsets)) > 1
+    assert set(sample_offsets) == {-9600}
     assert {
         samples_to_frames(offset, config.sample_rate, Fraction(_FPS)) for offset in sample_offsets
     } == {-2}

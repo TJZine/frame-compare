@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from frame_compare.orchestration import phase_alignment
-from frame_compare.services import alignment_consensus, alignment_reuse_cache
+from frame_compare.services import alignment_audio, alignment_consensus, alignment_reuse_cache
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import AudioAnalysisPlan, AudioWindow, AudioWindowSpec
 from frame_compare.services.alignment_correlation import CorrelationEstimate
@@ -110,19 +110,26 @@ def _one_success_four_failures(
         return CorrelationEstimate(sample_offset=24, score=0.99, peak_ratio=2.0)
 
     monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
-    consensus = alignment_consensus.estimate_planned_consensus_offset(
+    consensus = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=config,
         fps=Fraction(24),
-        analysis_window_loader=lambda spec: AudioWindow(
-            reference=np.ones(spec.reference_sample_count, dtype=np.float32),
-            comparison=np.ones(spec.comparison_sample_count, dtype=np.float32),
-            reference_start_sample=spec.reference_start_sample,
-            comparison_start_sample=spec.comparison_start_sample,
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            tuple(
+                AudioWindow(
+                    reference=np.ones(spec.reference_sample_count, dtype=np.float32),
+                    comparison=np.ones(spec.comparison_sample_count, dtype=np.float32),
+                    reference_start_sample=spec.reference_start_sample,
+                    comparison_start_sample=spec.comparison_start_sample,
+                )
+                for spec in plan.windows
+            ),
+            (),
         ),
-        scoring_window_loader=lambda _spec, _offset: pytest.fail(
+        verification_phase_loader=lambda _specs: pytest.fail(
             "same-rate test should not load scoring windows"
         ),
+        verification_spec_builder=lambda _offsets: (),
     )
     attempt = replace(
         audio_attempt(),

@@ -207,8 +207,8 @@ def test_collection_record_rejects_invalid_counts_and_failure_topology() -> None
         replace(base, output_rate=0)
     with pytest.raises(ValueError):
         replace(base, elapsed_seconds=True)
-    with pytest.raises(ValueError, match="retained samples"):
-        replace(base, retained_sample_count=8001, retained_byte_count=32004)
+    overlapping = replace(base, retained_sample_count=8001, retained_byte_count=32004)
+    assert overlapping.retained_sample_count == 8001
     with pytest.raises(ValueError, match="complete collection"):
         replace(base, failure_count=1)
     with pytest.raises(ValueError, match="failed collection"):

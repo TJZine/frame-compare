@@ -33,6 +33,50 @@ BASE_SCORE_FLOOR = 0.90
 BASE_PEAK_RATIO_FLOOR = 1.50
 
 
+def mux_audio(
+    path: Path,
+    wave_path: Path,
+    *,
+    source_rate: int,
+    codec: str,
+    start_seconds: int = 0,
+    fps: str = "24",
+    duration_seconds: int = 12,
+) -> None:
+    """Create a tiny deterministic A/V fixture for continuous-pipeline tests."""
+    codec_args = ["-c:a", "pcm_s16le"] if codec == "pcm" else ["-c:a", "aac", "-b:a", "192k"]
+    audio_input = ["-itsoffset", str(start_seconds)] if start_seconds else []
+    subprocess.run(  # noqa: S603 - fixed test fixture executable
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=black:s=16x16:r={fps}:d={duration_seconds + abs(start_seconds)}",
+            *audio_input,
+            "-i",
+            str(wave_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "ffv1",
+            *codec_args,
+            "-copyts",
+            "-avoid_negative_ts",
+            "disabled",
+            str(path),
+        ],
+        check=True,
+        timeout=45,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyObservation:
     """One preclassified primary-window observation for the test-only P4 evaluator."""

@@ -72,15 +72,15 @@ def _estimate_windows(
     *,
     config: AlignmentConfig,
 ) -> alignment_consensus.AlignmentConsensus:
-    remaining = iter(windows)
-    return alignment_consensus.estimate_planned_consensus_offset(
+    return alignment_consensus.estimate_staged_consensus_offset(
         plan=_plan(rate=config.sample_rate, count=len(windows)),
         config=config,
         fps=Fraction(24),
-        analysis_window_loader=lambda _spec: next(remaining),
-        scoring_window_loader=lambda _spec, _offset: (_ for _ in ()).throw(
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(tuple(windows), ()),
+        verification_phase_loader=lambda _specs: (_ for _ in ()).throw(
             AssertionError("requested-rate scoring is not expected")
         ),
+        verification_spec_builder=lambda _offsets: (),
     )
 
 
@@ -102,15 +102,15 @@ def _estimate_candidates(
         for index in range(len(estimates))
     ]
     plan = _plan(rate=config.sample_rate, count=len(windows))
-    window_iter = iter(windows)
-    return alignment_consensus.estimate_planned_consensus_offset(
+    return alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=config,
         fps=fps,
-        analysis_window_loader=lambda _spec: next(window_iter),
-        scoring_window_loader=lambda _spec, _offset: (_ for _ in ()).throw(
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(tuple(windows), ()),
+        verification_phase_loader=lambda _specs: (_ for _ in ()).throw(
             AssertionError("requested-rate scoring is not expected")
         ),
+        verification_spec_builder=lambda _offsets: (),
     )
 
 
@@ -391,30 +391,34 @@ def test_legacy_rejection_retains_strong_zero_as_unapplied_provisional_candidate
 def test_one_success_and_four_recoverable_failures_preserve_legacy_acceptance_and_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    outcomes: Any = iter(
+        [
+            CorrelationEstimate(0, 0.99, 2.0),
+            *[
+                AudioAlignmentError(
+                    "no useful signal",
+                    category="insufficient_signal",
+                    stage="correlation",
+                )
+                for _ in range(4)
+            ],
+        ]
+    )
+
+    def estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        outcome = next(outcomes)
+        if isinstance(outcome, AudioAlignmentError):
+            raise outcome
+        return outcome
+
     monkeypatch.setattr(
         alignment_consensus,
         "estimate_alignment_offset",
-        lambda *_args, **_kwargs: CorrelationEstimate(0, 0.99, 2.0),
+        estimate,
     )
-    calls = 0
-
-    def load(_spec: AudioWindowSpec) -> AudioWindow:
-        nonlocal calls
-        calls += 1
-        if calls > 1:
-            raise AudioAlignmentError(
-                "no useful signal",
-                category="insufficient_signal",
-                stage="correlation",
-            )
-        return AudioWindow(np.ones(20), np.ones(20), 0, 0)
-
-    result = alignment_consensus.estimate_planned_consensus_offset(
-        plan=_plan(rate=8000, count=5),
+    result = _estimate_windows(
+        [AudioWindow(np.ones(20), np.ones(20), index * 100, index * 100) for index in range(5)],
         config=AlignmentConfig(sample_rate=8000),
-        fps=Fraction(24),
-        analysis_window_loader=load,
-        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
     )
 
     assert result.applied
@@ -437,19 +441,20 @@ def test_one_success_and_four_recoverable_failures_preserve_legacy_acceptance_an
     ]
 
 
-def test_all_recoverable_failures_are_unavailable_without_inventing_zero() -> None:
-    result = alignment_consensus.estimate_planned_consensus_offset(
-        plan=_plan(rate=8000, count=5),
+def test_all_recoverable_failures_are_unavailable_without_inventing_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        raise AudioAlignmentError(
+            "no useful signal",
+            category="insufficient_signal",
+            stage="correlation",
+        )
+
+    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", fail)
+    result = _estimate_windows(
+        [AudioWindow(np.ones(20), np.ones(20), index * 100, index * 100) for index in range(5)],
         config=AlignmentConfig(sample_rate=8000),
-        fps=Fraction(24),
-        analysis_window_loader=lambda _spec: (_ for _ in ()).throw(
-            AudioAlignmentError(
-                "no useful signal",
-                category="insufficient_signal",
-                stage="correlation",
-            )
-        ),
-        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
     )
 
     assert not result.applied
@@ -460,40 +465,15 @@ def test_all_recoverable_failures_are_unavailable_without_inventing_zero() -> No
     assert len(result.window_records) == 5
 
 
-def test_recoverable_comparison_decode_retains_observed_reference_count() -> None:
-    result = alignment_consensus.estimate_planned_consensus_offset(
-        plan=_plan(rate=8000, count=1),
-        config=AlignmentConfig(sample_rate=8000),
-        fps=Fraction(24),
-        analysis_window_loader=lambda _spec: (_ for _ in ()).throw(
-            AudioAlignmentError(
-                "comparison decode was empty",
-                category="decode_empty",
-                stage="decode",
-                role="comparison",
-                reference_sample_count=20,
-            )
-        ),
-        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
-    )
-
-    record = result.window_records[0]
-    assert record.actual_reference_count == 20
-    assert record.actual_comparison_count is None
-    assert record.failed_role == "comparison"
-    assert record.terminal_category == "decode_empty"
-
-
 def test_fatal_ffmpeg_failure_is_not_converted_to_recoverable_abstention() -> None:
     with pytest.raises(FFmpegError):
-        alignment_consensus.estimate_planned_consensus_offset(
+        alignment_consensus.estimate_staged_consensus_offset(
             plan=_plan(rate=8000, count=1),
             config=AlignmentConfig(sample_rate=8000),
             fps=Fraction(24),
-            analysis_window_loader=lambda _spec: (_ for _ in ()).throw(
-                FFmpegError("fatal decode", 1)
-            ),
-            scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+            discovery_phase_loader=lambda: (_ for _ in ()).throw(FFmpegError("fatal decode", 1)),
+            verification_phase_loader=lambda _specs: (_ for _ in ()).throw(AssertionError()),
+            verification_spec_builder=lambda _offsets: (),
         )
 
 
@@ -548,7 +528,7 @@ def test_winning_frame_group_uses_minimum_ambiguity_ratio(
 def test_requested_rate_fallback_votes_in_requested_frame_domain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    offsets = iter([6000, 6004, 6002, 6001, 6003])
+    offsets = [6000, 6004, 6002, 6001, 6003]
     plan = AudioAnalysisPlan(
         8000,
         48000,
@@ -567,21 +547,21 @@ def test_requested_rate_fallback_votes_in_requested_frame_domain(
         lambda *_args, **_kwargs: (0, 0.9),
     )
 
-    def scoring_window(_spec: AudioWindowSpec, _offset: int) -> AudioWindow:
-        requested_offset = next(offsets)
-        return AudioWindow(
-            np.ones(100),
-            np.ones(100),
-            requested_offset,
-            0,
-        )
-
-    result = alignment_consensus.estimate_planned_consensus_offset(
+    specs = tuple(
+        alignment_audio.AudioVerificationSpec(index, offset, 100, 0, 100, offset, offset)
+        for index, offset in enumerate(offsets)
+    )
+    result = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=AlignmentConfig(sample_rate=48000),
         fps=Fraction(24),
-        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
-        scoring_window_loader=scoring_window,
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            tuple(AudioWindow(np.ones(100), np.ones(100), 0, 0) for _ in offsets), ()
+        ),
+        verification_phase_loader=lambda _specs: alignment_audio.CollectedAudioPhase(
+            tuple(AudioWindow(np.ones(100), np.ones(100), offset, 0) for offset in offsets), ()
+        ),
+        verification_spec_builder=lambda _offsets: specs,
     )
 
     assert result.applied
@@ -607,7 +587,8 @@ def test_coarse_lag_is_scored_at_requested_rate(
     )
     signal = np.linspace(-1, 1, 600, dtype=np.float32)
 
-    result = alignment_consensus.estimate_planned_consensus_offset(
+    verification_spec = alignment_audio.AudioVerificationSpec(0, 0, 600, 0, 600, -6, 6)
+    result = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=AlignmentConfig(
             sample_rate=48000,
@@ -615,8 +596,13 @@ def test_coarse_lag_is_scored_at_requested_rate(
             confidence_threshold=0.9,
         ),
         fps=Fraction(24),
-        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
-        scoring_window_loader=lambda _spec, _offset: AudioWindow(signal, -signal, 0, 0),
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(np.ones(100), np.ones(100), 0, 0),), ()
+        ),
+        verification_phase_loader=lambda _specs: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(signal, -signal, 0, 0),), ()
+        ),
+        verification_spec_builder=lambda _offsets: (verification_spec,),
     )
 
     assert not result.applied
@@ -624,66 +610,56 @@ def test_coarse_lag_is_scored_at_requested_rate(
     assert result.score == pytest.approx(-1.0)
 
 
-def test_failed_coarse_window_is_released_before_next_decode(
+def test_discovery_pcm_is_released_before_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    windows: list[weakref.ReferenceType[AudioWindow]] = []
-
-    def load_window(_spec: AudioWindowSpec) -> AudioWindow:
-        assert not windows or windows[-1]() is None
-        window = AudioWindow(np.ones(20), np.ones(20), 0, 0)
-        windows.append(weakref.ref(window))
-        return window
-
-    def fail_estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
-        raise AudioAlignmentError("invalid coarse window")
-
-    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", fail_estimate)
-
-    result = alignment_consensus.estimate_planned_consensus_offset(
-        plan=_plan(rate=100, count=2),
-        config=AlignmentConfig(sample_rate=100, max_offset_seconds=1),
-        fps=Fraction(24),
-        analysis_window_loader=load_window,
-        scoring_window_loader=lambda *_args: (_ for _ in ()).throw(AssertionError()),
+    references: list[weakref.ReferenceType[np.ndarray[Any, Any]]] = []
+    discovery_windows = tuple(
+        AudioWindow(np.ones(20), np.ones(20), index * 100, index * 100) for index in range(2)
     )
-
-    assert result.valid_windows == 0
-    assert len(windows) == 2
-
-
-def test_failed_scoring_window_is_released_before_next_decode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    windows: list[weakref.ReferenceType[AudioWindow]] = []
-
-    def load_scoring_window(_spec: AudioWindowSpec, _offset: int) -> AudioWindow:
-        assert not windows or windows[-1]() is None
-        window = AudioWindow(np.ones(20), np.ones(20), 0, 0)
-        windows.append(weakref.ref(window))
-        return window
-
-    def fail_refinement(*_args: object, **_kwargs: object) -> tuple[int, float]:
-        raise AudioAlignmentError("invalid scoring window")
-
+    for window in discovery_windows:
+        references.extend((weakref.ref(window.reference), weakref.ref(window.comparison)))
+    del window
     monkeypatch.setattr(
         alignment_consensus,
         "estimate_alignment_offset",
         lambda *_args, **_kwargs: CorrelationEstimate(0, 1.0, 2.0),
     )
-    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", fail_refinement)
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", lambda *_a, **_k: (0, 1.0))
     plan = _plan(rate=100, count=2)
+    specs = tuple(
+        alignment_audio.AudioVerificationSpec(index, index * 200, 20, index * 200, 20, 0, 0)
+        for index in range(2)
+    )
 
-    result = alignment_consensus.estimate_planned_consensus_offset(
+    def load_discovery() -> alignment_audio.CollectedAudioPhase:
+        nonlocal discovery_windows
+        phase = alignment_audio.CollectedAudioPhase(discovery_windows, ())
+        discovery_windows = ()
+        return phase
+
+    def load_verification(
+        _specs: tuple[alignment_audio.AudioVerificationSpec, ...],
+    ) -> alignment_audio.CollectedAudioPhase:
+        assert all(reference() is None for reference in references)
+        return alignment_audio.CollectedAudioPhase(
+            tuple(
+                AudioWindow(np.ones(20), np.ones(20), index * 200, index * 200)
+                for index in range(2)
+            ),
+            (),
+        )
+
+    result = alignment_consensus.estimate_staged_consensus_offset(
         plan=replace(plan, requested_sample_rate=200),
         config=AlignmentConfig(sample_rate=200, max_offset_seconds=1),
         fps=Fraction(24),
-        analysis_window_loader=lambda _spec: AudioWindow(np.ones(20), np.ones(20), 0, 0),
-        scoring_window_loader=load_scoring_window,
+        discovery_phase_loader=load_discovery,
+        verification_phase_loader=load_verification,
+        verification_spec_builder=lambda _offsets: specs,
     )
 
-    assert result.valid_windows == 0
-    assert len(windows) == 2
+    assert result.valid_windows == 2
 
 
 @pytest.mark.parametrize("sign", [-1, 1])
@@ -705,17 +681,35 @@ def test_requested_rate_correction_cannot_escape_max_offset(
 
     monkeypatch.setattr(alignment_consensus, "refine_aligned_score", outward_refinement)
 
-    result = alignment_consensus.estimate_planned_consensus_offset(
+    requested_center = sign * 48000
+    verification_spec = alignment_audio.AudioVerificationSpec(
+        0,
+        max(0, requested_center),
+        600,
+        max(0, -requested_center),
+        600,
+        max(-48000, requested_center - 6),
+        min(48000, requested_center + 6),
+    )
+    result = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=AlignmentConfig(sample_rate=48000, max_offset_seconds=1),
         fps=Fraction(24),
-        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
-        scoring_window_loader=lambda _spec, _offset: AudioWindow(
-            np.ones(600),
-            np.ones(600),
-            48000 if sign > 0 else 0,
-            0 if sign > 0 else 48000,
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(np.ones(100), np.ones(100), 0, 0),), ()
         ),
+        verification_phase_loader=lambda _specs: alignment_audio.CollectedAudioPhase(
+            (
+                AudioWindow(
+                    np.ones(600),
+                    np.ones(600),
+                    max(0, requested_center),
+                    max(0, -requested_center),
+                ),
+            ),
+            (),
+        ),
+        verification_spec_builder=lambda _offsets: (verification_spec,),
     )
 
     assert not result.applied
@@ -741,17 +735,34 @@ def test_requested_rate_interior_correction_is_preserved(
         lambda *_args, **_kwargs: (expected - coarse, 1.0),
     )
 
-    result = alignment_consensus.estimate_planned_consensus_offset(
+    verification_spec = alignment_audio.AudioVerificationSpec(
+        0,
+        max(0, coarse),
+        600,
+        max(0, -coarse),
+        600,
+        coarse - 6,
+        coarse + 6,
+    )
+    result = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=AlignmentConfig(sample_rate=48000, max_offset_seconds=1),
         fps=Fraction(24),
-        analysis_window_loader=lambda _spec: AudioWindow(np.ones(100), np.ones(100), 0, 0),
-        scoring_window_loader=lambda _spec, _offset: AudioWindow(
-            np.ones(600),
-            np.ones(600),
-            max(0, coarse),
-            max(0, -coarse),
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(np.ones(100), np.ones(100), 0, 0),), ()
         ),
+        verification_phase_loader=lambda _specs: alignment_audio.CollectedAudioPhase(
+            (
+                AudioWindow(
+                    np.ones(600),
+                    np.ones(600),
+                    max(0, coarse),
+                    max(0, -coarse),
+                ),
+            ),
+            (),
+        ),
+        verification_spec_builder=lambda _offsets: (verification_spec,),
     )
 
     assert result.applied
@@ -854,31 +865,43 @@ def test_long_48k_fallback_produces_requested_rate_candidates(
     )
     assert isinstance(plan, AudioAnalysisPlan)
     assert plan.sample_rate == 8000
-    signal = np.linspace(-1, 1, 30 * 48000, dtype=np.float32)
-    current_origin_delta = 0
-
-    def load_analysis_window(spec: AudioWindowSpec) -> AudioWindow:
-        nonlocal current_origin_delta
-        current_origin_delta = spec.reference_start_sample - spec.comparison_start_sample
-        return AudioWindow(
+    origin_deltas = iter(
+        spec.reference_start_sample - spec.comparison_start_sample for spec in plan.windows
+    )
+    discovery_windows = tuple(
+        AudioWindow(
             np.ones(spec.reference_sample_count),
             np.ones(spec.comparison_sample_count),
             spec.reference_start_sample,
             spec.comparison_start_sample,
         )
+        for spec in plan.windows
+    )
 
     monkeypatch.setattr(
         alignment_consensus,
         "estimate_alignment_offset",
-        lambda *_args, **_kwargs: CorrelationEstimate(-current_origin_delta, 0.99, 2.0),
+        lambda *_args, **_kwargs: CorrelationEstimate(-next(origin_deltas), 0.99, 2.0),
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "refine_aligned_score",
+        lambda *_args, **_kwargs: (0, 1.0),
+    )
+    verification_specs = tuple(
+        alignment_audio.AudioVerificationSpec(index, 0, 100, 0, 100, -6, 6)
+        for index in range(len(plan.windows))
     )
 
-    result = alignment_consensus.estimate_planned_consensus_offset(
+    result = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=AlignmentConfig(sample_rate=48000),
         fps=Fraction(24),
-        analysis_window_loader=load_analysis_window,
-        scoring_window_loader=lambda _spec, _offset: AudioWindow(signal, signal, 0, 0),
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(discovery_windows, ()),
+        verification_phase_loader=lambda _specs: alignment_audio.CollectedAudioPhase(
+            tuple(AudioWindow(np.ones(100), np.ones(100), 0, 0) for _ in plan.windows), ()
+        ),
+        verification_spec_builder=lambda _offsets: verification_specs,
     )
 
     assert result.applied
@@ -963,48 +986,31 @@ def test_short_clip_remains_a_single_complete_window() -> None:
     assert plan.windows[0].reference_sample_count == 16000
 
 
-def test_extract_planned_window_decodes_exactly_one_pair(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[Path, int]] = []
-
-    def extract(
-        path: Path,
-        _stream: AudioStreamInfo,
-        *,
-        sample_rate: int,
-        start_sample: int,
-        sample_count: int,
-        channel_strategy: str,
-    ) -> np.ndarray:
-        del sample_rate, channel_strategy
-        calls.append((path, start_sample))
-        return np.ones(sample_count, dtype=np.float32)
-
-    monkeypatch.setattr(alignment_audio, "extract_audio_window", extract)
-    plan = AudioAnalysisPlan(
-        100,
-        100,
-        (
-            AudioWindowSpec(0, 10, 0, 20),
-            AudioWindowSpec(100, 10, 90, 30),
-        ),
-        64,
-        128,
-    )
-    window = alignment_audio.extract_planned_window(
+def test_continuous_recipe_is_origin_based_and_endpoint_limited() -> None:
+    argv = alignment_audio.continuous_collection_argv(
         Path("reference.mkv"),
-        Path("comparison.mkv"),
         _stream(10),
-        _stream(10),
-        plan,
-        plan.windows[0],
+        sample_rate=8000,
+        end_sample=240000,
         channel_strategy="mono_downmix",
     )
 
-    assert calls == [(Path("reference.mkv"), 0), (Path("comparison.mkv"), 0)]
-    assert window.reference.size == 10
-    assert window.comparison.size == 20
+    assert argv == [
+        "ffmpeg",
+        "-i",
+        "reference.mkv",
+        "-map",
+        "0:a:0",
+        "-vn",
+        "-ac",
+        "1",
+        "-af",
+        "aresample=8000,atrim=end_sample=240000",
+        "-f",
+        "f32le",
+        "-",
+    ]
+    assert not {"-ss", "-copyts", "-fs"} & set(argv)
 
 
 def test_stream_probe_prefers_selected_stream_duration_over_container(
@@ -1066,3 +1072,387 @@ def test_stream_probe_ignores_non_finite_timing_metadata(
 
     assert selected.timeline.start_time == 0
     assert selected.timeline.duration is None
+
+
+def test_staged_eof_clamping_preserves_short_and_empty_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = AudioAnalysisPlan(
+        sample_rate=8000,
+        requested_sample_rate=8000,
+        windows=(
+            AudioWindowSpec(0, 100, 0, 100),
+            AudioWindowSpec(100, 100, 100, 100),
+            AudioWindowSpec(200, 100, 200, 100),
+        ),
+        peak_fft_points=256,
+        total_fft_points=768,
+    )
+    signal = np.random.default_rng(44).standard_normal(100).astype(np.float32)
+    phase = alignment_audio.CollectedAudioPhase(
+        windows=(
+            AudioWindow(signal, signal, 0, 0),
+            AudioWindow(signal[:90], signal[:90], 100, 100),
+            AudioWindow(signal[:0], signal[:0], 200, 200),
+        ),
+        summaries=(),
+    )
+
+    result = alignment_consensus.estimate_staged_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=8000),
+        fps=Fraction(24),
+        discovery_phase_loader=lambda: phase,
+        verification_phase_loader=lambda _specs: pytest.fail("unexpected verification"),
+        verification_spec_builder=lambda _offsets: (),
+    )
+
+    assert len(result.window_records) == 3
+    assert [record.coverage_state for record in result.window_records] == [
+        "complete",
+        "short",
+        "not_observed",
+    ]
+    assert result.window_records[1].pre_eof_expected_overlap == 100
+    assert result.window_records[1].actual_coverage == pytest.approx(0.9)
+    assert result.window_records[2].actual_reference_count == 0
+    assert result.window_records[2].actual_comparison_count == 0
+    assert result.window_records[2].pre_eof_expected_overlap is None
+
+
+def test_full_length_signal_failure_does_not_fabricate_coverage() -> None:
+    plan = AudioAnalysisPlan(8000, 8000, (AudioWindowSpec(0, 100, 0, 100),), 256, 256)
+    result = alignment_consensus.estimate_staged_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=8000),
+        fps=Fraction(24),
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(np.zeros(100), np.zeros(100), 0, 0),), ()
+        ),
+        verification_phase_loader=lambda _specs: pytest.fail("unexpected verification"),
+        verification_spec_builder=lambda _offsets: (),
+    )
+
+    record = result.window_records[0]
+    assert record.actual_reference_count == record.actual_comparison_count == 100
+    assert record.terminal_category == "insufficient_signal"
+    assert record.continuous_sample_count is None
+    assert record.actual_useful_reference_start is None
+    assert record.pre_eof_expected_overlap is None
+    assert record.actual_coverage is None
+    assert record.coverage_state == "not_observed"
+
+
+def test_verification_failure_does_not_fabricate_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = AudioAnalysisPlan(8000, 48000, (AudioWindowSpec(0, 100, 0, 100),), 256, 256)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(0, 0.99, 2.0),
+    )
+    spec = alignment_audio.AudioVerificationSpec(0, 0, 600, 0, 600, -6, 6)
+
+    def fail_verification(
+        _specs: tuple[alignment_audio.AudioVerificationSpec, ...],
+    ) -> alignment_audio.CollectedAudioPhase:
+        raise AudioAlignmentError(
+            "verification decode failed",
+            category="decode_failed",
+            stage="verification",
+            role="comparison",
+        )
+
+    result = alignment_consensus.estimate_staged_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=48000),
+        fps=Fraction(24),
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(np.ones(100), np.ones(100), 0, 0),), ()
+        ),
+        verification_phase_loader=fail_verification,
+        verification_spec_builder=lambda _offsets: (spec,),
+    )
+
+    record = result.window_records[0]
+    assert record.actual_reference_count == record.actual_comparison_count == 100
+    assert record.terminal_stage == "verification"
+    assert record.terminal_category == "decode_failed"
+    assert record.failed_role == "comparison"
+    assert record.continuous_sample_count is None
+    assert record.actual_useful_reference_start is None
+    assert record.pre_eof_expected_overlap is None
+    assert record.actual_coverage is None
+    assert record.coverage_state == "not_observed"
+
+
+def test_verification_scores_original_global_hypotheses_after_halo_shift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = AudioAnalysisPlan(
+        sample_rate=8000,
+        requested_sample_rate=48000,
+        windows=(AudioWindowSpec(100, 100, 50, 200),),
+        peak_fft_points=512,
+        total_fft_points=512,
+        discovery_retained_samples=300,
+        verification_reserved_samples=212,
+    )
+    signal = np.random.default_rng(45).standard_normal(100).astype(np.float32)
+    discovery = alignment_audio.CollectedAudioPhase(
+        windows=(AudioWindow(signal, np.pad(signal, (40, 60)), 100, 50),),
+        summaries=(),
+    )
+    verification_spec = alignment_audio.AudioVerificationSpec(
+        window_index=0,
+        reference_start_sample=600,
+        reference_sample_count=100,
+        comparison_start_sample=530,
+        comparison_sample_count=112,
+        global_lower_offset=54,
+        global_upper_offset=66,
+    )
+    verification = alignment_audio.CollectedAudioPhase(
+        windows=(AudioWindow(signal, np.pad(signal, (10, 2)), 600, 530),),
+        summaries=(),
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(-40, 0.99, 2.0),
+    )
+
+    def refine(*_args: object, **kwargs: Any) -> tuple[int, float]:
+        assert kwargs["correction_bounds_samples"] == (-16, -4)
+        return -10, 0.99
+
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", refine)
+
+    result = alignment_consensus.estimate_staged_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=48000),
+        fps=Fraction(24),
+        discovery_phase_loader=lambda: discovery,
+        verification_phase_loader=lambda specs: (
+            verification
+            if specs == (verification_spec,)
+            else pytest.fail("verification plan changed")
+        ),
+        verification_spec_builder=lambda offsets: (
+            (verification_spec,)
+            if offsets == ((0, 10),)
+            else pytest.fail("coarse global offset changed")
+        ),
+    )
+
+    assert result.window_records[0].requested_sample_lag == 60
+
+
+@pytest.mark.parametrize("requested_rate", [44100, 48000])
+@pytest.mark.parametrize("sign", [-1, 1])
+@pytest.mark.parametrize("edge", ["lower", "upper"])
+def test_fractional_discovery_candidate_preserves_exact_requested_halo_edges(
+    monkeypatch: pytest.MonkeyPatch,
+    requested_rate: int,
+    sign: int,
+    edge: str,
+) -> None:
+    plan = AudioAnalysisPlan(
+        sample_rate=8000,
+        requested_sample_rate=requested_rate,
+        windows=(AudioWindowSpec(800, 100, 800, 100),),
+        peak_fft_points=256,
+        total_fft_points=256,
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_alignment_offset",
+        lambda *_args, **_kwargs: CorrelationEstimate(
+            0,
+            0.99,
+            2.0,
+            subsample_offset=sign * 0.5,
+        ),
+    )
+    reference_stream = _stream(10)
+    comparison_stream = _stream(10)
+    captured_offsets: list[tuple[tuple[int, Fraction], ...]] = []
+
+    def build_specs(
+        offsets: tuple[tuple[int, Fraction], ...],
+    ) -> tuple[alignment_audio.AudioVerificationSpec, ...]:
+        captured_offsets.append(offsets)
+        return alignment_audio.verification_specs(
+            plan,
+            offsets,
+            reference_stream=reference_stream,
+            comparison_stream=comparison_stream,
+            max_offset_seconds=1,
+        )
+
+    seen_specs: list[alignment_audio.AudioVerificationSpec] = []
+
+    def load_verification(
+        specs: tuple[alignment_audio.AudioVerificationSpec, ...],
+    ) -> alignment_audio.CollectedAudioPhase:
+        spec = specs[0]
+        seen_specs.append(spec)
+        return alignment_audio.CollectedAudioPhase(
+            (
+                AudioWindow(
+                    np.ones(spec.reference_sample_count),
+                    np.ones(spec.comparison_sample_count),
+                    spec.reference_start_sample,
+                    spec.comparison_start_sample,
+                ),
+            ),
+            (),
+        )
+
+    def choose_edge(*_args: object, **kwargs: Any) -> tuple[int, float]:
+        lower, upper = kwargs["correction_bounds_samples"]
+        return (lower if edge == "lower" else upper), 0.99
+
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", choose_edge)
+    result = alignment_consensus.estimate_staged_consensus_offset(
+        plan=plan,
+        config=AlignmentConfig(sample_rate=requested_rate, max_offset_seconds=1),
+        fps=Fraction(24),
+        discovery_phase_loader=lambda: alignment_audio.CollectedAudioPhase(
+            (AudioWindow(np.ones(100), np.ones(100), 800, 800),), ()
+        ),
+        verification_phase_loader=load_verification,
+        verification_spec_builder=build_specs,
+    )
+
+    expected_center = round(Fraction(sign, 2) * requested_rate / 8000)
+    halo = -(-requested_rate // 8000)
+    spec = seen_specs[0]
+    assert captured_offsets == [((0, Fraction(sign, 2)),)]
+    assert (spec.global_lower_offset, spec.global_upper_offset) == (
+        expected_center - halo,
+        expected_center + halo,
+    )
+    expected = spec.global_lower_offset if edge == "lower" else spec.global_upper_offset
+    assert result.window_records[0].requested_sample_lag == expected
+
+
+def test_short_window_score_position_reservation_is_exact() -> None:
+    plan = alignment_audio.plan_audio_analysis(
+        _stream(4),
+        _stream(4),
+        config=AlignmentConfig(
+            sample_rate=48000,
+            max_offset_seconds=1,
+            window_length_seconds=1,
+            window_stride_seconds=1,
+        ),
+    )
+
+    assert isinstance(plan, AudioAnalysisPlan)
+    assert len(plan.windows) == 4
+    assert plan.score_evaluations_per_window == 14
+    assert plan.scored_positions == 2_528_000
+
+
+def test_score_position_boundary_rejects_before_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_audio, "_MAX_SCORED_POSITIONS", 2_527_999)
+    result = alignment_audio.plan_audio_analysis(
+        _stream(4),
+        _stream(4),
+        config=AlignmentConfig(
+            sample_rate=48000,
+            max_offset_seconds=1,
+            window_length_seconds=1,
+            window_stride_seconds=1,
+        ),
+    )
+
+    assert isinstance(result, AudioAnalysisBudgetExceeded)
+    assert result.reason == "scoring_positions_exceed_work_budget"
+
+
+@pytest.mark.parametrize(
+    ("config", "reason"),
+    [
+        (AlignmentConfig(max_offset_seconds=600), "window_or_offset_exceeds_peak_budget"),
+        (
+            AlignmentConfig(
+                sample_rate=48000,
+                window_length_seconds=32,
+                window_stride_seconds=32,
+            ),
+            "requested_rate_scoring_exceeds_peak_budget",
+        ),
+        (
+            AlignmentConfig(
+                sample_rate=48000,
+                window_length_seconds=30,
+                window_stride_seconds=30,
+                minimum_valid_windows=6,
+            ),
+            "requested_rate_scoring_exceeds_total_budget",
+        ),
+        (AlignmentConfig(sample_rate=2_048_000), "scoring_evaluations_exceed_window_budget"),
+        (
+            AlignmentConfig(
+                max_offset_seconds=1,
+                window_length_seconds=1,
+                window_stride_seconds=1,
+                minimum_valid_windows=17,
+            ),
+            "minimum_valid_windows_exceeds_work_budget",
+        ),
+        (
+            AlignmentConfig(
+                sample_rate=8000,
+                max_offset_seconds=30,
+                window_length_seconds=60,
+                window_stride_seconds=60,
+                minimum_valid_windows=9,
+            ),
+            "minimum_valid_windows_exceeds_work_budget",
+        ),
+    ],
+)
+def test_planner_rejects_resource_neighbors_before_collection(
+    config: AlignmentConfig,
+    reason: str,
+) -> None:
+    result = alignment_audio.plan_audio_analysis(_stream(180), _stream(180), config=config)
+
+    assert isinstance(result, AudioAnalysisBudgetExceeded)
+    assert result.reason == reason
+
+
+def test_planner_rejects_retained_pcm_neighbor_before_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_audio, "_MAX_DISCOVERY_RETAINED_SAMPLES", 1)
+    result = alignment_audio.plan_audio_analysis(
+        _stream(10),
+        _stream(10),
+        config=AlignmentConfig(max_offset_seconds=1),
+    )
+
+    assert isinstance(result, AudioAnalysisBudgetExceeded)
+    assert result.reason == "planned_windows_exceed_work_budget"
+
+
+def test_planner_retries_4000_only_when_8000_cannot_fit_fft() -> None:
+    plan = alignment_audio.plan_audio_analysis(
+        _stream(7200),
+        _stream(7200),
+        config=AlignmentConfig(sample_rate=48000, max_offset_seconds=102),
+    )
+
+    assert isinstance(plan, AudioAnalysisPlan)
+    assert plan.sample_rate == 4000
+    assert plan.peak_fft_points <= 2_097_152
+    assert plan.total_fft_points <= 16_777_216
+    assert plan.verification_reserved_samples <= 15_000_000
+    assert plan.score_evaluations_per_window <= 512
+    assert plan.scored_positions <= 536_870_912

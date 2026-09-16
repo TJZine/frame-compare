@@ -1009,19 +1009,19 @@ def _validate_collection_summary(
         or cast(float, data["elapsed_seconds"]) < 0
     ):
         raise AlignmentReviewContractError("alignment review collection bounds are invalid")
-    if cast(int, data["emitted_byte_count"]) != cast(int, data["emitted_sample_count"]) * 4:
+    complete_bytes = cast(int, data["emitted_sample_count"]) * 4
+    emitted_bytes = cast(int, data["emitted_byte_count"])
+    if not complete_bytes <= emitted_bytes <= complete_bytes + 3:
         raise AlignmentReviewContractError("alignment review emitted byte count is inconsistent")
     if cast(int, data["retained_byte_count"]) != cast(int, data["retained_sample_count"]) * 4:
         raise AlignmentReviewContractError("alignment review retained byte count is inconsistent")
-    if cast(int, data["retained_sample_count"]) > cast(int, data["emitted_sample_count"]):
-        raise AlignmentReviewContractError(
-            "alignment review retained samples exceed emitted samples"
-        )
     status = data["status"]
     end_category = data["end_category"]
     observed_eof = data["observed_eof_sample"]
     if status not in {"complete", "failed"}:
         raise AlignmentReviewContractError("alignment review collection status is invalid")
+    if status == "complete" and emitted_bytes != complete_bytes:
+        raise AlignmentReviewContractError("alignment review complete collection has byte carry")
     if status == "complete" and (data["cleanup_failure_count"] != 0 or data["failure_count"] != 0):
         raise AlignmentReviewContractError("alignment review complete collection has failures")
     if status == "failed":

@@ -1,5 +1,6 @@
 """Core audio alignment computation and progress workflow tests."""
 
+import os
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -16,11 +17,12 @@ from frame_compare.services.alignment_audio import (
     AudioStreamTimeline,
     AudioWindow,
     AudioWindowSpec,
+    CollectedAudioPhase,
 )
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_correlation import CorrelationEstimate
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AudioAlignmentCollectionRecord
 from frame_compare.utils.progress_protocol import ProgressReporter
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
@@ -415,12 +417,10 @@ def test_computed_attempt_retains_resolved_stream_and_window_facts(
         lambda *_args, **_kwargs: plan,
     )
     monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.extract_planned_window",
-        lambda *_args, **_kwargs: AudioWindow(
-            np.ones(200),
-            np.ones(400),
-            0,
-            0,
+        "frame_compare.services.alignment_audio.collect_discovery_phase",
+        lambda *_args, **_kwargs: CollectedAudioPhase(
+            windows=(AudioWindow(np.ones(200), np.ones(400), 0, 0),),
+            summaries=(),
         ),
     )
     monkeypatch.setattr(
@@ -454,6 +454,227 @@ def test_computed_attempt_retains_resolved_stream_and_window_facts(
     assert attempt.windows[0].actual_reference_count == 200
     assert attempt.windows[0].actual_comparison_count == 400
     assert attempt.windows[0].requested_sample_lag == 0
+
+
+def test_source_replacement_after_discovery_invalidates_the_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    stream = AudioStreamInfo(
+        audio_stream_index=0,
+        absolute_stream_index=1,
+        codec_name="pcm_s16le",
+        channels=1,
+        channel_layout="mono",
+        sample_rate=8000,
+        language=None,
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        timeline=AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=Fraction(1),
+            time_base=Fraction(1, 8000),
+            duration_basis="duration_ts",
+        ),
+    )
+    plan = AudioAnalysisPlan(
+        8000,
+        8000,
+        (AudioWindowSpec(0, 100, 0, 100),),
+        256,
+        256,
+        discovery_retained_samples=200,
+    )
+    summary = AudioAlignmentCollectionRecord(
+        phase="discovery",
+        role="reference",
+        output_rate=8000,
+        requested_horizon=100,
+        emitted_sample_count=100,
+        emitted_byte_count=400,
+        retained_sample_count=100,
+        retained_byte_count=400,
+        status="complete",
+        end_category="planned_end_reached",
+        observed_eof_sample=None,
+        elapsed_seconds=0.01,
+        cleanup_failure_count=0,
+        failure_count=0,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_reference_audio_stream",
+        lambda *_args, **_kwargs: stream,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_matching_audio_stream",
+        lambda *_args, **_kwargs: stream,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.plan_audio_analysis",
+        lambda *_args, **_kwargs: plan,
+    )
+
+    def replace_after_collection(*_args: object, **_kwargs: object) -> CollectedAudioPhase:
+        stat = comparison.stat()
+        os.utime(comparison, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+        signal = np.arange(100, dtype=np.float32)
+        return CollectedAudioPhase(
+            windows=(AudioWindow(signal, signal, 0, 0),),
+            summaries=(summary,),
+        )
+
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.collect_discovery_phase",
+        replace_after_collection,
+    )
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+
+    result = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert not result.applied
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.collection_observation == "observed"
+    assert result.audio_attempt.windows[0].terminal_category == "source_identity_changed"
+
+
+def test_request_identity_mismatch_rejects_before_probe_or_collection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    stat = comparison.stat()
+    os.utime(comparison, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+    select_reference = MagicMock()
+    select_comparison = MagicMock()
+    collect = MagicMock()
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_reference_audio_stream",
+        select_reference,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_matching_audio_stream",
+        select_comparison,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.collect_discovery_phase",
+        collect,
+    )
+
+    result = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert not result.applied
+    assert result.diagnostic == "source_identity_changed"
+    assert result.audio_attempt is None
+    select_reference.assert_not_called()
+    select_comparison.assert_not_called()
+    collect.assert_not_called()
+
+
+def test_reference_mutation_between_comparisons_rejects_before_cached_stream_use(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparisons = [tmp_path / "comparison-a.mkv", tmp_path / "comparison-b.mkv"]
+    reference.touch()
+    for comparison in comparisons:
+        comparison.touch()
+    config = AlignmentConfig(sample_rate=8000, cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=comparisons,
+        config=config,
+        generated_dir=tmp_path,
+    )
+    stream = AudioStreamInfo(
+        audio_stream_index=0,
+        absolute_stream_index=1,
+        codec_name="pcm_s16le",
+        channels=1,
+        channel_layout="mono",
+        sample_rate=8000,
+        language=None,
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        timeline=AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=Fraction(1),
+            time_base=Fraction(1, 8000),
+            duration_basis="duration_ts",
+        ),
+    )
+    plan = AudioAnalysisPlan(8000, 8000, (AudioWindowSpec(0, 100, 0, 100),), 256, 256)
+    select_reference = MagicMock(return_value=stream)
+    select_comparison = MagicMock(return_value=stream)
+    collect = MagicMock(
+        return_value=CollectedAudioPhase(
+            (AudioWindow(np.arange(100), np.arange(100), 0, 0),),
+            (),
+        )
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_reference_audio_stream",
+        select_reference,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.select_matching_audio_stream",
+        select_comparison,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.plan_audio_analysis",
+        lambda *_args, **_kwargs: plan,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_audio.collect_discovery_phase",
+        collect,
+    )
+    reporter = MagicMock(spec=ProgressReporter)
+    advances = 0
+
+    def mutate_after_first(_amount: int = 1) -> None:
+        nonlocal advances
+        advances += 1
+        if advances == 1:
+            stat = reference.stat()
+            os.utime(reference, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+
+    reporter.advance.side_effect = mutate_after_first
+
+    results = align_clips_from_request(
+        request,
+        config,
+        reference_fps=Fraction(24),
+        progress=reporter,
+    )
+
+    assert results[0].audio_attempt is not None
+    assert results[1].diagnostic == "source_identity_changed"
+    assert results[1].audio_attempt is None
+    select_reference.assert_called_once()
+    select_comparison.assert_called_once()
+    collect.assert_called_once()
 
 
 def _presented_attempt_result(

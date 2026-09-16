@@ -135,12 +135,13 @@ class AudioAlignmentCollectionRecord:
             "failure_count",
         ):
             _require_int(getattr(self, name), name, minimum=0)
-        if self.emitted_byte_count != self.emitted_sample_count * 4:
-            raise ValueError("emitted byte count must match float32 sample count")
+        complete_bytes = self.emitted_sample_count * 4
+        if not complete_bytes <= self.emitted_byte_count <= complete_bytes + 3:
+            raise ValueError("emitted byte count must match complete float32 samples and carry")
+        if self.status == "complete" and self.emitted_byte_count != complete_bytes:
+            raise ValueError("complete collection cannot retain a partial float32 carry")
         if self.retained_byte_count != self.retained_sample_count * 4:
             raise ValueError("retained byte count must match float32 sample count")
-        if self.retained_sample_count > self.emitted_sample_count:
-            raise ValueError("retained samples cannot exceed emitted samples")
         if self.observed_eof_sample is not None:
             _require_int(self.observed_eof_sample, "observed_eof_sample", minimum=0)
         if (

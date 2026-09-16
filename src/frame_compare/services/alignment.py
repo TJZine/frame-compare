@@ -227,6 +227,21 @@ def _clip_identity_digest(clip: AlignmentClipRequest) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _source_identity(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
+def _request_identity_matches(path: Path, request: AlignmentClipRequest) -> bool:
+    try:
+        return path.resolve() == request.identity.path.resolve() and _source_identity(path) == (
+            request.identity.size_bytes,
+            request.identity.mtime_ns,
+        )
+    except OSError:
+        return False
+
+
 def _build_audio_attempt(
     *,
     reference: AlignmentClipRequest,
@@ -242,17 +257,7 @@ def _build_audio_attempt(
     if consensus.decision is None:
         raise ValueError("audio consensus is missing its diagnostic decision")
     planned = plan if isinstance(plan, alignment_audio.AudioAnalysisPlan) else None
-    window_records = tuple(
-        replace(
-            window,
-            discovery_reference_count=window.actual_reference_count,
-            discovery_comparison_count=window.actual_comparison_count,
-            verification_reference_count=window.scoring_reference_count,
-            verification_comparison_count=window.scoring_comparison_count,
-            quality_disposition=("qualified" if window.review_qualified else "rejected"),
-        )
-        for window in consensus.window_records
-    )
+    window_records = consensus.window_records
     return AudioAlignmentAttempt(
         reference_identity_digest=_clip_identity_digest(reference),
         comparison_identity_digest=_clip_identity_digest(comparison),
@@ -296,8 +301,8 @@ def _build_audio_attempt(
         windows=window_records,
         decision=consensus.decision,
         stability=consensus.stability,
-        collection_observation="not_observed",
-        collection_summaries=(),
+        collection_observation="observed" if consensus.collection_summaries else "not_observed",
+        collection_summaries=consensus.collection_summaries,
     )
 
 
@@ -384,6 +389,36 @@ def _estimate_audio_pair(
     comparison_request: AlignmentClipRequest | None = None,
     comparison_ordinal: int = 1,
 ) -> alignment_consensus.AlignmentConsensus:
+    if (
+        reference_request is not None
+        and not _request_identity_matches(reference, reference_request)
+    ) or (
+        comparison_request is not None
+        and not _request_identity_matches(comparison, comparison_request)
+    ):
+        return alignment_consensus.rejected_analysis(
+            "source_identity_changed",
+            config=config,
+            fps=fps_reference,
+        )
+    frozen_identities = (_source_identity(reference), _source_identity(comparison))
+
+    def check_identities() -> None:
+        try:
+            current_identities = (_source_identity(reference), _source_identity(comparison))
+        except OSError as exc:
+            raise AudioAlignmentError(
+                "source identity changed during staged audio collection",
+                category="source_identity_changed",
+                stage="collection",
+            ) from exc
+        if frozen_identities != current_identities:
+            raise AudioAlignmentError(
+                "source identity changed during staged audio collection",
+                category="source_identity_changed",
+                stage="collection",
+            )
+
     reference_stream = (
         reference_stream_loader()
         if reference_stream_loader is not None
@@ -415,31 +450,62 @@ def _estimate_audio_pair(
                 fps=fps_reference,
             )
     else:
-        consensus = alignment_consensus.estimate_planned_consensus_offset(
-            plan=plan,
-            config=config,
-            fps=fps_reference,
-            analysis_window_loader=lambda spec: alignment_audio.extract_planned_window(
+
+        def load_discovery() -> alignment_audio.CollectedAudioPhase:
+            check_identities()
+            phase = alignment_audio.collect_discovery_phase(
                 reference,
                 comparison,
                 reference_stream,
                 comparison_stream,
                 plan,
-                spec,
                 channel_strategy=config.channel_strategy,
-            ),
-            scoring_window_loader=lambda spec, offset: (
-                alignment_audio.extract_aligned_scoring_window(
-                    reference,
-                    comparison,
-                    reference_stream,
-                    comparison_stream,
-                    plan,
-                    spec,
-                    global_analysis_offset=offset,
-                    channel_strategy=config.channel_strategy,
-                )
-            ),
+            )
+            try:
+                check_identities()
+            except AudioAlignmentError as exc:
+                exc.collection_summaries = phase.summaries
+                raise
+            return phase
+
+        def build_verification_specs(
+            offsets: tuple[tuple[int, Fraction], ...],
+        ) -> tuple[alignment_audio.AudioVerificationSpec, ...]:
+            return alignment_audio.verification_specs(
+                plan,
+                offsets,
+                reference_stream=reference_stream,
+                comparison_stream=comparison_stream,
+                max_offset_seconds=config.max_offset_seconds,
+            )
+
+        def load_verification(
+            specs: tuple[alignment_audio.AudioVerificationSpec, ...],
+        ) -> alignment_audio.CollectedAudioPhase:
+            check_identities()
+            phase = alignment_audio.collect_verification_phase(
+                reference,
+                comparison,
+                reference_stream,
+                comparison_stream,
+                plan,
+                specs,
+                channel_strategy=config.channel_strategy,
+            )
+            try:
+                check_identities()
+            except AudioAlignmentError as exc:
+                exc.collection_summaries = phase.summaries
+                raise
+            return phase
+
+        consensus = alignment_consensus.estimate_staged_consensus_offset(
+            plan=plan,
+            config=config,
+            fps=fps_reference,
+            discovery_phase_loader=load_discovery,
+            verification_phase_loader=load_verification,
+            verification_spec_builder=build_verification_specs,
         )
     consensus = alignment_consensus.hold_automatic_consensus(consensus)
     if reference_request is None or comparison_request is None:

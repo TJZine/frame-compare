@@ -1414,7 +1414,7 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `audio-authority-hold-2097152-v6` policy, computed cache hits and embedded computed
+  `continuous-origin-distributed-2097152-v7-held` policy, computed cache hits and embedded computed
   fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
   only whether prior human-confirmed offsets are reused. `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
@@ -1504,22 +1504,23 @@ Computed alignment probes timing for the selected audio stream, rather than usin
 container video duration. Stream `duration_ts` and time base are authoritative when
 available, followed by stream duration metadata and Matroska duration tags. Container
 duration is never substituted for missing selected-stream duration; an unavailable or
-empty selected-stream timeline produces a non-applied diagnostic. Each selected window
-uses up to five seconds of fixed input-seek preroll. Early windows decode from the
-selected-stream origin, resample once, and trim by output sample index; later windows use
-an absolute post-decode timestamp trim before resampling. This bounds early-window
-decoding while keeping long-media work bounded; it is not a cross-version AAC-grid
-guarantee.
+empty selected-stream timeline produces a non-applied diagnostic. Discovery uses
+`min(requested rate, 8000)` and retries once at 4 kHz only when required for fixed FFT
+admission. Each source is decoded once per phase from stream origin, resampled once, and
+limited by a final sample endpoint. The service retains only the planned distributed
+intervals; it does not seek independently for each window.
 
 Analysis has an internal fixed peak FFT limit of 2,097,152 points, a total budget of
-16,777,216 FFT points, and a maximum of 16 windows. It first uses the configured sample
-rate. When a normal long request cannot fit that FFT bound, bounded 8 kHz or 4 kHz
-correlation locates each candidate, then a separately decoded aligned overlap at the
-configured rate refines the coarse lag over the bounded rate-ratio neighborhood and
-supplies its confidence score; coarse-rate confidence never decides acceptance.
+16,777,216 FFT points, and a maximum of 16 windows. When discovery is below the
+configured rate, a second continuous pass at the configured rate scores the frozen
+candidate neighborhoods; coarse-rate confidence never decides acceptance.
 Requested-rate scoring is separately capped at 3,000,000 samples per pair
-and 15,000,000 samples in total. Reference and comparison pairs are extracted and
-processed sequentially. Confidence uses overlap-local mean centering and requires at
+and 15,000,000 samples in total, including exact-conversion rounding and halos.
+Scoring admits at most 512 evaluations per window and 536,870,912 sampled positions
+overall. Reference and comparison collections are sequential, discovery PCM is released
+before verification, and no PCM is reused across comparisons. Direct-rate work uses at
+most two FFmpeg decodes per comparison and verified work at most four. Confidence uses
+overlap-local mean centering and requires at
 least three samples and 5% of the shorter window, preventing tiny boundary overlaps
 from appearing perfectly correlated. Consensus considers every successfully correlated
 selected window, groups candidates by the exact frame correction that would be applied,
@@ -1539,7 +1540,8 @@ negative rather than unbounded scanning.
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
 v5 gate evidence, and an explicit audio decision: `provisional` or `unavailable` under
-the shipped automatic-authority hold. An otherwise-qualified computed attempt records
+the shipped `continuous-origin-distributed-2097152-v7-held` automatic-authority hold.
+An otherwise-qualified computed attempt records
 `automatic_authority_held`; `trusted_automatic` is not produced while that internal
 hold is active. A provisional candidate uses fixed display-only floors (score at
 least 0.90 and peak ratio at least 1.50) and a unique largest frame-equivalent group.
@@ -1553,8 +1555,8 @@ Fresh runs write one pathless diagnostic artifact per comparison at
 `diagnostic_only`, is limited to 128 KiB per comparison, and contains no media path,
 PCM, raw command line, full subprocess stderr, environment value, or credential. It
 is atomically snapshotted before optional review and may be atomically replaced once
-with the final human outcome. Held-v5 attempts use explicit `not_observed` collection
-state; observed collection summaries and window coverage facts remain bounded. The
+with the final human outcome. Current attempts retain bounded observed collection
+summaries and window coverage facts; preanalysis rejections remain `not_observed`. The
 SHA-256 digest covers only canonical original-attempt
 JSON, so manual confirmation does not rewrite the recorded audio attempt. Sharing a
 run folder also shares bounded labels, pseudonymous source identity digests, selected

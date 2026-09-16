@@ -383,7 +383,6 @@ def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
         ("attempt", "confidence_threshold", float("nan"), "confidence_threshold"),
         ("collection", "output_rate", True, "output_rate"),
         ("collection", "requested_horizon", 0, "collection bounds"),
-        ("collection", "retained_sample_count", 8001, "retained samples"),
         ("collection", "failure_count", 0, "failed collection"),
         ("collection", "cleanup_failure_count", 2, "cleanup failures"),
         ("collection", "elapsed_seconds", float("nan"), "elapsed_seconds"),
@@ -408,8 +407,6 @@ def test_workspace_metadata_rejects_malformed_retained_audio_facts(
             collection["status"] = "failed"
             collection["end_category"] = "not_observed"
             collection["failure_count"] = 1
-        if field == "retained_sample_count":
-            collection["retained_byte_count"] = 32004
         collection[field] = value
     else:
         windows = cast(list[dict[str, object]], attempt["windows"])

@@ -7,60 +7,17 @@ from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from frame_compare.services.alignment_audio import (
-    AudioStreamInfo,
+    probe_fps as _probe_fps,
+)
+from frame_compare.services.alignment_audio import (
     select_matching_audio_stream,
     select_reference_audio_stream,
 )
-from frame_compare.services.alignment_audio import (
-    extract_audio_window as _extract_audio_window,
-)
-from frame_compare.services.alignment_audio import (
-    probe_fps as _probe_fps,
-)
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-
-
-def _audio_stream(
-    *,
-    audio_stream_index: int = 0,
-    channels: int = 2,
-    channel_layout: str = "stereo",
-) -> AudioStreamInfo:
-    return AudioStreamInfo(
-        audio_stream_index=audio_stream_index,
-        absolute_stream_index=audio_stream_index + 1,
-        codec_name="aac",
-        channels=channels,
-        channel_layout=channel_layout,
-        sample_rate=48000,
-        language="eng",
-        is_default=True,
-        is_original=False,
-        is_commentary=False,
-    )
-
-
-def _extract_window(
-    video_path: Path,
-    *,
-    stream: AudioStreamInfo | None = None,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-    sample_count: int = 10,
-) -> np.ndarray:
-    return _extract_audio_window(
-        video_path,
-        stream or _audio_stream(),
-        sample_rate=8000,
-        start_sample=0,
-        sample_count=sample_count,
-        channel_strategy=channel_strategy,
-    )
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
@@ -169,14 +126,6 @@ def test_probe_fps_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_ffmpeg_not_found(mock_run: MagicMock):
-    """Test audio extraction when ffmpeg is missing."""
-    mock_run.side_effect = FileNotFoundError()
-    with pytest.raises(FFmpegNotFoundError):
-        _extract_window(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_probe_fps_timeout_raises(mock_run: MagicMock):
     """Test probing FPS timeout surfaces as FFmpegError."""
     mock_run.side_effect = TimeoutExpired(cmd=["ffprobe"], timeout=15.0)
@@ -185,156 +134,6 @@ def test_probe_fps_timeout_raises(mock_run: MagicMock):
     assert exc_info.value.context.details is not None
     assert exc_info.value.context.details.get("returncode") == 124
     assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_ffmpeg_fails(mock_run: MagicMock):
-    """Test audio extraction when ffmpeg fails."""
-    mock_run.side_effect = CalledProcessError(1, ["ffmpeg"], stderr=b"error")
-    with pytest.raises(FFmpegError):
-        _extract_window(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
-    mock_run.side_effect = CalledProcessError(1, ["ffmpeg"], stderr=b"\xfferror")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _extract_window(Path("test.mkv"))
-
-    assert "\ufffderror" in str(exc_info.value.context.details)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_timeout_raises(mock_run: MagicMock):
-    """Test audio extraction timeout surfaces as FFmpegError."""
-    mock_run.side_effect = TimeoutExpired(cmd=["ffmpeg"], timeout=120.0)
-    with pytest.raises(FFmpegError) as exc_info:
-        _extract_window(Path("test.mkv"))
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 124
-    assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_oserror_raises_ffmpeg_error(mock_run: MagicMock) -> None:
-    mock_run.side_effect = OSError("permission denied")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _extract_window(Path("test.mkv"))
-
-    assert "could not start" in str(exc_info.value.context.details)
-    assert "permission denied" in str(exc_info.value.context.details)
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 1
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_unexpected_exceptions_propagate(mock_run: MagicMock) -> None:
-    mock_run.side_effect = RuntimeError("unexpected bug")
-
-    with pytest.raises(RuntimeError, match="unexpected bug"):
-        _extract_window(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_empty_raises(mock_run: MagicMock):
-    """Test audio extraction when output is empty."""
-    mock_run.return_value.stdout = b""
-    with pytest.raises(AudioAlignmentError, match="empty audio"):
-        _extract_window(Path("test.mkv"), stream=_audio_stream(audio_stream_index=1))
-    mock_run.assert_called_once_with(
-        [
-            "ffmpeg",
-            "-i",
-            "test.mkv",
-            "-map",
-            "0:a:1",
-            "-vn",
-            "-ac",
-            "1",
-            "-af",
-            "aresample=8000,atrim=start_sample=0:end_sample=10,asetpts=PTS-STARTPTS",
-            "-fs",
-            "40",
-            "-f",
-            "f32le",
-            "-",
-        ],
-        timeout_seconds=120.0,
-    )
-
-
-@pytest.mark.parametrize(
-    ("channels", "channel_layout", "expected_filter"),
-    [
-        (1, "mono", "pan=mono|c0=c0"),
-        (2, "stereo", "pan=mono|c0=FL"),
-        (6, "5.1", "pan=mono|c0=FC"),
-    ],
-)
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_best_channel_uses_explicit_map_and_deterministic_channel(
-    mock_run: MagicMock,
-    channels: int,
-    channel_layout: str,
-    expected_filter: str,
-) -> None:
-    mock_run.return_value.stdout = np.array([0.1], dtype=np.float32).tobytes()
-    stream = AudioStreamInfo(
-        audio_stream_index=2,
-        absolute_stream_index=7,
-        codec_name="aac",
-        channels=channels,
-        channel_layout=channel_layout,
-        sample_rate=48000,
-        language="eng",
-        is_default=True,
-        is_original=False,
-        is_commentary=False,
-    )
-
-    audio = _extract_window(
-        Path("test.mkv"),
-        channel_strategy="best_channel",
-        stream=stream,
-    )
-
-    assert audio.tolist() == pytest.approx([0.1])
-    mock_run.assert_called_once_with(
-        [
-            "ffmpeg",
-            "-i",
-            "test.mkv",
-            "-map",
-            "0:a:2",
-            "-vn",
-            "-af",
-            f"{expected_filter},aresample=8000,atrim=start_sample=0:end_sample=10,asetpts=PTS-STARTPTS",
-            "-fs",
-            "40",
-            "-f",
-            "f32le",
-            "-",
-        ],
-        timeout_seconds=120.0,
-    )
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_invalid_float32_payload_raises(mock_run: MagicMock) -> None:
-    mock_run.return_value.stdout = b"abc"
-
-    with pytest.raises(AudioAlignmentError, match="test.mkv.*3 bytes"):
-        _extract_window(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_window_rejects_payload_beyond_planned_count(mock_run: MagicMock) -> None:
-    mock_run.return_value.stdout = np.zeros(2, dtype=np.float32).tobytes()
-
-    with pytest.raises(AudioAlignmentError, match="exceeded the planned sample count"):
-        _extract_window(Path("long.mkv"), sample_count=1)
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
