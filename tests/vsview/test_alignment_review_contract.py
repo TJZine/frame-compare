@@ -30,7 +30,7 @@ from frame_compare.vsview.alignment_review_contract import (
     read_alignment_review_result,
     write_alignment_review_result,
 )
-from tests.services.test_alignment_diagnostics import audio_attempt
+from tests.services.test_alignment_diagnostics import audio_attempt, maximum_audio_attempt
 
 _SESSION_ID = "12345678123456781234567812345678"
 
@@ -151,6 +151,115 @@ def test_workspace_metadata_accepts_provisional_attempt_without_trusted_offset()
     assert cast(dict[str, object], decision["decision"])["state"] == "provisional"
 
 
+def test_workspace_metadata_accepts_observed_collection_facts() -> None:
+    attempt = asdict(audio_attempt())
+    attempt["collection_observation"] = "observed"
+    attempt["collection_summaries"] = [
+        {
+            "phase": phase,
+            "role": role,
+            "output_rate": 8000,
+            "requested_horizon": 8000,
+            "emitted_sample_count": 8000,
+            "emitted_byte_count": 32000,
+            "retained_sample_count": 8000,
+            "retained_byte_count": 32000,
+            "status": "complete",
+            "end_category": "planned_end_reached",
+            "observed_eof_sample": None,
+            "elapsed_seconds": 0.25,
+            "cleanup_failure_count": 0,
+            "failure_count": 0,
+        }
+        for phase, role in (
+            ("discovery", "reference"),
+            ("discovery", "comparison"),
+            ("verification", "reference"),
+            ("verification", "comparison"),
+        )
+    ]
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+
+    parsed = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed is not None
+    assert parsed["collection_observation"] == "observed"
+    assert len(cast(list[object], parsed["collection_summaries"])) == 4
+
+
+def test_workspace_metadata_accepts_signed_window_evidence() -> None:
+    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
+    window = cast(list[dict[str, object]], attempt["windows"])[0]
+    window["requested_sample_lag"] = -1
+    window["requested_frame_candidate"] = -2
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+
+    parsed = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed is not None
+    parsed_window = cast(list[dict[str, object]], parsed["windows"])[0]
+    assert parsed_window["requested_sample_lag"] == -1
+    assert parsed_window["requested_frame_candidate"] == -2
+
+
+def test_workspace_metadata_rejects_unobserved_collection_payload() -> None:
+    attempt = asdict(audio_attempt())
+    attempt["collection_summaries"] = [
+        {
+            "phase": "discovery",
+            "role": "reference",
+            "output_rate": 8000,
+            "requested_horizon": 8000,
+            "emitted_sample_count": 8000,
+            "emitted_byte_count": 32000,
+            "retained_sample_count": 8000,
+            "retained_byte_count": 32000,
+            "status": "complete",
+            "end_category": "planned_end_reached",
+            "observed_eof_sample": None,
+            "elapsed_seconds": 0.25,
+            "cleanup_failure_count": 0,
+            "failure_count": 0,
+        }
+    ]
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="unobserved alignment collection"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        )
+
+
 def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> None:
     payload = {
         "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
@@ -165,7 +274,7 @@ def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> Non
         )
 
 
-@pytest.mark.parametrize("old_version", [1, 99])
+@pytest.mark.parametrize("old_version", [1, 2, 99])
 def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
     old_version: int,
 ) -> None:
@@ -182,7 +291,7 @@ def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
 
     with pytest.raises(
         AlignmentReviewContractError,
-        match=rf"newly generated session.*metadata v{old_version}.*requires v2",
+        match=rf"newly generated session.*metadata v{old_version}.*requires v3",
     ):
         parse_alignment_review_workspace_metadata((_reference_output(0), old_comparison))
 
@@ -195,7 +304,7 @@ def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
         metadata=dict(old_reference.metadata) | {ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1},
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v2"):
+    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v3"):
         parse_alignment_review_workspace_metadata((_comparison_output(1, 1), old_reference))
 
 
@@ -240,6 +349,134 @@ def test_workspace_metadata_rejects_nonfinite_or_inconsistent_attempt_evidence()
                     audio_review=json.dumps(payload),
                 ),
             )
+        )
+
+
+def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
+    attempt = asdict(maximum_audio_attempt())
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    assert len(review.encode("utf-8")) < 128 * 1024
+
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+
+    parsed = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed is not None
+    assert len(cast(list[object], parsed["windows"])) == 16
+    assert len(cast(list[object], parsed["collection_summaries"])) == 4
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value", "match"),
+    [
+        ("attempt", "confidence_threshold", float("nan"), "confidence_threshold"),
+        ("collection", "output_rate", True, "output_rate"),
+        ("collection", "requested_horizon", 0, "collection bounds"),
+        ("collection", "retained_sample_count", 8001, "retained samples"),
+        ("collection", "failure_count", 0, "failed collection"),
+        ("collection", "cleanup_failure_count", 2, "cleanup failures"),
+        ("collection", "elapsed_seconds", float("nan"), "elapsed_seconds"),
+        ("window", "discovery_reference_count", -1, "discovery_reference_count"),
+        ("window", "actual_coverage", True, "actual_coverage"),
+        ("window", "actual_coverage", 0.5, "unobserved coverage"),
+    ],
+)
+def test_workspace_metadata_rejects_malformed_retained_audio_facts(
+    section: str, field: str, value: object, match: str
+) -> None:
+    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
+    if section == "attempt":
+        attempt[field] = value
+    elif section == "collection":
+        collections = cast(list[dict[str, object]], attempt["collection_summaries"])
+        collection = collections[0]
+        if field == "failure_count":
+            collection["status"] = "failed"
+            collection["end_category"] = "not_observed"
+        if field == "cleanup_failure_count":
+            collection["status"] = "failed"
+            collection["end_category"] = "not_observed"
+            collection["failure_count"] = 1
+        if field == "retained_sample_count":
+            collection["retained_byte_count"] = 32004
+        collection[field] = value
+    else:
+        windows = cast(list[dict[str, object]], attempt["windows"])
+        window = windows[0]
+        window[field] = value
+
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=True,
+    )
+    with pytest.raises(AlignmentReviewContractError, match=match):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        )
+
+
+def test_workspace_metadata_rejects_duplicate_collection_summaries() -> None:
+    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
+    collections = cast(list[dict[str, object]], attempt["collection_summaries"])
+    collections[1]["phase"] = collections[0]["phase"]
+    collections[1]["role"] = collections[0]["role"]
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="duplicated"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        )
+
+
+def test_workspace_metadata_rejects_all_unobserved_coverage_facts() -> None:
+    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
+    window = cast(list[dict[str, object]], attempt["windows"])[0]
+    window.update(
+        {
+            "actual_coverage": 0.5,
+            "actual_useful_reference_start": 1,
+            "actual_useful_reference_end": 2,
+            "pre_eof_expected_overlap": 1,
+        }
+    )
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="unobserved coverage"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
         )
 
 

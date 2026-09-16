@@ -14,6 +14,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     AudioAlignmentAttempt,
     AudioAlignmentCandidate,
+    AudioAlignmentCollectionRecord,
     AudioAlignmentDecision,
     AudioAlignmentWindowRecord,
     SelectedAudioStreamEvidence,
@@ -136,6 +137,102 @@ def audio_attempt() -> AudioAlignmentAttempt:
     )
 
 
+def maximum_audio_attempt() -> AudioAlignmentAttempt:
+    base = audio_attempt()
+    template = base.windows[0]
+    windows = tuple(
+        replace(
+            template,
+            logical_id=f"primary-{index:02d}",
+            planned_reference_start=index * 8000,
+            planned_comparison_start=index * 8000,
+        )
+        for index in range(16)
+    )
+    collections = tuple(
+        AudioAlignmentCollectionRecord(
+            phase=phase,
+            role=role,
+            output_rate=8000,
+            requested_horizon=8000,
+            emitted_sample_count=8000,
+            emitted_byte_count=32000,
+            retained_sample_count=8000,
+            retained_byte_count=32000,
+            status="complete",
+            end_category="planned_end_reached",
+            observed_eof_sample=None,
+            elapsed_seconds=0.25,
+            cleanup_failure_count=0,
+            failure_count=0,
+        )
+        for phase, role in (
+            ("discovery", "reference"),
+            ("discovery", "comparison"),
+            ("verification", "reference"),
+            ("verification", "comparison"),
+        )
+    )
+    return replace(
+        base,
+        planned_window_count=16,
+        windows=windows,
+        decision=replace(base.decision, raw_correlated_windows=16),
+        collection_observation="observed",
+        collection_summaries=collections,
+    )
+
+
+def test_collection_record_rejects_invalid_counts_and_failure_topology() -> None:
+    base = AudioAlignmentCollectionRecord(
+        phase="discovery",
+        role="reference",
+        output_rate=8000,
+        requested_horizon=8000,
+        emitted_sample_count=8000,
+        emitted_byte_count=32000,
+        retained_sample_count=8000,
+        retained_byte_count=32000,
+        status="complete",
+        end_category="planned_end_reached",
+        observed_eof_sample=None,
+        elapsed_seconds=0.25,
+        cleanup_failure_count=0,
+        failure_count=0,
+    )
+
+    with pytest.raises(ValueError):
+        replace(base, requested_horizon=0)
+    with pytest.raises(ValueError):
+        replace(base, output_rate=0)
+    with pytest.raises(ValueError):
+        replace(base, elapsed_seconds=True)
+    with pytest.raises(ValueError, match="retained samples"):
+        replace(base, retained_sample_count=8001, retained_byte_count=32004)
+    with pytest.raises(ValueError, match="complete collection"):
+        replace(base, failure_count=1)
+    with pytest.raises(ValueError, match="failed collection"):
+        replace(base, status="failed", end_category="not_observed")
+    with pytest.raises(ValueError, match="cleanup failures"):
+        replace(
+            base,
+            status="failed",
+            end_category="not_observed",
+            cleanup_failure_count=2,
+            failure_count=1,
+        )
+    with pytest.raises(ValueError, match="actual coverage"):
+        replace(audio_attempt().windows[0], actual_coverage=True)
+    with pytest.raises(ValueError, match="observed facts"):
+        replace(
+            audio_attempt().windows[0],
+            actual_coverage=0.5,
+            actual_useful_reference_start=1,
+            actual_useful_reference_end=2,
+            pre_eof_expected_overlap=1,
+        )
+
+
 def _result(attempt: AudioAlignmentAttempt, *, manual: bool = False) -> AlignmentResult:
     return AlignmentResult(
         reference_clip="reference.mkv",
@@ -180,6 +277,7 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
     )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
     assert before_digest == after_digest == payload["original_attempt_digest"]
     assert before_size < 128 * 1024
     assert after_size < 128 * 1024
@@ -190,6 +288,8 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
     assert "ffmpeg -i" not in serialized
     assert payload["original_audio_attempt"]["ffmpeg_version"] == "not_observed"
     assert payload["original_audio_attempt"]["ffprobe_version"] == "not_observed"
+    assert payload["original_audio_attempt"]["collection_observation"] == "not_observed"
+    assert payload["original_audio_attempt"]["collection_summaries"] == []
     assert payload["original_audio_attempt"]["extraction_recipe"] == (
         "ffmpeg [seek] -i <role_input> -map 0:a:<selected_ordinal> -vn "
         "[channel] -af <bounded_filters> -fs <planned_pcm_bytes> -f f32le -"
@@ -239,23 +339,7 @@ def test_failed_final_replacement_preserves_last_valid_snapshot(
 
 
 def test_maximum_primary_window_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> None:
-    base = audio_attempt()
-    template = base.windows[0]
-    windows = tuple(
-        replace(
-            template,
-            logical_id=f"primary-{index:02d}",
-            planned_reference_start=index * 8000,
-            planned_comparison_start=index * 8000,
-        )
-        for index in range(16)
-    )
-    attempt = replace(
-        base,
-        planned_window_count=16,
-        windows=windows,
-        decision=replace(base.decision, raw_correlated_windows=16),
-    )
+    attempt = maximum_audio_attempt()
 
     path, _, size = alignment_diagnostics.write_alignment_diagnostic(
         generated_root=tmp_path.parent,
@@ -273,8 +357,12 @@ def test_maximum_primary_window_artifact_fits_the_fixed_byte_bound(tmp_path: Pat
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert size < 128 * 1024
     assert len(payload["original_audio_attempt"]["windows"]) == 16
+    assert len(payload["original_audio_attempt"]["collection_summaries"]) == 4
     assert len(payload["pair"]["reference_label"]) == 256
     assert len(payload["pair"]["comparison_label"]) == 256
+    serialized = path.read_text(encoding="utf-8")
+    assert str(tmp_path) not in serialized
+    assert "ffmpeg -i" not in serialized
 
 
 def test_symlinked_diagnostic_directory_is_rejected(tmp_path: Path) -> None:

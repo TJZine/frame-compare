@@ -83,8 +83,11 @@ confirmation is a separate fact and does not rewrite the original audio attempt.
 
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
-schema-v1 file records selected stream metadata, every planned window outcome, raw
+schema-v2 file records selected stream metadata, every planned window outcome, raw
 candidate and quality facts, the aggregate decision, and the final review resolution.
+It also retains bounded continuous-collection summaries and useful-overlap/coverage
+facts when observed. Held-v5 attempts explicitly mark collection facts as
+`not_observed`; they never fabricate streaming counts, endpoints, or timing.
 It records the expected media-runtime fingerprint; FFmpeg/ffprobe version fields say
 `not_observed` because this package does not add version-probe subprocesses.
 It contains no media paths, PCM, environment values, credentials, full commands, or
@@ -162,11 +165,11 @@ duplicate, incomplete, or out-of-bounds sidecars are rejected before any offset 
 applied. Missing modern `_Range` is reported once but remains unset, preserving
 VSView's native range inference; other native diagnostics remain inherited.
 
-Generated Frame Compare sessions use metadata v2 while the result sidecar remains v1.
-Metadata v1, unknown-version, mixed-version, and malformed Frame Compare sessions must
+Generated Frame Compare sessions use metadata v3 while the result sidecar remains v1.
+Metadata v1/v2, unknown-version, mixed-version, and malformed Frame Compare sessions must
 be regenerated after upgrading; they are not migrated into trust. Ordinary VSView
 sessions without Frame Compare metadata remain inert. Shared alignment cache schema v2,
-diagnostic artifact schema v1, and manual override schema v1 are separate contracts and
+diagnostic artifact schema v2, and manual override schema v1 are separate contracts and
 are unchanged by this session-metadata update.
 
 The native-panel workflow uses each source exactly once, named outputs, public

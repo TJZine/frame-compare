@@ -242,6 +242,17 @@ def _build_audio_attempt(
     if consensus.decision is None:
         raise ValueError("audio consensus is missing its diagnostic decision")
     planned = plan if isinstance(plan, alignment_audio.AudioAnalysisPlan) else None
+    window_records = tuple(
+        replace(
+            window,
+            discovery_reference_count=window.actual_reference_count,
+            discovery_comparison_count=window.actual_comparison_count,
+            verification_reference_count=window.scoring_reference_count,
+            verification_comparison_count=window.scoring_comparison_count,
+            quality_disposition=("qualified" if window.review_qualified else "rejected"),
+        )
+        for window in consensus.window_records
+    )
     return AudioAlignmentAttempt(
         reference_identity_digest=_clip_identity_digest(reference),
         comparison_identity_digest=_clip_identity_digest(comparison),
@@ -282,9 +293,11 @@ def _build_audio_attempt(
         planning_reason=plan.reason
         if isinstance(plan, alignment_audio.AudioAnalysisBudgetExceeded)
         else None,
-        windows=consensus.window_records,
+        windows=window_records,
         decision=consensus.decision,
         stability=consensus.stability,
+        collection_observation="not_observed",
+        collection_summaries=(),
     )
 
 

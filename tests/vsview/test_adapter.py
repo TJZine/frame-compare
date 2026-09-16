@@ -26,7 +26,10 @@ from frame_compare.vsview.adapter import (
     check_vsview_availability,
     launch_alignment_verification_session,
 )
-from frame_compare.vsview.alignment_review_contract import AlignmentReviewContractError
+from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_VERSION,
+    AlignmentReviewContractError,
+)
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.session_script import (
     _build_script_content,
@@ -603,7 +606,9 @@ def test_generated_session_registers_named_outputs_in_input_order(
         1,
         2,
     ]
-    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {2}
+    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {
+        ALIGNMENT_REVIEW_METADATA_VERSION
+    }
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
     assert [stem for stem, _cachefile, _cache in loader_calls].count("ref") == 1
 

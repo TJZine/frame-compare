@@ -314,17 +314,20 @@ recovery requirement.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
 - `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
   manual alignment overrides for the current run
-- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v1,
+- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v2,
   diagnostic-only audio evidence owned by
   `frame_compare.services.alignment_diagnostics`. Each pathless file is bounded to
-  128 KiB, contains at most 16 primary window outcomes, and is written atomically
-  before optional review. A final review outcome may replace the envelope once while
-  preserving the canonical original-attempt digest. These files are never read by
-  alignment, trim, or shared-cache owners and expire only when the run folder is
-  removed.
+  128 KiB, contains at most 16 primary window outcomes and four optional collection
+  summaries, and is written atomically before optional review. Held-v5 attempts mark
+  continuous collection facts `not_observed` rather than synthesizing streaming data.
+  A final review outcome may replace the envelope once while preserving the canonical
+  original-attempt digest. These files are never read by alignment, trim, or
+  shared-cache owners and expire only when the run folder is removed.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
-  (VSView's BestSource workspace is not a Frame Compare source-loader change)
+  (VSView's BestSource workspace is not a Frame Compare source-loader change).
+  Frame Compare metadata in generated sessions is schema v3; metadata v1/v2,
+  unknown, or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
   the VSView panel only after one complete whole-set positions action or keep-current

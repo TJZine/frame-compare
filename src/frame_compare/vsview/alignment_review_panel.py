@@ -891,7 +891,20 @@ def _audio_details(
         f"Work: planned={attempt['planned_window_count']}; analysis rate={attempt['analysis_rate']}; "
         f"FFT peak/total={attempt['peak_fft_points']}/{attempt['total_fft_points']}; "
         f"planning={attempt['planning_reason'] or 'complete'}",
+        f"Collection: {attempt['collection_observation']}",
     ]
+    for collection in cast(list[dict[str, object]], attempt["collection_summaries"]):
+        lines.append(
+            f"{collection['phase']}/{collection['role']}: rate={collection['output_rate']}; "
+            f"horizon={collection['requested_horizon']}; emitted="
+            f"{collection['emitted_sample_count']} samples/{collection['emitted_byte_count']} bytes; "
+            f"retained={collection['retained_sample_count']} samples/"
+            f"{collection['retained_byte_count']} bytes; "
+            f"status={collection['status']}/{collection['end_category']}; "
+            f"EOF={collection['observed_eof_sample']}; elapsed={collection['elapsed_seconds']}; "
+            f"cleanup_failures={collection['cleanup_failure_count']}; "
+            f"failures={collection['failure_count']}"
+        )
     for stream in cast(list[dict[str, object]], attempt["selected_streams"]):
         lines.append(
             f"{stream['role']}: a:{stream['audio_stream_index']} (absolute {stream['absolute_stream_index']}), "
@@ -914,14 +927,23 @@ def _audio_details(
         lines.append(
             f"{window['logical_id']}: ref={window['planned_reference_start']}+{window['planned_reference_count']}, "
             f"cmp={window['planned_comparison_start']}+{window['planned_comparison_count']}, "
-            f"actual={window['actual_reference_count']}/{window['actual_comparison_count']}, "
-            f"scoring={window['scoring_reference_count']}/{window['scoring_comparison_count']}, "
+            f"discovery={window['discovery_reference_count']}/"
+            f"{window['discovery_comparison_count']}, "
+            f"verification={window['verification_reference_count']}/"
+            f"{window['verification_comparison_count']}, "
             f"overlap={window['effective_aligned_overlap']}, origin={window['origin_basis']}, "
+            f"continuous={window['continuous_sample_count']}@"
+            f"{window['continuous_sample_count_origin']}, "
+            f"useful={window['actual_useful_reference_start']}-"
+            f"{window['actual_useful_reference_end']}, "
+            f"expected_overlap={window['pre_eof_expected_overlap']}, "
+            f"coverage={window['actual_coverage']} ({window['coverage_state']}), "
             f"rates={window['analysis_rate']}/{window['requested_rate']}, "
             f"lag={window['local_lag']}/{window['global_analysis_lag']}/{window['requested_sample_lag']}, "
             f"frame={window['requested_frame_candidate']}, score={window['requested_score']} "
             f"({window['score_stage']}), peak={window['peak_ratio']} "
-            f"({window['peak_stage']}@{window['peak_rate']}), quality={window['configured_quality']}, "
+            f"({window['peak_stage']}@{window['peak_rate']}), "
+            f"quality={window['quality_disposition']}/{window['configured_quality']}, "
             f"vote={window['vote_disposition']}, review={window['review_qualified']}, "
             f"result={window['terminal_stage']}/{window['terminal_category']}, "
             f"relation={window['purpose']}/{window['parent_id'] or 'root'}"

@@ -1252,11 +1252,11 @@ the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 The generated session carries an explicit UUID session identity, one reference role,
 ordered comparison roles/keys/ordinals, presentation names, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v2. The panel derives display bounds from public
+schema v3. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
 the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
 sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
-exact ordered whole-set decision shape. Metadata v1, unknown, or mixed Frame Compare
+exact ordered whole-set decision shape. Metadata v1/v2, unknown, or mixed Frame Compare
 sessions are rejected with instructions to generate a new session; there is no
 trust-upgrade shim. Ordinary non-Frame-Compare sessions remain inert. Frame Compare
 derives the sibling result path from the trusted generated script path, then rejects
@@ -1549,11 +1549,13 @@ manual result keeps the original attempt as separate diagnostic history.
 ## Persistence Rules
 
 Fresh runs write one pathless diagnostic artifact per comparison at
-`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v1 is marked
+`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v2 is marked
 `diagnostic_only`, is limited to 128 KiB per comparison, and contains no media path,
 PCM, raw command line, full subprocess stderr, environment value, or credential. It
 is atomically snapshotted before optional review and may be atomically replaced once
-with the final human outcome. The SHA-256 digest covers only canonical original-attempt
+with the final human outcome. Held-v5 attempts use explicit `not_observed` collection
+state; observed collection summaries and window coverage facts remain bounded. The
+SHA-256 digest covers only canonical original-attempt
 JSON, so manual confirmation does not rewrite the recorded audio attempt. Sharing a
 run folder also shares bounded labels, pseudonymous source identity digests, selected
 stream metadata, and timing evidence.

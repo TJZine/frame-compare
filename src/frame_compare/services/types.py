@@ -35,6 +35,13 @@ type AudioSelectionMethod = Literal["explicit_override", "automatic_metadata"]
 type AudioMetadataMatch = Literal["match", "mismatch", "unknown", "not_applicable"]
 type AudioWindowPurpose = Literal["primary", "disputed_recheck", "zero_check"]
 type AudioPeakRatio = float | Literal["unbounded"]
+type AudioCollectionPhase = Literal["discovery", "verification"]
+type AudioCollectionRole = Literal["reference", "comparison"]
+type AudioCollectionStatus = Literal["complete", "failed"]
+type AudioCollectionEnd = Literal["planned_end_reached", "observed_eof", "not_observed"]
+type AudioCollectionObservation = Literal["observed", "not_observed"]
+type AudioWindowCoverageState = Literal["complete", "short", "empty", "not_observed"]
+type AudioWindowQualityDisposition = Literal["qualified", "rejected", "not_observed"]
 
 
 def _require_int(value: object, name: str, *, minimum: int | None = None) -> None:
@@ -94,6 +101,83 @@ class SelectedAudioStreamEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class AudioAlignmentCollectionRecord:
+    """Bounded scalar facts for one continuous collection phase and role."""
+
+    phase: AudioCollectionPhase
+    role: AudioCollectionRole
+    output_rate: int
+    requested_horizon: int
+    emitted_sample_count: int
+    emitted_byte_count: int
+    retained_sample_count: int
+    retained_byte_count: int
+    status: AudioCollectionStatus
+    end_category: AudioCollectionEnd
+    observed_eof_sample: int | None
+    elapsed_seconds: float
+    cleanup_failure_count: int
+    failure_count: int
+
+    def __post_init__(self) -> None:
+        if self.phase not in {"discovery", "verification"}:
+            raise ValueError("collection phase is invalid")
+        if self.role not in {"reference", "comparison"}:
+            raise ValueError("collection role is invalid")
+        _require_int(self.output_rate, "output_rate", minimum=1)
+        _require_int(self.requested_horizon, "requested_horizon", minimum=1)
+        for name in (
+            "emitted_sample_count",
+            "emitted_byte_count",
+            "retained_sample_count",
+            "retained_byte_count",
+            "cleanup_failure_count",
+            "failure_count",
+        ):
+            _require_int(getattr(self, name), name, minimum=0)
+        if self.emitted_byte_count != self.emitted_sample_count * 4:
+            raise ValueError("emitted byte count must match float32 sample count")
+        if self.retained_byte_count != self.retained_sample_count * 4:
+            raise ValueError("retained byte count must match float32 sample count")
+        if self.retained_sample_count > self.emitted_sample_count:
+            raise ValueError("retained samples cannot exceed emitted samples")
+        if self.observed_eof_sample is not None:
+            _require_int(self.observed_eof_sample, "observed_eof_sample", minimum=0)
+        if (
+            isinstance(self.elapsed_seconds, bool)
+            or not math.isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+        ):
+            raise ValueError("collection elapsed time must be finite and non-negative")
+        if self.status == "complete" and (
+            self.cleanup_failure_count != 0 or self.failure_count != 0
+        ):
+            raise ValueError("complete collection cannot have failure counters")
+        if self.status == "failed":
+            if self.failure_count < 1:
+                raise ValueError("failed collection must have a failure")
+            if self.cleanup_failure_count > self.failure_count:
+                raise ValueError("cleanup failures cannot exceed collection failures")
+        if self.end_category == "planned_end_reached":
+            if self.status != "complete" or self.observed_eof_sample is not None:
+                raise ValueError("planned-end collection facts are inconsistent")
+            if self.emitted_sample_count != self.requested_horizon:
+                raise ValueError("planned-end collection must emit its requested horizon")
+        elif self.end_category == "observed_eof":
+            if self.status != "complete" or self.observed_eof_sample is None:
+                raise ValueError("observed-EOF collection facts are inconsistent")
+            if not 0 <= self.observed_eof_sample < self.requested_horizon:
+                raise ValueError("observed EOF is outside the requested horizon")
+            if self.emitted_sample_count != self.observed_eof_sample:
+                raise ValueError("observed EOF must match emitted sample count")
+        elif self.end_category == "not_observed":
+            if self.status != "failed" or self.observed_eof_sample is not None:
+                raise ValueError("unobserved collection facts are inconsistent")
+        else:
+            raise ValueError("collection end category is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class AudioAlignmentWindowRecord:
     """Bounded outcome for one planned alignment window."""
 
@@ -111,6 +195,20 @@ class AudioAlignmentWindowRecord:
     actual_comparison_count: int | None = None
     scoring_reference_count: int | None = None
     scoring_comparison_count: int | None = None
+    discovery_reference_count: int | None = None
+    discovery_comparison_count: int | None = None
+    verification_reference_count: int | None = None
+    verification_comparison_count: int | None = None
+    continuous_sample_count: int | None = None
+    continuous_sample_count_origin: Literal["discovery", "verification", "not_observed"] = (
+        "not_observed"
+    )
+    actual_useful_reference_start: int | None = None
+    actual_useful_reference_end: int | None = None
+    pre_eof_expected_overlap: int | None = None
+    actual_coverage: float | None = None
+    coverage_state: AudioWindowCoverageState = "not_observed"
+    quality_disposition: AudioWindowQualityDisposition = "not_observed"
     effective_aligned_overlap: int | None = None
     origin_basis: Literal["planned_assumption", "not_measured"] = "planned_assumption"
     local_lag: float | None = None
@@ -139,12 +237,24 @@ class AudioAlignmentWindowRecord:
             "analysis_rate",
             "requested_rate",
         ):
-            _require_int(getattr(self, name), name, minimum=0)
+            _require_int(
+                getattr(self, name),
+                name,
+                minimum=1 if name in {"analysis_rate", "requested_rate"} else 0,
+            )
         for name in (
             "actual_reference_count",
             "actual_comparison_count",
             "scoring_reference_count",
             "scoring_comparison_count",
+            "discovery_reference_count",
+            "discovery_comparison_count",
+            "verification_reference_count",
+            "verification_comparison_count",
+            "continuous_sample_count",
+            "actual_useful_reference_start",
+            "actual_useful_reference_end",
+            "pre_eof_expected_overlap",
             "effective_aligned_overlap",
         ):
             value = getattr(self, name)
@@ -157,6 +267,51 @@ class AudioAlignmentWindowRecord:
         for value in (self.local_lag, self.global_analysis_lag, self.requested_score):
             if value is not None and not math.isfinite(value):
                 raise ValueError("window numeric evidence must be finite")
+        if self.actual_coverage is not None:
+            if isinstance(self.actual_coverage, bool) or not math.isfinite(self.actual_coverage):
+                raise ValueError("window actual coverage must be finite and numeric")
+            if not 0 <= self.actual_coverage <= 1:
+                raise ValueError("window actual coverage must be between zero and one")
+        if (self.actual_useful_reference_start is None) != (
+            self.actual_useful_reference_end is None
+        ):
+            raise ValueError("useful reference interval must have both endpoints")
+        if (
+            self.actual_useful_reference_start is not None
+            and self.actual_useful_reference_end is not None
+            and self.actual_useful_reference_end < self.actual_useful_reference_start
+        ):
+            raise ValueError("useful reference interval is reversed")
+        if self.continuous_sample_count_origin not in {
+            "discovery",
+            "verification",
+            "not_observed",
+        }:
+            raise ValueError("continuous sample count origin is invalid")
+        if (
+            self.continuous_sample_count is None
+            and self.continuous_sample_count_origin != "not_observed"
+        ):
+            raise ValueError("missing continuous sample count must be not_observed")
+        if (
+            self.continuous_sample_count is not None
+            and self.continuous_sample_count_origin == "not_observed"
+        ):
+            raise ValueError("observed continuous sample count needs an origin")
+        if self.coverage_state not in {"complete", "short", "empty", "not_observed"}:
+            raise ValueError("window coverage state is invalid")
+        if self.coverage_state == "not_observed" and any(
+            value is not None
+            for value in (
+                self.actual_coverage,
+                self.actual_useful_reference_start,
+                self.actual_useful_reference_end,
+                self.pre_eof_expected_overlap,
+            )
+        ):
+            raise ValueError("unobserved coverage cannot include observed facts")
+        if self.quality_disposition not in {"qualified", "rejected", "not_observed"}:
+            raise ValueError("window quality disposition is invalid")
         if isinstance(self.peak_ratio, float) and not math.isfinite(self.peak_ratio):
             raise ValueError("unbounded peak ratio must use the explicit string encoding")
 
@@ -249,6 +404,8 @@ class AudioAlignmentAttempt:
     windows: tuple[AudioAlignmentWindowRecord, ...]
     decision: AudioAlignmentDecision
     stability: "AlignmentStabilitySummary | None" = None
+    collection_observation: AudioCollectionObservation = "not_observed"
+    collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = ()
 
     def __post_init__(self) -> None:
         _require_int(self.comparison_ordinal, "comparison_ordinal", minimum=1)
@@ -274,6 +431,19 @@ class AudioAlignmentAttempt:
             raise ValueError("extraction recipe exceeds its text bound")
         if len(self.windows) > 18 or self.planned_window_count > 16:
             raise ValueError("audio attempt exceeds the bounded window contract")
+        if self.collection_observation not in {"observed", "not_observed"}:
+            raise ValueError("collection observation is invalid")
+        if len(self.collection_summaries) > 4:
+            raise ValueError("audio attempt exceeds the bounded collection contract")
+        if self.collection_observation == "not_observed" and self.collection_summaries:
+            raise ValueError("unobserved collection facts must be absent")
+        if self.collection_observation == "observed" and not self.collection_summaries:
+            raise ValueError("observed collection facts must not be absent")
+        collection_keys = {
+            (collection.phase, collection.role) for collection in self.collection_summaries
+        }
+        if len(collection_keys) != len(self.collection_summaries):
+            raise ValueError("audio attempt collection summaries must be unique")
         if len({window.logical_id for window in self.windows}) != len(self.windows):
             raise ValueError("audio attempt window logical IDs must be unique")
         if sum(window.purpose == "primary" for window in self.windows) != self.planned_window_count:
