@@ -440,6 +440,14 @@ Computed alignment work is planned against typed timing for each selected audio 
 total FFT-work budgets, requested-rate scoring budgets, distributed window selection,
 and seek-with-preroll followed by absolute post-decode trimming. The fixed preroll
 bounds early-window decoding but is not a cross-version AAC-grid guarantee.
+`alignment_streaming` is the adjacent, independently exercisable continuous-collection
+owner. It accepts a caller-prepared FFmpeg argument vector, scalar admitted intervals,
+the final sample horizon, an explicit retained-sample ceiling, hard deadline, and
+optional cancellation event; resolves the executable through `utils.subproc`; and owns
+one child, bounded stdout/stderr readers,
+interval intersection copies, endpoint classification, typed transport failures, and
+deterministic cleanup. It imports neither alignment planning nor trust/cache policy and
+is not selected by the normal alignment path until staged extraction is integrated.
 Requested-rate
 correlation is preferred. When it cannot fit, a bounded coarse pair finds the lag, is
 released, and a fresh aligned pair at the configured rate refines the rate-ratio
@@ -885,6 +893,7 @@ Runtime ownership matrix:
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
 | Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and FFmpeg/channel-aware seek/extraction policy | `frame_compare.services.alignment_audio` |
+| One-child continuous FFmpeg collection, bounded pipe drainage, admitted interval retention, endpoint classification, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
 | Audio correlation, unequal-length lag mapping, overlap-normalized confidence, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
@@ -915,8 +924,8 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/services/report/**`
 - `src/frame_compare/cli/entry.py`
 - `src/frame_compare/services/alignment.py` and its focused audio-alignment owners
-  (`alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`,
-  `alignment_vsview.py`)
+  (`alignment_audio.py`, `alignment_streaming.py`, `alignment_correlation.py`,
+  `alignment_consensus.py`, `alignment_vsview.py`)
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
