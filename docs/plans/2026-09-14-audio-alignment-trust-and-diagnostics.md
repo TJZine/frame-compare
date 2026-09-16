@@ -810,8 +810,8 @@ After activation, publish the actual qualified policy, cache invalidation, sessi
 
 | Unit | Initial state | Integrated SHA | Proof and outstanding acceptance |
 | --- | --- | --- | --- |
-| Plan replacement | Authored; installation pending | — | No implementation/test execution claimed by authoring. |
-| R0 safety hold | Not started | — | Hold is absent at inspected head. |
+| Plan replacement | Complete | `bcbde14a` | Preamble/references inspected; `git diff --check` and commit hooks passed. |
+| R0 safety hold | Complete | `f46752ce` | Held v6 authority, cache, trim, presentation, and manual-preservation proof passed; two known P3 AAC extraction XFAILs remain historical inputs rather than R0 failures. |
 | R1 streaming owner | Not started | — | Production failure/lifecycle and Windows proof required. |
 | R2 evidence/native extension | Not started | — | Reuse P1/P2; extend exact contract and complete visible acceptance. |
 | R3 staged extraction | Not started | — | Production endpoints/margins/rate coordinates/budgets required. |
@@ -821,6 +821,15 @@ After activation, publish the actual qualified policy, cache invalidation, sessi
 | R7 activation | Blocked by R0–R6 acceptance | — | Unpatched defaults and packaged candidate proof required. |
 
 For each checkpoint record task model/effort actually used, owner disposition, files, commit, commands/results/skips, evidence locations, unresolved risks, and the next permitted unit. Do not mark a package accepted from intended tests. When the workstream and release handoff are complete, change this file to `Status: Historical` in the same pass; otherwise keep the unresolved gate explicit.
+
+#### R0 execution record — September 15, 2026
+
+- **Task/runtime:** standalone Codex new task `01a0a755-90a5-7192-8ffd-61371c1021c4`, `gpt-5.6-luna` at `xhigh`, explicitly overriding the configured `worker_luna` subagent profile as required by §3.2. The controller reviewed every changed line, found one acceptance-proof gap, and redispatched only the missing tests before integration.
+- **Owner disposition:** cohesive growth in the existing consensus, service sequencing, previous-offset reuse, and cache owners. No extraction, native wire, config, dependency, or import-layer change was required.
+- **Integrated change:** `f46752ce` (`fix(alignment): hold automatic audio authority`). Production files: `alignment.py`, `alignment_consensus.py`, `alignment_correlation.py`, `alignment_previous_offsets.py`, and `alignment_reuse_cache.py`. Authority docs: current architecture, CLI contract, and audio-alignment guide. Tests cover fresh/cached/embedded computed paths, both signs and zero, one survivor/four failures, manual zero, mixed manual/unresolved comparisons, keep-current, null native authority, trim application, cache eligibility, and the asymmetric positive-start service result.
+- **Verification:** locked dev and VSView extras synchronized successfully. Controller-observed passes: `pyright --warnings`; `ruff check .`; task-file `ruff format --check`; Bandit with zero medium/high findings; both import contracts; focused alignment service, orchestration, CLI/docs, and VSView suites; generated API-doc drift check; CLI contract-doc tests; `git diff --check`; and full `pytest -q` exit 0. The full suite retained the two expected P3 AAC XFAILs. Host/runtime skips remained explicit for the opt-in long collector case, unavailable local L-SMASH/libplacebo capabilities, live manual probes, and Windows/PowerShell-only tests. No extraction, Docker, or physical-Windows result is claimed by R0.
+- **Evidence and behavior:** estimator identity is `audio-authority-hold-2097152-v6`. Computed results and current-identity computed/embedded cache evidence are non-applied with null frame/time authority; old-policy source-set identities miss; validated manual authority remains applied and cacheable without embedding held computed authority. Current test evidence remains in the named service/integration tests and ordinary test output; no scalar production record is introduced for R0.
+- **Outstanding risks / next unit:** the safety hold is installed, so unresolved extraction/runtime/native acceptance cannot authorize trims. R1 is now dependency-ready. R1 owns the bounded continuous collector and its process/reader lifecycle; R2–R7 and their platform/resource gates remain outstanding.
 
 ## 14. Source record
 
