@@ -26,6 +26,17 @@ from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
+@pytest.fixture(autouse=True)
+def automatic_authority_is_disabled_for_workflow_fixtures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep pre-R0 workflow fixtures focused on sequencing and presentation."""
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_consensus._AUTOMATIC_AUTHORITY_HELD",
+        False,
+    )
+
+
 def test_alignment_duplicate_stems_fail_before_starting_progress(tmp_path: Path) -> None:
     ref = tmp_path / "ref.mkv"
     comp_a = tmp_path / "dup.mkv"

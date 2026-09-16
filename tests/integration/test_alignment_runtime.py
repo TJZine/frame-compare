@@ -171,12 +171,17 @@ def _write_multi_stream_clip(
     )
 
 
-def _assert_applied_offset(result: AlignmentResult, *, frame_offset: int) -> None:
-    assert result.applied is True
+def _assert_held_offset(result: AlignmentResult, *, frame_offset: int) -> None:
+    assert result.applied is False
     assert result.source == "computed"
-    assert result.frame_offset == frame_offset
-    assert result.time_offset_seconds == pytest.approx(frame_offset / _FPS, abs=1 / _SAMPLE_RATE)
+    assert result.frame_offset is None
+    assert result.time_offset_seconds is None
+    assert result.diagnostic == "automatic_authority_held"
     assert result.correlation_score > 0.9
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.decision.state == "provisional"
+    assert result.audio_attempt.decision.candidate is not None
+    assert result.audio_attempt.decision.candidate.frame_offset == frame_offset
 
 
 @pytest.mark.integration
@@ -217,7 +222,7 @@ def test_alignment_recovers_known_offset_from_generated_media(
     results = align_clips_from_request(request, config)
 
     assert len(results) == 1
-    _assert_applied_offset(results[0], frame_offset=-2)
+    _assert_held_offset(results[0], frame_offset=-2)
     downmix_request = alignment_request(
         reference=reference,
         comparisons=[comparison],
@@ -315,8 +320,8 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
 
     assert len(results) == 2
     by_clip = {result.comparison_clip: result for result in results}
-    _assert_applied_offset(by_clip[reference.name], frame_offset=0)
-    _assert_applied_offset(by_clip[comparison.name], frame_offset=-2)
+    _assert_held_offset(by_clip[reference.name], frame_offset=0)
+    _assert_held_offset(by_clip[comparison.name], frame_offset=-2)
     for result in by_clip.values():
         assert result.stability is not None
         assert result.stability.valid_windows == 5
@@ -364,7 +369,7 @@ def test_long_non_packet_aligned_media_accepts_frame_equivalent_window_offsets(
     results = align_clips_from_request(request, config)
 
     assert len(results) == 1
-    _assert_applied_offset(results[0], frame_offset=-2)
+    _assert_held_offset(results[0], frame_offset=-2)
     assert len(captured) == 1
     sample_offsets = [item.sample_offset for item in captured[0].window_evidence]
     assert len(sample_offsets) == 5
@@ -415,7 +420,7 @@ def test_alignment_selects_runtime_streams_and_keeps_cache_config_distinct(
     )
     default_results = align_clips_from_request(default_request, default_config)
 
-    _assert_applied_offset(default_results[0], frame_offset=-2)
+    _assert_held_offset(default_results[0], frame_offset=-2)
 
     override_request = alignment_request(
         reference=reference,
@@ -426,7 +431,7 @@ def test_alignment_selects_runtime_streams_and_keeps_cache_config_distinct(
     )
     override_results = align_clips_from_request(override_request, override_config)
 
-    _assert_applied_offset(override_results[0], frame_offset=-1)
+    _assert_held_offset(override_results[0], frame_offset=-1)
 
 
 @pytest.mark.integration
@@ -460,8 +465,8 @@ def test_typed_alignment_writes_shared_reuse_when_previous_offsets_disabled(
     results = align_clips_from_request(request, config)
 
     assert len(results) == 1
-    _assert_applied_offset(results[0], frame_offset=-2)
-    assert (shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME).exists()
+    _assert_held_offset(results[0], frame_offset=-2)
+    assert not (shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME).exists()
     assert not (generated_dir / "audio_offsets.toml").exists()
 
 

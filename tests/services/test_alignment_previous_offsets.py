@@ -40,6 +40,18 @@ from frame_compare.utils.types import (
     AlignmentRequest,
 )
 
+
+@pytest.fixture(autouse=True)
+def automatic_authority_is_disabled_for_reuse_fixtures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep legacy reuse fixtures focused on precedence and cache plumbing."""
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_consensus._AUTOMATIC_AUTHORITY_HELD",
+        False,
+    )
+
+
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
     classification="insufficient_evidence",
     valid_windows=0,

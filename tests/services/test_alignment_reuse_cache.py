@@ -14,6 +14,7 @@ import pytest
 import tomli_w
 
 import frame_compare.services.alignment_reuse_cache as reuse_cache
+from frame_compare.services import alignment_consensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
@@ -34,6 +35,15 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
+
+
+@pytest.fixture(autouse=True)
+def automatic_authority_is_disabled_for_cache_serialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep schema round-trip tests independent from the shipped authority latch."""
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
     "insufficient_evidence", 0, None, None, None, None, None, None

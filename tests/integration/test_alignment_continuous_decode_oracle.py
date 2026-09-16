@@ -19,7 +19,11 @@ from frame_compare.services.alignment_audio import (
     select_reference_audio_stream,
 )
 from frame_compare.services.alignment_math import samples_to_frames
-from frame_compare.services.types import AlignmentConfig, AudioAlignmentWindowRecord
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentResult,
+    AudioAlignmentWindowRecord,
+)
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint, runtime_kind
 from tests.integration.alignment_oracle import (
@@ -164,14 +168,14 @@ def _encode_audio_only(
     run_subprocess(command, timeout_seconds=45)
 
 
-def _run_audio_pair(
+def _run_alignment_result(
     root: Path,
     reference: Path,
     comparison: Path,
     *,
     config: AlignmentConfig,
     fps: Fraction = Fraction(24),
-) -> list[PolicyObservation]:
+) -> AlignmentResult:
     generated = root / "audio-pair-generated"
     generated.mkdir(exist_ok=True)
     request = alignment_request(
@@ -188,8 +192,20 @@ def _run_audio_pair(
         reference_fps=fps,
         quiet=True,
     )
-    assert result[0].audio_attempt is not None
-    return _policy_observations(result[0].audio_attempt.windows)
+    return result[0]
+
+
+def _run_audio_pair(
+    root: Path,
+    reference: Path,
+    comparison: Path,
+    *,
+    config: AlignmentConfig,
+    fps: Fraction = Fraction(24),
+) -> list[PolicyObservation]:
+    result = _run_alignment_result(root, reference, comparison, config=config, fps=fps)
+    assert result.audio_attempt is not None
+    return _policy_observations(result.audio_attempt.windows)
 
 
 def _policy_observations(
@@ -533,7 +549,13 @@ def test_asymmetric_positive_start_aac_preserves_clean_oracle_frame_and_eligibil
         sample_rate=requested_rate,
         max_offset_seconds=1.0,
     )
-    observations = _run_audio_pair(tmp_path, reference, comparison, config=config)
+    alignment_result = _run_alignment_result(tmp_path, reference, comparison, config=config)
+    assert alignment_result.applied is False
+    assert alignment_result.frame_offset is None
+    assert alignment_result.time_offset_seconds is None
+    assert alignment_result.audio_attempt is not None
+    assert alignment_result.audio_attempt.decision.state != "trusted_automatic"
+    observations = _policy_observations(alignment_result.audio_attempt.windows)
     assert len(observations) == 1
     observation = observations[0]
     observed_frame = (

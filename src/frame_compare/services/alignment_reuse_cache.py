@@ -12,6 +12,7 @@ from typing import TypeGuard, cast
 import structlog
 import tomli_w
 
+from frame_compare.services.alignment_consensus import automatic_authority_is_held
 from frame_compare.services.alignment_correlation import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.services.types import (
     AlignmentProvenance,
@@ -488,6 +489,7 @@ def _is_write_eligible(provenance: AlignmentProvenance) -> bool:
         and result.applied
         and result.frame_offset is not None
         and result.time_offset_seconds is not None
+        and not (origin == "computed" and automatic_authority_is_held())
         and (origin != "computed" or result.stability is not None)
         and (provenance.computed_result is None or provenance.computed_result.stability is not None)
     )
@@ -521,7 +523,7 @@ def _entry_from_provenance(
             raise ValueError("computed stability is required")
         entry["correlation_score"] = result.correlation_score
         entry["stability"] = _stability_dict(result.stability)
-    elif provenance.computed_result is not None:
+    elif provenance.computed_result is not None and not automatic_authority_is_held():
         computed = provenance.computed_result
         if computed.frame_offset is not None and computed.time_offset_seconds is not None:
             if computed.stability is None:

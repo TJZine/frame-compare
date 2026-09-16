@@ -35,6 +35,17 @@ from tests.services.alignment_request_test_support import (
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
+@pytest.fixture(autouse=True)
+def automatic_authority_is_disabled_for_native_workflow_fixtures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep native-review fixtures focused on review replacement semantics."""
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_consensus._AUTOMATIC_AUTHORITY_HELD",
+        False,
+    )
+
+
 def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int = 1000) -> None:
     monkeypatch.setattr(
         "frame_compare.services.alignment_audio.probe_fps", lambda _path: Fraction(24, 1)

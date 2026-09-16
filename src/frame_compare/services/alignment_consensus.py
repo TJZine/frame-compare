@@ -21,6 +21,7 @@ from frame_compare.services.alignment_stability import classify_alignment_stabil
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
+    AlignmentResult,
     AlignmentStabilitySummary,
     AlignmentWindowEvidence,
     AudioAlignmentAttempt,
@@ -32,6 +33,51 @@ from frame_compare.services.types import (
 
 _REVIEW_SCORE_FLOOR = 0.90
 _REVIEW_PEAK_RATIO_FLOOR = 1.50
+AUTOMATIC_AUTHORITY_HOLD_REASON = "automatic_authority_held"
+_AUTOMATIC_AUTHORITY_HELD = True
+
+
+def automatic_authority_is_held() -> bool:
+    """Return the internal release latch for computed alignment authority."""
+    return _AUTOMATIC_AUTHORITY_HELD
+
+
+def hold_computed_result(result: AlignmentResult) -> AlignmentResult:
+    """Remove automatic authority from a computed result while the latch is held."""
+    if not automatic_authority_is_held() or not result.applied:
+        return result
+    return replace(
+        result,
+        frame_offset=None,
+        time_offset_seconds=None,
+        applied=False,
+        diagnostic=AUTOMATIC_AUTHORITY_HOLD_REASON,
+    )
+
+
+def hold_automatic_consensus(result: AlignmentConsensus) -> AlignmentConsensus:
+    """Remove automatic authority from a computed consensus while held."""
+    if not automatic_authority_is_held() or not result.applied:
+        return result
+    decision = result.decision
+    if decision is not None and decision.state == "trusted_automatic":
+        decision = replace(
+            decision,
+            state="provisional",
+            primary_reason=AUTOMATIC_AUTHORITY_HOLD_REASON,
+            failed_gates=(*decision.failed_gates, AUTOMATIC_AUTHORITY_HOLD_REASON),
+        )
+    attempt = result.audio_attempt
+    if attempt is not None and decision is not None:
+        attempt = replace(attempt, decision=decision)
+    return replace(
+        result,
+        sample_offset=None,
+        applied=False,
+        diagnostic=AUTOMATIC_AUTHORITY_HOLD_REASON,
+        decision=decision,
+        audio_attempt=attempt,
+    )
 
 
 def _peak_value(value: float) -> AudioPeakRatio:
@@ -66,6 +112,8 @@ def _review_decision(
 ) -> AudioAlignmentDecision:
     members = list(zip(candidates, candidate_ids, strict=True))
     failed_gates, unassessed_gates = _legacy_gate_evidence(candidates, config, fps)
+    if result.diagnostic == AUTOMATIC_AUTHORITY_HOLD_REASON:
+        failed_gates = (*failed_gates, AUTOMATIC_AUTHORITY_HOLD_REASON)
     consensus_ratio = result.consensus_ratio if candidates else None
     aggregate_score = result.score if candidates else None
     minimum_peak_ratio = (
@@ -408,6 +456,7 @@ def _finish_consensus(
         stability=stability,
         window_records=tuple(window_records),
     )
+    result = hold_automatic_consensus(result)
     return replace(
         result,
         decision=_review_decision(result, candidates, candidate_ids, window_records, config, fps),

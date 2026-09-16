@@ -20,14 +20,15 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 ## Recommended workflow
 
-1. Let automatic alignment compute an offset.
-2. Review confidence and warnings.
+1. Let automatic alignment collect and report an offset candidate.
+2. Review the evidence, hold notice, and warnings; computed authority is currently
+   held and does not authorize a trim.
 3. Use the native VSView panel for optional alignment review when the route is
    available and the evidence needs visual confirmation. It is not part of automatic
    correlation: position each source in the viewer, then save the complete lineup once.
 4. Verify dialogue, cuts, and motion in the final report.
-5. Reuse an accepted result only while the same source identities and alignment-affecting
-   settings remain valid.
+5. Reuse a validated human-confirmed result only while the same source identities and
+   alignment-affecting settings remain valid.
 
 ## Audio stream selection
 
@@ -42,8 +43,9 @@ surface documented in the
 
 ## Previous offset reuse
 
-Accepted computed or interactively confirmed offsets can be stored in the shared alignment
-reuse cache. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
+Interactively confirmed offsets can be stored in the shared alignment reuse cache.
+While the automatic-authority hold is active, computed results are not written or reused
+as trim authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
 selected reference relationship, audio stream choices, alignment settings, and relevant
 runtime identity.
 
@@ -52,10 +54,11 @@ ignored with a warning rather than treated as authoritative evidence.
 
 Computed alignment may also classify bounded evidence across the source as stable,
 possible drift, possible discontinuity, variable, or insufficient. This summary is
-diagnostic only: Frame Compare always retains the selected constant offset and trims.
+diagnostic only: computed evidence remains separate from trim authority while the
+automatic hold is active; explicit or human-confirmed offsets remain authoritative.
 Consensus groups windows only when their requested-rate sample estimates produce the
 same integer source-frame correction at the reference FPS. It does not merge adjacent
-frames or use the diagnostic stability classification for acceptance. The accepted
+frames or use the diagnostic stability classification for acceptance. The winning
 group retains an observed lower-median sample estimate for diagnostic time reporting,
 while preserving every original per-window sample estimate as evidence.
 Material non-stable evidence produces one concise warning and should be verified at
@@ -67,16 +70,16 @@ are recomputed or reviewed normally. Schema-v1 entries are ignored and recompute
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
 remains a v1 file with the same path and offset semantics.
 
-Fresh computation distinguishes three audio-evidence states. `trusted_automatic`
-means the unchanged v5 policy accepted a candidate and may authorize the existing
-constant offset. `provisional` means a unique display-qualified candidate survived a
-rejected attempt; it is shown as a clearly unaccepted review hint in the terminal and
-native panel and is never applied or passed as the authoritative integer/null field.
-`unavailable` means no unique usable
+Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
+a unique display-qualified candidate survived an attempt; under the internal
+`audio-authority-hold-2097152-v6` policy it is shown as a clearly unaccepted review hint
+and is never applied or passed as the authoritative integer/null field. Its decision
+records `automatic_authority_held` when the remaining v5 gates qualify it. `unavailable`
+means no unique usable
 candidate exists, and Frame Compare does not invent zero. The
 display-only qualification floor is score 0.90 and peak ratio 1.50; it does not filter
-v5 voting or change an automatic result. Manual confirmation is a separate fact and
-does not rewrite the original audio attempt.
+v5 voting. The automatic hold independently prevents computed application. Manual
+confirmation is a separate fact and does not rewrite the original audio attempt.
 
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded

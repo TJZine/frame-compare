@@ -497,15 +497,18 @@ unchanged.
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
   native VSView panel review is labeled `ALIGN | Native VSView review`.
-- Before an optional native review opens, each rejected current audio attempt emits a
+- Before an optional native review opens, each non-applied current audio attempt emits a
   compact stderr explanation naming its retained display-only provisional candidate
-  and `not applied` status, or stating that no usable candidate exists. This does not
+  and `not applied` status, or stating that no usable candidate exists. While the
+  shipped automatic-authority hold is active, an otherwise-qualified candidate also
+  reports `automatic_authority_held`. This does not
   add a successful JSON field or write human text to JSON stdout. The run-local
   diagnostic location is reported only after a successful write.
-- The pre-review evidence block keeps accepted `+0f`, provisional `+0f`, and absence
-  distinct. Accepted evidence reports `Audio alignment accepted: +Nf`; rejected
-  evidence with a display candidate reports `Provisional candidate: +Nf (not
-  applied)`; and rejected evidence without one reports `No usable audio candidate. No
+- The pre-review evidence block keeps manual/human-authoritative `+0f`, held
+  provisional `+0f`, and absence distinct. Held computed evidence reports that
+  automatic application is temporarily disabled and that no computed correction was
+  applied; a display candidate is still shown as `Provisional candidate: +Nf (not
+  applied)`. Rejected evidence without one reports `No usable audio candidate. No
   automatic correction applied.` Selected stream rows name each audio ordinal as
   `a:N` and distinguish automatic metadata selection from an explicit override.
   Historical computed and human reuse are labeled separately and do not fabricate
@@ -521,8 +524,8 @@ unchanged.
 - Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
-  module, normal mode emits one sanitized warning and continues with the computed
-  audio alignment; forced interactive failure remains fatal. A successful VSView
+  module, normal mode emits one sanitized warning and continues with held, non-applied
+  audio evidence; forced interactive failure remains fatal. A successful VSView
   child continues to inherit its native stdout and stderr diagnostics. When Frame
   Compare reports missing, unspecified, or malformed preview color properties, the
   generated session applies the same explicit BT.709 preview defaults that VSView
@@ -1410,19 +1413,20 @@ converted to this sign convention before consensus evidence, hints, caching, and
   source loading, rendering, or report generation.
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
-  is not present in the CLI override map. Exact-match computed audio alignment
-  offsets are deterministic cache hits when `cache_results = true`, regardless
-  of `previous_offsets`; the policy only controls whether prior human-confirmed
-  offsets are reused. `disabled` is the default and does not read or reuse shared
-  interactively confirmed offsets, but eligible current-run computed or
-  interactively confirmed results still write to the shared reuse cache when
-  `cache_results = true`. `prompt` shows a Rich stderr table for a complete
+  is not present in the CLI override map. Under the shipped
+  `audio-authority-hold-2097152-v6` policy, computed cache hits and embedded computed
+  fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
+  only whether prior human-confirmed offsets are reused. `disabled` is the default and
+  does not read or reuse shared interactively confirmed offsets. Newly validated manual
+  results may still write to the shared reuse cache when `cache_results = true`.
+  `prompt` shows a Rich stderr table for a complete
   valid interactively confirmed offset set and asks
   <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
-  result that produced the preview suggestion, declining the prompt reuses that
-  computed result instead of rerunning audio alignment. `always` reuses a
+  result that produced the preview suggestion, declining the prompt retains that
+  computed evidence as non-applied instead of granting automatic authority.
+  `always` reuses a
   complete valid confirmed set without prompting. Prompt mode writes no
   prompt/table to stdout.
 - Previous-offset prompt mode requires both stdin and stderr to be TTYs before
@@ -1463,7 +1467,8 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `channel_strategy = "mono_downmix" | "best_channel"` selects the audio channel
   handling used during extraction. `mono_downmix` is the default.
 - `confidence_threshold` remains a float from `0.0` through `1.0`, defaulting to
-  `0.0`. It gates whether computed offsets are applied.
+  `0.0`. It contributes to computed acceptance, but the shipped automatic-authority
+  hold keeps every computed offset non-applied.
 - `ambiguity_peak_ratio` remains a float greater than or equal to `1.0`,
   defaulting to `1.0`. It gates ambiguous correlation peaks.
 - `window_length_seconds` and `window_stride_seconds` remain floats greater than
@@ -1502,8 +1507,9 @@ duration is never substituted for missing selected-stream duration; an unavailab
 empty selected-stream timeline produces a non-applied diagnostic. Each selected window
 uses up to five seconds of fixed input-seek preroll. Early windows decode from the
 selected-stream origin, resample once, and trim by output sample index; later windows use
-an absolute post-decode timestamp trim before resampling. This avoids codec- and
-FFmpeg-version-dependent early AAC seek grids while keeping long-media decoding bounded.
+an absolute post-decode timestamp trim before resampling. This bounds early-window
+decoding while keeping long-media work bounded; it is not a cross-version AAC-grid
+guarantee.
 
 Analysis has an internal fixed peak FFT limit of 2,097,152 points, a total budget of
 16,777,216 FFT points, and a maximum of 16 windows. It first uses the configured sample
@@ -1532,12 +1538,13 @@ negative rather than unbounded scanning.
 
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
-v5 gate evidence, and an explicit audio decision: `trusted_automatic`, `provisional`,
-or `unavailable`. A provisional candidate uses fixed display-only floors (score at
+v5 gate evidence, and an explicit audio decision: `provisional` or `unavailable` under
+the shipped automatic-authority hold. An otherwise-qualified computed attempt records
+`automatic_authority_held`; `trusted_automatic` is not produced while that internal
+hold is active. A provisional candidate uses fixed display-only floors (score at
 least 0.90 and peak ratio at least 1.50) and a unique largest frame-equivalent group.
-It never supplies an applied offset, trim, cache value, or trusted VSView hint. These
-display rules do not change v5 automatic voting or acceptance. A manual result keeps
-the original attempt as separate diagnostic history.
+It never supplies an applied offset, trim, cache value, or trusted VSView hint. A
+manual result keeps the original attempt as separate diagnostic history.
 
 ## Persistence Rules
 
@@ -1555,8 +1562,9 @@ Diagnostic files are never read for offset selection, trim application, or share
 cache reuse. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
 authority unchanged; a containment or symlink escape remains fail-closed. The shared
-alignment cache remains schema v2 and stores accepted authority only. Historical
-cache hits do not fabricate current stream or window evidence.
+alignment cache remains schema v2 and stores eligible authority only. Computed results
+are not written while the automatic-authority hold is active, and historical computed
+cache hits do not fabricate current stream or window evidence or authorize trims.
 
 `run --write-config` persists the effective config after applying the mapped overrides
 above. That means the flags in the previous section are persistent when combined with

@@ -245,7 +245,7 @@ recovery requirement.
   thresholds because those affect frame choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
   shared previous alignment offset reuse cache owned by
-  `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
+  `frame_compare.services.alignment_reuse_cache`. It stores eligible computed or
   interactively confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, alignment settings that affect
@@ -255,9 +255,9 @@ recovery requirement.
   lineage change therefore misses cleanly rather than reusing offsets computed by a
   different decoder/tool build. Interactively confirmed
   entries may also retain the computed
-  audio alignment result that produced the viewer suggestion so a later run can
-  decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Cache schema v2 stores only `computed` and `interactive_confirmed`
+  audio alignment result that produced the viewer suggestion, subject to the
+  current automatic-authority policy. Cache schema v2 stores only `computed` and
+  `interactive_confirmed`
   origins, requires a bounded scalar stability summary for computed entries and
   embedded computed results, and persists no per-window evidence or audio. A v1
   cache is ignored and recomputed; there is no v1 migration or compatibility reader.
@@ -420,22 +420,27 @@ precedence and carries the immutable original audio attempt and diagnostic-only
 stability summaries without allowing them to change the applied constant offset or
 trims. The attempt retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate v5 decision evidence,
-and a separate display-only provisional candidate. Manual confirmation replaces
+and a separate display-only provisional candidate. The shipped
+`audio-authority-hold-2097152-v6` policy keeps computed authority held: an otherwise
+qualified computed result records `automatic_authority_held`, has null applied
+offsets, and cannot reach trims or shared-cache writes. Manual confirmation replaces
 authority without replacing that original attempt. Immutable `ClipState` carries the
 attempt even when its applied `alignment` remains null. `alignment_correlation` converts its raw
 correlation lag into the signed `reference source frame - comparison source frame`
 contract before consensus results reach hints, caches, or trim calculation. Immutable
 orchestration alignment state carries that summary to warning and human-report owners
 without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
-previous-offset reuse policy. Exact-match computed audio alignment cache hits are
-treated as deterministic and can be reused independently of the human
-confirmed-offset policy; `previous_offsets` governs only interactively confirmed
-offset reuse.
+previous-offset reuse policy. While the shipped automatic-authority hold is active,
+computed cache hits and embedded computed fallbacks are retained as non-applied
+evidence; only validated human-confirmed authority can be reused through the
+`previous_offsets` policy.
 
 Computed alignment work is planned against typed timing for each selected audio stream.
 `alignment_audio` owns stream-relative duration/origin normalization, the fixed peak and
 total FFT-work budgets, requested-rate scoring budgets, distributed window selection,
-and seek-with-preroll followed by absolute post-decode trimming. Requested-rate
+and seek-with-preroll followed by absolute post-decode trimming. The fixed preroll
+bounds early-window decoding but is not a cross-version AAC-grid guarantee.
+Requested-rate
 correlation is preferred. When it cannot fit, a bounded coarse pair finds the lag, is
 released, and a fresh aligned pair at the configured rate refines the rate-ratio
 neighborhood and supplies confidence, so only one decoded pair and one correlation
@@ -448,7 +453,8 @@ represents the winning frame group without replacing raw window evidence. Reques
 outside the fixed internal work budget produce a typed non-applied
 `analysis_budget_exceeded` consensus rather than widening config validation, truncating
 the requested search silently, or attempting unbounded work. The estimator-policy token
-includes this strategy so older computed cache entries are not reused.
+includes this strategy so older computed cache entries are not reused. The current
+safety hold also prevents computed results from authorizing trims or new cache writes.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr

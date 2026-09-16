@@ -317,15 +317,17 @@ def _compute_missing_alignments(
         if progress:
             progress.set_description(descriptions.get(comp.path, f"ALIGN | {comp.path.name}"))
 
-        estimate = _estimate_audio_pair(
-            reference.path,
-            comp.path,
-            config=config,
-            fps_reference=fps_reference,
-            reference_stream_loader=load_reference_stream,
-            reference_request=reference,
-            comparison_request=comp,
-            comparison_ordinal=comparison_ordinal,
+        estimate = alignment_consensus.hold_automatic_consensus(
+            _estimate_audio_pair(
+                reference.path,
+                comp.path,
+                config=config,
+                fps_reference=fps_reference,
+                reference_stream_loader=load_reference_stream,
+                reference_request=reference,
+                comparison_request=comp,
+                comparison_ordinal=comparison_ordinal,
+            )
         )
         frame_offset = (
             alignment_math.samples_to_frames(
@@ -426,6 +428,7 @@ def _estimate_audio_pair(
                 )
             ),
         )
+    consensus = alignment_consensus.hold_automatic_consensus(consensus)
     if reference_request is None or comparison_request is None:
         return consensus
     attempt = _build_audio_attempt(
@@ -621,6 +624,12 @@ def _normal_evidence_lines(
                 "no audio analysis ran this time."
             )
             return [f"Comparison {ordinal} - {prefix}: {offset:+d}f.", detail]
+        if result.diagnostic == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON:
+            return [
+                "Audio alignment automatic application is temporarily disabled.",
+                f"Comparison {ordinal} - Audio evidence is available for manual review; "
+                "no computed correction was applied.",
+            ]
         return [f"Comparison {ordinal} - Audio alignment was not computed. No usable candidate."]
 
     attempt = result.audio_attempt
@@ -642,16 +651,26 @@ def _normal_evidence_lines(
     elif decision.state == "provisional":
         if candidate is None:
             raise ValueError("provisional audio decision is missing its candidate")
-        lines = [
-            f"Comparison {ordinal} - Audio alignment requires review. "
-            f"Provisional candidate: {candidate.frame_offset:+d}f (not applied).",
-            (
-                f"{decision.consensus_windows}/{decision.raw_correlated_windows} correlated "
-                f"windows agree; configured consensus requires "
-                f"{attempt.consensus_minimum_ratio:.0%}."
-            ),
-            f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
-        ]
+        lines: list[str] = []
+        if decision.primary_reason == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON:
+            lines.extend(
+                [
+                    "Audio alignment automatic application is temporarily disabled.",
+                    "Audio evidence is available for manual review; no computed correction was applied.",
+                ]
+            )
+        lines.extend(
+            [
+                f"Comparison {ordinal} - Audio alignment requires review. "
+                f"Provisional candidate: {candidate.frame_offset:+d}f (not applied).",
+                (
+                    f"{decision.consensus_windows}/{decision.raw_correlated_windows} correlated "
+                    f"windows agree; configured consensus requires "
+                    f"{attempt.consensus_minimum_ratio:.0%}."
+                ),
+                f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
+            ]
+        )
     else:
         lines = [
             f"Comparison {ordinal} - No usable audio candidate. No automatic correction applied.",

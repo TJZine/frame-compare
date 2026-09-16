@@ -33,6 +33,14 @@ from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.ffmpeg_errors import FFmpegError
 
 
+@pytest.fixture(autouse=True)
+def automatic_authority_is_disabled_for_policy_mechanics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep legacy consensus mechanics tests independent from the shipped latch."""
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+
+
 def _stream(duration: int, *, start: int = 0) -> AudioStreamInfo:
     return AudioStreamInfo(
         audio_stream_index=0,
