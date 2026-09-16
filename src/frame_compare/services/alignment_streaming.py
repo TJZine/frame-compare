@@ -465,6 +465,23 @@ def collect_continuous_audio(
     initialized = [0 for _ in requested_intervals]
     pending = b""
 
+    if cancellation is not None and cancellation.is_set():
+        facts = _facts(
+            planned_end_sample=planned_end_sample,
+            emitted_sample_count=0,
+            emitted_byte_count=0,
+            retained_sample_count=0,
+            stderr_capture=stderr_capture,
+            started=started,
+            returncode=None,
+        )
+        return ContinuousAudioCollectionFailure(
+            category="cancelled",
+            message="continuous audio collection was cancelled",
+            facts=facts,
+            cleanup=_empty_cleanup(),
+        )
+
     try:
         resolved_argv = [str(part) for part in argv]
         resolved_argv[0] = resolve_executable(resolved_argv[0])

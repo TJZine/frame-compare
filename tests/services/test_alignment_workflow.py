@@ -1,5 +1,6 @@
 """Core audio alignment computation and progress workflow tests."""
 
+import asyncio
 import os
 from dataclasses import replace
 from fractions import Fraction
@@ -10,7 +11,8 @@ import numpy as np
 import pytest
 import tomli_w
 
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services import alignment as alignment_service
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_audio import (
     AudioAnalysisPlan,
     AudioStreamInfo,
@@ -26,6 +28,10 @@ from frame_compare.services.types import AlignmentConfig, AudioAlignmentCollecti
 from frame_compare.utils.progress_protocol import ProgressReporter
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 @pytest.fixture(autouse=True)
@@ -306,6 +312,7 @@ def test_alignment_passes_config_to_audio_pair_owner(
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
             comparison_ordinal=1,
+            cancellation=ANY,
         ),
         call(
             ref,
@@ -316,6 +323,7 @@ def test_alignment_passes_config_to_audio_pair_owner(
             reference_request=request.reference,
             comparison_request=request.comparisons[1],
             comparison_ordinal=2,
+            cancellation=ANY,
         ),
     ]
 
@@ -651,16 +659,19 @@ def test_reference_mutation_between_comparisons_rejects_before_cached_stream_use
         collect,
     )
     reporter = MagicMock(spec=ProgressReporter)
-    advances = 0
+    real_estimate = alignment_service._estimate_audio_pair
+    estimates = 0
 
-    def mutate_after_first(_amount: int = 1) -> None:
-        nonlocal advances
-        advances += 1
-        if advances == 1:
+    def mutate_after_first(*args: object, **kwargs: object) -> AlignmentConsensus:
+        nonlocal estimates
+        result = real_estimate(*args, **kwargs)
+        estimates += 1
+        if estimates == 1:
             stat = reference.stat()
             os.utime(reference, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+        return result
 
-    reporter.advance.side_effect = mutate_after_first
+    monkeypatch.setattr(alignment_service, "_estimate_audio_pair", mutate_after_first)
 
     results = align_clips_from_request(
         request,

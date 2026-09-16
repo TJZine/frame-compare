@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+import asyncio
 import json
 import tomllib
 from dataclasses import replace
@@ -12,7 +13,7 @@ from unittest.mock import Mock, patch
 import pytest
 import tomli_w
 
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
@@ -39,6 +40,10 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 @pytest.fixture(autouse=True)

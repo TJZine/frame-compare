@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from threading import Event
+
     from frame_compare.services.types import AudioAlignmentCollectionRecord
 
 from frame_compare.errors import (
@@ -111,6 +113,24 @@ class AudioAlignmentError(ProcessingError):
                 hint="Ensure audio tracks exist and are similar",
                 details={"reason": reason},
             )
+        )
+
+
+class AudioAlignmentCancellationError(AudioAlignmentError):
+    """Internal cooperative cancellation raised by blocking alignment work."""
+
+
+class AudioAlignmentCleanupError(AudioAlignmentError):
+    """Fatal failure to release an alignment child, reader, pipe, or handle."""
+
+
+def raise_if_alignment_cancelled(cancellation: Event | None) -> None:
+    """Stop blocking alignment work at its next bounded cooperative boundary."""
+    if cancellation is not None and cancellation.is_set():
+        raise AudioAlignmentCancellationError(
+            "audio alignment was cancelled",
+            category="cancelled",
+            stage="cancellation",
         )
 
 

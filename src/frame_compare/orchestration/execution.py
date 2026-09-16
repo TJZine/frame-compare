@@ -51,6 +51,7 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationFn,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -172,7 +173,7 @@ def build_phases_before_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=not config.audio_alignment.force_interactive,
-            fatal_exceptions=(ExclusionRecoverySelectionError,),
+            fatal_exceptions=(ExclusionRecoverySelectionError, AudioAlignmentCleanupError),
             progress_total=max(1, len(input_videos)),
             skip_detail="Disabled",
         ),

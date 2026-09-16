@@ -421,7 +421,16 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
 precedence and carries the immutable original audio attempt and diagnostic-only
 stability summaries without allowing them to change the applied constant offset or
-trims. The attempt retains resolved pathless stream facts, one bounded result for
+trims. Its internal entrypoint is asynchronous: saved-offset reuse and prompts,
+diagnostic publication, native review, cache persistence, and presentation stay on
+the application execution context, while one owned worker thread performs only the
+blocking probe, collection, correlation, and bounded scoring work. Outer task
+cancellation sets one thread-safe event, waits through repeated cancellation for the
+worker and collector cleanup to finish, and then re-raises the original cancellation;
+no partial worker result reaches phase-output application. Incomplete child, reader,
+pipe, or handle cleanup is a distinct fatal alignment error even when ordinary
+dependency or decode failures remain warning-only for optional alignment. The attempt
+retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate v5 decision evidence,
 and a separate display-only provisional candidate. The shipped
 `continuous-origin-distributed-2097152-v7-held` policy keeps computed authority held: an otherwise
@@ -452,6 +461,10 @@ optional cancellation event; resolves the executable through `utils.subproc`; an
 one child, bounded stdout/stderr readers,
 interval intersection copies, endpoint classification, typed transport failures, and
 deterministic cleanup. It imports neither alignment planning nor trust/cache policy.
+Cancellation is checked before process creation, during bounded queue consumption,
+between source processes and comparisons, between logical windows, and between scoring
+hypotheses. A native NumPy FFT already in progress completes to its admitted safe
+boundary before cancellation is observed; Python threads are not interrupted.
 The production path collects the reference and comparison sequentially, analyzes one
 numeric pair at a time, and releases the discovery store before any requested-rate
 verification collection. When discovery and requested rates differ, all verification

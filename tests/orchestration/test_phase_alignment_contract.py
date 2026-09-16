@@ -11,7 +11,7 @@ from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
-from tests.orchestration.phase_task_helpers import _clip, _context
+from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
@@ -44,7 +44,7 @@ def test_alignment_request_uses_untrimmed_probe_frame_count(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", fake_align)
 
-    phase_alignment.run_align_phase(ctx, selected_frames=[0])
+    _run_align_phase(ctx, selected_frames=[0])
 
     assert captured[0].reference.source_frame_count == 321
 
@@ -95,7 +95,7 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
         ],
     )
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0])
+    output = _run_align_phase(ctx, selected_frames=[0])
 
     assert output.comparisons[0].alignment is None
     assert output.comparisons[0].audio_attempt == attempt
@@ -140,7 +140,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
 
     real_align = alignment_service.align_clips_from_request
 
-    def align_then_tamper(
+    async def align_then_tamper(
         request: AlignmentRequest,
         config: AlignmentConfig,
         *,
@@ -151,7 +151,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         quiet: bool = False,
         json_output: bool = False,
     ) -> list[AlignmentResult]:
-        results = real_align(
+        results = await real_align(
             request,
             config,
             progress=progress,
@@ -176,7 +176,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", align_then_tamper)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0])
+    output = _run_align_phase(ctx, selected_frames=[0])
 
     assert output.comparisons[0].alignment is None
     assert output.comparisons[0].audio_attempt == attempt

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import math
+import threading
 from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
 
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig, AlignmentCorrelationMode
 
 FloatArray = npt.NDArray[np.float64]
@@ -185,6 +186,7 @@ def correlate_audio(
     offset_bounds_samples: tuple[int, int] | None = None,
     correlation_mode: AlignmentCorrelationMode = "raw_fft",
     preprocessing_mode: str = "none",
+    cancellation: threading.Event | None = None,
 ) -> CorrelationEstimate:
     """Estimate sample offset using the requested correlation mode."""
     reference_signal = _preprocess_signal(
@@ -205,11 +207,14 @@ def correlate_audio(
             stage="correlation",
         )
 
+    raise_if_alignment_cancelled(cancellation)
     correlation = _linear_correlation(
         reference_signal,
         comparison_signal,
         mode=correlation_mode,
     )
+    # NumPy's native FFT is not interruptible; this is its bounded safe boundary.
+    raise_if_alignment_cancelled(cancellation)
     sample_offset, _peak, peak_ratio = _peak_from_correlation(
         correlation,
         comparison_size=comparison_signal.size,
@@ -293,6 +298,7 @@ def refine_aligned_score(
     *,
     preprocessing_mode: str,
     correction_bounds_samples: tuple[int, int],
+    cancellation: threading.Event | None = None,
 ) -> tuple[int, float]:
     """Refine a coarse-aligned pair over a small bounded integer neighborhood."""
     reference_signal = _preprocess_signal(
@@ -306,18 +312,16 @@ def refine_aligned_score(
     lower_correction, upper_correction = correction_bounds_samples
     if lower_correction > upper_correction:
         raise AudioAlignmentError("requested-rate correction bounds are inverted")
-    scored = [
-        (correction, score)
-        for correction in range(lower_correction, upper_correction + 1)
-        if (
-            score := _normalized_overlap_score(
-                reference_signal,
-                comparison_signal,
-                offset=float(-correction),
-            )
+    scored: list[tuple[int, float]] = []
+    for correction in range(lower_correction, upper_correction + 1):
+        raise_if_alignment_cancelled(cancellation)
+        score = _normalized_overlap_score(
+            reference_signal,
+            comparison_signal,
+            offset=float(-correction),
         )
-        is not None
-    ]
+        if score is not None:
+            scored.append((correction, score))
     if not scored:
         raise AudioAlignmentError(
             "insufficient aligned overlap prevents correlation",
@@ -345,6 +349,7 @@ def _refine_locally(
     refinement_sample_rate: int,
     max_offset_samples: int,
     offset_bounds_samples: tuple[int, int] | None,
+    cancellation: threading.Event | None,
 ) -> CorrelationEstimate:
     best_offset = float(coarse_offset)
     best_score = coarse_score
@@ -355,6 +360,7 @@ def _refine_locally(
         max_offset_samples=max_offset_samples,
         offset_bounds_samples=offset_bounds_samples,
     ):
+        raise_if_alignment_cancelled(cancellation)
         score = _normalized_overlap_score(reference, comparison, offset=candidate)
         if score is not None and score > best_score:
             best_offset = candidate
@@ -373,6 +379,7 @@ def estimate_alignment_offset(
     *,
     config: AlignmentConfig,
     alignment_offset_bounds_samples: tuple[int, int] | None = None,
+    cancellation: threading.Event | None = None,
 ) -> CorrelationEstimate:
     """Estimate ``reference - comparison`` alignment from extracted audio."""
     max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
@@ -388,6 +395,7 @@ def estimate_alignment_offset(
         offset_bounds_samples=raw_offset_bounds,
         correlation_mode=config.correlation_mode,
         preprocessing_mode=config.preprocessing_mode,
+        cancellation=cancellation,
     )
     if config.refinement_mode == "disabled":
         return CorrelationEstimate(-estimate.sample_offset, estimate.score, estimate.peak_ratio)
@@ -415,6 +423,7 @@ def estimate_alignment_offset(
         refinement_sample_rate=refinement_sample_rate,
         max_offset_samples=max_offset_samples,
         offset_bounds_samples=raw_offset_bounds,
+        cancellation=cancellation,
     )
     return CorrelationEstimate(
         -refined.sample_offset,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
@@ -19,7 +20,12 @@ from frame_compare.services.alignment_streaming import (
     ContinuousAudioCollectionFailure,
     collect_continuous_audio,
 )
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import (
+    AudioAlignmentCancellationError,
+    AudioAlignmentCleanupError,
+    AudioAlignmentError,
+    raise_if_alignment_cancelled,
+)
 from frame_compare.services.types import (
     AlignmentChannelStrategy,
     AlignmentConfig,
@@ -913,7 +919,9 @@ def _collect_role(
     sample_rate: int,
     channel_strategy: AlignmentChannelStrategy,
     max_retained_samples: int,
+    cancellation: threading.Event | None,
 ) -> tuple[ContinuousAudioCollection, AudioAlignmentCollectionRecord]:
+    raise_if_alignment_cancelled(cancellation)
     horizon = max(interval.end_sample for interval in intervals)
     result = collect_continuous_audio(
         continuous_collection_argv(
@@ -927,10 +935,18 @@ def _collect_role(
         planned_end_sample=horizon,
         max_retained_samples=max_retained_samples,
         timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS,
+        cancellation=cancellation,
     )
     summary = _collection_record(result, phase=phase, role=role, output_rate=sample_rate)
     if isinstance(result, ContinuousAudioCollectionFailure):
-        raise AudioAlignmentError(
+        error_type: type[AudioAlignmentError]
+        if not result.cleanup.completed:
+            error_type = AudioAlignmentCleanupError
+        elif result.category == "cancelled":
+            error_type = AudioAlignmentCancellationError
+        else:
+            error_type = AudioAlignmentError
+        raise error_type(
             result.message,
             category=result.category,
             stage=phase,
@@ -948,6 +964,7 @@ def collect_discovery_phase(
     plan: AudioAnalysisPlan,
     *,
     channel_strategy: AlignmentChannelStrategy,
+    cancellation: threading.Event | None = None,
 ) -> CollectedAudioPhase:
     """Collect all planned discovery intervals with two sequential decodes."""
     reference_intervals = tuple(
@@ -967,6 +984,7 @@ def collect_discovery_phase(
         sample_rate=plan.sample_rate,
         channel_strategy=channel_strategy,
         max_retained_samples=plan.discovery_retained_samples,
+        cancellation=cancellation,
     )
     try:
         comparison_result, comparison_summary = _collect_role(
@@ -978,6 +996,7 @@ def collect_discovery_phase(
             sample_rate=plan.sample_rate,
             channel_strategy=channel_strategy,
             max_retained_samples=plan.discovery_retained_samples,
+            cancellation=cancellation,
         )
     except AudioAlignmentError as exc:
         exc.collection_summaries = (reference_summary, *exc.collection_summaries)
@@ -1055,6 +1074,7 @@ def collect_verification_phase(
     specs: tuple[AudioVerificationSpec, ...],
     *,
     channel_strategy: AlignmentChannelStrategy,
+    cancellation: threading.Event | None = None,
 ) -> CollectedAudioPhase:
     """Collect one frozen requested-rate phase with two sequential decodes."""
     reference_intervals = tuple(
@@ -1074,6 +1094,7 @@ def collect_verification_phase(
         sample_rate=plan.requested_sample_rate,
         channel_strategy=channel_strategy,
         max_retained_samples=plan.verification_reserved_samples,
+        cancellation=cancellation,
     )
     try:
         comparison_result, comparison_summary = _collect_role(
@@ -1085,6 +1106,7 @@ def collect_verification_phase(
             sample_rate=plan.requested_sample_rate,
             channel_strategy=channel_strategy,
             max_retained_samples=plan.verification_reserved_samples,
+            cancellation=cancellation,
         )
     except AudioAlignmentError as exc:
         exc.collection_summaries = (reference_summary, *exc.collection_summaries)

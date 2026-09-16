@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from fractions import Fraction
 from pathlib import Path
@@ -10,7 +11,7 @@ import numpy as np
 import pytest
 
 from frame_compare.services import alignment_audio
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_streaming import ContinuousAudioCollection
 from frame_compare.services.types import AlignmentConfig
 from tests.integration.alignment_oracle import (
@@ -20,6 +21,10 @@ from tests.integration.alignment_oracle import (
     write_pcm_wave,
 )
 from tests.services.alignment_request_test_support import alignment_request
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 def _audio_only_fixture(path: Path, wave_path: Path) -> None:

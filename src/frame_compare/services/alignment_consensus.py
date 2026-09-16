@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -20,7 +21,12 @@ from frame_compare.services.alignment_correlation import (
 )
 from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.alignment_stability import classify_alignment_stability
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import (
+    AudioAlignmentCancellationError,
+    AudioAlignmentCleanupError,
+    AudioAlignmentError,
+    raise_if_alignment_cancelled,
+)
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentResult,
@@ -529,13 +535,17 @@ def estimate_staged_consensus_offset(
     verification_spec_builder: Callable[
         [tuple[tuple[int, Fraction], ...]], tuple[alignment_audio.AudioVerificationSpec, ...]
     ],
+    cancellation: threading.Event | None = None,
 ) -> AlignmentConsensus:
     """Collect each phase once, then analyze its logical windows sequentially."""
     local_config = replace(config, sample_rate=plan.sample_rate)
     margin = math.ceil(config.max_offset_seconds * plan.sample_rate)
     requested_limit = int(config.max_offset_seconds * plan.requested_sample_rate)
     try:
+        raise_if_alignment_cancelled(cancellation)
         discovery = discovery_phase_loader()
+    except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
+        raise
     except AudioAlignmentError as exc:
         window_records = tuple(
             AudioAlignmentWindowRecord(
@@ -577,6 +587,7 @@ def estimate_staged_consensus_offset(
     staged: list[_StagedWindow] = []
     records: dict[int, AudioAlignmentWindowRecord] = {}
     for index, (spec, window) in enumerate(zip(plan.windows, discovery.windows, strict=True)):
+        raise_if_alignment_cancelled(cancellation)
         logical_id = f"primary-{index + 1:02d}"
         reference_count = int(window.reference.size)
         comparison_count = int(window.comparison.size)
@@ -590,6 +601,7 @@ def estimate_staged_consensus_offset(
                     -margin - origin_delta,
                     margin - origin_delta,
                 ),
+                cancellation=cancellation,
             )
             local_offset = (
                 estimate.subsample_offset
@@ -652,7 +664,10 @@ def estimate_staged_consensus_offset(
             # phase-store lifetime even when the caller keeps no other reference.
             del discovery
             try:
+                raise_if_alignment_cancelled(cancellation)
                 verification = verification_phase_loader(frozen)
+            except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
+                raise
             except AudioAlignmentError as exc:
                 summaries += exc.collection_summaries
                 verification_failure = exc
@@ -672,6 +687,7 @@ def estimate_staged_consensus_offset(
     candidate_ids: list[str] = []
     evidence: list[AlignmentWindowEvidence] = []
     for item in staged:
+        raise_if_alignment_cancelled(cancellation)
         spec = item.spec
         score = item.local_estimate.score
         requested_offset = round(item.global_analysis_offset)
@@ -715,6 +731,7 @@ def estimate_staged_consensus_offset(
                         verification_spec.global_lower_offset - origin_delta,
                         verification_spec.global_upper_offset - origin_delta,
                     ),
+                    cancellation=cancellation,
                 )
                 requested_offset = origin_delta + correction
                 score_stage = "requested_rate"
@@ -727,6 +744,8 @@ def estimate_staged_consensus_offset(
                 planned_comparison_start = verification_spec.comparison_start_sample
                 planned_comparison_count = verification_spec.comparison_sample_count
                 continuous_origin = "verification"
+        except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
+            raise
         except AudioAlignmentError as exc:
             records[item.index] = AudioAlignmentWindowRecord(
                 logical_id=item.logical_id,

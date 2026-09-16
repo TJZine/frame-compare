@@ -53,7 +53,7 @@ from frame_compare.utils.types import (
 log = structlog.get_logger()
 
 
-def run_align_phase(
+async def run_align_phase(
     ctx: RunContext,
     *,
     selected_frames: list[int],
@@ -98,7 +98,7 @@ def run_align_phase(
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    results = align_clips_from_request(
+    results = await align_clips_from_request(
         alignment_request,
         alignment_config,
         progress=ctx.reporter,

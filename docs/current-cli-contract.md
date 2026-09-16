@@ -1533,6 +1533,15 @@ minimum-window, or requested-rate scoring request
 that cannot fit the fixed budget remains valid configuration but produces the explicit
 non-applied `analysis_budget_exceeded` result. Normal optional VSView/manual review and
 best-effort rendering policy then handle it like other rejected computed alignments.
+
+Interrupting a run during fresh audio computation cooperatively cancels the active
+collection or bounded numeric work, waits for the owned FFmpeg child, pipe readers,
+and computation worker to finish cleanup, and then preserves the existing interrupted
+run behavior. A cancelled attempt cannot apply trims, start another comparison or
+native review, publish completion diagnostics, or write reusable offsets. Incomplete
+process/reader cleanup is fatal even when ordinary missing dependency, decode, or
+correlation failures would remain warning-only for optional alignment. This adds no
+flag, configuration field, signal-handler framework, or successful JSON field.
 Because the fixed window cap samples a long configured grid, highly localized matching
 content that falls between selected windows can still produce a conservative false
 negative rather than unbounded scanning.

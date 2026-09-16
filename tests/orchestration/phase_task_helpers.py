@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from fractions import Fraction
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -16,7 +20,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.execution_types import RenderArtifacts
+from frame_compare.orchestration.execution_types import AlignPhaseOutput, RenderArtifacts
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.media_facts import (
@@ -65,6 +69,25 @@ use_ffmpeg = true
 [report]
 enable = false
 """
+
+
+def _run_align_phase(*args: Any, **kwargs: Any) -> AlignPhaseOutput:
+    """Run the async phase while adapting existing synchronous test doubles."""
+
+    async def invoke() -> AlignPhaseOutput:
+        from frame_compare.orchestration import phase_alignment
+
+        collaborator = phase_alignment.align_clips_from_request
+        if inspect.iscoroutinefunction(collaborator):
+            return await phase_alignment.run_align_phase(*args, **kwargs)
+
+        async def async_collaborator(*inner_args: Any, **inner_kwargs: Any) -> Any:
+            return collaborator(*inner_args, **inner_kwargs)
+
+        with patch.object(phase_alignment, "align_clips_from_request", async_collaborator):
+            return await phase_alignment.run_align_phase(*args, **kwargs)
+
+    return asyncio.run(invoke())
 
 
 class _RenderRunner:

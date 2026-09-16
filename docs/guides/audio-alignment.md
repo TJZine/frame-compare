@@ -91,6 +91,12 @@ facts when observed. Continuous collection decodes each selected source from its
 origin once per phase, keeps only admitted distributed intervals in memory, and records
 clean endpoint versus observed-EOF counts without padding or backfilling short windows.
 A lower-rate discovery pass is followed by requested-rate verification only when needed.
+Fresh computation runs in one owned worker thread so the application can respond to
+cancellation while FFmpeg collection or bounded scoring is active. Cancelling waits for
+cooperative child/reader/worker cleanup before the interruption escapes; it does not
+interrupt a native FFT already running, which may finish to its admitted safe boundary.
+Cancelled work never applies trims, writes reusable offsets, publishes a completed
+diagnostic, or opens native review. Failure to release the child or readers is fatal.
 It records the expected media-runtime fingerprint; FFmpeg/ffprobe version fields say
 `not_observed` because this package does not add version-probe subprocesses.
 It contains no media paths, PCM, environment values, credentials, full commands, or

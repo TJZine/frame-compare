@@ -72,7 +72,7 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         request,
         config,
         progress=None,
@@ -163,7 +163,7 @@ enable = false
         "Interactive alignment did not return a valid VSView review result."
     )
 
-    def _fail_alignment(*_args: object, **_kwargs: object) -> None:
+    async def _fail_alignment(*_args: object, **_kwargs: object) -> None:
         raise failure
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fail_alignment)

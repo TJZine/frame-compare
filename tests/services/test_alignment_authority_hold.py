@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -10,9 +11,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from frame_compare.orchestration import phase_alignment
 from frame_compare.services import alignment_audio, alignment_consensus, alignment_reuse_cache
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_audio import AudioAnalysisPlan, AudioWindow, AudioWindowSpec
 from frame_compare.services.alignment_correlation import CorrelationEstimate
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
@@ -25,9 +25,13 @@ from frame_compare.services.types import (
     AlignmentStabilitySummary,
 )
 from frame_compare.utils.types import AlignmentRequest
-from tests.orchestration.phase_task_helpers import _clip, _context
+from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 def _held_candidate_consensus(offset: int = 0) -> alignment_consensus.AlignmentConsensus:
@@ -311,7 +315,7 @@ def test_orchestration_hold_reaches_trim_application_boundary(
         lambda *_args, **_kwargs: _held_candidate_consensus(24),
     )
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 1])
+    output = _run_align_phase(ctx, selected_frames=[0, 1])
 
     assert output.reference.trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_start_frames == 0

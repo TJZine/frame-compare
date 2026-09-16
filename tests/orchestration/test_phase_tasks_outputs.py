@@ -27,7 +27,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
 )
 from frame_compare.vs.types import HDRMetadata
-from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner
+from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner, _run_align_phase
 
 
 def _result_for_requests(
@@ -373,7 +373,7 @@ def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than
     )
 
     with pytest.raises(SelectionError) as exc_info:
-        phase_alignment.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+        _run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
     assert exc_info.value.context.details == {
         "reason": "insufficient generated candidates after alignment",

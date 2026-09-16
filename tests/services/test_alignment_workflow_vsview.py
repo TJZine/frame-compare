@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from fractions import Fraction
@@ -13,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_diagnostics import original_attempt_digest
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
@@ -33,6 +34,10 @@ from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
 from tests.services.test_alignment_diagnostics import audio_attempt
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 @pytest.fixture(autouse=True)

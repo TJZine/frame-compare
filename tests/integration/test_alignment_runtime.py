@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
 from frame_compare.services import alignment_consensus
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
@@ -19,6 +20,10 @@ _DURATION_SECONDS = 3
 _SAMPLE_RATE = 48000
 _FPS = 10
 _VIDEO_SIZE = "32x32"
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 def _run_ffmpeg(argv: list[str]) -> None:

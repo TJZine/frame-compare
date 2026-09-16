@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sys
+import threading
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import asdict, replace
 from fractions import Fraction
 from pathlib import Path
@@ -29,7 +32,7 @@ from frame_compare.services.alignment_previous_offsets import (
 )
 from frame_compare.services.alignment_reuse_cache import comparison_cache_key, save_reusable_offsets
 from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
@@ -316,6 +319,7 @@ def _compute_missing_alignments(
     progress: ProgressReporter | None,
     progress_descriptions: dict[Path, str] | None = None,
     comparison_ordinals: dict[Path, int] | None = None,
+    cancellation: threading.Event | None = None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
     descriptions = progress_descriptions or {}
@@ -331,6 +335,7 @@ def _compute_missing_alignments(
         return selected_reference_stream
 
     for fallback_ordinal, comp in enumerate(requested_comparisons, start=1):
+        raise_if_alignment_cancelled(cancellation)
         comparison_ordinal = (comparison_ordinals or {}).get(comp.path, fallback_ordinal)
         if progress:
             progress.set_description(descriptions.get(comp.path, f"ALIGN | {comp.path.name}"))
@@ -345,8 +350,10 @@ def _compute_missing_alignments(
                 reference_request=reference,
                 comparison_request=comp,
                 comparison_ordinal=comparison_ordinal,
+                cancellation=cancellation,
             )
         )
+        raise_if_alignment_cancelled(cancellation)
         frame_offset = (
             alignment_math.samples_to_frames(
                 estimate.sample_offset, config.sample_rate, fps_reference
@@ -388,7 +395,9 @@ def _estimate_audio_pair(
     reference_request: AlignmentClipRequest | None = None,
     comparison_request: AlignmentClipRequest | None = None,
     comparison_ordinal: int = 1,
+    cancellation: threading.Event | None = None,
 ) -> alignment_consensus.AlignmentConsensus:
+    raise_if_alignment_cancelled(cancellation)
     if (
         reference_request is not None
         and not _request_identity_matches(reference, reference_request)
@@ -460,6 +469,7 @@ def _estimate_audio_pair(
                 comparison_stream,
                 plan,
                 channel_strategy=config.channel_strategy,
+                cancellation=cancellation,
             )
             try:
                 check_identities()
@@ -491,6 +501,7 @@ def _estimate_audio_pair(
                 plan,
                 specs,
                 channel_strategy=config.channel_strategy,
+                cancellation=cancellation,
             )
             try:
                 check_identities()
@@ -506,6 +517,7 @@ def _estimate_audio_pair(
             discovery_phase_loader=load_discovery,
             verification_phase_loader=load_verification,
             verification_spec_builder=build_verification_specs,
+            cancellation=cancellation,
         )
     consensus = alignment_consensus.hold_automatic_consensus(consensus)
     if reference_request is None or comparison_request is None:
@@ -535,6 +547,7 @@ def _compute_missing_alignments_with_provenance(
     progress: ProgressReporter | None,
     progress_descriptions: dict[Path, str],
     comparison_ordinals: dict[Path, int],
+    cancellation: threading.Event | None = None,
 ) -> None:
     _compute_missing_alignments(
         reference=reference,
@@ -545,7 +558,9 @@ def _compute_missing_alignments_with_provenance(
         progress=progress,
         progress_descriptions=progress_descriptions,
         comparison_ordinals=comparison_ordinals,
+        cancellation=cancellation,
     )
+    raise_if_alignment_cancelled(cancellation)
     for comparison in requested_comparisons:
         key = _alignment_key(reference.path, comparison.path)
         result = results_map[key]
@@ -559,6 +574,78 @@ def _compute_missing_alignments_with_provenance(
                 else "historical_details_unavailable"
             ),
         )
+
+
+def _compute_requested_alignments(
+    *,
+    request: AlignmentRequest,
+    requested_comparisons: list[AlignmentClipRequest],
+    config: AlignmentConfig,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    fps_reference: Fraction | None,
+    cancellation: threading.Event,
+) -> Fraction:
+    """Run only blocking probe, collection, and numeric work in the owned worker."""
+    raise_if_alignment_cancelled(cancellation)
+    resolved_fps = fps_reference or alignment_audio.probe_fps(request.reference.path)
+    _compute_missing_alignments_with_provenance(
+        reference=request.reference,
+        requested_comparisons=requested_comparisons,
+        config=config,
+        results_map=results_map,
+        provenances=provenances,
+        fps_reference=resolved_fps,
+        progress=None,
+        progress_descriptions={},
+        comparison_ordinals={
+            comparison.path: ordinal
+            for ordinal, comparison in enumerate(request.comparisons, start=1)
+        },
+        cancellation=cancellation,
+    )
+    raise_if_alignment_cancelled(cancellation)
+    return resolved_fps
+
+
+async def _await_audio_computation(
+    *,
+    request: AlignmentRequest,
+    requested_comparisons: list[AlignmentClipRequest],
+    config: AlignmentConfig,
+    results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    fps_reference: Fraction | None,
+) -> Fraction:
+    cancellation = threading.Event()
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            _compute_requested_alignments,
+            request=request,
+            requested_comparisons=requested_comparisons,
+            config=config,
+            results_map=results_map,
+            provenances=provenances,
+            fps_reference=fps_reference,
+            cancellation=cancellation,
+        ),
+        name="alignment-audio-computation",
+    )
+    try:
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        cancellation.set()
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        if worker.done() and not worker.cancelled():
+            with suppress(BaseException):
+                worker.result()
+        raise
 
 
 def _record_alignment_progress(
@@ -942,7 +1029,7 @@ def _write_run_diagnostics(
     return written
 
 
-def align_clips_from_request(
+async def align_clips_from_request(
     request: AlignmentRequest,
     config: AlignmentConfig,
     progress: ProgressReporter | None = None,
@@ -1000,22 +1087,21 @@ def align_clips_from_request(
             request=request,
             results_map=results_map,
         )
-        if fps_reference is None:
-            fps_reference = alignment_audio.probe_fps(reference)
-        _compute_missing_alignments_with_provenance(
-            reference=request.reference,
+        fps_reference = await _await_audio_computation(
+            request=request,
             requested_comparisons=requested_comparisons,
             config=config,
             results_map=results_map,
             provenances=provenances,
             fps_reference=fps_reference,
-            progress=progress,
-            progress_descriptions=_request_progress_descriptions(request),
-            comparison_ordinals={
-                comparison.path: ordinal
-                for ordinal, comparison in enumerate(request.comparisons, start=1)
-            },
         )
+        descriptions = _request_progress_descriptions(request)
+        for comparison in requested_comparisons:
+            _record_alignment_progress(
+                progress=progress,
+                result=results_map[_alignment_key(reference, comparison.path)],
+                description=descriptions[comparison.path],
+            )
 
     initial_outcome: AlignmentReviewOutcome = (
         "pending"

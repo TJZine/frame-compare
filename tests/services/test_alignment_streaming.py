@@ -177,9 +177,22 @@ def test_stderr_is_drained_and_retained_within_fixed_limit() -> None:
     assert result.facts.stderr_truncated
 
 
-def test_cancellation_terminates_child_and_joins_both_readers() -> None:
+def test_cancellation_terminates_child_and_joins_both_readers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cancellation = threading.Event()
-    cancellation.set()
+    real_create = alignment_streaming._create_reader_infrastructure
+
+    def create_then_cancel(*args: Any, **kwargs: Any) -> Any:
+        infrastructure = real_create(*args, **kwargs)
+        cancellation.set()
+        return infrastructure
+
+    monkeypatch.setattr(
+        alignment_streaming,
+        "_create_reader_infrastructure",
+        create_then_cancel,
+    )
     result = collect_continuous_audio(
         _writer_argv(delay_seconds=5.0),
         (AudioSampleInterval(0, 1),),
@@ -190,6 +203,28 @@ def test_cancellation_terminates_child_and_joins_both_readers() -> None:
     failed = _assert_failed(result, "cancelled")
     assert failed.cleanup.completed
     assert failed.cleanup.termination_requested
+
+
+def test_preexisting_cancellation_stops_before_process_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancellation = threading.Event()
+    cancellation.set()
+    monkeypatch.setattr(
+        alignment_streaming.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("cancelled collection spawned a process"),
+    )
+    result = collect_continuous_audio(
+        _writer_argv(delay_seconds=5.0),
+        (AudioSampleInterval(0, 1),),
+        planned_end_sample=1,
+        cancellation=cancellation,
+    )
+
+    failed = _assert_failed(result, "cancelled")
+    assert failed.cleanup.completed
+    assert not failed.cleanup.termination_requested
 
 
 def test_no_output_timeout_terminates_child_and_joins_both_readers() -> None:

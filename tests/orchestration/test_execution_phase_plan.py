@@ -32,6 +32,7 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.phase_output_application import apply_phase_output
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 
@@ -99,6 +100,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     align_phase = next(phase for phase in plan.before_align if phase.name == "align")
     assert align_phase.progress_total == 3
     assert align_phase.warn_only is True
+    assert AudioAlignmentCleanupError in align_phase.fatal_exceptions
 
     config.audio_alignment.force_interactive = True
     forced_plan = build_execution_phase_plan(
