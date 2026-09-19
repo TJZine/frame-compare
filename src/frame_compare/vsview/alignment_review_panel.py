@@ -882,9 +882,11 @@ def _audio_details(
         f"Decision: {decision['state']}; reason={decision['primary_reason']}; "
         f"failed={','.join(cast(list[str], decision['failed_gates'])) or 'none'}; "
         f"unassessed={','.join(cast(list[str], decision['unassessed_gates'])) or 'none'}",
-        f"Support: {decision['consensus_windows']}/{decision['raw_correlated_windows']} "
-        f"correlated; ratio={decision['consensus_ratio']}; score={decision['aggregate_score']}; "
-        f"peak={decision['minimum_peak_ratio']}",
+        f"Evidence: raw={decision['raw_correlated_windows']}; "
+        f"credible={decision['credible_windows']}; voting={decision['voting_windows']}; "
+        f"winning={decision['winning_windows']}; independent={decision['independent_windows']}; "
+        f"consensus={decision['consensus_windows']}; ratio={decision['consensus_ratio']}; "
+        f"score={decision['aggregate_score']}; peak={decision['minimum_peak_ratio']}",
         f"Thresholds: score={attempt['confidence_threshold']}; peak={attempt['ambiguity_peak_ratio']}; "
         f"minimum windows={attempt['minimum_valid_windows']}; "
         f"consensus={attempt['consensus_minimum_ratio']}",

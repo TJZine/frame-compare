@@ -428,7 +428,25 @@ def test_computed_attempt_retains_resolved_stream_and_window_facts(
         "frame_compare.services.alignment_audio.collect_discovery_phase",
         lambda *_args, **_kwargs: CollectedAudioPhase(
             windows=(AudioWindow(np.ones(200), np.ones(400), 0, 0),),
-            summaries=(),
+            summaries=tuple(
+                AudioAlignmentCollectionRecord(
+                    phase="discovery",
+                    role=role,
+                    output_rate=8000,
+                    requested_horizon=200 if role == "reference" else 400,
+                    emitted_sample_count=200 if role == "reference" else 400,
+                    emitted_byte_count=(200 if role == "reference" else 400) * 4,
+                    retained_sample_count=200 if role == "reference" else 400,
+                    retained_byte_count=(200 if role == "reference" else 400) * 4,
+                    status="complete",
+                    end_category="planned_end_reached",
+                    observed_eof_sample=None,
+                    elapsed_seconds=0.0,
+                    cleanup_failure_count=0,
+                    failure_count=0,
+                )
+                for role in ("reference", "comparison")
+            ),
         ),
     )
     monkeypatch.setattr(

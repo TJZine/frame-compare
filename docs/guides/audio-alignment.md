@@ -41,6 +41,24 @@ When automatic stream selection is unsuitable, use the audio-alignment configura
 surface documented in the
 [CLI Behavioral Contract](../current-cli-contract.md#config-only-audio-alignment-surface).
 
+## Evidence and temporal support
+
+The diagnostic keeps every planned row: raw correlated, weak, failed, short, and
+unattempted. Automatic qualification requires finite requested-rate score `>= 0.90`,
+peak ratio `>= 1.50` (`unbounded` is allowed), meaningful overlap, and actual observed
+support. Voting additionally requires at least 90% useful coverage and the configured
+thresholds; the configured consensus ratio applies only to voting-qualified windows.
+A base-credible estimate in another frame bin is a hard contradiction, even when it is
+excluded from voting by a stricter setting.
+
+With default window settings, sources up to 30 seconds use one full shared-duration
+interval, sources from 30 to 90 seconds use two disjoint endpoint intervals, and sources
+of at least 90 seconds use five distributed 30-second intervals. Explicit window length
+and stride preserve their requested shape, but do not waive the duration tier's temporal
+support requirement. Overlapping or duplicate useful intervals do not create independent
+support. Clean planned completion and observed early EOF are
+distinct successful collection outcomes; failed collection PCM is never usable.
+
 ## Previous offset reuse
 
 Interactively confirmed offsets can be stored in the shared alignment reuse cache.
@@ -72,14 +90,19 @@ remains a v1 file with the same path and offset semantics.
 
 Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
 a unique display-qualified candidate survived an attempt; under the internal
-`continuous-origin-distributed-2097152-v7-held` policy it is shown as a clearly
+`continuous-origin-qualified-2097152-v8-held` policy it is shown as a clearly
 unaccepted review hint and is never applied or passed as the authoritative integer/null
 field. Its decision
-records `automatic_authority_held` when the remaining v5 gates qualify it. `unavailable`
+records `automatic_authority_held` when the qualified policy would otherwise pass. `unavailable`
 means no unique usable
 candidate exists, and Frame Compare does not invent zero. The
-display-only qualification floor is score 0.90 and peak ratio 1.50; it does not filter
-v5 voting. The automatic hold independently prevents computed application. Manual
+display-only qualification floor is score 0.90 and peak ratio 1.50. Raw, base-credible,
+voting-qualified, winning, and independent counts are reported separately. Voting requires
+90% useful observed coverage and applies each configured threshold as the maximum of that
+threshold and the policy floor; `consensus_minimum_ratio` applies to voting-qualified
+windows. A base-credible estimate in another frame bin is a hard contradiction, even if
+a stricter setting excludes it from voting. The automatic hold independently prevents
+computed application. Manual
 confirmation is a separate fact and does not rewrite the original audio attempt.
 
 Each run retains that attempt in
@@ -87,7 +110,8 @@ Each run retains that attempt in
 schema-v2 file records selected stream metadata, every planned window outcome, raw
 candidate and quality facts, the aggregate decision, and the final review resolution.
 It also retains bounded continuous-collection summaries and useful-overlap/coverage
-facts when observed. Continuous collection decodes each selected source from its audio
+facts when observed. Shortage and observed-EOF states remain explicit; a failed collection
+never contributes usable PCM evidence. Continuous collection decodes each selected source from its audio
 origin once per phase, keeps only admitted distributed intervals in memory, and records
 clean endpoint versus observed-EOF counts without padding or backfilling short windows.
 A lower-rate discovery pass is followed by requested-rate verification only when needed.

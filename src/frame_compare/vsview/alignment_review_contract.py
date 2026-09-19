@@ -533,6 +533,10 @@ _DECISION_KEYS = {
     "consensus_ratio",
     "aggregate_score",
     "minimum_peak_ratio",
+    "credible_windows",
+    "voting_windows",
+    "winning_windows",
+    "independent_windows",
     "failed_gates",
     "unassessed_gates",
 }
@@ -898,13 +902,31 @@ def _validate_audio_attempt(
     candidate = decision["candidate"]
     if state not in {"trusted_automatic", "provisional", "unavailable"}:
         raise AlignmentReviewContractError("alignment review audio decision is invalid")
-    _require_int_fields(decision, ("raw_correlated_windows", "consensus_windows"))
+    _require_int_fields(
+        decision,
+        (
+            "raw_correlated_windows",
+            "consensus_windows",
+            "credible_windows",
+            "voting_windows",
+            "winning_windows",
+            "independent_windows",
+        ),
+    )
     if decision["raw_correlated_windows"] != correlated_count:
         raise AlignmentReviewContractError(
             "alignment review correlated window count is inconsistent"
         )
     if not 0 <= cast(int, decision["consensus_windows"]) <= correlated_count:
         raise AlignmentReviewContractError("alignment review consensus window count is invalid")
+    if not 0 <= cast(int, decision["credible_windows"]) <= correlated_count:
+        raise AlignmentReviewContractError("alignment review credible window count is invalid")
+    if not 0 <= cast(int, decision["voting_windows"]) <= cast(int, decision["credible_windows"]):
+        raise AlignmentReviewContractError("alignment review voting window count is invalid")
+    if not 0 <= cast(int, decision["winning_windows"]) <= cast(int, decision["voting_windows"]):
+        raise AlignmentReviewContractError("alignment review winning window count is invalid")
+    if not 0 <= cast(int, decision["independent_windows"]) <= cast(int, decision["voting_windows"]):
+        raise AlignmentReviewContractError("alignment review independent window count is invalid")
     _require_nullable_number_fields(
         decision, ("consensus_ratio", "aggregate_score", "minimum_peak_ratio")
     )

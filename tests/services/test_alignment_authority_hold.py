@@ -23,6 +23,7 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
     AlignmentStabilitySummary,
+    AudioAlignmentCollectionRecord,
 )
 from frame_compare.utils.types import AlignmentRequest
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
@@ -114,6 +115,25 @@ def _one_success_four_failures(
         return CorrelationEstimate(sample_offset=24, score=0.99, peak_ratio=2.0)
 
     monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
+    summaries = tuple(
+        AudioAlignmentCollectionRecord(
+            phase="discovery",
+            role=role,
+            output_rate=config.sample_rate,
+            requested_horizon=5 * 8000,
+            emitted_sample_count=5 * 8000,
+            emitted_byte_count=5 * 8000 * 4,
+            retained_sample_count=5 * 8000,
+            retained_byte_count=5 * 8000 * 4,
+            status="complete",
+            end_category="planned_end_reached",
+            observed_eof_sample=None,
+            elapsed_seconds=0.0,
+            cleanup_failure_count=0,
+            failure_count=0,
+        )
+        for role in ("reference", "comparison")
+    )
     consensus = alignment_consensus.estimate_staged_consensus_offset(
         plan=plan,
         config=config,
@@ -128,7 +148,7 @@ def _one_success_four_failures(
                 )
                 for spec in plan.windows
             ),
-            (),
+            summaries,
         ),
         verification_phase_loader=lambda _specs: pytest.fail(
             "same-rate test should not load scoring windows"
@@ -169,7 +189,7 @@ def test_service_hold_keeps_strong_computed_offsets_non_applied(
     assert not (tmp_path / "shared-alignment" / "alignment_reuse.toml").exists()
 
 
-def test_held_service_preserves_one_candidate_and_four_failed_windows(
+def test_service_keeps_one_candidate_provisional_without_independent_support(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,7 +211,7 @@ def test_held_service_preserves_one_candidate_and_four_failed_windows(
     assert result.applied is False
     assert result.frame_offset is None
     assert result.time_offset_seconds is None
-    assert result.diagnostic == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON
+    assert result.diagnostic == "insufficient_independent_support"
     assert result.audio_attempt is not None
     assert len(result.audio_attempt.windows) == 5
     assert (
@@ -205,9 +225,7 @@ def test_held_service_preserves_one_candidate_and_four_failed_windows(
     assert candidate is not None
     assert candidate.frame_offset == 0
     assert candidate.supporting_window_ids == ("primary-01",)
-    assert result.audio_attempt.decision.primary_reason == (
-        alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON
-    )
+    assert result.audio_attempt.decision.primary_reason == "insufficient_independent_support"
 
 
 def test_mixed_manual_and_held_computed_comparisons_keep_only_manual_authority(

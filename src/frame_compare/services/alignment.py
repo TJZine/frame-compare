@@ -812,7 +812,10 @@ def _normal_evidence_lines(
         )
         lines[-1] += (
             f" Policy: {attempt.estimator_policy}; {decision.consensus_windows}/"
-            f"{decision.raw_correlated_windows} correlated windows agree."
+            f"{decision.raw_correlated_windows} correlated windows agree; evidence "
+            f"raw={decision.raw_correlated_windows}, credible={decision.credible_windows}, "
+            f"voting={decision.voting_windows}, winning={decision.winning_windows}, "
+            f"independent={decision.independent_windows}."
         )
     elif decision.state == "provisional":
         if candidate is None:
@@ -831,7 +834,10 @@ def _normal_evidence_lines(
                 f"Provisional candidate: {candidate.frame_offset:+d}f (not applied).",
                 (
                     f"{decision.consensus_windows}/{decision.raw_correlated_windows} correlated "
-                    f"windows agree; configured consensus requires "
+                    f"windows agree; evidence raw={decision.raw_correlated_windows}, "
+                    f"credible={decision.credible_windows}, voting={decision.voting_windows}, "
+                    f"winning={decision.winning_windows}, independent={decision.independent_windows}; "
+                    f"configured consensus requires "
                     f"{attempt.consensus_minimum_ratio:.0%}."
                 ),
                 f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
@@ -841,7 +847,9 @@ def _normal_evidence_lines(
         lines = [
             f"Comparison {ordinal} - No usable audio candidate. No automatic correction applied.",
             f"{attempt.planned_window_count} windows planned; "
-            f"{decision.raw_correlated_windows} usable estimates. "
+            f"{decision.raw_correlated_windows} usable estimates; evidence "
+            f"credible={decision.credible_windows}, voting={decision.voting_windows}, "
+            f"winning={decision.winning_windows}, independent={decision.independent_windows}. "
             f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
         ]
     lines.append(_format_stream_summary(attempt))
@@ -874,6 +882,10 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
         f"  Decision: state={decision.state}; reason={decision.primary_reason}; "
         f"failed={','.join(decision.failed_gates) or 'none'}; "
         f"unassessed={','.join(decision.unassessed_gates) or 'none'}",
+        f"  Evidence: raw={decision.raw_correlated_windows}; credible={decision.credible_windows}; "
+        f"voting={decision.voting_windows}; winning={decision.winning_windows}; "
+        f"independent={decision.independent_windows}; ratio={decision.consensus_ratio}; "
+        f"score={decision.aggregate_score}; peak={decision.minimum_peak_ratio}",
         f"  Work: planned={attempt.planned_window_count}; analysis rate={attempt.analysis_rate}; "
         f"FFT peak/total={attempt.peak_fft_points}/{attempt.total_fft_points}; "
         f"planning={attempt.planning_reason or 'complete'}",

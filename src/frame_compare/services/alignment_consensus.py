@@ -7,6 +7,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from itertools import combinations
 from statistics import median_low
 from typing import Literal
 
@@ -89,8 +90,10 @@ def hold_automatic_consensus(result: AlignmentConsensus) -> AlignmentConsensus:
     )
 
 
-def _peak_value(value: float) -> AudioPeakRatio:
-    return "unbounded" if math.isinf(value) else value
+def _peak_value(value: float) -> AudioPeakRatio | None:
+    if value == float("inf"):
+        return "unbounded"
+    return value if math.isfinite(value) else None
 
 
 def _candidate_record(
@@ -101,14 +104,177 @@ def _candidate_record(
 ) -> AudioAlignmentCandidate:
     sample_offset = int(median_low(estimate.sample_offset for estimate, _ in members))
     peak_ratio = min(estimate.peak_ratio for estimate, _ in members)
+    encoded_peak_ratio = _peak_value(peak_ratio)
+    if encoded_peak_ratio is None:
+        raise ValueError("candidate peak ratio is missing or non-finite")
     return AudioAlignmentCandidate(
         sample_offset=sample_offset,
         sample_rate=sample_rate,
         frame_offset=samples_to_frames(sample_offset, sample_rate, fps),
         supporting_window_ids=tuple(logical_id for _, logical_id in members),
         median_score=float(np.median([estimate.score for estimate, _ in members])),
-        minimum_peak_ratio=_peak_value(peak_ratio),
+        minimum_peak_ratio=encoded_peak_ratio,
     )
+
+
+def _peak_passes(value: float, floor: float) -> bool:
+    return value == float("inf") or math.isfinite(value) and value >= floor
+
+
+def _record_has_integrity(record: AudioAlignmentWindowRecord) -> bool:
+    if record.actual_reference_count is None or record.actual_comparison_count is None:
+        return False
+    if record.actual_reference_count <= 0 or record.actual_comparison_count <= 0:
+        return False
+    if record.effective_aligned_overlap is None or record.effective_aligned_overlap < 3:
+        return False
+    if record.actual_useful_reference_start is None or record.actual_useful_reference_end is None:
+        return False
+    if record.actual_useful_reference_end <= record.actual_useful_reference_start:
+        return False
+    if record.actual_coverage is None or record.coverage_state == "not_observed":
+        return False
+    if record.score_stage == "requested_rate":
+        return (
+            record.scoring_reference_count is not None
+            and record.scoring_comparison_count is not None
+            and record.scoring_reference_count > 0
+            and record.scoring_comparison_count > 0
+        )
+    return record.score_stage == "analysis_rate" and record.analysis_rate == record.requested_rate
+
+
+def _collection_integrity(
+    summaries: tuple[AudioAlignmentCollectionRecord, ...],
+    *,
+    require_verification: bool,
+) -> bool:
+    if not summaries:
+        return False
+    keys = {(summary.phase, summary.role) for summary in summaries}
+    required_phases = {"discovery"}
+    if require_verification:
+        required_phases.add("verification")
+    return (
+        len(keys) == len(summaries)
+        and all(
+            summary.status == "complete"
+            and summary.end_category in {"planned_end_reached", "observed_eof"}
+            and summary.cleanup_failure_count == 0
+            and summary.failure_count == 0
+            and 0 <= summary.emitted_sample_count <= summary.requested_horizon
+            for summary in summaries
+        )
+        and all({(phase, "reference"), (phase, "comparison")} <= keys for phase in required_phases)
+    )
+
+
+def _frame_boundary_crossed(
+    lower: int,
+    upper: int,
+    *,
+    sample_rate: int,
+    fps: Fraction,
+) -> bool:
+    if lower >= upper:
+        return False
+    return samples_to_frames(lower, sample_rate, fps) != samples_to_frames(upper, sample_rate, fps)
+
+
+def _is_exact_half_frame(sample_offset: int, *, sample_rate: int, fps: Fraction) -> bool:
+    frame_position = Fraction(sample_offset * fps, sample_rate)
+    remainder = frame_position - frame_position.numerator // frame_position.denominator
+    return remainder == Fraction(1, 2)
+
+
+def _minimum_independent_count(
+    duration_samples: int,
+    *,
+    sample_rate: int,
+    config: AlignmentConfig,
+) -> int:
+    tier_minimum = (
+        1
+        if duration_samples <= 30 * sample_rate
+        else 2
+        if duration_samples < 90 * sample_rate
+        else 3
+    )
+    return max(config.minimum_valid_windows, tier_minimum)
+
+
+def _independent_support(
+    records: list[AudioAlignmentWindowRecord],
+    voting_ids: set[str],
+    *,
+    config: AlignmentConfig,
+    sample_rate: int,
+    reference_duration: int,
+    comparison_duration: int,
+    offsets: dict[str, int],
+) -> tuple[tuple[str, ...], int]:
+    intervals = sorted(
+        (
+            record.actual_useful_reference_start,
+            record.actual_useful_reference_end,
+            record.logical_id,
+        )
+        for record in records
+        if record.logical_id in voting_ids
+        and record.actual_useful_reference_start is not None
+        and record.actual_useful_reference_end is not None
+    )
+    if not intervals:
+        return (), 0
+    if len(intervals) > 16:
+        return (), 0
+
+    duration_samples = min(reference_duration, comparison_duration)
+    required_count = _minimum_independent_count(
+        duration_samples,
+        sample_rate=sample_rate,
+        config=config,
+    )
+    if duration_samples <= 30 * sample_rate:
+        early_limit = None
+        late_limit = None
+        require_full_source = True
+    elif duration_samples < 90 * sample_rate:
+        early_limit = duration_samples / 3
+        late_limit = 2 * duration_samples / 3
+        require_full_source = False
+    else:
+        early_limit = duration_samples / 3
+        late_limit = 2 * duration_samples / 3
+        require_full_source = False
+
+    selected: tuple[str, ...] = ()
+    for subset_size in range(1, len(intervals) + 1):
+        for subset in combinations(intervals, subset_size):
+            if any(left[1] > right[0] for left, right in zip(subset, subset[1:], strict=False)):
+                continue
+            if selected or subset_size < required_count:
+                continue
+            if early_limit is not None and subset[0][0] > early_limit:
+                continue
+            if late_limit is not None and subset[-1][1] < late_limit:
+                continue
+            if require_full_source and not any(
+                (item[1] - item[0]) * 10
+                >= 9
+                * max(
+                    0,
+                    min(
+                        reference_duration,
+                        comparison_duration + offsets[item[2]],
+                    )
+                    - max(0, offsets[item[2]]),
+                )
+                for item in subset
+            ):
+                continue
+            selected = tuple(item[2] for item in subset)
+    return selected, len(selected)
 
 
 def _review_decision(
@@ -118,9 +284,12 @@ def _review_decision(
     window_records: list[AudioAlignmentWindowRecord],
     config: AlignmentConfig,
     fps: Fraction,
+    *,
+    qualified_winning_ids: set[str],
 ) -> AudioAlignmentDecision:
     members = list(zip(candidates, candidate_ids, strict=True))
-    failed_gates, unassessed_gates = _legacy_gate_evidence(candidates, config, fps)
+    failed_gates: tuple[str, ...] = ()
+    unassessed_gates: tuple[str, ...] = ()
     if result.diagnostic == AUTOMATIC_AUTHORITY_HOLD_REASON:
         failed_gates = (*failed_gates, AUTOMATIC_AUTHORITY_HOLD_REASON)
     consensus_ratio = result.consensus_ratio if candidates else None
@@ -131,12 +300,7 @@ def _review_decision(
     if result.applied:
         if result.sample_offset is None:
             raise ValueError("applied consensus is missing its sample offset")
-        accepted_frame = samples_to_frames(result.sample_offset, config.sample_rate, fps)
-        accepted_members = [
-            item
-            for item in members
-            if samples_to_frames(item[0].sample_offset, config.sample_rate, fps) == accepted_frame
-        ]
+        accepted_members = [item for item in members if item[1] in qualified_winning_ids]
         return AudioAlignmentDecision(
             state="trusted_automatic",
             candidate=_candidate_record(
@@ -150,6 +314,10 @@ def _review_decision(
             consensus_ratio=consensus_ratio,
             aggregate_score=aggregate_score,
             minimum_peak_ratio=minimum_peak_ratio,
+            credible_windows=result.credible_windows,
+            voting_windows=result.voting_windows,
+            winning_windows=result.consensus_windows,
+            independent_windows=result.independent_windows,
             failed_gates=failed_gates,
             unassessed_gates=unassessed_gates,
         )
@@ -171,6 +339,10 @@ def _review_decision(
             consensus_ratio=consensus_ratio,
             aggregate_score=aggregate_score,
             minimum_peak_ratio=minimum_peak_ratio,
+            credible_windows=result.credible_windows,
+            voting_windows=result.voting_windows,
+            winning_windows=result.consensus_windows,
+            independent_windows=result.independent_windows,
             failed_gates=failed_gates,
             unassessed_gates=unassessed_gates,
         )
@@ -185,6 +357,10 @@ def _review_decision(
             consensus_ratio=consensus_ratio,
             aggregate_score=aggregate_score,
             minimum_peak_ratio=minimum_peak_ratio,
+            credible_windows=result.credible_windows,
+            voting_windows=result.voting_windows,
+            winning_windows=result.consensus_windows,
+            independent_windows=result.independent_windows,
             failed_gates=(*failed_gates, "no_unique_candidate"),
             unassessed_gates=unassessed_gates,
         )
@@ -197,40 +373,13 @@ def _review_decision(
         consensus_ratio=consensus_ratio,
         aggregate_score=aggregate_score,
         minimum_peak_ratio=minimum_peak_ratio,
+        credible_windows=result.credible_windows,
+        voting_windows=result.voting_windows,
+        winning_windows=result.consensus_windows,
+        independent_windows=result.independent_windows,
         failed_gates=failed_gates,
         unassessed_gates=unassessed_gates,
     )
-
-
-def _legacy_gate_evidence(
-    candidates: list[CorrelationEstimate],
-    config: AlignmentConfig,
-    fps: Fraction,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    if len(candidates) < config.minimum_valid_windows:
-        return (
-            ("insufficient_valid_windows",),
-            ("low_confidence", "insufficient_consensus", "ambiguous_correlation_peak"),
-        )
-    groups: dict[int, list[CorrelationEstimate]] = {}
-    for candidate in candidates:
-        frame = samples_to_frames(candidate.sample_offset, config.sample_rate, fps)
-        groups.setdefault(frame, []).append(candidate)
-    winner = max(
-        groups.values(),
-        key=lambda group: (len(group), max(candidate.score for candidate in group)),
-    )
-    score = float(np.median([candidate.score for candidate in winner]))
-    ratio = len(winner) / len(candidates)
-    peak_ratio = min(candidate.peak_ratio for candidate in winner)
-    failed: list[str] = []
-    if score < config.confidence_threshold:
-        failed.append("low_confidence")
-    if ratio < config.consensus_minimum_ratio:
-        failed.append("insufficient_consensus")
-    if peak_ratio < config.ambiguity_peak_ratio:
-        failed.append("ambiguous_correlation_peak")
-    return tuple(failed), ()
 
 
 @dataclass(frozen=True)
@@ -251,6 +400,9 @@ class AlignmentConsensus:
     decision: AudioAlignmentDecision | None = None
     audio_attempt: AudioAlignmentAttempt | None = None
     collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = ()
+    credible_windows: int = 0
+    voting_windows: int = 0
+    independent_windows: int = 0
 
 
 @dataclass
@@ -365,6 +517,11 @@ def _finish_consensus(
     *,
     config: AlignmentConfig,
     fps: Fraction,
+    collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = (),
+    boundary_guard_ids: set[str] | None = None,
+    search_edge_ids: set[str] | None = None,
+    source_duration_samples: tuple[int, int] = (0, 0),
+    source_sample_rate: int | None = None,
 ) -> AlignmentConsensus:
     window_evidence = tuple(sorted(evidence, key=lambda item: item.start_sample))
     stability = classify_alignment_stability(
@@ -372,104 +529,202 @@ def _finish_consensus(
         sample_rate=config.sample_rate,
         fps=fps,
     )
-
-    if len(candidates) < config.minimum_valid_windows:
-        result = _reject(
-            "insufficient_valid_windows",
-            score=0.0,
-            valid_windows=len(candidates),
-            consensus_windows=0,
-            consensus_ratio=0.0,
-            ambiguity_ratio=None,
-            window_evidence=window_evidence,
-            stability=stability,
-        )
-        return replace(
-            result,
-            window_records=tuple(window_records),
-            decision=_review_decision(
-                result, candidates, candidate_ids, window_records, config, fps
-            ),
-        )
-
-    groups: dict[int, list[tuple[CorrelationEstimate, str]]] = {}
-    for candidate, logical_id in zip(candidates, candidate_ids, strict=True):
-        frame_offset = samples_to_frames(candidate.sample_offset, config.sample_rate, fps)
-        groups.setdefault(frame_offset, []).append((candidate, logical_id))
-    winning_group = max(
-        groups.values(),
-        key=lambda group: (len(group), max(candidate.score for candidate, _ in group)),
+    requires_verification = any(record.score_stage == "requested_rate" for record in window_records)
+    gate_i = _collection_integrity(
+        collection_summaries,
+        require_verification=requires_verification,
     )
-    winner_count = len(winning_group)
-    winner_offset = int(median_low(candidate.sample_offset for candidate, _ in winning_group))
-    consensus_ratio = winner_count / len(candidates)
-    winning_scores = [candidate.score for candidate, _ in winning_group]
-    score = float(np.median(winning_scores))
-    winning_peak_ratios = [candidate.peak_ratio for candidate, _ in winning_group]
-    ambiguity_ratio = min(winning_peak_ratios)
+    estimates = dict(zip(candidate_ids, candidates, strict=True))
+    configured_score_floor = max(_REVIEW_SCORE_FLOOR, config.confidence_threshold)
+    configured_peak_floor = max(_REVIEW_PEAK_RATIO_FLOOR, config.ambiguity_peak_ratio)
+    credible_ids: set[str] = set()
+    voting_ids: set[str] = set()
+    updated_records: list[AudioAlignmentWindowRecord] = []
+    for record in window_records:
+        estimate = estimates.get(record.logical_id)
+        credible = False
+        voting = False
+        if estimate is not None:
+            credible = (
+                gate_i
+                and _record_has_integrity(record)
+                and math.isfinite(estimate.score)
+                and estimate.score >= _REVIEW_SCORE_FLOOR
+                and _peak_passes(estimate.peak_ratio, _REVIEW_PEAK_RATIO_FLOOR)
+            )
+            voting = (
+                credible
+                and record.actual_coverage is not None
+                and record.actual_coverage >= 0.90
+                and estimate.score >= configured_score_floor
+                and _peak_passes(estimate.peak_ratio, configured_peak_floor)
+            )
+        if credible:
+            credible_ids.add(record.logical_id)
+        if voting:
+            voting_ids.add(record.logical_id)
+        if estimate is not None:
+            updated_records.append(
+                replace(
+                    record,
+                    quality_disposition="qualified" if credible else "rejected",
+                    review_qualified=credible,
+                    configured_quality=voting,
+                    vote_disposition=("voted" if voting else "abstained" if credible else "failed"),
+                )
+            )
+        else:
+            updated_records.append(record)
+    window_records = updated_records
 
-    if score < config.confidence_threshold:
-        result = _reject(
-            "low_confidence",
-            score=score,
-            valid_windows=len(candidates),
-            consensus_windows=winner_count,
-            consensus_ratio=consensus_ratio,
-            ambiguity_ratio=ambiguity_ratio,
-            window_evidence=window_evidence,
-            stability=stability,
-        )
-        return replace(
-            result,
-            window_records=tuple(window_records),
-            decision=_review_decision(
-                result, candidates, candidate_ids, window_records, config, fps
-            ),
+    def group_by_frame(ids: set[str]) -> dict[int, list[tuple[CorrelationEstimate, str]]]:
+        groups: dict[int, list[tuple[CorrelationEstimate, str]]] = {}
+        for logical_id in candidate_ids:
+            if logical_id not in ids:
+                continue
+            estimate = estimates[logical_id]
+            frame = samples_to_frames(estimate.sample_offset, config.sample_rate, fps)
+            groups.setdefault(frame, []).append((estimate, logical_id))
+        return groups
+
+    credible_groups = group_by_frame(credible_ids)
+    voting_groups = group_by_frame(voting_ids)
+
+    def ordered_groups(
+        groups: dict[int, list[tuple[CorrelationEstimate, str]]],
+    ) -> list[list[tuple[CorrelationEstimate, str]]]:
+        return sorted(
+            groups.values(),
+            key=lambda group: (-len(group), -max(item[0].score for item in group), group[0][1]),
         )
 
-    if consensus_ratio < config.consensus_minimum_ratio:
-        result = _reject(
-            "insufficient_consensus",
-            score=score,
-            valid_windows=len(candidates),
-            consensus_windows=winner_count,
-            consensus_ratio=consensus_ratio,
-            ambiguity_ratio=ambiguity_ratio,
-            window_evidence=window_evidence,
-            stability=stability,
+    credible_ordered = ordered_groups(credible_groups)
+    voting_ordered = ordered_groups(voting_groups)
+    credible_winner = credible_ordered[0] if credible_ordered else []
+    voting_winner = voting_ordered[0] if voting_ordered else []
+    winner_count = len(voting_winner)
+    consensus_ratio = winner_count / len(voting_ids) if voting_ids else 0.0
+    diagnostic_group = voting_winner or credible_winner
+    score = (
+        float(np.median([candidate.score for candidate, _ in diagnostic_group]))
+        if diagnostic_group
+        else 0.0
+    )
+    diagnostic_peaks = [
+        candidate.peak_ratio
+        for candidate, _ in diagnostic_group
+        if _peak_passes(candidate.peak_ratio, 0.0)
+    ]
+    ambiguity_ratio = min(diagnostic_peaks) if diagnostic_peaks else None
+    boundary_guard_ids = boundary_guard_ids or set()
+    search_edge_ids = search_edge_ids or set()
+    winning_ids = {logical_id for _, logical_id in voting_winner}
+    support_phase = (
+        "verification"
+        if any(
+            record.logical_id in winning_ids and record.score_stage == "requested_rate"
+            for record in window_records
         )
-        return replace(
-            result,
-            window_records=tuple(window_records),
-            decision=_review_decision(
-                result, candidates, candidate_ids, window_records, config, fps
-            ),
+        else "discovery"
+    )
+    support_summaries = [
+        summary for summary in collection_summaries if summary.phase == support_phase
+    ]
+    reference_summary = next(
+        (summary for summary in support_summaries if summary.role == "reference"),
+        None,
+    )
+    comparison_summary = next(
+        (summary for summary in support_summaries if summary.role == "comparison"),
+        None,
+    )
+    support_rate = (
+        reference_summary.output_rate if reference_summary is not None else config.sample_rate
+    )
+    duration_rate = source_sample_rate or (
+        next((record.analysis_rate for record in window_records), support_rate)
+    )
+    if all(source_duration_samples):
+        reference_duration = round(
+            Fraction(source_duration_samples[0] * support_rate, duration_rate)
         )
+        comparison_duration = round(
+            Fraction(source_duration_samples[1] * support_rate, duration_rate)
+        )
+    else:
+        reference_duration = (
+            reference_summary.requested_horizon if reference_summary is not None else 0
+        )
+        comparison_duration = (
+            comparison_summary.requested_horizon if comparison_summary is not None else 0
+        )
+    _, independent_count = _independent_support(
+        window_records,
+        winning_ids,
+        config=config,
+        sample_rate=support_rate,
+        reference_duration=reference_duration,
+        comparison_duration=comparison_duration,
+        offsets={logical_id: estimates[logical_id].sample_offset for logical_id in winning_ids},
+    )
+    failed: list[str] = []
+    if not gate_i:
+        failed.append("extraction_integrity")
+    if not voting_ids:
+        failed.append("no_voting_windows")
+    elif len(voting_ids) < config.minimum_valid_windows:
+        failed.append("insufficient_valid_windows")
+    if credible_winner and any(
+        samples_to_frames(estimate.sample_offset, config.sample_rate, fps)
+        != samples_to_frames(credible_winner[0][0].sample_offset, config.sample_rate, fps)
+        for estimate, _ in ((estimates[logical_id], logical_id) for logical_id in credible_ids)
+    ):
+        failed.append("credible_contradiction")
+    if voting_ids and consensus_ratio < config.consensus_minimum_ratio:
+        failed.append("insufficient_consensus")
+    required_independent_count = _minimum_independent_count(
+        min(reference_duration, comparison_duration),
+        sample_rate=support_rate,
+        config=config,
+    )
+    if independent_count < required_independent_count:
+        failed.append("insufficient_independent_support")
+    boundary_count = len(boundary_guard_ids & voting_ids)
+    search_edge_count = len(search_edge_ids & voting_ids)
+    if boundary_count:
+        failed.append("frame_boundary_guard")
+    if search_edge_count:
+        failed.append("search_edge_guard")
+    if ambiguity_ratio is not None and not _peak_passes(ambiguity_ratio, configured_peak_floor):
+        failed.append("ambiguous_correlation_peak")
 
-    if ambiguity_ratio < config.ambiguity_peak_ratio:
-        result = _reject(
-            "ambiguous_correlation_peak",
-            score=score,
-            valid_windows=len(candidates),
-            consensus_windows=winner_count,
-            consensus_ratio=consensus_ratio,
-            ambiguity_ratio=ambiguity_ratio,
-            window_evidence=window_evidence,
-            stability=stability,
-        )
-        return replace(
-            result,
-            window_records=tuple(window_records),
-            decision=_review_decision(
-                result, candidates, candidate_ids, window_records, config, fps
-            ),
-        )
-
+    # A base-credible estimate in another frame bin is a hard veto, regardless
+    # of whether stricter configured thresholds excluded it from voting.
+    contradiction = "credible_contradiction" in failed
+    temporal_ok = "insufficient_independent_support" not in failed
+    quality_ok = (
+        bool(voting_winner)
+        and len(voting_ids) >= config.minimum_valid_windows
+        and consensus_ratio >= config.consensus_minimum_ratio
+        and not contradiction
+        and temporal_ok
+        and not boundary_count
+        and not search_edge_count
+        and ambiguity_ratio is not None
+        and _peak_passes(ambiguity_ratio, configured_peak_floor)
+    )
+    accepted = gate_i and quality_ok
+    winner_offset = (
+        int(median_low(candidate.sample_offset for candidate, _ in voting_winner))
+        if voting_winner
+        else None
+    )
+    diagnostic = "accepted" if accepted else (failed[0] if failed else "no_usable_windows")
     result = AlignmentConsensus(
-        sample_offset=winner_offset,
+        sample_offset=winner_offset if accepted else None,
         score=score,
-        applied=True,
-        diagnostic="accepted",
+        applied=accepted,
+        diagnostic=diagnostic,
         valid_windows=len(candidates),
         consensus_windows=winner_count,
         consensus_ratio=consensus_ratio,
@@ -477,12 +732,28 @@ def _finish_consensus(
         window_evidence=window_evidence,
         stability=stability,
         window_records=tuple(window_records),
+        credible_windows=len(credible_ids),
+        voting_windows=len(voting_ids),
+        independent_windows=independent_count,
     )
-    result = hold_automatic_consensus(result)
-    return replace(
+    if accepted:
+        result = hold_automatic_consensus(result)
+    decision = _review_decision(
         result,
-        decision=_review_decision(result, candidates, candidate_ids, window_records, config, fps),
+        candidates,
+        candidate_ids,
+        window_records,
+        config,
+        fps,
+        qualified_winning_ids=winning_ids,
     )
+    decision = replace(
+        decision,
+        failed_gates=tuple(dict.fromkeys((*failed, *decision.failed_gates))),
+        independent_windows=independent_count,
+        winning_windows=winner_count,
+    )
+    return replace(result, decision=decision)
 
 
 def _support_facts(
@@ -579,6 +850,12 @@ def estimate_staged_consensus_offset(
             list(window_records),
             config=config,
             fps=fps,
+            collection_summaries=exc.collection_summaries,
+            source_duration_samples=(
+                plan.reference_duration_samples,
+                plan.comparison_duration_samples,
+            ),
+            source_sample_rate=plan.sample_rate,
         )
         return replace(result, collection_summaries=exc.collection_summaries)
     if len(discovery.windows) != len(plan.windows):
@@ -686,6 +963,8 @@ def estimate_staged_consensus_offset(
     candidates: list[CorrelationEstimate] = []
     candidate_ids: list[str] = []
     evidence: list[AlignmentWindowEvidence] = []
+    boundary_guard_ids: set[str] = set()
+    search_edge_ids: set[str] = set()
     for item in staged:
         raise_if_alignment_cancelled(cancellation)
         spec = item.spec
@@ -723,18 +1002,32 @@ def estimate_staged_consensus_offset(
                 scoring_reference_count = int(window.reference.size)
                 scoring_comparison_count = int(window.comparison.size)
                 origin_delta = window.reference_start_sample - window.comparison_start_sample
+                correction_bounds = (
+                    verification_spec.global_lower_offset - origin_delta,
+                    verification_spec.global_upper_offset - origin_delta,
+                )
                 correction, score = refine_aligned_score(
                     window.reference,
                     window.comparison,
                     preprocessing_mode=config.preprocessing_mode,
-                    correction_bounds_samples=(
-                        verification_spec.global_lower_offset - origin_delta,
-                        verification_spec.global_upper_offset - origin_delta,
-                    ),
+                    correction_bounds_samples=correction_bounds,
                     cancellation=cancellation,
                 )
                 requested_offset = origin_delta + correction
                 score_stage = "requested_rate"
+                if correction in correction_bounds or abs(requested_offset) >= requested_limit:
+                    search_edge_ids.add(item.logical_id)
+                if _is_exact_half_frame(
+                    requested_offset,
+                    sample_rate=config.sample_rate,
+                    fps=fps,
+                ) or _frame_boundary_crossed(
+                    verification_spec.global_lower_offset,
+                    verification_spec.global_upper_offset,
+                    sample_rate=config.sample_rate,
+                    fps=fps,
+                ):
+                    boundary_guard_ids.add(item.logical_id)
                 support_reference_start = window.reference_start_sample
                 support_reference_count = scoring_reference_count
                 support_comparison_start = window.comparison_start_sample
@@ -800,6 +1093,19 @@ def estimate_staged_consensus_offset(
             review_qualified = configured_quality = False
         else:
             terminal_category = "correlated"
+            if abs(requested_offset) >= requested_limit or _is_exact_half_frame(
+                requested_offset,
+                sample_rate=config.sample_rate,
+                fps=fps,
+            ):
+                if abs(requested_offset) >= requested_limit:
+                    search_edge_ids.add(item.logical_id)
+                if _is_exact_half_frame(
+                    requested_offset,
+                    sample_rate=config.sample_rate,
+                    fps=fps,
+                ):
+                    boundary_guard_ids.add(item.logical_id)
             review_qualified = bool(
                 math.isfinite(score)
                 and score >= _REVIEW_SCORE_FLOOR
@@ -872,5 +1178,13 @@ def estimate_staged_consensus_offset(
         [records[index] for index in range(len(plan.windows))],
         config=config,
         fps=fps,
+        collection_summaries=summaries,
+        boundary_guard_ids=boundary_guard_ids,
+        search_edge_ids=search_edge_ids,
+        source_duration_samples=(
+            plan.reference_duration_samples,
+            plan.comparison_duration_samples,
+        ),
+        source_sample_rate=plan.sample_rate,
     )
     return replace(result, collection_summaries=summaries)

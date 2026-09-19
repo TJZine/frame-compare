@@ -237,7 +237,7 @@ def test_alignment_recovers_known_offset_from_generated_media(
     )
     downmix_results = align_clips_from_request(downmix_request, downmix_config)
     assert downmix_results[0].applied is False
-    assert downmix_results[0].diagnostic == "low_confidence"
+    assert downmix_results[0].diagnostic == "no_voting_windows"
 
 
 _LONG_CLIP_SECONDS = 65
@@ -329,7 +329,7 @@ def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
     _assert_held_offset(by_clip[comparison.name], frame_offset=-2)
     for result in by_clip.values():
         assert result.stability is not None
-        assert result.stability.valid_windows == 5
+        assert result.stability.valid_windows == 2
 
 
 @pytest.mark.integration
@@ -377,7 +377,7 @@ def test_long_non_packet_aligned_media_accepts_frame_equivalent_window_offsets(
     _assert_held_offset(results[0], frame_offset=-2)
     assert len(captured) == 1
     sample_offsets = [item.sample_offset for item in captured[0].window_evidence]
-    assert len(sample_offsets) == 5
+    assert len(sample_offsets) == 2
     assert set(sample_offsets) == {-9600}
     assert {
         samples_to_frames(offset, config.sample_rate, Fraction(_FPS)) for offset in sample_offsets
@@ -505,4 +505,4 @@ def test_alignment_rejects_weak_signal_without_applying_or_caching(
     assert results[0].applied is False
     assert results[0].frame_offset is None
     assert results[0].time_offset_seconds is None
-    assert results[0].diagnostic == "insufficient_valid_windows"
+    assert results[0].diagnostic == "no_voting_windows"

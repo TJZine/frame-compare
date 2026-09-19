@@ -1414,7 +1414,7 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `continuous-origin-distributed-2097152-v7-held` policy, computed cache hits and embedded computed
+  `continuous-origin-qualified-2097152-v8-held` policy, computed cache hits and embedded computed
   fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
   only whether prior human-confirmed offsets are reused. `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
@@ -1478,17 +1478,22 @@ converted to this sign convention before consensus evidence, hints, caching, and
   across the complete shared selected-audio-stream timeline. When the window length
   is configured and the stride is zero, the window length is also used as the stride,
   producing a contiguous candidate grid before bounded sampling. With both values at
-  zero, long inputs use five distributed 30-second windows; short inputs use their
-  complete shared audio duration.
+  zero, inputs up to 30 seconds use one full shared-duration interval, inputs longer than
+  30 and shorter than 90 seconds use two disjoint endpoint intervals of `min(30s, D/2)`,
+  and inputs at least 90 seconds use five distributed 30-second intervals. A larger
+  configured minimum is retained; overlap and duplicate intervals do not become independent
+  support. Explicit length and stride preserve their requested shape, but do not waive the
+  corresponding short full-source or medium/long endpoint support requirement.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,
-  defaulting to `1`. It gates whether enough selected windows produced correlation
-  estimates before the independent confidence and ambiguity gates run.
+  defaulting to `1`. It is a lower bound for voting and independent support; failed, short,
+  and unattempted rows remain visible and never count as zero-quality evidence.
 - `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting
-  to `1.0`. It gates whether enough windows agree on the exact integer frame
-  correction produced by `samples_to_frames` at the requested sample rate and
-  reference FPS. Adjacent frame corrections remain distinct. The accepted group
-  retains an observed lower-median sample offset for diagnostic time reporting;
-  raw per-window sample evidence remains unchanged.
+  to `1.0`. It applies to voting-qualified windows, not every raw correlated row, and
+  users' stronger configured threshold or minimum is never reduced. It gates whether
+  enough voting windows agree on the exact integer frame correction produced by
+  `samples_to_frames` at the requested sample rate and reference FPS. Adjacent frame
+  corrections remain distinct. The accepted group retains an observed lower-median sample
+  offset for diagnostic time reporting; raw per-window sample evidence remains unchanged.
 - `refinement_mode = "disabled" | "local"` selects whether local offset
   refinement runs after coarse correlation. `disabled` is the default.
 - `refinement_sample_rate` is either `null` or an integer from `4000` through
@@ -1522,13 +1527,18 @@ before verification, and no PCM is reused across comparisons. Direct-rate work u
 most two FFmpeg decodes per comparison and verified work at most four. Confidence uses
 overlap-local mean centering and requires at
 least three samples and 5% of the shorter window, preventing tiny boundary overlaps
-from appearing perfectly correlated. Consensus considers every successfully correlated
-selected window, groups candidates by the exact frame correction that would be applied,
-selects the largest agreeing group, uses score only to break equal-size groups, and gates
-the winner by its median window score and minimum peak ratio. The winning group's
-lower-median observed sample offset supplies diagnostic time information without
-replacing raw window evidence. Sample offsets that cross a frame-rounding boundary do
-not agree, even when the resulting frame corrections are adjacent. A schema-valid window, offset,
+from appearing perfectly correlated. Consensus preserves raw, credible, voting, winning,
+and independent counts. Gate I requires the canonical recipe, frozen identities, admitted
+bounds, finite retained samples, truthful coordinates, successful child/readers, and
+complete cleanup; planned completion and valid observed EOF are distinct successful
+outcomes. Gate Q requires finite requested-rate score at least 0.90, peak ratio at least
+1.50 (`unbounded` may pass), meaningful overlap, valid bounds, 90% useful coverage, and a
+deterministic disjoint subset of actual useful intervals. The configured ratio applies to
+voting-qualified windows. A base-credible estimate in another frame bin is a hard veto,
+even when stricter configuration excludes it from voting. Exact half-frame cases,
+requested-rate search-edge winners, and correction neighborhoods crossing a frame boundary
+remain provisional. The winning group's lower-median observed sample offset supplies
+diagnostic time information without replacing raw window evidence. A schema-valid window, offset,
 minimum-window, or requested-rate scoring request
 that cannot fit the fixed budget remains valid configuration but produces the explicit
 non-applied `analysis_budget_exceeded` result. Normal optional VSView/manual review and
@@ -1548,14 +1558,17 @@ negative rather than unbounded scanning.
 
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
-v5 gate evidence, and an explicit audio decision: `provisional` or `unavailable` under
-the shipped `continuous-origin-distributed-2097152-v7-held` automatic-authority hold.
+qualified-policy evidence, and an explicit audio decision: `provisional` or `unavailable`
+under the shipped `continuous-origin-qualified-2097152-v8-held` automatic-authority hold.
 An otherwise-qualified computed attempt records
 `automatic_authority_held`; `trusted_automatic` is not produced while that internal
 hold is active. A provisional candidate uses fixed display-only floors (score at
 least 0.90 and peak ratio at least 1.50) and a unique largest frame-equivalent group.
-It never supplies an applied offset, trim, cache value, or trusted VSView hint. A
-manual result keeps the original attempt as separate diagnostic history.
+It never supplies an applied offset, trim, cache value, or trusted VSView hint. A manual
+result keeps the original attempt as separate diagnostic history. Held results remain
+provisional/unavailable even when the future policy would otherwise pass; computed frame/time
+fields and trusted native hints stay null. The sampled support is bounded and does not claim
+drift compensation or exhaustive edit detection.
 
 ## Persistence Rules
 

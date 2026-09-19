@@ -356,6 +356,10 @@ class AudioAlignmentDecision:
     consensus_ratio: float | None
     aggregate_score: float | None
     minimum_peak_ratio: AudioPeakRatio | None
+    credible_windows: int = 0
+    voting_windows: int = 0
+    winning_windows: int = 0
+    independent_windows: int = 0
     failed_gates: tuple[str, ...] = ()
     unassessed_gates: tuple[str, ...] = ()
 
@@ -366,6 +370,21 @@ class AudioAlignmentDecision:
             raise ValueError(f"{self.state} audio decision requires a candidate")
         _require_int(self.raw_correlated_windows, "raw_correlated_windows", minimum=0)
         _require_int(self.consensus_windows, "consensus_windows", minimum=0)
+        for name in (
+            "credible_windows",
+            "voting_windows",
+            "winning_windows",
+            "independent_windows",
+        ):
+            _require_int(getattr(self, name), name, minimum=0)
+        if self.credible_windows > self.raw_correlated_windows:
+            raise ValueError("credible window count exceeds raw correlated count")
+        if self.voting_windows > self.credible_windows:
+            raise ValueError("voting window count exceeds credible count")
+        if self.winning_windows > self.voting_windows:
+            raise ValueError("winning window count exceeds voting count")
+        if self.independent_windows > self.voting_windows:
+            raise ValueError("independent window count exceeds voting count")
         for value in (self.consensus_ratio, self.aggregate_score):
             if value is not None and not math.isfinite(value):
                 raise ValueError("aggregate decision evidence must be finite")

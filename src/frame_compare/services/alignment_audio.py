@@ -39,8 +39,6 @@ from frame_compare.utils.subproc import run_subprocess
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
 _FLOAT32_BYTES = np.dtype(np.float32).itemsize
-# Decode enough context to avoid codec/version-dependent AAC state at an early seek.
-# The fixed bound preserves long-media behavior while early windows decode from origin.
 _DEFAULT_WINDOW_SECONDS = 30
 _DEFAULT_DISTRIBUTED_WINDOWS = 5
 _MIN_ANALYSIS_SAMPLE_RATE = 4000
@@ -123,6 +121,8 @@ class AudioAnalysisPlan:
     verification_reserved_samples: int = 0
     score_evaluations_per_window: int = 0
     scored_positions: int = 0
+    reference_duration_samples: int = 0
+    comparison_duration_samples: int = 0
 
 
 @dataclass(frozen=True)
@@ -749,9 +749,22 @@ def _plan_at_discovery_rate(
     rate: int,
     config: AlignmentConfig,
 ) -> AudioAnalysisPlan | AudioAnalysisBudgetExceeded:
-    window_samples = max(
-        2, round(min(reference_duration, comparison_duration, requested_window_seconds) * rate)
-    )
+    reference_total = max(1, math.floor(reference_duration * rate))
+    comparison_total = max(1, math.floor(comparison_duration * rate))
+    shared_total = min(reference_total, comparison_total)
+    default_shape = config.window_length_seconds <= 0
+    if default_shape:
+        shared_seconds = min(reference_duration, comparison_duration)
+        if shared_seconds <= 30:
+            window_samples = shared_total
+        elif shared_seconds < 90:
+            window_samples = min(30 * rate, max(2, round(shared_seconds * rate / 2)))
+        else:
+            window_samples = min(shared_total, 30 * rate)
+    else:
+        window_samples = max(
+            2, round(min(reference_duration, comparison_duration, requested_window_seconds) * rate)
+        )
     margin_samples = math.ceil(max_offset_seconds * rate)
     conservative_fft = _fft_size(2 * window_samples + 2 * margin_samples - 1)
     if conservative_fft > _MAX_FFT_POINTS:
@@ -774,21 +787,33 @@ def _plan_at_discovery_rate(
         return AudioAnalysisBudgetExceeded("scoring_evaluations_exceed_window_budget")
 
     window_capacity = min(_MAX_ANALYSIS_WINDOWS, _FFT_WORK_BUDGET // conservative_fft)
-    reference_total = max(1, math.floor(reference_duration * rate))
-    comparison_total = max(1, math.floor(comparison_duration * rate))
-    shared_total = min(reference_total, comparison_total)
     stride_samples = (
         max(1, round(config.window_stride_seconds * rate))
         if config.window_stride_seconds > 0
         else (window_samples if config.window_length_seconds > 0 else 0)
     )
-    starts = _window_starts(
-        shared_total,
-        window_samples=window_samples,
-        stride_samples=stride_samples,
-        default_windows=max(_DEFAULT_DISTRIBUTED_WINDOWS, config.minimum_valid_windows),
-        limit=window_capacity,
-    )
+    if default_shape and min(reference_duration, comparison_duration) <= 30:
+        starts = (0,)
+    elif default_shape and min(reference_duration, comparison_duration) < 90:
+        endpoint_starts = (0, max(0, shared_total - window_samples))
+        if config.minimum_valid_windows <= 2:
+            starts = endpoint_starts
+        else:
+            starts = _window_starts(
+                shared_total,
+                window_samples=window_samples,
+                stride_samples=0,
+                default_windows=config.minimum_valid_windows,
+                limit=window_capacity,
+            )
+    else:
+        starts = _window_starts(
+            shared_total,
+            window_samples=window_samples,
+            stride_samples=stride_samples,
+            default_windows=max(_DEFAULT_DISTRIBUTED_WINDOWS, config.minimum_valid_windows),
+            limit=window_capacity,
+        )
 
     windows: list[AudioWindowSpec] = []
     total_fft_points = 0
@@ -847,6 +872,8 @@ def _plan_at_discovery_rate(
         verification_reserved_samples=verification_samples,
         score_evaluations_per_window=evaluations,
         scored_positions=scored_positions,
+        reference_duration_samples=reference_total,
+        comparison_duration_samples=comparison_total,
     )
 
 
