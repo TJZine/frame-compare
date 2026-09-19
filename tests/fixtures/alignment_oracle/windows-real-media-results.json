@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "purpose": "R6 share-safe physical-Windows real-media and visible CLI/VSView handoff evidence",
+  "candidate": {
+    "repository": "TJZine/frame-compare",
+    "run_time_checkout_inferred_from_reflog": "9401f47177a68cdd9a4202a8680c6d73e099a546",
+    "run_info_embeds_commit": false,
+    "run_time_dirty_state_known": false,
+    "frame_compare_version": "0.6.0",
+    "contains_diagnostic_invariants_commit_8044716f": true,
+    "contains_active_audio_progress_commit_73ecea72": false,
+    "automatic_authority_default": "held"
+  },
+  "environment": {
+    "observed_at_utc": "2026-09-19",
+    "platform": "physical Windows, unmanaged source checkout",
+    "media_runtime_profile": "unmanaged-windows",
+    "alignment_runtime_fingerprint": "8aeba52eb49aa3d05abf0f79de898dd07c6d958bbdb8e9002934080f4a01adf9",
+    "vapoursynth": "R79 API R4.2",
+    "vs_placebo": "2.0.4",
+    "ffmpeg": "git-2025-11-02-a677b38-ffmpeg-windows-build-helpers",
+    "ffprobe": "git-2025-11-02-a677b38-ffmpeg-windows-build-helpers",
+    "vsview_and_alignment_panel": "available",
+    "doctor_success": true,
+    "doctor_noncritical_findings": [
+      "slow.pics returned HTTP 520"
+    ],
+    "windows_simultaneous_parent_child_rss": {
+      "status": "unavailable",
+      "reason": "The completed normal run had no supported simultaneous parent-plus-active-FFmpeg sampler; no Task Manager estimate is substituted."
+    }
+  },
+  "run": {
+    "share_safe_identity": "physical-windows-real-media-zero-offset-candidate-set-1",
+    "started_at_utc": "2026-09-19T17:50:58Z",
+    "completed_at_utc": "2026-09-19T17:56:44Z",
+    "status": "completed_with_warnings",
+    "source_count": 3,
+    "comparison_count": 2,
+    "reference_semantics": "One of three peer release sources was selected as the calculation baseline; it is not an independently authoritative master.",
+    "source_names_and_paths_in_record": false,
+    "frame_rate": "24000/1001",
+    "source_frame_counts": [143487, 143023, 143023],
+    "fresh_computation": true,
+    "prior_human_confirmed_zero_offsets_offered": true,
+    "prior_offsets_reused": false,
+    "reuse_prompt_response": "n",
+    "alignment_phase_elapsed_seconds": 270.566730200022,
+    "run_elapsed_seconds": 345.9034887999878,
+    "configuration": {
+      "requested_rate": 16000,
+      "discovery_rate": 8000,
+      "maximum_offset_seconds": 30.0,
+      "correlation_mode": "raw_fft",
+      "preprocessing_mode": "none",
+      "channel_strategy": "mono_downmix",
+      "window_plan": "default long-duration tier: five distributed 30-second windows",
+      "minimum_valid_windows": 1,
+      "consensus_minimum_ratio": 1.0,
+      "refinement_mode": "disabled",
+      "stream_selection": "automatic metadata",
+      "use_vsview": true,
+      "force_interactive": false
+    }
+  },
+  "comparisons": [
+    {
+      "ordinal": 1,
+      "expected_relationship": {
+        "frame_offset": 0,
+        "confidence": "user-reported quick check, not independently labeled ground truth"
+      },
+      "diagnostic_schema": 2,
+      "evidence_availability": "current_attempt",
+      "collection_observation": "observed",
+      "selected_streams": {
+        "reference": "automatic a:0; absolute stream 1; E-AC-3; 48000 Hz; 5.1(side); English; default; original; non-commentary",
+        "comparison": "automatic a:0; absolute stream 1; E-AC-3; 48000 Hz; 5.1(side); English; default; original; non-commentary"
+      },
+      "collections": [
+        {"phase": "discovery", "role": "reference", "rate": 8000, "elapsed_seconds": 13.221529299975373, "retained_bytes": 4800000, "end": "planned_end_reached", "cleanup_failures": 0},
+        {"phase": "discovery", "role": "comparison", "rate": 8000, "elapsed_seconds": 13.069562699995004, "retained_bytes": 12480000, "end": "planned_end_reached", "cleanup_failures": 0},
+        {"phase": "verification", "role": "reference", "rate": 16000, "elapsed_seconds": 13.157237000006717, "retained_bytes": 9600000, "end": "planned_end_reached", "cleanup_failures": 0},
+        {"phase": "verification", "role": "comparison", "rate": 16000, "elapsed_seconds": 13.102415200031828, "retained_bytes": 9600072, "end": "planned_end_reached", "cleanup_failures": 0}
+      ],
+      "windows": [
+        {"id": "primary-01", "sample_offset": 0, "frame_offset": 0, "score": 1.0, "peak_ratio": 3.614173758252488, "coverage": 1.0, "disposition": "qualified_voted"},
+        {"id": "primary-02", "sample_offset": 0, "frame_offset": 0, "score": 1.0, "peak_ratio": 10.469956295963271, "coverage": 1.0, "disposition": "qualified_voted"},
+        {"id": "primary-03", "sample_offset": 0, "frame_offset": 0, "score": 1.0, "peak_ratio": 7.561453518302704, "coverage": 1.0, "disposition": "qualified_voted"},
+        {"id": "primary-04", "sample_offset": 0, "frame_offset": 0, "score": 1.0000000000000002, "peak_ratio": 13.819696009502593, "coverage": 1.0, "disposition": "qualified_voted"},
+        {"id": "primary-05", "sample_offset": 315723, "frame_offset": 473, "score": 0.013357916104409048, "peak_ratio": 1.008688608076804, "coverage": 1.0, "disposition": "rejected_failed"}
+      ],
+      "decision": {
+        "state": "provisional",
+        "candidate_sample_offset": 0,
+        "candidate_seconds": 0.0,
+        "candidate_frame_offset": 0,
+        "raw_windows": 5,
+        "credible_windows": 4,
+        "voting_windows": 4,
+        "winning_windows": 4,
+        "independent_windows": 3,
+        "credible_competing_frame_bin": false,
+        "failed_gates": ["automatic_authority_held"],
+        "stability": "possible_discontinuity",
+        "change_position_seconds": 5225.282,
+        "final_resolution": "interactive_confirmed_this_run +0f"
+      },
+      "disposition": "inconclusive pending targeted visual review near 01:27:05 and later/final content"
+    },
+    {
+      "ordinal": 2,
+      "expected_relationship": {
+        "frame_offset": 0,
+        "confidence": "user-reported quick check, not independently labeled ground truth"
+      },
+      "diagnostic_schema": 2,
+      "evidence_availability": "current_attempt",
+      "collection_observation": "observed",
+      "selected_streams": {
+        "reference": "automatic a:0; absolute stream 1; E-AC-3; 48000 Hz; 5.1(side); English; default; original; non-commentary",
+        "comparison": "automatic a:0; absolute stream 1; E-AC-3; 48000 Hz; 5.1(side); English; default; original; non-commentary"
+      },
+      "collections": [
+        {"phase": "discovery", "role": "reference", "rate": 8000, "elapsed_seconds": 13.202111599966884, "retained_bytes": 4800000, "end": "planned_end_reached", "cleanup_failures": 0},
+        {"phase": "discovery", "role": "comparison", "rate": 8000, "elapsed_seconds": 11.297339999990072, "retained_bytes": 12480000, "end": "planned_end_reached", "cleanup_failures": 0},
+        {"phase": "verification", "role": "reference", "rate": 16000, "elapsed_seconds": 13.276192300021648, "retained_bytes": 9600000, "end": "planned_end_reached", "cleanup_failures": 0},
+        {"phase": "verification", "role": "comparison", "rate": 16000, "elapsed_seconds": 11.348544700013008, "retained_bytes": 9599696, "end": "planned_end_reached", "cleanup_failures": 0}
+      ],
+      "windows": [
+        {"id": "primary-01", "sample_offset": 94, "frame_offset": 0, "score": 0.9501278416697125, "peak_ratio": 3.405630519502227, "coverage": 1.0, "disposition": "qualified_voted"},
+        {"id": "primary-02", "sample_offset": 93, "frame_offset": 0, "score": 0.9086374781164824, "peak_ratio": 10.086426805310017, "coverage": 1.0, "disposition": "qualified_voted"},
+        {"id": "primary-03", "sample_offset": 94, "frame_offset": 0, "score": 0.6058724879435262, "peak_ratio": 4.1539260390097175, "coverage": 1.0, "disposition": "rejected_failed"},
+        {"id": "primary-04", "sample_offset": 94, "frame_offset": 0, "score": 0.7020071260794909, "peak_ratio": 13.260365937001495, "coverage": 1.0, "disposition": "rejected_failed"},
+        {"id": "primary-05", "sample_offset": 99, "frame_offset": 0, "score": 0.7353245845413297, "peak_ratio": 1.076732522132903, "coverage": 1.0, "disposition": "rejected_failed"}
+      ],
+      "decision": {
+        "state": "provisional",
+        "candidate_sample_offset": 93,
+        "candidate_seconds": 0.0058125,
+        "candidate_frame_offset": 0,
+        "raw_windows": 5,
+        "credible_windows": 2,
+        "voting_windows": 2,
+        "winning_windows": 2,
+        "independent_windows": 0,
+        "credible_competing_frame_bin": false,
+        "failed_gates": ["insufficient_independent_support"],
+        "stability": "stable",
+        "final_resolution": "interactive_confirmed_this_run +0f"
+      },
+      "disposition": "inconclusive pending middle/later/final visual review"
+    }
+  ],
+  "physical_and_presentation_observations": {
+    "cli_reported_three_sources_loaded": true,
+    "vsview_named_outputs": ["Reference", "Comparison 1", "Comparison 2"],
+    "provisional_hints_displayed": ["comparison 1 +0f not applied", "comparison 2 +0f not applied"],
+    "automatic_application_occurred": false,
+    "whole_set_result": "one schema-v1 sidecar with two ordered confirmed decisions",
+    "cli_review_result": "Accepted 2 confirmed pair(s); 0 comparison(s) kept their current offset.",
+    "manual_offsets_applied": [0, 0],
+    "visual_checks": [
+      {"reference_frame": 5000, "comparison_1_frame": 5000, "comparison_2_frame": 5000, "result": "same visible moment reported for all three"},
+      {"reference_frame": 10000, "comparison_1_frame": 10000, "comparison_2_frame": 10000, "result": "same visible moment reported for all three"}
+    ],
+    "visual_check_limit": "Both checks are early in the program and do not satisfy the required early/middle/late/final drift review.",
+    "readiness_3_of_3": "not_observed",
+    "manual_field_prefill": "not_observed",
+    "playhead_and_visited_state": "not_observed",
+    "audio_details_readability": "not_observed",
+    "marker_bounds": "result frames are in bounds; visible marker rendering not observed",
+    "close_without_save": "not_observed"
+  },
+  "artifact_sha256": {
+    "run_info.toml": "9dc620fda1c28571dc158e63730ec13d5aa9f4ade17ed603558bf4520d67d616",
+    "run_result.toml": "67e028008e69e6f0cc077eabb50bcea1e116470716420c8f6f447c538dbb66a7",
+    "comparison-1.json": "24190ea7e3d692bf9dcf5b42fbe83efc6a2d16013e8c084f27fc884e50ac0ae2",
+    "comparison-2.json": "b4c9800f9c9f71a6d23dd27bd76857baf3a987c5024a24ce8f5988b7850e874e",
+    "manual_overrides.toml": "ded52fb29b54899209362106e1c4ced54d429789141eac47eda850395fcd68c2",
+    "alignment-result.json": "bb2354aa34373eabe923911d78b7dc3806016ab0078e8ab6a4c9a67e5a0af09b",
+    "cli-run-plan-and-sources.png": "81ed4455ccdaaead55b5d9ae2593f5fca377adece83e5a0933863217afe5dfa1",
+    "cli-alignment-and-vsview.png": "09edba76bef7965293658111066780bf30647e163f82e0247588b8ccb62d1f93",
+    "cli-run-summary.png": "06c429cf80f5cc2a571d68a0a13ec6c64f89149435348cffe7974c8c92041c36"
+  },
+  "findings": [
+    {
+      "severity": "low",
+      "category": "correctness_review",
+      "finding": "Comparison 1 retained a very weak late 473-frame raw estimate and correctly exposed possible_discontinuity near 01:27:05 without treating it as a credible contradiction or applying it.",
+      "required_follow_up": "Inspect the same visible moment around untrimmed frame 125281 plus middle and final shared content."
+    }
+  ],
+  "recommendation": "No estimator, threshold, stream-selection, timeout, or architecture change is supported. Complete targeted later/final visual checks before classifying either comparison as fully correct.",
+  "release_posture": {
+    "r6_accepted": false,
+    "automatic_authority_may_be_activated": false,
+    "newly_observed_cells": [
+      "physical Windows unmanaged runtime doctor and real-media execution",
+      "three-source/two-comparison CLI and named VSView output topology",
+      "fresh computation after declining prior human-offset reuse",
+      "provisional-not-applied presentation and complete whole-set manual result",
+      "one user-described real-media zero-offset candidate set with two early visual checks"
+    ],
+    "remaining_blockers": [
+      "middle, later, warning-position, and final shared visual checks for this zero-offset set",
+      "independently labeled real known signed-offset pair",
+      "independently labeled real mismatched mix/cut/track pair",
+      "visible panel readiness, no-prefill/playhead/visited-state, details, marker, and close-without-save observations",
+      "Windows portable candidate identity and formal simultaneous parent-plus-FFmpeg RSS/lifetime measurement"
+    ]
+  }
+}
