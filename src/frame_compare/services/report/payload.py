@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, TypedDict, cast
+from urllib.parse import quote
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.errors import PathEscapesRootError
@@ -550,7 +551,7 @@ def image_src_for_report(screenshot_path: Path, *, report_dir: Path, embed_image
         raise ReportError("screenshot path cannot be made relative to the report") from exc
     if relative_path.is_absolute():
         raise ReportError("screenshot path must be relative to the report")
-    return relative_path.as_posix()
+    return quote(relative_path.as_posix(), safe="/")
 
 
 def _resolve_report_screenshot(screenshot_path: Path, report_dir: Path) -> Path:

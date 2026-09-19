@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import structlog
 
@@ -51,6 +52,21 @@ class _TTYStatus:
 class _LaunchDecision:
     enabled: bool
     no_tty: bool
+
+
+@dataclass(frozen=True)
+class AlignmentVSViewOutcome:
+    """Typed result of the optional native review without changing its wire contract."""
+
+    confirmed_offsets: dict[str, int] | None
+    review_outcome: Literal[
+        "not_requested",
+        "confirmed",
+        "keep_current",
+        "rejected_result",
+        "no_result",
+    ]
+    confirmed_frame_pairs: tuple[tuple[str, int, int], ...] = ()
 
 
 def _current_tty_status() -> _TTYStatus:
@@ -237,6 +253,20 @@ def _confirmed_offsets(result: AlignmentReviewResult) -> dict[str, int]:
     }
 
 
+def _confirmed_frame_pairs(
+    result: AlignmentReviewResult,
+) -> tuple[tuple[str, int, int], ...]:
+    return tuple(
+        (
+            decision.comparison_key,
+            decision.reference_source_frame,
+            decision.comparison_source_frame,
+        )
+        for decision in result.decisions
+        if isinstance(decision, ConfirmedAlignmentReviewDecision)
+    )
+
+
 def _handle_invalid_result(
     exc: AlignmentReviewContractError,
     *,
@@ -264,15 +294,16 @@ def maybe_launch_alignment_vsview(
     reference: AlignmentClipRequest,
     comparisons: list[AlignmentClipRequest],
     offsets_by_key: dict[str, int | None],
+    audio_review_by_key: dict[str, str],
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     verbose: bool = False,
-) -> dict[str, int] | None:
+) -> AlignmentVSViewOutcome:
     """Launch one native review and apply only a complete, trusted result."""
     if not _launch_requested(config):
-        return None
+        return AlignmentVSViewOutcome(None, "not_requested")
 
     availability = check_vsview_availability()
     if config.force_interactive:
@@ -313,6 +344,7 @@ def maybe_launch_alignment_vsview(
                 reference=reference_path,
                 comparisons=comparison_paths,
                 suggested_offsets_by_key=offsets_by_key,
+                audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
                 frame_props_by_stem=frame_props_by_stem,
                 presentation_names_by_stem={
@@ -332,7 +364,7 @@ def maybe_launch_alignment_vsview(
         if launch_decision.no_tty:
             _log_no_tty(session.script_path, tty_status)
         if not launch_decision.enabled:
-            return None
+            return AlignmentVSViewOutcome(None, "no_result")
         try:
             result = read_alignment_review_result(
                 session,
@@ -340,7 +372,7 @@ def maybe_launch_alignment_vsview(
             )
         except AlignmentReviewContractError as exc:
             _handle_invalid_result(exc, config=config, tty_status=tty_status)
-            return None
+            return AlignmentVSViewOutcome(None, "rejected_result")
 
         confirmed_offsets = _confirmed_offsets(result)
         _save_confirmed_offsets(
@@ -358,7 +390,11 @@ def maybe_launch_alignment_vsview(
             ),
             no_color=config.no_color,
         )
-        return confirmed_offsets
+        return AlignmentVSViewOutcome(
+            confirmed_offsets,
+            "confirmed" if confirmed_offsets else "keep_current",
+            _confirmed_frame_pairs(result),
+        )
     except VSViewError as exc:
         if config.force_interactive:
             raise
@@ -371,4 +407,4 @@ def maybe_launch_alignment_vsview(
     finally:
         if progress_suspended and progress is not None:
             progress.resume()
-    return None
+    return AlignmentVSViewOutcome(None, "no_result")

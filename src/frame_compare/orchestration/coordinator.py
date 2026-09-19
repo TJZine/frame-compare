@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from dataclasses import replace
 from datetime import datetime
 
 import httpx
@@ -100,19 +101,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         preflight_warnings = capture.preflight_warnings
         artifacts = RunArtifacts(warnings=capture.run_warnings)
 
-    if deps is None:
-        local_deps = RunDependencies()
-    else:
-        local_deps = RunDependencies(
-            vs_loader=deps.vs_loader,
-            ffmpeg_runner=deps.ffmpeg_runner,
-            http_client=deps.http_client,
-            progress=deps.progress,
-            confirm_slowpics_upload=deps.confirm_slowpics_upload,
-            confirm_full_window_retry=deps.confirm_full_window_retry,
-            clock=deps.clock,
-            monotonic_timer=deps.monotonic_timer,
-        )
+    local_deps = RunDependencies() if deps is None else replace(deps)
 
     local_deps.capture_reserved_run = _capture_reserved_run
 

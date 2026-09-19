@@ -496,12 +496,44 @@ unchanged.
 - Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
-  native VSView panel review is labeled `ALIGN | Native VSView review`.
+  native VSView panel review is labeled `ALIGN | Native VSView review`. Interactive
+  alignment uses a plain left-aligned activity line without a bar, count, ETA, or
+  spinner: the comparison count is too small to make those indicators useful, while
+  the changing description still identifies the active comparison. Structured JSON
+  progress keeps its measurable comparison milestones.
+- Before an optional native review opens, each non-applied current audio attempt emits a
+  compact, inset `Audio Alignment` panel naming its retained display-only provisional
+  candidate and `not applied` status, or stating that no usable candidate exists. The
+  panel uses the prepared comparison identity and aligned status, evidence, reason,
+  stream, review-action, and diagnostics rows. While the
+  shipped automatic-authority hold is active, an otherwise-qualified candidate also
+  reports `automatic_authority_held`. This does not
+  add a successful JSON field or write human text to JSON stdout. The run-local
+  diagnostic location is reported only after a successful write. The human Rich panel
+  owns that success presentation; `alignment_diagnostics_written` remains a structured
+  event for JSON/log output and is suppressed from interactive human output.
+- The pre-review evidence block keeps manual/human-authoritative `+0f`, held
+  provisional `+0f`, and absence distinct. Held computed evidence reports that
+  automatic application is temporarily disabled and that no computed correction was
+  applied; a display candidate is still shown as `Provisional candidate: +Nf (not
+  applied)`. Rejected evidence without one reports `No usable audio candidate. No
+  automatic correction applied.` Selected stream rows name each audio ordinal as
+  `a:N` and distinguish automatic metadata selection from an explicit override.
+  Historical computed and human reuse are labeled separately and do not fabricate
+  current stream/window details.
+- `--verbose` adds bounded selected-stream, threshold, gate, runtime/policy, work, and
+  per-window evidence. `--quiet` suppresses routine accepted/status evidence but
+  retains actionable rejection and diagnostic-write warnings. `--no-color` and
+  redirected/non-TTY output remain static plain text without cursor control or a
+  blocking read.
+- `run --json` suppresses the human alignment blocks and tables. Actionable rejection
+  uses the existing structured stderr logging boundary with bounded scalar fields;
+  successful JSON stdout retains its existing schema exactly.
 - Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
-  module, normal mode emits one sanitized warning and continues with the computed
-  audio alignment; forced interactive failure remains fatal. A successful VSView
+  module, normal mode emits one sanitized warning and continues with held, non-applied
+  audio evidence; forced interactive failure remains fatal. A successful VSView
   child continues to inherit its native stdout and stderr diagnostics. When Frame
   Compare reports missing, unspecified, or malformed preview color properties, the
   generated session applies the same explicit BT.709 preview defaults that VSView
@@ -791,6 +823,17 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
   changing DOM order, native controls, keyboard behavior, or ARIA semantics.
+- Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
+  alignment. Filmstrip captions show the comparison frame number and selection category
+  at every thumbnail size, with the full original frame label available on hover and
+  in the frame selector. The viewport palette remains floating and adds no reserved row.
+- Filmstrip captions center the frame-number/category group over a shallow bottom
+  gradient without reducing thumbnail image space or increasing card height.
+  Category identification uses text in captions and filters; filters keep their counts,
+  and the selected thumbnail retains its brass border.
+- The header shows the generation date in `YYYY-MM-DD` form using the timestamp's
+  recorded date, without timezone conversion. The exact timestamp remains in the date
+  tooltip, Report Information, and payload; unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.
@@ -1158,7 +1201,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.10.3 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.11.0 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with
@@ -1186,12 +1229,13 @@ Normal VSView labels reuse the release-aware presentation identities prepared by
 typed alignment request. Paths and stems remain the internal source, suggested
 offset, manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
-output per comparison. In the native panel, the default workflow unlinks playheads, visits
-every output, and positions each source on the same visible moment. Manual source-frame
-or known-offset entry and keep-current completion do not require viewer visits. Public current-
-output/current-frame callbacks update the live source lineup; the panel does not
-inspect or change hidden playheads or synchronization mode. **Use these aligned
-positions** writes the complete ordered result once. **Keep audio-derived alignment**
+output per comparison. In the native panel, the default workflow unlinks playheads,
+visits every output, and positions each source on the same visible moment. Manual
+source-frame or known-offset entry and keep-current completion do not require viewer
+visits. Public current-output/current-frame callbacks update the live source lineup;
+the panel does not inspect or change hidden playheads or synchronization mode.
+**Confirm these aligned positions** writes the complete ordered result once; the
+known-offset equivalent is **Confirm these known offsets**. **Keep current alignment**
 writes one `keep_current` decision for every comparison. The collapsed manual
 disclosure offers source-frame or known-offset input, and both use the same whole-set
 save action. The panel calculates `reference - comparison` and shows the trim meaning;
@@ -1202,15 +1246,27 @@ initial `Content loaded successfully` INFO record because `[OK] VSView Ready` al
 owns that success confirmation; reload, clipboard, warning, error, and other native
 diagnostics remain unchanged.
 
+Each comparison has a persistent **Audio evidence** summary and collapsed **Audio
+details** independent of its manual draft. Accepted, provisional, unavailable,
+historically reused, and human-authoritative alignments use distinct text and marker
+labels. A provisional marker is display-only: it never prefills a field, moves a
+playhead, marks an output visited, increases readiness, enables confirmation, writes
+an accepted marker, or authorizes trimming/cache reuse. Unavailable evidence has no
+marker.
+
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 
 The generated session carries an explicit UUID session identity, one reference role,
-ordered comparison roles/keys/ordinals, presentation names, and bounded audio
-suggestions in strict metadata schema v1. The panel derives display bounds from public
+ordered comparison roles/keys/ordinals, presentation names, the authoritative integer
+or null offset, and one bounded primitive audio-evidence projection in strict metadata
+schema v3. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
 the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
-sidecar uses the same schema v1 contract and exact ordered whole-set decision shape. Frame Compare
+sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
+exact ordered whole-set decision shape. Metadata v1/v2, unknown, or mixed Frame Compare
+sessions are rejected with instructions to generate a new session; there is no
+trust-upgrade shim. Ordinary non-Frame-Compare sessions remain inert. Frame Compare
 derives the sibling result path from the trusted generated script path, then rejects
 missing, malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds
 results. It never trusts panel-supplied paths or counts.
@@ -1365,19 +1421,20 @@ converted to this sign convention before consensus evidence, hints, caching, and
   source loading, rendering, or report generation.
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
-  is not present in the CLI override map. Exact-match computed audio alignment
-  offsets are deterministic cache hits when `cache_results = true`, regardless
-  of `previous_offsets`; the policy only controls whether prior human-confirmed
-  offsets are reused. `disabled` is the default and does not read or reuse shared
-  interactively confirmed offsets, but eligible current-run computed or
-  interactively confirmed results still write to the shared reuse cache when
-  `cache_results = true`. `prompt` shows a Rich stderr table for a complete
+  is not present in the CLI override map. Under the shipped
+  `continuous-origin-qualified-2097152-v8-held` policy, computed cache hits and embedded computed
+  fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
+  only whether prior human-confirmed offsets are reused. `disabled` is the default and
+  does not read or reuse shared interactively confirmed offsets. Newly validated manual
+  results may still write to the shared reuse cache when `cache_results = true`.
+  `prompt` shows a Rich stderr table for a complete
   valid interactively confirmed offset set and asks
   <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
-  result that produced the preview suggestion, declining the prompt reuses that
-  computed result instead of rerunning audio alignment. `always` reuses a
+  result that produced the preview suggestion, declining the prompt retains that
+  computed evidence as non-applied instead of granting automatic authority.
+  `always` reuses a
   complete valid confirmed set without prompting. Prompt mode writes no
   prompt/table to stdout.
 - Previous-offset prompt mode requires both stdin and stderr to be TTYs before
@@ -1418,16 +1475,33 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `channel_strategy = "mono_downmix" | "best_channel"` selects the audio channel
   handling used during extraction. `mono_downmix` is the default.
 - `confidence_threshold` remains a float from `0.0` through `1.0`, defaulting to
-  `0.0`. It gates whether computed offsets are applied.
+  `0.0`. It contributes to computed acceptance, but the shipped automatic-authority
+  hold keeps every computed offset non-applied.
 - `ambiguity_peak_ratio` remains a float greater than or equal to `1.0`,
   defaulting to `1.0`. It gates ambiguous correlation peaks.
 - `window_length_seconds` and `window_stride_seconds` remain floats greater than
   or equal to `0.0`, both defaulting to `0.0`. They control the consensus window
-  shape used by computed alignment.
+  shape used by computed alignment. A configured window length is retained, and a
+  configured stride defines the candidate grid before bounded candidates are sampled
+  across the complete shared selected-audio-stream timeline. When the window length
+  is configured and the stride is zero, the window length is also used as the stride,
+  producing a contiguous candidate grid before bounded sampling. With both values at
+  zero, inputs up to 30 seconds use one full shared-duration interval, inputs longer than
+  30 and shorter than 90 seconds use two disjoint endpoint intervals of `min(30s, D/2)`,
+  and inputs at least 90 seconds use five distributed 30-second intervals. A larger
+  configured minimum is retained; overlap and duplicate intervals do not become independent
+  support. Explicit length and stride preserve their requested shape, but do not waive the
+  corresponding short full-source or medium/long endpoint support requirement.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,
-  defaulting to `1`. It gates whether enough windows produced valid estimates.
+  defaulting to `1`. It is a lower bound for voting and independent support; failed, short,
+  and unattempted rows remain visible and never count as zero-quality evidence.
 - `consensus_minimum_ratio` remains a float from `0.0` through `1.0`, defaulting
-  to `1.0`. It gates whether enough windows agree on the selected offset.
+  to `1.0`. It applies to voting-qualified windows, not every raw correlated row, and
+  users' stronger configured threshold or minimum is never reduced. It gates whether
+  enough voting windows agree on the exact integer frame correction produced by
+  `samples_to_frames` at the requested sample rate and reference FPS. Adjacent frame
+  corrections remain distinct. The accepted group retains an observed lower-median sample
+  offset for diagnostic time reporting; raw per-window sample evidence remains unchanged.
 - `refinement_mode = "disabled" | "local"` selects whether local offset
   refinement runs after coarse correlation. `disabled` is the default.
 - `refinement_sample_rate` is either `null` or an integer from `4000` through
@@ -1439,7 +1513,92 @@ converted to this sign convention before consensus evidence, hints, caching, and
   audio stream ordinal, defaulting to an empty map. Matching entries select the
   comparison clip audio stream for that stem.
 
+Computed alignment probes timing for the selected audio stream, rather than using the
+container video duration. Stream `duration_ts` and time base are authoritative when
+available, followed by stream duration metadata and Matroska duration tags. Container
+duration is never substituted for missing selected-stream duration; an unavailable or
+empty selected-stream timeline produces a non-applied diagnostic. Discovery uses
+`min(requested rate, 8000)` and retries once at 4 kHz only when required for fixed FFT
+admission. Each source is decoded once per phase from stream origin, resampled once, and
+limited by a final sample endpoint. The service retains only the planned distributed
+intervals; it does not seek independently for each window.
+
+Analysis has an internal fixed peak FFT limit of 2,097,152 points, a total budget of
+16,777,216 FFT points, and a maximum of 16 windows. When discovery is below the
+configured rate, a second continuous pass at the configured rate scores the frozen
+candidate neighborhoods; coarse-rate confidence never decides acceptance.
+Requested-rate scoring is separately capped at 3,000,000 samples per pair
+and 15,000,000 samples in total, including exact-conversion rounding and halos.
+Scoring admits at most 512 evaluations per window and 536,870,912 sampled positions
+overall. Reference and comparison collections are sequential, discovery PCM is released
+before verification, and no PCM is reused across comparisons. Direct-rate work uses at
+most two FFmpeg decodes per comparison and verified work at most four. Confidence uses
+overlap-local mean centering and requires at
+least three samples and 5% of the shorter window, preventing tiny boundary overlaps
+from appearing perfectly correlated. Consensus preserves raw, credible, voting, winning,
+and independent counts. Gate I requires the canonical recipe, frozen identities, admitted
+bounds, finite retained samples, truthful coordinates, successful child/readers, and
+complete cleanup; planned completion and valid observed EOF are distinct successful
+outcomes. Gate Q requires finite requested-rate score at least 0.90, peak ratio at least
+1.50 (`unbounded` may pass), meaningful overlap, valid bounds, 90% useful coverage, and a
+deterministic disjoint subset of actual useful intervals. The configured ratio applies to
+voting-qualified windows. A base-credible estimate in another frame bin is a hard veto,
+even when stricter configuration excludes it from voting. Exact half-frame cases,
+requested-rate search-edge winners, and correction neighborhoods crossing a frame boundary
+remain provisional. The winning group's lower-median observed sample offset supplies
+diagnostic time information without replacing raw window evidence. A schema-valid window, offset,
+minimum-window, or requested-rate scoring request
+that cannot fit the fixed budget remains valid configuration but produces the explicit
+non-applied `analysis_budget_exceeded` result. Normal optional VSView/manual review and
+best-effort rendering policy then handle it like other rejected computed alignments.
+
+Interrupting a run during fresh audio computation cooperatively cancels the active
+collection or bounded numeric work, waits for the owned FFmpeg child, pipe readers,
+and computation worker to finish cleanup, and then preserves the existing interrupted
+run behavior. A cancelled attempt cannot apply trims, start another comparison or
+native review, publish completion diagnostics, or write reusable offsets. Incomplete
+process/reader cleanup is fatal even when ordinary missing dependency, decode, or
+correlation failures would remain warning-only for optional alignment. This adds no
+flag, configuration field, signal-handler framework, or successful JSON field.
+Because the fixed window cap samples a long configured grid, highly localized matching
+content that falls between selected windows can still produce a conservative false
+negative rather than unbounded scanning.
+
+Every fresh completed attempt also retains immutable selected-stream facts, one
+categorized outcome for every planned window, raw candidate/quality facts, aggregate
+qualified-policy evidence, and an explicit audio decision: `provisional` or `unavailable`
+under the shipped `continuous-origin-qualified-2097152-v8-held` automatic-authority hold.
+An otherwise-qualified computed attempt records
+`automatic_authority_held`; `trusted_automatic` is not produced while that internal
+hold is active. A provisional candidate uses fixed display-only floors (score at
+least 0.90 and peak ratio at least 1.50) and a unique largest frame-equivalent group.
+It never supplies an applied offset, trim, cache value, or trusted VSView hint. A manual
+result keeps the original attempt as separate diagnostic history. Held results remain
+provisional/unavailable even when the future policy would otherwise pass; computed frame/time
+fields and trusted native hints stay null. The sampled support is bounded and does not claim
+drift compensation or exhaustive edit detection.
+
 ## Persistence Rules
+
+Fresh runs write one pathless diagnostic artifact per comparison at
+`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v2 is marked
+`diagnostic_only`, is limited to 128 KiB per comparison, and contains no media path,
+PCM, raw command line, full subprocess stderr, environment value, or credential. It
+is atomically snapshotted before optional review and may be atomically replaced once
+with the final human outcome. Current attempts retain bounded observed collection
+summaries and window coverage facts; preanalysis rejections remain `not_observed`. The
+SHA-256 digest covers only canonical original-attempt
+JSON, so manual confirmation does not rewrite the recorded audio attempt. Sharing a
+run folder also shares bounded labels, pseudonymous source identity digests, selected
+stream metadata, and timing evidence.
+
+Diagnostic files are never read for offset selection, trim application, or shared
+cache reuse. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
+offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
+authority unchanged; a containment or symlink escape remains fail-closed. The shared
+alignment cache remains schema v2 and stores eligible authority only. Computed results
+are not written while the automatic-authority hold is active, and historical computed
+cache hits do not fabricate current stream or window evidence or authorize trims.
 
 `run --write-config` persists the effective config after applying the mapped overrides
 above. That means the flags in the previous section are persistent when combined with

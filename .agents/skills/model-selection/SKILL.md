@@ -20,8 +20,10 @@ independent benchmarks justify a change:
   cross-boundary comprehension, complex diagnosis, or proof interpretation;
 - `reviewer`: independent read-only review.
 
-Treat `.codex/agents/<role>.toml` as the sole authority for exact model,
-reasoning-effort, sandbox, and fallback settings. Choose implementation roles at
+Resolve the role's `config_file` through `.codex/config.toml` (role keys and file
+names can differ, such as `worker_luna` and `agents/worker-luna.toml`). Treat that
+TOML as the authority for exact model, reasoning-effort, sandbox, and fallback
+settings. Choose implementation roles at
 dispatch from current task risk rather than pinning a model in durable plans. Keep
 delegated writes behind a clear owner boundary, direct verification, and explicit
 stop conditions. Do not duplicate exact settings in plans, prompts, or workflow

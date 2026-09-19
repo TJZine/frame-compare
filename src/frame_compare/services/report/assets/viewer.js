@@ -40,18 +40,6 @@ const ReportViewer = {
         paletteOrientation: 'horizontal'
     },
 
-    clipDisplay(clip, profile = 'control') {
-        return ViewerFormat.clipDisplay(clip, profile);
-    },
-
-    clipFilename(clip) {
-        return ViewerFormat.clipFilename(clip);
-    },
-
-    clipAccessibleName(clip) {
-        return ViewerFormat.clipAccessibleName(clip);
-    },
-
     init() {
         this.inspector = Inspector.create(this);
         this.viewport = Viewport.create(this);
@@ -66,7 +54,7 @@ const ReportViewer = {
             this.state.mode = this.validPayloadMode(this.state.data.default_mode)
                 ? this.state.data.default_mode
                 : 'slider';
-            this.state.storageKey = this.viewportStorageKey();
+            this.state.storageKey = this.viewerStorageKey();
             this.state.categoryFilterKeys = this.buildCategoryFilterKeys();
             this.applyDefaultSelection();
             this.restorePersistedState();
@@ -78,8 +66,8 @@ const ReportViewer = {
             }
             this.bindHelpEvents();
             this.updateOverlayVisibility();
-            this.updateInspectorTabs();
-            this.updateInspectorVisibility();
+            this.inspector.updateTabs();
+            this.inspector.updateVisibility();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -1020,7 +1008,7 @@ const ReportViewer = {
         }
     },
 
-    viewportStorageKey() {
+    viewerStorageKey() {
         const reportId = this.state.data?.report_id || 'unknown-report';
         return `frame-compare:report-viewer:${reportId}:viewport`;
     },
@@ -1086,7 +1074,7 @@ const ReportViewer = {
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
-    persistViewportState() {
+    persistViewerState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
         this.viewport.storeCurrentPairAlignment();
@@ -1161,14 +1149,14 @@ const ReportViewer = {
         }
         this.state.filmstripCollapsed = Boolean(collapsed);
         this.updateFilmstripPanel();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     setFilmstripSize(size, options = {}) {
         if (!this.validFilmstripSize(size)) return;
         this.state.filmstripSize = size;
         this.updateFilmstripPanel();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     updateFilmstripPanel() {
@@ -1183,7 +1171,7 @@ const ReportViewer = {
 
         this.dom.btnFilmstripToggle.disabled = !hasThumbnails;
         this.dom.btnFilmstripToggle.textContent = hasThumbnails
-            ? (collapsed ? 'Show timeline' : 'Hide timeline')
+            ? (collapsed ? 'Show filmstrip' : 'Hide filmstrip')
             : 'Filmstrip disabled';
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-expanded',
@@ -1192,12 +1180,12 @@ const ReportViewer = {
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-label',
             hasThumbnails
-                ? `${collapsed ? 'Expand' : 'Collapse'} timeline controls`
+                ? `${collapsed ? 'Expand' : 'Collapse'} filmstrip controls`
                 : 'Filmstrip disabled'
         );
         this.dom.btnFilmstripToggle.setAttribute(
             'title',
-            hasThumbnails ? 'Toggle timeline (F)' : 'Filmstrip disabled'
+            hasThumbnails ? 'Toggle filmstrip (F)' : 'Filmstrip disabled'
         );
 
         this.dom.filmstripSizeBtns.forEach(btn => {
@@ -1213,7 +1201,7 @@ const ReportViewer = {
         if (!this.validPaletteOrientation(orientation)) return;
         this.state.paletteOrientation = orientation;
         this.updatePaletteOrientation();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     updatePaletteOrientation() {
@@ -1222,7 +1210,6 @@ const ReportViewer = {
 
         if (this.dom.btnPaletteOrientation) {
             const isVertical = this.state.paletteOrientation === 'vertical';
-            this.dom.btnPaletteOrientation.textContent = isVertical ? '↕' : '↔';
             this.dom.btnPaletteOrientation.setAttribute('aria-label', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
             this.dom.btnPaletteOrientation.setAttribute('title', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
         }
@@ -1235,46 +1222,6 @@ const ReportViewer = {
         return this.reviewController;
     },
 
-    setInspectorOpen(open, options = {}) {
-        this.inspector.setOpen(open, options);
-    },
-
-    isInspectorVisible() {
-        return this.inspector.isVisible();
-    },
-
-    updateInspectorVisibility() {
-        this.inspector.updateVisibility();
-    },
-
-    inspectorFocusableElements() {
-        return this.inspector.focusableElements();
-    },
-
-    setInspectorFocusable(enabled) {
-        this.inspector.setFocusable(enabled);
-    },
-
-    safeHttpUrl(url) {
-        return this.inspector.safeHttpUrl(url);
-    },
-
-    updateInspectorSlowpics() {
-        this.inspector.renderSlowpics();
-    },
-
-    setInspectorTab(tab, options = {}) {
-        this.inspector.setTab(tab, options);
-    },
-
-    handleInspectorTabKey(e) {
-        this.inspector.handleTabKey(e);
-    },
-
-    updateInspectorTabs() {
-        this.inspector.updateTabs();
-    },
-
     setText(element, text) {
         if (element) element.textContent = String(text ?? '');
     },
@@ -1283,54 +1230,12 @@ const ReportViewer = {
         return this.state.data?.frames?.[this.state.currentFrameIdx] || null;
     },
 
-    currentClipRole(index) {
-        return this.inspector.currentClipRole(index);
-    },
-
-    stableClipRole(index) {
-        return ViewerFormat.stableClipRole(index, this.referenceClipIndex());
-    },
-
-    modeLabel(mode = this.state.mode) {
-        return ViewerFormat.modeLabel(mode);
-    },
-
-    formatFps(value) {
-        return ViewerFormat.formatFps(value);
-    },
-
-    formatFileSize(value) {
-        return ViewerFormat.formatFileSize(value);
-    },
-
-    signalCodeLabel(kind, value) {
-        return ViewerFormat.signalCodeLabel(kind, value);
-    },
-
-    formatSignal(signal) {
-        return ViewerFormat.formatSignal(signal);
-    },
-
-    formatPresentation(clip) {
-        return ViewerFormat.formatPresentation(clip);
-    },
-
-    formatToneCurve(value) {
-        return ViewerFormat.formatToneCurve(value);
-    },
-
-    formatActivePicture(active) {
-        return ViewerFormat.formatActivePicture(active);
-    },
-
-    formatTonemapSummary() {
-        return ViewerFormat.formatTonemapSummary(this.state.data?.rendering?.tonemap);
-    },
-
     updateRenderingSummary() {
         if (typeof document?.querySelector !== 'function') return;
         const summary = document.querySelector('[data-rendering-tonemap-summary]');
-        if (summary) this.setText(summary, this.formatTonemapSummary());
+        if (summary) {
+            this.setText(summary, ViewerFormat.formatTonemapSummary(this.state.data?.rendering?.tonemap));
+        }
     },
 
     visibleSourceIndexes() {
@@ -1351,8 +1256,8 @@ const ReportViewer = {
     },
 
     currentPairLabel() {
-        const left = this.clipDisplay(this.state.data.clips[this.state.leftClipIdx]);
-        const right = this.clipDisplay(this.state.data.clips[this.state.rightClipIdx]);
+        const left = ViewerFormat.clipDisplay(this.state.data.clips[this.state.leftClipIdx]);
+        const right = ViewerFormat.clipDisplay(this.state.data.clips[this.state.rightClipIdx]);
         return `${left} vs ${right}`;
     },
 
@@ -1370,20 +1275,20 @@ const ReportViewer = {
         delete this.state.pairAlignments[this.viewport.currentPairAlignmentKey()];
         this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
         this.viewport.applyAlignment();
-        this.persistViewportState();
+        this.persistViewerState();
     },
 
     resetAllPairAlignments() {
         this.state.pairAlignments = {};
         this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
         this.viewport.applyAlignment();
-        this.persistViewportState();
+        this.persistViewerState();
     },
 
     setOverlaysHidden(hidden, options = {}) {
         this.state.overlaysHidden = Boolean(hidden);
         this.updateOverlayVisibility();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     updateOverlayVisibility() {
@@ -1414,7 +1319,7 @@ const ReportViewer = {
         this.state.blinkIntervalMs = normalized;
         this.updateBlinkControls();
         if (this.state.mode === 'blink') this.restartBlink();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     setBlinkPaused(paused) {
@@ -1603,9 +1508,9 @@ const ReportViewer = {
                 this.closeAlignmentPopover();
                 return;
             }
-            if (this.isInspectorVisible()) {
+            if (this.inspector.isVisible()) {
                 e.preventDefault();
-                this.setInspectorOpen(false);
+                this.inspector.setOpen(false);
                 return;
             }
             if (document.fullscreenElement) {
@@ -1627,7 +1532,7 @@ const ReportViewer = {
 
         if (e.key === 'i' || e.key === 'I') {
             e.preventDefault();
-            this.setInspectorOpen(!this.state.inspectorOpen);
+            this.inspector.setOpen(!this.state.inspectorOpen);
             return;
         }
 
@@ -1905,10 +1810,6 @@ const ReportViewer = {
         return role ? `${role.toUpperCase()}: ${identity}` : identity;
     },
 
-    sourceHudLabel(clip, profile = 'control') {
-        return ViewerFormat.sourceHudLabel(clip, profile);
-    },
-
     humanizeCategory(cat) {
         const mapping = {
             'quantile_bright': 'Bright',
@@ -2091,8 +1992,8 @@ const ReportViewer = {
                 leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
                 rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');
             }
-            leftAlt = `${this.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
-            rightAlt = `${this.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
+            leftAlt = `${ViewerFormat.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
+            rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
             // For Diff mode, right layer is the "compare" one which gets difference blend
             // Left layer is base.
@@ -2115,8 +2016,8 @@ const ReportViewer = {
 
             leftLabelTxt = this.clipOverlayLabel(activeClip);
             rightLabelTxt = "";
-            leftAlt = `${this.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
-            rightAlt = `${this.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
+            leftAlt = `${ViewerFormat.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
+            rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
         }
 
         this.hideStageMessage();
@@ -2170,9 +2071,9 @@ const ReportViewer = {
         this.dom.leftSelect.value = this.state.leftClipIdx;
         this.dom.rightSelect.value = this.state.rightClipIdx;
         this.dom.activeSelect.value = this.state.activeClipIdx;
-        this.dom.leftSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.leftClipIdx]);
-        this.dom.rightSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.rightClipIdx]);
-        this.dom.activeSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.activeClipIdx]);
+        this.dom.leftSelect.title = ViewerFormat.clipAccessibleName(this.state.data.clips[this.state.leftClipIdx]);
+        this.dom.rightSelect.title = ViewerFormat.clipAccessibleName(this.state.data.clips[this.state.rightClipIdx]);
+        this.dom.activeSelect.title = ViewerFormat.clipAccessibleName(this.state.data.clips[this.state.activeClipIdx]);
         this.updateOverlayVisibility();
         this.updateFilmstripPanel();
         this.updatePaletteOrientation();
@@ -2199,7 +2100,7 @@ const ReportViewer = {
         });
         this.scrollActiveFilmstripItem();
         this.preloadImages();
-        this.persistViewportState();
+        this.persistViewerState();
     },
 
     preloadImages() {

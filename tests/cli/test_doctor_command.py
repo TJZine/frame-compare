@@ -14,22 +14,22 @@ from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 from .cli_helpers import runner
 
 _AUDITED_HINTS = (
-    "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start",
+    "Make VapourSynth importable; see https://tjzine.github.io/frame-compare/getting-started/native/#native-source",
     (
         "Make L-SMASH-Works available under core.lsmas; see "
-        "https://github.com/TJZine/frame-compare#quick-start"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     (
         "Make VapourSynth importable before checking L-SMASH-Works; see "
-        "https://github.com/TJZine/frame-compare#quick-start"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     (
         "Check the VapourSynth/plugin setup, then rerun doctor; see "
-        "https://github.com/TJZine/frame-compare#quick-start"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     (
         "Provide FFmpeg and ffprobe executables; see "
-        "https://github.com/TJZine/frame-compare#requirements"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     "Install the supported vs-placebo wheel or use a complete Frame Compare runtime",
     "Install or reinstall the complete supported media runtime, then rerun doctor",

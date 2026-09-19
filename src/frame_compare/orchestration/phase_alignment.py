@@ -53,8 +53,13 @@ from frame_compare.utils.types import (
 log = structlog.get_logger()
 
 
-def run_align_phase(
-    ctx: RunContext, *, selected_frames: list[int], verbose: bool = False
+async def run_align_phase(
+    ctx: RunContext,
+    *,
+    selected_frames: list[int],
+    verbose: bool = False,
+    quiet: bool = False,
+    json_output: bool = False,
 ) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
@@ -93,7 +98,7 @@ def run_align_phase(
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    results = align_clips_from_request(
+    results = await align_clips_from_request(
         alignment_request,
         alignment_config,
         progress=ctx.reporter,
@@ -103,6 +108,8 @@ def run_align_phase(
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
         verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
     )
 
     updated_comparisons: list[ClipState] = []
@@ -154,6 +161,7 @@ def run_align_phase(
             replace(
                 comparison,
                 alignment=alignment,
+                audio_attempt=result.audio_attempt,
             )
         )
     ref_trim, comp_trims = calculate_alignment_trims(
@@ -331,6 +339,8 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         presentation_content=(
             None if common_content is None else format_content_identity(common_content)
         ),
+        alignment_diagnostics_dir=ctx.workspace.alignment_diagnostics_dir,
+        alignment_diagnostics_root=ctx.workspace.generated_root,
     )
 
 

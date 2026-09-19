@@ -95,7 +95,7 @@ function makeViewer() {
         },
         clipCount() { return this.state.data.clips.length; },
         syncRadioGroupTabStops() {},
-        persistViewportState() {
+        persistViewerState() {
             persistence.calls += 1;
             this.viewport.storeCurrentPairAlignment();
         },

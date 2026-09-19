@@ -14,6 +14,7 @@ import pytest
 import tomli_w
 
 import frame_compare.services.alignment_reuse_cache as reuse_cache
+from frame_compare.services import alignment_consensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
@@ -34,6 +35,15 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
+
+
+@pytest.fixture(autouse=True)
+def automatic_authority_is_disabled_for_cache_serialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep schema round-trip tests independent from the shipped authority latch."""
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
     "insufficient_evidence", 0, None, None, None, None, None, None
@@ -319,6 +329,53 @@ def test_source_set_cache_key_changes_with_media_runtime(
 
     assert source_set_cache_key(request) != original
     assert observed_scopes == ["alignment"]
+
+
+def test_source_set_cache_key_changes_with_estimator_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    original = source_set_cache_key(request)
+
+    monkeypatch.setattr(reuse_cache, "ALIGNMENT_ESTIMATOR_POLICY", "next-policy")
+
+    assert source_set_cache_key(request) != original
+
+
+@pytest.mark.parametrize(
+    ("provenance", "source"),
+    [
+        ("computed_this_run", "computed"),
+        ("interactive_confirmed_this_run", "manual"),
+    ],
+)
+def test_previous_estimator_policy_shared_entries_miss_without_schema_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provenance: str,
+    source: str,
+) -> None:
+    request = _request(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            reuse_cache,
+            "ALIGNMENT_ESTIMATOR_POLICY",
+            "stream-timeline-distributed-2097152-v4",
+        )
+        save_reusable_offsets(
+            request,
+            [
+                _provenance(
+                    request,
+                    result=_result(request, source=source),
+                    provenance=provenance,
+                )
+            ],
+        )
+
+    assert _cache_data(request)["version"] == CACHE_VERSION == "2"
+    assert load_reusable_offset_entries(request) is None
 
 
 def test_alignment_cache_keys_intentionally_reuse_same_stat_identity(tmp_path: Path) -> None:

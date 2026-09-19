@@ -5,7 +5,8 @@ description: Use when a Frame Compare task needs an explicit proof surface or wh
 
 # Verification Strategy
 
-Read the runbook and matching boundary skills, apply any stronger required gate, and
+Read the runbook's relevant verification section and boundary guidance needed for
+the changed contract, apply any stronger required gate, and
 choose the smallest proof that covers the risk:
 
 - regression/contract test for a stable behavior defect or public contract;
@@ -26,4 +27,5 @@ UNAVAILABLE_OR_DOCUMENTED_ONLY_PROOF:
 ```
 
 Avoid snapshots and tests that merely restate implementation details. Full-suite
-verification does not replace targeted proof.
+verification does not replace targeted proof. Reuse still-current inspected results
+under the runbook policy; repeat checks only when changes or uncertainty justify it.

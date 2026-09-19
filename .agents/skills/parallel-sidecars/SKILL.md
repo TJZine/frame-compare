@@ -15,7 +15,8 @@ benefit exceeds coordination cost.
   when concurrent writers or sensitive shared surfaces need collision protection.
 - Route bounded implementation through `bounded-worker-execution`; use
   `worker_luna` by default when outcome, ownership, contracts, and proof are clear.
-- The controller owns integration and reruns verification.
+- The controller owns integration and confirms current verification under the runbook;
+  rerun affected checks when changes invalidate existing results.
 
 Keep delegation shallow. Do not delegate an immediate critical-path task merely to
 use a role.

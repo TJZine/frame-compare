@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -15,13 +16,14 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
-    PublishPhaseOutput,
     RunArtifacts,
 )
 from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
+from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.run_result_record import read_run_result
 from frame_compare.services.types import AlignmentResult, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 
@@ -70,15 +72,19 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         request,
         config,
         progress=None,
         reference_fps=None,
         frame_props_by_stem=None,
         verbose=False,
+        quiet=False,
+        json_output=False,
     ):
         assert verbose is False
+        assert quiet is False
+        assert json_output is False
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path
         assert [comparison.identity.path for comparison in request.comparisons] == [
@@ -130,6 +136,63 @@ enable = false
     assert by_video["c_comp2.mkv"] == [33, 67, 84]
 
 
+def test_execute_run_forced_alignment_failure_stops_before_render_and_records_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = true
+use_vsview = true
+force_interactive = true
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    create_video_files(tmp_path / "comparison_videos", "a_ref.mkv", "b_comp.mkv")
+
+    failure = AudioAlignmentError(
+        "Interactive alignment did not return a valid VSView review result."
+    )
+
+    async def _fail_alignment(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fail_alignment)
+    ffmpeg = FakeFFmpegRunner()
+
+    with pytest.raises(AudioAlignmentError) as raised:
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    random_frame_count=1,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg),
+            )
+        )
+
+    assert raised.value is failure
+    assert ffmpeg.calls == []
+    run_dirs = [path for path in (tmp_path / "generated").iterdir() if path.is_dir()]
+    assert len(run_dirs) == 1
+    record = read_run_result(run_dirs[0] / "run_result.toml")
+    assert record.status == "failed"
+    assert record.failure is not None
+    assert record.failure.code == "FC-4005"
+
+
 def test_execute_run_report_confirmed_decline_skips_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -163,12 +226,10 @@ enable = true
         callback_calls.append(request)
         return "declined"
 
-    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
-        raise AssertionError("declined report-confirmed upload must not publish")
-
+    publish = AsyncMock()
     monkeypatch.setattr(
         "frame_compare.orchestration.execution.run_publish_phase",
-        _unexpected_publish,
+        publish,
     )
 
     result = asyncio.run(
@@ -193,6 +254,8 @@ enable = true
     assert result.slowpics_upload_confirmation_status == "declined"
     assert result.slowpics_url is None
     assert "confirm_slowpics_upload" in result.phase_timings
+    publish.assert_not_awaited()
+    assert not any(warning.startswith("publish:") for warning in result.warnings)
 
 
 def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Path) -> None:

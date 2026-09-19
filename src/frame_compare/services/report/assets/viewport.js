@@ -122,7 +122,7 @@ const Viewport = {
         pointer.pinchStartDistance = 0;
         pointer.pinchGridAnchor = null;
         this.viewer.dom.stage.classList.remove('is-panning');
-        this.viewer.persistViewportState();
+        this.viewer.persistViewerState();
         if (this.viewer.state.mode === 'blink') this.viewer.state.blinkPaused = false;
     },
 
@@ -225,7 +225,7 @@ const Viewport = {
         pointer.lensPointHandled = false;
         pointer.lensTouchStart = null;
         if (completedPan) {
-            this.viewer.persistViewportState();
+            this.viewer.persistViewerState();
             if (
                 !acquiredLensPoint
                 && !options.cancelled
@@ -235,14 +235,14 @@ const Viewport = {
                 this.viewer.cycleClip();
             }
         }
-        if (completedDrag) this.viewer.persistViewportState();
+        if (completedDrag) this.viewer.persistViewerState();
     },
 
     setZoom(level) {
         this.viewer.state.fitMode = 'custom';
         this.updateFitButtons();
         this.applyZoom(level);
-        this.viewer.persistViewportState();
+        this.viewer.persistViewerState();
     },
 
     clampZoom(level) {
@@ -327,7 +327,7 @@ const Viewport = {
         this.viewer.state.panY = this.viewer.numberOrDefault(y, 0);
         this.clampPan();
         this.applyPan();
-        if (options.save !== false) this.viewer.persistViewportState();
+        if (options.save !== false) this.viewer.persistViewerState();
     },
 
     clampPan() {
@@ -368,7 +368,7 @@ const Viewport = {
 
         if (options.updateZoom === false) return;
         this.applyFitMode({ resetPan: true });
-        this.viewer.persistViewportState();
+        this.viewer.persistViewerState();
     },
 
     updateFitButtons() {
@@ -550,7 +550,7 @@ const Viewport = {
             this.applyAlignmentPresetOffsets(preset);
         }
         this.applyAlignment();
-        this.viewer.persistViewportState();
+        this.viewer.persistViewerState();
     },
 
     setManualAlignment(x, y) {
@@ -559,7 +559,7 @@ const Viewport = {
         this.viewer.state.alignX = this.viewer.numberOrDefault(x, 0);
         this.viewer.state.alignY = this.viewer.numberOrDefault(y, 0);
         this.applyAlignment();
-        this.viewer.persistViewportState();
+        this.viewer.persistViewerState();
     },
 
     clearRawAlignmentInputs() {
@@ -641,12 +641,12 @@ const Viewport = {
         const yText = this.formatSignedPixels(this.viewer.state.alignY, 'y');
         const hasOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
 
-        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'Aligned: none';
-        if (this.viewer.state.alignmentPreset === 'custom') return `Aligned: custom ${xText} ${yText}`;
+        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'Offset: none';
+        if (this.viewer.state.alignmentPreset === 'custom') return `Offset: custom ${xText} ${yText}`;
         if (this.viewer.state.alignmentPreset !== 'none') {
-            return `Aligned: preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
+            return `Offset: preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
         }
-        return `Aligned: ${xText} ${yText}`;
+        return `Offset: ${xText} ${yText}`;
     },
 
     updateAlignmentStatus() {

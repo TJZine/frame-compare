@@ -20,7 +20,6 @@ from pathlib import Path
 
 import structlog
 
-from frame_compare.vs.runtime_contract import runtime_kind
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewSession,
@@ -36,6 +35,15 @@ _STARTUP_PROBE_TIMEOUT_SECONDS = 10.0
 _REVIEW_PROCESS_TIMEOUT_SECONDS = 12 * 60 * 60
 _PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 _STARTUP_STDERR_LIMIT = 4000
+# Keep ``-c``/``-m`` imports out of the caller-controlled media workspace.
+_CHILD_PROCESS_CWD = Path(sys.executable).resolve().parent
+_PYTHON_INJECTION_ENV_KEYS = (
+    "PYTHONHOME",
+    "PYTHONINSPECT",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONUSERBASE",
+)
 _ALIGNMENT_REVIEW_ENTRY_POINT_NAME = "frame-compare-alignment-review"
 _ALIGNMENT_REVIEW_ENTRY_POINT_VALUE = "frame_compare.vsview.alignment_review_panel"
 _MISSING_MODULE_PATTERN = re.compile(
@@ -169,6 +177,7 @@ class VSViewSessionRequest:
     reference: Path
     comparisons: list[Path]
     suggested_offsets_by_key: dict[str, int | None]
+    audio_review_by_key: dict[str, str]
     cache_dir: Path
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None
     presentation_names_by_stem: dict[str, str] | None = None
@@ -234,6 +243,10 @@ def launch_alignment_verification_session(
 def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
     """Build the child-only environment without changing the parent process."""
     env = os.environ.copy()
+    for key in _PYTHON_INJECTION_ENV_KEYS:
+        env.pop(key, None)
+    env["PYTHONSAFEPATH"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
     if no_color:
         env["NO_COLOR"] = "1"
     return env
@@ -250,11 +263,10 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
         "    raise RuntimeError('Frame Compare alignment panel entry point is unavailable')\n"
         "eps[0].load()\n"
     )
-    if runtime_kind().casefold() == "windows-portable":
-        probe_code = (
-            "from frame_compare.vsview.launcher import preload_vapoursynth_runtime; "
-            f"preload_vapoursynth_runtime(); {probe_code}"
-        )
+    probe_code = (
+        "from frame_compare.vsview.launcher import preload_vapoursynth_runtime; "
+        f"preload_vapoursynth_runtime(); {probe_code}"
+    )
     probe_command = [sys.executable, "-c", probe_code]
     try:
         result = subprocess.run(  # nosec B603
@@ -265,6 +277,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
             errors="replace",
             timeout=_STARTUP_PROBE_TIMEOUT_SECONDS,
             env=env,
+            cwd=_CHILD_PROCESS_CWD,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -325,6 +338,7 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
         stdout=None,
         stderr=None,
         env=env,
+        cwd=_CHILD_PROCESS_CWD,
     ) as process:
         try:
             return process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
@@ -346,6 +360,7 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
         reference=request.reference,
         comparisons=request.comparisons,
         suggested_offsets_by_key=request.suggested_offsets_by_key,
+        audio_review_by_key=request.audio_review_by_key,
         cache_dir=request.cache_dir,
         frame_props_by_stem=request.frame_props_by_stem,
         presentation_names_by_stem=request.presentation_names_by_stem,
@@ -356,7 +371,7 @@ def _resolve_launch_command(script_path: Path) -> list[str]:
     """Resolve the launch command for VSView.
 
     The managed launcher keeps VSView and the packaged Frame Compare panel in the
-    current interpreter. On Windows it also preloads VapourSynth before Qt.
+    current interpreter and preloads VapourSynth before Qt on every runtime.
     """
     return [
         sys.executable,

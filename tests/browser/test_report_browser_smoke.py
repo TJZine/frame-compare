@@ -181,7 +181,12 @@ def test_browser_dump_does_not_retry_non_timeout_failure(
     assert calls == 1
 
 
-def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
+def _generated_report(
+    tmp_path: Path,
+    *,
+    tonemapped: bool = False,
+    encoded_image_paths: bool = False,
+) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
         "reference": RenderedGeometryFacts(
@@ -206,8 +211,12 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
         ("encode", _COMPARISON_LABEL),
     ):
         geometry = geometry_by_name[name]
-        screenshot = tmp_path / "screenshots" / name / "10.png"
-        screenshot.parent.mkdir(parents=True)
+        screenshot = (
+            tmp_path / "screenshots # %20 Ü" / f"{name} # %20 Ü.png"
+            if encoded_image_paths
+            else tmp_path / "screenshots" / name / "10.png"
+        )
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
             ClipInfo(
@@ -269,6 +278,44 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     )
 
 
+def _append_encoded_image_load_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<img id="encoded-screenshot-probe" src="screenshots%20%23%20%2520%20%C3%9C/reference%20%23%20%2520%20%C3%9C.png" alt="" hidden>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const image = document.getElementById('encoded-screenshot-probe');
+    const mark = () => {
+        document.documentElement.dataset.encodedImagesLoaded = String(
+            image.complete && image.naturalWidth > 0
+        );
+    };
+    image.addEventListener('load', mark, { once: true });
+    image.addEventListener('error', mark, { once: true });
+    mark();
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_generated_report_loads_percent_encoded_screenshot_paths(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+
+    report_path = _generated_report(tmp_path, encoded_image_paths=True)
+    _append_encoded_image_load_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+
+    assert "screenshots%20%23%20%2520%20%C3%9C" in completed.stdout
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-encoded-images-loaded"] == "true"
+
+
 def _append_screenshot_load_probe(report_path: Path) -> None:
     """Add a test-only DOM marker that proves a sibling file actually loaded."""
     html = report_path.read_text(encoding="utf-8")
@@ -283,6 +330,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const stage = document.querySelector('.rv-viewer-stage');
         const stageLabels = document.querySelector('.rv-stage-labels');
         const palette = document.querySelector('.rv-viewport-palette');
+        document.documentElement.dataset.selectAffordances = String(
+            Array.from(document.querySelectorAll('select')).every(select => {
+                const style = window.getComputedStyle(select);
+                return style.backgroundImage !== 'none'
+                    && parseFloat(style.paddingRight) >= 24;
+            })
+        );
         const rectanglesIntersect = (first, second) => !(
             first.right <= second.left
             || second.right <= first.left
@@ -376,6 +430,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const paletteInset = window.innerWidth <= 768 ? 8 : (window.innerWidth <= 992 ? 12 : 16);
         const labelInset = window.innerWidth <= 768 ? 8 : 12;
         const approximately = (first, second) => Math.abs(first - second) <= 1;
+        const originalFilmstripSize = ReportViewer.state.filmstripSize;
+        document.documentElement.dataset.filmstripImageSpace = String(
+            [['compact', 120], ['normal', 150], ['large', 210]].every(([size, width]) => {
+                ReportViewer.setFilmstripSize(size, { save: false });
+                const item = document.querySelector('.rv-filmstrip-item');
+                const thumb = item.querySelector('.rv-filmstrip-thumb');
+                const caption = item.querySelector('.rv-filmstrip-caption');
+                const cardRect = item.getBoundingClientRect();
+                const thumbRect = thumb.getBoundingClientRect();
+                const captionRect = caption.getBoundingClientRect();
+                return approximately(cardRect.width, width)
+                    && approximately(cardRect.height, cardRect.width * 10 / 16)
+                    && approximately(thumbRect.width, item.clientWidth)
+                    && approximately(thumbRect.height, item.clientHeight)
+                    && approximately(captionRect.width, thumbRect.width)
+                    && approximately(captionRect.bottom, thumbRect.bottom)
+                    && captionRect.top >= thumbRect.top
+                    && window.getComputedStyle(caption).position === 'absolute';
+            })
+        );
+        ReportViewer.setFilmstripSize(originalFilmstripSize, { save: false });
         const primaryControls = document.querySelector('.rv-primary-controls');
         const frameControls = document.querySelector('.rv-frame-controls');
         const modeControls = document.querySelector('.rv-mode-controls');
@@ -471,8 +546,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         stage.style.transition = 'none';
-        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setOpen(true, { focus: false, save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         ReportViewer.updateInspectorData();
         const inspectorStageRect = stage.getBoundingClientRect();
         const inspectorPaletteRect = palette.getBoundingClientRect();
@@ -492,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
             panel.hidden = wasHidden;
             return safe;
         });
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.inspectorWidthPolicy = String(
             approximately(inspector.getBoundingClientRect().width, expectedInspectorWidth)
@@ -531,7 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
             && approximately(inspectorPaletteRect.bottom, inspectorStageRect.bottom - paletteInset)
             && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
         );
-        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(false, { focus: false, save: false });
         const infoButton = document.getElementById('btn-info');
         infoButton?.focus();
         infoButton?.click();
@@ -597,7 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inspectorButton?.click();
         document.documentElement.dataset.infoInspectorSemanticsStable = String(
             infoBefore.label === 'Report information'
-            && infoBefore.title === 'Report Info'
+            && infoBefore.title === 'Report information'
             && infoBefore.pressed === null
             && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
         );
@@ -681,18 +756,18 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
         );
-        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(true, { focus: false, save: false });
         const sourceRowsByMode = {};
         ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
             ReportViewer.setMode(mode);
-            ReportViewer.setInspectorTab('frame');
+            ReportViewer.inspector.setTab('frame');
             ReportViewer.updateInspectorData();
             sourceRowsByMode[mode] = Array.from(
                 document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
             ).map(row => row.textContent.trim());
         });
         document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
-        ReportViewer.setInspectorTab('clips');
+        ReportViewer.inspector.setTab('clips');
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.clipsMetadata = String(
             document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
@@ -702,7 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         let reviewTabUsable = false;
         try {
-            ReportViewer.setInspectorTab('review', { save: false });
+            ReportViewer.inspector.setTab('review', { save: false });
             const bookmark = document.querySelector('[data-review-bookmark]');
             const note = document.querySelector('[data-review-note]');
             bookmark.checked = true;
@@ -721,7 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.dataset.reviewTabError = String(error);
         }
         document.documentElement.dataset.reviewTabUsable = String(reviewTabUsable);
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         document.documentElement.dataset.renderingDisclosure = String(
             document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
             && !document.querySelector('[data-rendering-details]')
@@ -730,7 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.scrollWidth <= window.innerWidth
             && document.body.scrollWidth <= window.innerWidth
         );
-        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(false, { focus: false, save: false });
         ReportViewer.setMode('diff');
     };
     probeHud();
@@ -896,6 +971,8 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert 'src="screenshots/reference/10.png"' in completed.stdout
     assert parser.document_attributes is not None
     assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
+    assert parser.document_attributes["data-select-affordances"] == "true"
+    assert parser.document_attributes["data-filmstrip-image-space"] == "true"
     assert parser.document_attributes["data-source-hud-viewport-stable"] == "true"
     assert parser.document_attributes["data-source-hud-wraps"] == "true"
     assert parser.document_attributes["data-diff-source-hud-visible"] == "true"

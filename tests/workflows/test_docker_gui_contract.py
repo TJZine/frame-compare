@@ -128,8 +128,8 @@ def test_verify_docker_gui_script_documents_narrow_x11_permissions(repo_root: Pa
         "app.processEvents()",
     )
     assert '"3 / 3 sources ready"' in script
-    assert '"Use these aligned positions"' in script
-    assert '"Keep audio-derived alignment"' in script
+    assert '"Confirm these aligned positions"' in script
+    assert '"Keep current alignment"' in script
     assert "pair.reference.source_frame_count" not in script
     assert "pair.comparison.source_frame_count" not in script
     assert 'rm -rf -- "$proof_dir"' in script

@@ -238,6 +238,61 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
     assert str(render_exceptions[0]) == "Failed immediately"
 
 
+def test_render_batch_parallel_reports_lowest_request_index_failure(
+    tmp_path: Path,
+) -> None:
+    frame_zero_started = Event()
+    frame_two_failed = Event()
+    release_frame_zero = Event()
+    exceptions: list[BaseException] = []
+    requests = [
+        RenderRequest(
+            clip=tmp_path / f"clip_{frame}.mkv",
+            diagnostic_source=tmp_path / f"clip_{frame}.mkv",
+            frame_number=frame,
+            output_path=tmp_path / f"out_{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for frame in range(3)
+    ]
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        if request.frame_number == 0:
+            frame_zero_started.set()
+            assert release_frame_zero.wait(timeout=2.0)
+            raise RuntimeError("error-0")
+        if request.frame_number == 2:
+            assert frame_zero_started.wait(timeout=2.0)
+            frame_two_failed.set()
+            raise RuntimeError("error-2")
+        return _rendered(request)
+
+    def run_render() -> None:
+        try:
+            render_batch_detailed(requests, parallelism=3)
+        except BaseException as exc:
+            exceptions.append(exc)
+
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed",
+        side_effect=render_single,
+    ):
+        thread = Thread(target=run_render, daemon=True)
+        thread.start()
+        try:
+            assert frame_zero_started.wait(timeout=2.0)
+            assert frame_two_failed.wait(timeout=2.0)
+        finally:
+            release_frame_zero.set()
+            thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0], RuntimeError)
+    assert str(exceptions[0]) == "error-0"
+
+
 def test_render_batch_marks_progress_failed_on_exception(mock_render_request) -> None:
     reporter = MagicMock(spec=ProgressReporter)
 

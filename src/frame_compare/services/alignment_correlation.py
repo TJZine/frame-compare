@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import math
+import threading
 from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
 
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig, AlignmentCorrelationMode
 
 FloatArray = npt.NDArray[np.float64]
 
+# Legacy array callers remain bounded. Production alignment uses a stricter
+# per-window FFT and total-work budget in alignment_audio.
+ALIGNMENT_ANALYSIS_SAMPLE_LIMIT = 1 << 21
+ALIGNMENT_ESTIMATOR_POLICY = "continuous-origin-qualified-2097152-v8-held"
+
 _EPSILON = 1e-12
+_MIN_OVERLAP_SAMPLES = 3
+_MIN_OVERLAP_FRACTION = 0.05
 _REFINEMENT_RADIUS_SECONDS = 0.005
 _REFINEMENT_MAX_POINTS = 65_536
 
@@ -24,14 +33,25 @@ class CorrelationEstimate:
     sample_offset: int
     score: float
     peak_ratio: float
+    subsample_offset: float | None = None
 
 
 def _as_finite_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
-    array = np.asarray(signal, dtype=np.float64).reshape(-1)
+    array = np.asarray(signal).reshape(-1)[:ALIGNMENT_ANALYSIS_SAMPLE_LIMIT]
+    array = np.asarray(array, dtype=np.float64)
     if array.size == 0:
-        raise AudioAlignmentError("empty audio signal prevents correlation")
+        raise AudioAlignmentError(
+            "empty audio signal prevents correlation",
+            category="insufficient_signal",
+            stage="correlation",
+        )
     if not bool(np.all(np.isfinite(array))):
-        raise AudioAlignmentError(f"{name} audio signal contains non-finite samples")
+        raise AudioAlignmentError(
+            f"{name} audio signal contains non-finite samples",
+            category="non_finite_signal",
+            stage="correlation",
+            role="reference" if name == "reference" else "comparison",
+        )
     return array
 
 
@@ -44,7 +64,11 @@ def _preprocess_signal(signal: FloatArray, *, mode: str) -> FloatArray:
     centered = signal - float(np.mean(signal))
     rms = float(np.sqrt(np.mean(centered * centered)))
     if rms <= _EPSILON:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
+        raise AudioAlignmentError(
+            "zero-norm audio signal prevents correlation",
+            category="insufficient_signal",
+            stage="correlation",
+        )
     return centered / rms
 
 
@@ -83,12 +107,21 @@ def _linear_correlation(
 def _peak_from_correlation(
     correlation: FloatArray,
     *,
-    reference_size: int,
+    comparison_size: int,
     max_offset_samples: int | None,
+    offset_bounds_samples: tuple[int, int] | None,
 ) -> tuple[int, float, float]:
-    if max_offset_samples is not None:
+    center = comparison_size - 1
+    if offset_bounds_samples is not None:
+        lower, upper = offset_bounds_samples
+        if lower > upper:
+            raise AudioAlignmentError("correlation offset bounds are inverted")
+        start_idx = max(0, center - upper)
+        end_idx = min(correlation.size, center - lower + 1)
+        if start_idx >= end_idx:
+            raise AudioAlignmentError("offset bounds produced an empty search window")
+    elif max_offset_samples is not None:
         bounded = max(0, max_offset_samples)
-        center = reference_size - 1
         start_idx = max(0, center - bounded)
         end_idx = min(correlation.size, center + bounded + 1)
         if start_idx >= end_idx:
@@ -107,7 +140,7 @@ def _peak_from_correlation(
         end_idx=end_idx,
     )
 
-    offset = reference_size - 1 - peak_idx
+    offset = center - peak_idx
     return offset, peak, _peak_ratio(peak, runner_up)
 
 
@@ -150,8 +183,10 @@ def correlate_audio(
     comparison: npt.ArrayLike,
     *,
     max_offset_samples: int | None = None,
+    offset_bounds_samples: tuple[int, int] | None = None,
     correlation_mode: AlignmentCorrelationMode = "raw_fft",
     preprocessing_mode: str = "none",
+    cancellation: threading.Event | None = None,
 ) -> CorrelationEstimate:
     """Estimate sample offset using the requested correlation mode."""
     reference_signal = _preprocess_signal(
@@ -166,23 +201,38 @@ def correlate_audio(
     norm_ref = float(np.linalg.norm(reference_signal))
     norm_comp = float(np.linalg.norm(comparison_signal))
     if norm_ref <= _EPSILON or norm_comp <= _EPSILON:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
+        raise AudioAlignmentError(
+            "zero-norm audio signal prevents correlation",
+            category="insufficient_signal",
+            stage="correlation",
+        )
 
+    raise_if_alignment_cancelled(cancellation)
     correlation = _linear_correlation(
         reference_signal,
         comparison_signal,
         mode=correlation_mode,
     )
-    sample_offset, peak, peak_ratio = _peak_from_correlation(
+    # NumPy's native FFT is not interruptible; this is its bounded safe boundary.
+    raise_if_alignment_cancelled(cancellation)
+    sample_offset, _peak, peak_ratio = _peak_from_correlation(
         correlation,
-        reference_size=reference_signal.size,
+        comparison_size=comparison_signal.size,
         max_offset_samples=max_offset_samples,
+        offset_bounds_samples=offset_bounds_samples,
     )
-    return CorrelationEstimate(
-        sample_offset=sample_offset,
-        score=float(peak / (norm_ref * norm_comp)),
-        peak_ratio=peak_ratio,
+    score = _normalized_overlap_score(
+        reference_signal,
+        comparison_signal,
+        offset=float(sample_offset),
     )
+    if score is None:
+        raise AudioAlignmentError(
+            "insufficient aligned overlap prevents correlation",
+            category="insufficient_overlap",
+            stage="correlation",
+        )
+    return CorrelationEstimate(sample_offset=sample_offset, score=score, peak_ratio=peak_ratio)
 
 
 def _candidate_offsets(
@@ -191,6 +241,7 @@ def _candidate_offsets(
     sample_rate: int,
     refinement_sample_rate: int,
     max_offset_samples: int,
+    offset_bounds_samples: tuple[int, int] | None = None,
 ) -> list[float]:
     radius = min(max_offset_samples, max(1, int(round(sample_rate * _REFINEMENT_RADIUS_SECONDS))))
     ratio = max(1.0, refinement_sample_rate / sample_rate)
@@ -199,8 +250,10 @@ def _candidate_offsets(
     candidates = [
         coarse_offset + (index * step) for index in range(-count_each_side, count_each_side + 1)
     ]
-    lower_bound = -max_offset_samples
-    upper_bound = max_offset_samples
+    lower_bound, upper_bound = offset_bounds_samples or (
+        -max_offset_samples,
+        max_offset_samples,
+    )
     return [candidate for candidate in candidates if lower_bound <= candidate <= upper_bound]
 
 
@@ -221,22 +274,68 @@ def _normalized_overlap_score(
 ) -> float | None:
     start = max(0.0, -offset)
     stop = min(float(reference.size), float(comparison.size) - offset)
-    positions = _sample_positions(start, stop)
-    if positions.size == 0:
-        return None
-
-    reference_values = np.interp(positions, np.arange(reference.size, dtype=np.float64), reference)
-    comparison_values = np.interp(
-        positions + offset,
-        np.arange(comparison.size, dtype=np.float64),
-        comparison,
+    minimum_overlap = max(
+        _MIN_OVERLAP_SAMPLES,
+        math.ceil(min(reference.size, comparison.size) * _MIN_OVERLAP_FRACTION),
     )
+    if math.floor(stop - start) < minimum_overlap:
+        return None
+    positions = _sample_positions(start, stop)
+
+    reference_values = _interpolate(reference, positions)
+    comparison_values = _interpolate(comparison, positions + offset)
     reference_values = reference_values - float(np.mean(reference_values))
     comparison_values = comparison_values - float(np.mean(comparison_values))
     denom = float(np.linalg.norm(reference_values) * np.linalg.norm(comparison_values))
     if denom <= _EPSILON:
         return None
     return float(np.dot(reference_values, comparison_values) / denom)
+
+
+def refine_aligned_score(
+    reference: npt.ArrayLike,
+    comparison: npt.ArrayLike,
+    *,
+    preprocessing_mode: str,
+    correction_bounds_samples: tuple[int, int],
+    cancellation: threading.Event | None = None,
+) -> tuple[int, float]:
+    """Refine a coarse-aligned pair over a small bounded integer neighborhood."""
+    reference_signal = _preprocess_signal(
+        _as_finite_signal(reference, name="reference"),
+        mode=preprocessing_mode,
+    )
+    comparison_signal = _preprocess_signal(
+        _as_finite_signal(comparison, name="comparison"),
+        mode=preprocessing_mode,
+    )
+    lower_correction, upper_correction = correction_bounds_samples
+    if lower_correction > upper_correction:
+        raise AudioAlignmentError("requested-rate correction bounds are inverted")
+    scored: list[tuple[int, float]] = []
+    for correction in range(lower_correction, upper_correction + 1):
+        raise_if_alignment_cancelled(cancellation)
+        score = _normalized_overlap_score(
+            reference_signal,
+            comparison_signal,
+            offset=float(-correction),
+        )
+        if score is not None:
+            scored.append((correction, score))
+    if not scored:
+        raise AudioAlignmentError(
+            "insufficient aligned overlap prevents correlation",
+            category="insufficient_overlap",
+            stage="scoring",
+        )
+    return max(scored, key=lambda item: item[1])
+
+
+def _interpolate(signal: FloatArray, positions: FloatArray) -> FloatArray:
+    lower = np.floor(positions).astype(np.int64)
+    upper = np.minimum(lower + 1, signal.size - 1)
+    fraction = positions - lower
+    return signal[lower] * (1.0 - fraction) + signal[upper] * fraction
 
 
 def _refine_locally(
@@ -249,6 +348,8 @@ def _refine_locally(
     sample_rate: int,
     refinement_sample_rate: int,
     max_offset_samples: int,
+    offset_bounds_samples: tuple[int, int] | None,
+    cancellation: threading.Event | None,
 ) -> CorrelationEstimate:
     best_offset = float(coarse_offset)
     best_score = coarse_score
@@ -257,7 +358,9 @@ def _refine_locally(
         sample_rate=sample_rate,
         refinement_sample_rate=refinement_sample_rate,
         max_offset_samples=max_offset_samples,
+        offset_bounds_samples=offset_bounds_samples,
     ):
+        raise_if_alignment_cancelled(cancellation)
         score = _normalized_overlap_score(reference, comparison, offset=candidate)
         if score is not None and score > best_score:
             best_offset = candidate
@@ -266,6 +369,7 @@ def _refine_locally(
         sample_offset=int(round(best_offset)),
         score=best_score,
         peak_ratio=coarse_peak_ratio,
+        subsample_offset=best_offset,
     )
 
 
@@ -274,15 +378,24 @@ def estimate_alignment_offset(
     comparison: npt.ArrayLike,
     *,
     config: AlignmentConfig,
+    alignment_offset_bounds_samples: tuple[int, int] | None = None,
+    cancellation: threading.Event | None = None,
 ) -> CorrelationEstimate:
     """Estimate ``reference - comparison`` alignment from extracted audio."""
     max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
+    raw_offset_bounds = (
+        (-alignment_offset_bounds_samples[1], -alignment_offset_bounds_samples[0])
+        if alignment_offset_bounds_samples is not None
+        else None
+    )
     estimate = correlate_audio(
         reference,
         comparison,
         max_offset_samples=max_offset_samples,
+        offset_bounds_samples=raw_offset_bounds,
         correlation_mode=config.correlation_mode,
         preprocessing_mode=config.preprocessing_mode,
+        cancellation=cancellation,
     )
     if config.refinement_mode == "disabled":
         return CorrelationEstimate(-estimate.sample_offset, estimate.score, estimate.peak_ratio)
@@ -309,5 +422,12 @@ def estimate_alignment_offset(
         sample_rate=config.sample_rate,
         refinement_sample_rate=refinement_sample_rate,
         max_offset_samples=max_offset_samples,
+        offset_bounds_samples=raw_offset_bounds,
+        cancellation=cancellation,
     )
-    return CorrelationEstimate(-refined.sample_offset, refined.score, refined.peak_ratio)
+    return CorrelationEstimate(
+        -refined.sample_offset,
+        refined.score,
+        refined.peak_ratio,
+        -refined.subsample_offset if refined.subsample_offset is not None else None,
+    )

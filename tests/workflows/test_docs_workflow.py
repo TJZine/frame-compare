@@ -24,7 +24,7 @@ EXPECTED_PATHS = {
 EXPECTED_ACTIONS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
-    "astral-sh/setup-uv": "20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
+    "astral-sh/setup-uv": "bec219d24cd3e171d82865faccec33120bb574f4",
     "actions/configure-pages": "45bfe0192ca1faeb007ade9deae92b16b8254a0d",
     "actions/upload-pages-artifact": "fc324d3547104276b827a68afc52ff2a11cc49c9",
     "actions/deploy-pages": "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128",
@@ -40,7 +40,7 @@ def test_docs_workflow_events_and_paths_are_scoped(repo_root: Path) -> None:
     events = workflow["on"]
 
     assert set(events) == {"pull_request", "push", "workflow_dispatch"}
-    assert events["pull_request"]["branches"] == ["main", "cleanup", "staging"]
+    assert events["pull_request"]["branches"] == ["main", "pre-release", "staging"]
     assert events["push"]["branches"] == ["main", "staging"]
     assert set(events["pull_request"]["paths"]) == EXPECTED_PATHS
     assert set(events["push"]["paths"]) == EXPECTED_PATHS
@@ -69,7 +69,7 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
 
     assert _step_by_name(build, "Set up Python")["with"]["python-version"] == "3.13"
     uv_step = _step_by_name(build, "Set up uv")
-    assert uv_step["with"] == {"version": "0.12.7", "enable-cache": "false"}
+    assert uv_step["with"] == {"version": "0.12.13", "enable-cache": "false"}
     assert not re.search(r"version:\s*[\"']?latest[\"']?", source, re.IGNORECASE)
     assert _step_by_name(build, "Install documentation dependencies")["run"] == (
         "uv sync --only-group docs --locked"

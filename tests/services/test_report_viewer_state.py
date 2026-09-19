@@ -18,6 +18,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])
 
+    assert (
+        summary["viewerStorageKey"]
+        == "frame-compare:report-viewer:report_viewer_state_contract:viewport"
+    )
     assert summary["clipDisplayProfiles"] == {
         "requiredPayloadProfiles": True,
         "stableInspectorRoles": True,

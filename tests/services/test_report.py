@@ -443,6 +443,28 @@ def test_image_src_for_report_rejects_escape_and_accepts_contained_files(tmp_pat
         image_src_for_report(tmp_path / "outside.png", report_dir=report_dir, embed_images=False)
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("100 - Cut#1.png", "screens/100%20-%20Cut%231.png"),
+        ("100 - Cut%20A.png", "screens/100%20-%20Cut%2520A.png"),
+        ("100 - Cut A.png", "screens/100%20-%20Cut%20A.png"),
+        ("100 - Ünicode.png", "screens/100%20-%20%C3%9Cnicode.png"),
+    ],
+)
+def test_image_src_for_report_encodes_url_path_characters(
+    tmp_path: Path,
+    filename: str,
+    expected: str,
+) -> None:
+    report_dir = tmp_path / "run"
+    screenshot = report_dir / "screens" / filename
+    screenshot.parent.mkdir(parents=True)
+    screenshot.write_bytes(b"fake_png_data")
+
+    assert image_src_for_report(screenshot, report_dir=report_dir, embed_images=False) == expected
+
+
 def test_report_data_and_clip_are_frozen(report_data: ReportData) -> None:
     with pytest.raises(FrozenInstanceError):
         report_data.frames = []  # type: ignore

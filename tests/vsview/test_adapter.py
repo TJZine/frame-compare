@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -21,10 +22,14 @@ from frame_compare.vsview.adapter import (
     VSViewSessionRequest,
     _build_vsview_child_env,
     _check_startup_readiness,
+    _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
-from frame_compare.vsview.alignment_review_contract import AlignmentReviewContractError
+from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_VERSION,
+    AlignmentReviewContractError,
+)
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.session_script import (
     _build_script_content,
@@ -33,12 +38,33 @@ from frame_compare.vsview.session_script import (
 )
 
 
+def _audio_review_map(offsets: dict[str, int | None]) -> dict[str, str]:
+    return {
+        key: json.dumps(
+            {
+                "current_authority": {
+                    "origin": "shared_computed_offsets" if offset is not None else "none",
+                    "frame_offset": offset,
+                },
+                "evidence_availability": (
+                    "historical_details_unavailable" if offset is not None else "not_computed"
+                ),
+                "audio_attempt": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for key, offset in offsets.items()
+    }
+
+
 def _session_request(tmp_path: Path) -> VSViewSessionRequest:
     return VSViewSessionRequest(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comparison.mkv"],
         suggested_offsets_by_key={"ref:comparison": 4},
         cache_dir=tmp_path,
+        audio_review_by_key=_audio_review_map({"ref:comparison": 4}),
     )
 
 
@@ -61,14 +87,46 @@ def test_child_environment_isolated_and_preserves_warning_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYTHONWARNINGS", "error::ResourceWarning")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    monkeypatch.setenv("PYTHONSTARTUP", "/caller/startup.py")
+    monkeypatch.setenv("PYTHONINSPECT", "1")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.delenv("NO_COLOR", raising=False)
     parent_env = os.environ.copy()
 
     child_env = _build_vsview_child_env(no_color=True)
 
     assert child_env["PYTHONWARNINGS"] == "error::ResourceWarning"
+    assert child_env["PYTHONSAFEPATH"] == "1"
+    assert child_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONPATH" not in child_env
+    assert "PYTHONHOME" not in child_env
+    assert "PYTHONSTARTUP" not in child_env
+    assert "PYTHONINSPECT" not in child_env
+    assert "PYTHONUSERBASE" not in child_env
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
+
+
+def test_windows_portable_child_env_relies_on_managed_embedded_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+    monkeypatch.setenv("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "managed-fingerprint")
+    monkeypatch.setenv("PYTHONPATH", r"C:\bundle\app\src;C:\bundle\app\site-packages")
+
+    child_env = _build_vsview_child_env(no_color=False)
+
+    assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
+    assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
+    assert "PYTHONPATH" not in child_env
+    build_script = (
+        Path(__file__).parents[2] / "tools" / "windows_portable" / "build_portable.ps1"
+    ).read_text(encoding="utf-8")
+    assert r'"..\\app\\site-packages"' in build_script
+    assert r'"..\\app\\src"' in build_script
+    assert '"import site"' in build_script
 
 
 @pytest.mark.parametrize(
@@ -137,11 +195,104 @@ def test_startup_readiness_probes_pyside6_vsview_and_output_api(
     probe_code = mock_run.call_args.args[0][2]
     assert "import PySide6" in probe_code
     assert "import vsview" in probe_code
+    assert probe_code.index("preload_vapoursynth_runtime()") < probe_code.index("import PySide6")
     assert "from vsview import set_output" in probe_code
     assert "frame-compare-alignment-review" in probe_code
     assert "eps[0].load()" in probe_code
     assert "raise RuntimeError" in probe_code
     assert "compat" not in probe_code
+    assert mock_run.call_args.kwargs["cwd"] == Path(sys.executable).resolve().parent
+
+
+@pytest.mark.parametrize(
+    "python_args",
+    [
+        ("-c", "import json"),
+        ("-m", "json.tool", "--help"),
+    ],
+)
+def test_managed_python_children_ignore_hostile_inherited_python_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    python_args: tuple[str, ...],
+) -> None:
+    hostile_python_path = tmp_path / "hostile-python-path"
+    hostile_python_path.mkdir()
+    sitecustomize_marker = tmp_path / "hostile-sitecustomize-imported"
+    shadow_marker = tmp_path / "hostile-json-imported"
+    (hostile_python_path / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(sitecustomize_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    (hostile_python_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(hostile_python_path))
+    child_env = _build_vsview_child_env(no_color=False)
+
+    returncode = _run_vsview_command(
+        [sys.executable, *python_args],
+        env=child_env,
+    )
+
+    assert returncode == 0
+    assert not sitecustomize_marker.exists()
+    assert not shadow_marker.exists()
+
+
+def test_preloaded_vapoursynth_wins_over_hostile_generated_session_module(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    session = write_vsview_session_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key=_audio_review_map({"ref:comparison": 0}),
+        cache_dir=workspace / "generated",
+    )
+    hostile_marker = tmp_path / "hostile-vapoursynth-imported"
+    (session.parent / "vapoursynth.py").write_text(
+        f"from pathlib import Path\nPath({str(hostile_marker)!r}).touch()\n"
+        "raise RuntimeError('hostile VapourSynth shadow loaded')\n",
+        encoding="utf-8",
+    )
+
+    runtime_dir = tmp_path / "selected-runtime"
+    runtime_dir.mkdir()
+    safe_marker = tmp_path / "selected-vapoursynth-imported"
+    (runtime_dir / "vapoursynth.py").write_text(
+        f"from pathlib import Path\nPath({str(safe_marker)!r}).touch()\ncore = object()\n",
+        encoding="utf-8",
+    )
+    source_dir = Path(__file__).parents[2] / "src"
+    probe_code = f"""
+import sys
+sys.path.insert(0, {str(source_dir)!r})
+sys.path.insert(0, {str(runtime_dir)!r})
+from frame_compare.vsview.launcher import preload_vapoursynth_runtime
+preload_vapoursynth_runtime()
+sys.path.insert(0, {str(session.parent)!r})
+import vapoursynth
+assert vapoursynth.__file__ == {str(runtime_dir / "vapoursynth.py")!r}
+"""
+
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-c", probe_code],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=10.0,
+        env=_build_vsview_child_env(no_color=False),
+        cwd=Path(sys.executable).resolve().parent,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert safe_marker.exists()
+    assert not hostile_marker.exists()
 
 
 def test_launch_rejects_missing_panel_entry_point(
@@ -179,7 +330,6 @@ def test_windows_startup_readiness_preloads_before_vsview(
 ) -> None:
     mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-    monkeypatch.setattr("frame_compare.vsview.adapter.runtime_kind", lambda: "windows-portable")
 
     _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
 
@@ -221,10 +371,10 @@ def test_launch_uses_managed_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
-    )
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
     process = MagicMock()
     process.__enter__.return_value = process
     process.wait.return_value = 0
@@ -242,6 +392,13 @@ def test_launch_uses_managed_launcher(
         "frame_compare.vsview.launcher",
         str(session.script_path),
     ]
+    probe_env = mock_run.call_args.kwargs["env"]
+    launch_env = popen.call_args.kwargs["env"]
+    assert probe_env == launch_env
+    assert "PYTHONPATH" not in launch_env
+    assert "PYTHONHOME" not in launch_env
+    assert launch_env["PYTHONSAFEPATH"] == "1"
+    assert launch_env["PYTHONNOUSERSITE"] == "1"
 
 
 def test_disabled_launch_writes_vsview_named_session_without_starting_process(
@@ -321,6 +478,8 @@ def _execute_generated_script(
     unusable_index_stems: set[str] | None = None,
     cache_free_failure_stems: set[str] | None = None,
     output_sink: list[tuple[str, int, str]] | None = None,
+    audio_review_by_key: dict[str, str] | None = None,
+    overlay_sink: list[str] | None = None,
 ) -> tuple[
     list[tuple[str, int, str]],
     list[dict[str, object]],
@@ -369,8 +528,10 @@ def _execute_generated_script(
             return clips[stem]
 
     class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+        def Text(self, clip: FakeClip, text: str, *, alignment: int) -> FakeClip:
             assert alignment == 7
+            if overlay_sink is not None:
+                overlay_sink.append(text)
             return clip
 
     class FakeStd:
@@ -399,7 +560,11 @@ def _execute_generated_script(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
-        bootstrap_paths=[tmp_path],
+        audio_review_by_key=(
+            _audio_review_map(suggested_offsets_by_key)
+            if audio_review_by_key is None
+            else audio_review_by_key
+        ),
         frame_props_by_stem=default_props,
         presentation_names_by_stem=presentation_names_by_stem,
     )
@@ -441,7 +606,9 @@ def test_generated_session_registers_named_outputs_in_input_order(
         1,
         2,
     ]
-    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {1}
+    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {
+        ALIGNMENT_REVIEW_METADATA_VERSION
+    }
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
     assert [stem for stem, _cachefile, _cache in loader_calls].count("ref") == 1
 
@@ -506,6 +673,73 @@ def test_generated_session_keeps_bt709_defaults_and_overlay_hints(
     assert applied_props["ref"] == {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1}
 
 
+def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlays: list[str] = []
+    reviews = {
+        "ref:accepted": json.dumps(
+            {
+                "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "trusted_automatic",
+                        "candidate": {"frame_offset": 0},
+                        "primary_reason": "accepted",
+                    }
+                },
+            }
+        ),
+        "ref:provisional": json.dumps(
+            {
+                "current_authority": {"origin": "none", "frame_offset": None},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "provisional",
+                        "candidate": {"frame_offset": 0},
+                        "primary_reason": "insufficient_consensus",
+                    }
+                },
+            }
+        ),
+        "ref:unavailable": json.dumps(
+            {
+                "current_authority": {"origin": "none", "frame_offset": None},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "unavailable",
+                        "candidate": None,
+                        "primary_reason": "insufficient_signal",
+                    }
+                },
+            }
+        ),
+    }
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        comparison_stems=("accepted", "provisional", "unavailable"),
+        suggested_offsets_by_key={
+            "ref:accepted": 0,
+            "ref:provisional": None,
+            "ref:unavailable": None,
+        },
+        audio_review_by_key=reviews,
+        overlay_sink=overlays,
+    )
+
+    joined = "\n".join(overlays)
+    assert "Audio alignment accepted: +0f" in joined
+    assert "Provisional +0f — NOT APPLIED" in joined
+    assert "No usable audio candidate" in joined
+    assert "no trusted audio hint" not in joined
+
+
 def test_generated_script_suppresses_only_redundant_vsview_load_success() -> None:
     logger = logging.getLogger("vsview.app.workspace.loader")
     existing_filters = tuple(logger.filters)
@@ -521,9 +755,7 @@ def test_generated_script_suppresses_only_redundant_vsview_load_success() -> Non
             (logging.ERROR, "Failed to load content: %r", True),
         )
         for level, message, expected in cases:
-            record = logging.LogRecord(
-                logger.name, level, "loader.py", 1, message, (), None
-            )
+            record = logging.LogRecord(logger.name, level, "loader.py", 1, message, (), None)
             assert bool(logger.filter(record)) is expected
     finally:
         for item in added_filters:
@@ -537,7 +769,7 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "a.mkv"],
         suggested_offsets_by_key={"ref:a": 0},
-        bootstrap_paths=[tmp_path],
+        audio_review_by_key=_audio_review_map({"ref:a": 0}),
     )
 
     assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 3
@@ -561,12 +793,14 @@ def test_write_vsview_session_script_is_atomic_and_deterministic_body(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
     second = write_vsview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
 
@@ -603,6 +837,7 @@ def test_write_vsview_session_script_retries_uuid_path_collision(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
 

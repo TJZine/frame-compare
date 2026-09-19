@@ -18,12 +18,17 @@ Always-on defaults:
   important results in source and use `rg`/direct reads for exact queries.
 - Use the smallest matching repo-local skill set. Prefer one process skill plus only
   the boundary skills required by the changed surface.
+- Read relevant authority sections first; expand to callers, adjacent contracts, or
+  the full document when the evidence leaves a material question unresolved.
 - Keep code-health scanner state and optional local code-health skills untracked; do not add a repo-local `desloppify` skill unless the task explicitly targets desloppify workflow and the maintainer approves tracking it.
 - Keep Antigravity rules in `.agents/rules/general-guidelines.md` as a thin shim over this entrypoint and the runbook, not a second workflow.
 - Use the repo command canon from the runbook.
 - Let the runbook own public-surface and `docs/plans/` activation policy.
 - Default to one agent. Delegate only independent read-heavy work or an approved,
   disjoint implementation unit; do not add planner/reviewer passes by habit.
+- Complete authorized work through verification and repair of failures caused by
+  the change. Resolve routine uncertainty from source; use the runbook's escalation
+  boundaries for consequential decisions that remain unresolved.
 - Before claiming completion, run risk-matched verification, inspect the diff, and
   preserve unrelated user changes.
 

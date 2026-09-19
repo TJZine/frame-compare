@@ -51,6 +51,7 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationFn,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -118,6 +119,7 @@ def _create_timed_phase(
 def build_phases_before_align(
     *,
     request: RunRequest,
+    config: ConfigSchema,
     monotonic_timer: Callable[[], float],
     state: ExecutionState,
     input_videos: list[Path],
@@ -163,13 +165,15 @@ def build_phases_before_align(
                 run_align_phase,
                 selected_frames=state.selected_frames,
                 verbose=request.verbose,
+                quiet=request.quiet,
+                json_output=request.json_output,
             ),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
-            warn_only=True,
-            fatal_exceptions=(ExclusionRecoverySelectionError,),
+            warn_only=not config.audio_alignment.force_interactive,
+            fatal_exceptions=(ExclusionRecoverySelectionError, AudioAlignmentCleanupError),
             progress_total=max(1, len(input_videos)),
             skip_detail="Disabled",
         ),
@@ -363,6 +367,7 @@ def build_execution_phase_plan(
     """
     before_align = build_phases_before_align(
         request=request,
+        config=prep.config,
         monotonic_timer=deps.monotonic_timer,
         state=state,
         input_videos=prep.input_videos,

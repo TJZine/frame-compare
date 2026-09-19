@@ -74,8 +74,10 @@ const context = {
 };
 context.globalThis = context;
 
-const asset = path.join(__dirname, '..', '..', 'src', 'frame_compare', 'services', 'report', 'assets', 'review_state.js');
-vm.runInNewContext(`${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, context, { filename: asset });
+const assets = path.join(__dirname, '..', '..', 'src', 'frame_compare', 'services', 'report', 'assets');
+const formatAsset = path.join(assets, 'viewer_format.js');
+const asset = path.join(assets, 'review_state.js');
+vm.runInNewContext(`${fs.readFileSync(formatAsset, 'utf8')}\n${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, context, { filename: asset });
 const ReviewState = context.__ReviewState;
 const reportId = `report_${'c'.repeat(32)}`;
 const encoder = new TextEncoder();
