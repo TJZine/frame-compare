@@ -2,6 +2,7 @@
 
 import sys
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 from rich.console import Console
@@ -153,27 +154,33 @@ def test_select_reporter_no_color_non_tty_returns_plain():
 
 def test_interactive_alignment_uses_plain_activity_without_discarding_log_progress() -> None:
     rich_reporter = RichProgressReporter(no_color=True)
-    start_phase_progress(
+    with patch.object(
         rich_reporter,
-        name="align",
-        display_label="ALIGN",
-        total=3,
-    )
-
-    rich_task = rich_reporter._progress.tasks[0]  # noqa: SLF001
-    assert rich_task.total == 1
-    assert rich_task.fields["presentation"] == "simple"
+        "start_phase",
+        wraps=rich_reporter.start_phase,
+    ) as rich_start_phase:
+        start_phase_progress(
+            rich_reporter,
+            name="align",
+            display_label="ALIGN",
+            total=3,
+        )
+    rich_start_phase.assert_called_once_with("ALIGN", total=1)
     rich_reporter.complete_phase()
 
     log_reporter = LogProgressReporter()
-    start_phase_progress(
+    with patch.object(
         log_reporter,
-        name="align",
-        display_label="ALIGN",
-        total=3,
-    )
-    assert log_reporter._name == "align"  # noqa: SLF001
-    assert log_reporter._total == 3  # noqa: SLF001
+        "start_phase",
+        wraps=log_reporter.start_phase,
+    ) as log_start_phase:
+        start_phase_progress(
+            log_reporter,
+            name="align",
+            display_label="ALIGN",
+            total=3,
+        )
+    log_start_phase.assert_called_once_with("align", total=3)
 
 
 @pytest.mark.parametrize("width", [60, 80])
