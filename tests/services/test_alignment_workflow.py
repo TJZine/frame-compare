@@ -25,6 +25,7 @@ from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_correlation import CorrelationEstimate
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AudioAlignmentCollectionRecord
+from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
@@ -714,6 +715,7 @@ def _presented_attempt_result(
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
+    progress: ProgressReporter | None = None,
 ) -> None:
     attempt = audio_attempt()
     decision = attempt.decision
@@ -794,6 +796,7 @@ def _presented_attempt_result(
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
+        progress=progress,
     )
 
 
@@ -819,6 +822,30 @@ def test_normal_terminal_distinguishes_audio_states(
     assert expected in captured.err
     assert "Streams: Reference a:0 -> Comparison a:0" in captured.err
     assert "\x1b[" not in captured.err
+
+
+def test_rich_terminal_groups_audio_evidence_in_an_aligned_panel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _presented_attempt_result(
+        tmp_path,
+        monkeypatch,
+        state="provisional",
+        progress=RichProgressReporter(no_color=True),
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "[WARN] Audio Alignment" in captured.err
+    assert "comparison" in captured.err
+    assert "status" in captured.err
+    assert "Provisional candidate:" in captured.err
+    assert "+0f (not applied)" in captured.err
+    assert "evidence" in captured.err
+    assert "reason" in captured.err
+    assert "streams" in captured.err
 
 
 def test_verbose_terminal_adds_bounded_stream_and_window_details(

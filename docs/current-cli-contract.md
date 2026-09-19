@@ -496,10 +496,16 @@ unchanged.
 - Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
-  native VSView panel review is labeled `ALIGN | Native VSView review`.
+  native VSView panel review is labeled `ALIGN | Native VSView review`. Interactive
+  alignment uses the indeterminate spinner presentation rather than a progress bar:
+  the comparison count is too small to make a bar or ETA useful, while the changing
+  description still identifies the active comparison. Structured JSON progress keeps
+  its measurable comparison milestones.
 - Before an optional native review opens, each non-applied current audio attempt emits a
-  compact stderr explanation naming its retained display-only provisional candidate
-  and `not applied` status, or stating that no usable candidate exists. While the
+  compact, inset `Audio Alignment` panel naming its retained display-only provisional
+  candidate and `not applied` status, or stating that no usable candidate exists. The
+  panel uses the prepared comparison identity and aligned status, evidence, reason,
+  stream, review-action, and diagnostics rows. While the
   shipped automatic-authority hold is active, an otherwise-qualified candidate also
   reports `automatic_authority_held`. This does not
   add a successful JSON field or write human text to JSON stdout. The run-local

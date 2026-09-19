@@ -11,6 +11,7 @@ from frame_compare.orchestration.progress import (
     emit_execution_section_end,
     emit_execution_section_start,
     select_reporter,
+    start_phase_progress,
 )
 from frame_compare.utils.progress import (
     LogProgressReporter,
@@ -148,6 +149,31 @@ def test_select_reporter_no_color_non_tty_returns_plain():
     """Non-interactive no-color output should still use plain progress."""
     reporter = select_reporter(no_color=True, force_tty=False)
     assert isinstance(reporter, PlainProgressReporter)
+
+
+def test_interactive_alignment_uses_spinner_without_discarding_log_progress() -> None:
+    rich_reporter = RichProgressReporter(no_color=True)
+    start_phase_progress(
+        rich_reporter,
+        name="align",
+        display_label="ALIGN",
+        total=3,
+    )
+
+    rich_task = rich_reporter._progress.tasks[0]  # noqa: SLF001
+    assert rich_task.total is None
+    assert rich_task.fields["presentation"] == "indeterminate"
+    rich_reporter.complete_phase()
+
+    log_reporter = LogProgressReporter()
+    start_phase_progress(
+        log_reporter,
+        name="align",
+        display_label="ALIGN",
+        total=3,
+    )
+    assert log_reporter._name == "align"  # noqa: SLF001
+    assert log_reporter._total == 3  # noqa: SLF001
 
 
 @pytest.mark.parametrize("width", [60, 80])

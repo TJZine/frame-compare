@@ -14,6 +14,11 @@ from fractions import Fraction
 from pathlib import Path
 
 import structlog
+from rich.console import Console
+from rich.markup import escape
+from rich.padding import Padding
+from rich.panel import Panel
+from rich.table import Table
 
 from frame_compare.services import alignment_audio, alignment_consensus, alignment_math
 from frame_compare.services.alignment_correlation import ALIGNMENT_ESTIMATOR_POLICY
@@ -39,6 +44,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     AudioAlignmentAttempt,
 )
+from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
@@ -872,6 +878,81 @@ def _trim_explanation(offset: int) -> str:
     return f"Trim {abs(offset)}f from the comparison"
 
 
+def _alignment_evidence_row(line: str) -> tuple[str, str, str]:
+    """Return the key, value, and style for one interactive evidence row."""
+    stripped = line.strip()
+    if stripped.startswith("Comparison ") and " - " in stripped:
+        _comparison, value = stripped.split(" - ", 1)
+        return "  status", value, "yellow" if "not applied" in value else "bright_white"
+    prefixes = {
+        "Reason: ": "  reason",
+        "Streams: ": "  streams",
+        "Runtime/policy: ": "  runtime",
+        "Thresholds: ": "  thresholds",
+        "Decision: ": "  decision",
+        "Evidence: ": "  evidence",
+        "Work: ": "  work",
+    }
+    for prefix, key in prefixes.items():
+        if stripped.startswith(prefix):
+            return key, stripped.removeprefix(prefix), "bright_white"
+    if stripped.startswith("Audio alignment automatic application"):
+        return "  authority", stripped, "yellow"
+    if stripped.startswith(("Audio evidence", "Continuing without")):
+        return "  outcome", stripped, "yellow"
+    if "correlated windows agree" in stripped or "windows planned" in stripped:
+        return "  evidence", stripped, "bright_white"
+    if stripped.startswith("Opening VSView"):
+        return "  review", stripped, "magenta"
+    if stripped.startswith("Audio diagnostics: "):
+        return "diagnostics", stripped.removeprefix("Audio diagnostics: "), "bright_white"
+    if "warning" in stripped.lower() or "not applied" in stripped.lower():
+        return "  warning", stripped, "yellow"
+    return "  detail", stripped, "bright_white"
+
+
+def _render_alignment_evidence_panel(
+    *,
+    entries: list[tuple[str, list[str]]],
+    diagnostics_written: bool,
+    no_color: bool,
+    actionable: bool,
+) -> None:
+    table = Table(
+        show_header=False,
+        box=None,
+        pad_edge=False,
+        padding=(0, 2, 0, 0),
+        expand=True,
+    )
+    table.add_column("key", style="blue", no_wrap=True, min_width=14, overflow="fold")
+    table.add_column("value", overflow="fold")
+    for index, (comparison_name, lines) in enumerate(entries):
+        if index:
+            table.add_row("", "")
+        table.add_row("comparison", f"[bright_white]{escape(comparison_name)}[/]")
+        for line in lines:
+            key, value, style = _alignment_evidence_row(line)
+            table.add_row(key, f"[{style}]{escape(value)}[/]")
+    if diagnostics_written:
+        table.add_row("", "")
+        table.add_row("diagnostics", "[bright_white]alignment_diagnostics/[/]")
+
+    marker = "[bold yellow][WARN][/] " if actionable else ""
+    console = Console(stderr=True, no_color=no_color, height=1000)
+    console.print(
+        Padding(
+            Panel(
+                table,
+                title=f"{marker}[bold cyan]Audio Alignment[/]",
+                border_style="cyan",
+            ),
+            (0, 0, 0, 2),
+        ),
+        crop=False,
+    )
+
+
 def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
     decision = attempt.decision
     lines = [
@@ -935,6 +1016,8 @@ def _present_alignment_evidence(
     diagnostics_written: bool,
 ) -> None:
     lines: list[str] = []
+    entries: list[tuple[str, list[str]]] = []
+    has_actionable_result = False
     for ordinal, comparison in enumerate(request.comparisons, start=1):
         key = _alignment_key(request.reference.path, comparison.path)
         result = results_map[key]
@@ -943,6 +1026,7 @@ def _present_alignment_evidence(
         actionable = not result.applied or (
             decision is not None and decision.state != "trusted_automatic"
         )
+        has_actionable_result = has_actionable_result or actionable
         if json_output:
             if actionable:
                 log.warning(
@@ -959,24 +1043,35 @@ def _present_alignment_evidence(
             continue
         if quiet and not actionable:
             continue
-        lines.extend(_normal_evidence_lines(ordinal=ordinal, result=result, provenance=provenance))
+        comparison_lines = _normal_evidence_lines(
+            ordinal=ordinal,
+            result=result,
+            provenance=provenance,
+        )
         if verbose and not quiet and result.audio_attempt is not None:
-            lines.extend(_verbose_evidence_lines(result.audio_attempt))
+            comparison_lines.extend(_verbose_evidence_lines(result.audio_attempt))
         if actionable and (config.use_vsview or config.force_interactive):
             if decision is not None and decision.candidate is not None:
-                lines.append(
+                comparison_lines.append(
                     "Opening VSView for manual review. The candidate is a hint, not a "
                     "confirmed alignment."
                 )
             else:
-                lines.append(
+                comparison_lines.append(
                     "Opening VSView for manual review. No automatic candidate is available; "
                     "align the sources manually."
                 )
         elif actionable:
-            lines.append(
+            comparison_lines.append(
                 "Continuing without an accepted audio correction; rendering remains best-effort."
             )
+        lines.extend(comparison_lines)
+        entries.append(
+            (
+                comparison.presentation_name or comparison.label or comparison.path.name,
+                comparison_lines,
+            )
+        )
     if diagnostics_written and not quiet and not json_output:
         lines.append("Audio diagnostics: alignment_diagnostics/.")
     if not lines:
@@ -984,7 +1079,15 @@ def _present_alignment_evidence(
     if progress is not None:
         progress.suspend()
     try:
-        print("\n".join(lines), file=sys.stderr)
+        if isinstance(progress, RichProgressReporter):
+            _render_alignment_evidence_panel(
+                entries=entries,
+                diagnostics_written=diagnostics_written,
+                no_color=config.no_color,
+                actionable=has_actionable_result,
+            )
+        else:
+            print("\n".join(lines), file=sys.stderr)
     finally:
         if progress is not None:
             progress.resume()
