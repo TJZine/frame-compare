@@ -340,10 +340,14 @@ def test_stdout_reader_failure_invalidates_already_consumed_pcm(
 def test_out_of_band_reader_error_survives_full_stdout_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    chunk_count = 8
+    chunk = b"\x00" * 65_536
+    payload_sample_count = chunk_count * len(chunk) // struct.calcsize("<f")
+
     def fill_then_fail(stream: Any, chunks: Any, stop: Any, done: Any, slot: Any) -> None:
         del stream, stop
-        for _ in range(8):
-            chunks.put(b"\x00" * 65_536)
+        for _ in range(chunk_count):
+            chunks.put(chunk)
         slot.record("stdout_reader_failed", "injected failure behind full queue")
         done.set()
 
@@ -351,7 +355,7 @@ def test_out_of_band_reader_error_survives_full_stdout_queue(
     result = collect_continuous_audio(
         _writer_argv(delay_seconds=5.0),
         (AudioSampleInterval(0, 1),),
-        planned_end_sample=1,
+        planned_end_sample=payload_sample_count,
     )
 
     failed = _assert_failed(result, "stdout_reader_failed")
@@ -374,6 +378,8 @@ def test_consumer_failure_invalidates_pcm_and_cleans_process(
     )
 
     failed = _assert_failed(result, "consumer_failed")
+    assert failed.facts.emitted_sample_count == 0
+    assert failed.facts.emitted_byte_count == 0
     assert failed.cleanup.completed
 
 

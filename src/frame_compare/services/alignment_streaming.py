@@ -550,7 +550,6 @@ def collect_continuous_audio(
             except Empty:
                 continue
 
-            emitted_bytes += len(chunk)
             payload = pending + chunk
             complete_bytes = len(payload) - len(payload) % _FLOAT32_BYTES
             if complete_bytes:
@@ -567,12 +566,13 @@ def collect_continuous_audio(
                     failure.record("consumer_failed", f"audio collector consumer failed: {exc}")
                     break
                 emitted_samples += int(complete.size)
-                if emitted_samples > planned_end_sample:
-                    failure.record(
-                        "output_exceeded",
-                        "FFmpeg output exceeded the planned sample endpoint",
-                    )
-                    break
+            emitted_bytes += len(chunk)
+            if emitted_samples > planned_end_sample:
+                failure.record(
+                    "output_exceeded",
+                    "FFmpeg output exceeded the planned sample endpoint",
+                )
+                break
             pending = payload[complete_bytes:]
 
         if failure.read()[0] is None and pending:

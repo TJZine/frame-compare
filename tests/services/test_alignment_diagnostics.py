@@ -193,6 +193,14 @@ def test_audio_attempt_rejects_invalid_or_contradictory_states() -> None:
         replace(attempt.decision, state=cast(AudioDecisionState, "invalid"))
     with pytest.raises(ValueError, match="attempt status"):
         replace(attempt, status=cast(AudioAttemptStatus, "invalid"))
+    with pytest.raises(ValueError, match="consensus window count"):
+        replace(
+            attempt.decision,
+            consensus_windows=attempt.decision.raw_correlated_windows + 1,
+        )
+    for ratio in (-0.1, 1.1):
+        with pytest.raises(ValueError, match="consensus ratio"):
+            replace(attempt.decision, consensus_ratio=ratio)
     for status in ("preanalysis_rejection", "aborted"):
         with pytest.raises(ValueError, match="non-complete audio attempts"):
             replace(attempt, status=status)

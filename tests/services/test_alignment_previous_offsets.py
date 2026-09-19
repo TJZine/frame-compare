@@ -52,8 +52,12 @@ def automatic_authority_is_disabled_for_reuse_fixtures(
 ) -> None:
     """Keep legacy reuse fixtures focused on precedence and cache plumbing."""
     monkeypatch.setattr(
-        "frame_compare.services.alignment_consensus._AUTOMATIC_AUTHORITY_HELD",
-        False,
+        "frame_compare.services.alignment_consensus.automatic_authority_is_held",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_reuse_cache.automatic_authority_is_held",
+        lambda: False,
     )
 
 

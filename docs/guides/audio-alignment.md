@@ -52,8 +52,9 @@ A base-credible estimate in another frame bin is a hard contradiction, even when
 excluded from voting by a stricter setting.
 
 With default window settings, sources up to 30 seconds use one full shared-duration
-interval, sources from 30 to 90 seconds use two disjoint endpoint intervals, and sources
-of at least 90 seconds use five distributed 30-second intervals. Explicit window length
+interval, sources longer than 30 seconds and shorter than 90 seconds use two disjoint
+endpoint intervals, and sources of at least 90 seconds use five distributed 30-second
+intervals. Explicit window length
 and stride preserve their requested shape, but do not waive the duration tier's temporal
 support requirement. Overlapping or duplicate useful intervals do not create independent
 support. Clean planned completion and observed early EOF are

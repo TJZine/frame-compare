@@ -379,6 +379,8 @@ class AudioAlignmentDecision:
             "independent_windows",
         ):
             _require_int(getattr(self, name), name, minimum=0)
+        if self.consensus_windows > self.raw_correlated_windows:
+            raise ValueError("consensus window count exceeds raw correlated count")
         if self.credible_windows > self.raw_correlated_windows:
             raise ValueError("credible window count exceeds raw correlated count")
         if self.voting_windows > self.credible_windows:
@@ -390,6 +392,8 @@ class AudioAlignmentDecision:
         for value in (self.consensus_ratio, self.aggregate_score):
             if value is not None and not math.isfinite(value):
                 raise ValueError("aggregate decision evidence must be finite")
+        if self.consensus_ratio is not None and not 0 <= self.consensus_ratio <= 1:
+            raise ValueError("consensus ratio must be between zero and one")
         if isinstance(self.minimum_peak_ratio, float) and not math.isfinite(
             self.minimum_peak_ratio
         ):
