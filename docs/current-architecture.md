@@ -509,9 +509,9 @@ Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
-service-projected audio evidence as metadata schema v2. The
+service-projected audio evidence as metadata schema v3. The
 typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
-strict metadata-v2/result-v1 topology and primitive DTO validation, trusted
+strict metadata-v3/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it remains inert for ordinary or
@@ -919,7 +919,7 @@ Runtime ownership matrix:
 | Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
-| Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and FFmpeg/channel-aware seek/extraction policy | `frame_compare.services.alignment_audio` |
+| Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and origin-based FFmpeg/channel extraction policy | `frame_compare.services.alignment_audio` |
 | One-child continuous FFmpeg collection, bounded pipe drainage, admitted interval retention, endpoint classification, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
 | Audio correlation, unequal-length lag mapping, overlap-normalized confidence, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
 | Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
@@ -965,8 +965,8 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v2 transport required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v2/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v3 transport required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v3/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
 | `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |

@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "purpose": "R6 production continuous-alignment runtime, resource, and release-gate evidence",
+  "candidate": {
+    "repository": "TJZine/frame-compare",
+    "base_commit": "bd3f7aa997130cb864cf1a39897bb1b102469247",
+    "source_state": "uncommitted R6 test/evidence worktree",
+    "resource_test_sha256": "f24544d8bbc9d7577d119d415a01f7cf08b3b01dd4da01b10344614f54f97c0c",
+    "changed_source_paths": [
+      "docs/current-architecture.md",
+      "tests/integration/test_alignment_streaming_resources.py",
+      "tests/fixtures/alignment_oracle/streaming-production-results.json"
+    ],
+    "production_code_changed": false,
+    "automatic_authority_default": "held"
+  },
+  "environment": {
+    "observed_at_utc": "2026-09-19",
+    "platform": "macOS 27.0 build 26A428",
+    "kernel": "Darwin 27.0.0 arm64",
+    "hardware": "Apple M1 Pro, 10 logical CPUs, 34359738368 bytes RAM",
+    "ffmpeg": "9.0.2 Homebrew arm64",
+    "ffprobe": "9.0.2 Homebrew arm64",
+    "rss_method": "darwin ps -o rss= -p <parent,active-child>; one combined sample per observation",
+    "rss_target_period_seconds": 0.02,
+    "rss_ceiling_bytes": 536870912,
+    "os_reported_process_high_water": {"status": "unavailable", "reason": "The release ceiling uses simultaneous sampled RSS; portable per-child OS high-water values are not exposed consistently by the standard library. Separate sampled parent and child peaks are recorded without summing them."},
+    "production_ffmpeg_deadline_seconds": 120
+  },
+  "docker_environment": {
+    "platform": "Linux arm64 canonical Debian image",
+    "test_image": "sha256:baea14a5eb3e43c738c81663a784be930c99e4c24df3d45bca2b8eafcc47f769",
+    "runtime_image": "sha256:906bfa7f7bcf7a988951aca6fb9012e356623e9c4240e60a9f14fd3fd6dafd38",
+    "debian_ffmpeg_package": "7:7.1.5-0+deb13u1",
+    "ffmpeg": "7.1.5-0+deb13u1",
+    "ffprobe": "7.1.5-0+deb13u1",
+    "rss_method": "linux /proc/<pid>/status VmRSS; one combined parent/active-child observation per sample",
+    "candidate_source": "fresh image built from the same uncommitted R6 worktree"
+  },
+  "historical_scalar_integrity": {
+    "p3-results.json": "23954481c7057c1010236885c8c5249d91b106a4d38d6d06fb6da4862ff613c6",
+    "p5-results.json": "8fdc890150c191714de62c1bdfe8d6a9ba33e475b5d4942136fdec4d3140caad",
+    "p5b-results.json": "ed7148614c8389c95f7317fc6df26fdae5db5edde908c8bd6ab802463320dea0",
+    "p6-results.json": "9287fa0df45dc15d2b54b522677fe387a42837d095fab32103ad1f8c0851b655"
+  },
+  "commands": [
+    {
+      "command": "FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 uv run --no-sync pytest tests/integration/test_alignment_streaming_resources.py -rsx -s",
+      "result": "5 passed with zero skips"
+    },
+    {
+      "command": "FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 uv run --no-sync pytest tests/integration/test_alignment_streaming_resources.py::test_outer_task_cancellation_reaps_the_active_production_child -rsx -s",
+      "result": "passed after repairing the test-only subprocess proxy; active child reaped before cancellation returned"
+    },
+    {
+      "command": "bash tools/verify_docker_integration.sh --pytest-path tests/integration/test_alignment_continuous_pipeline.py",
+      "result": "passed canonical runtime/application checks; 7 pipeline tests passed with zero skips"
+    },
+    {
+      "command": "docker compose run --rm --no-deps -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 --entrypoint python frame-compare-test -m pytest tests/integration/test_alignment_streaming_resources.py -rsx -s",
+      "result": "5 passed with zero skips in the fresh canonical test image"
+    },
+    {
+      "command": "uv run --no-sync pyright --warnings && uv run --no-sync ruff check . && uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium && uv run --no-sync pytest -q && uv run --no-sync lint-imports --config importlinter.ini",
+      "result": "passed; full pytest exit 0 with the then-current four opt-in resource skips and explicit native/plugin/manual/Windows skips; Bandit found zero medium/high issues; 2 import contracts kept; the later fifth opt-in orchestration case passed natively and in Docker"
+    },
+    {
+      "command": "uv run --no-sync pytest -q tests/services -k alignment; uv run --no-sync pytest -q tests/orchestration -k alignment; uv run --no-sync pytest -q tests/cli tests/test_cli_contract_docs.py; uv run --no-sync pytest -q tests/vsview; uv run --no-sync pytest -q tests/services/test_alignment_streaming.py",
+      "result": "all focused suites passed"
+    },
+    {
+      "command": "uv run --no-sync pytest -q tests/integration -k alignment -rsx; uv run --no-sync pytest -q tests/integration/test_alignment_continuous_pipeline.py -rsx",
+      "result": "passed; the then-current four resource cases skipped without opt-in; local L-SMASH-dependent tests skipped; targeted pipeline 7 passed; the later fifth opt-in orchestration case passed natively and in Docker"
+    },
+    {
+      "command": "uv run --no-sync python scripts/generate_api_docs.py --check; uv run --no-sync pytest -q tests/test_cli_contract_docs.py; uv sync --group dev --group docs --locked; uv run --no-sync zensical build --clean --strict",
+      "result": "passed; strict documentation build reported no issues"
+    },
+    {
+      "command": "uv run --no-sync pytest -q tests/services/test_alignment_streaming.py tests/services/test_alignment_cancellation.py tests/orchestration/test_phase_alignment_cancellation.py; uv run --no-sync ruff check .; uv run --no-sync pyright --warnings; uv run --no-sync python scripts/generate_api_docs.py --check; uv run --no-sync pytest -q tests/test_cli_contract_docs.py; uv run --no-sync zensical build --clean --strict; uv run --no-sync pytest -q tests/integration/test_alignment_streaming_resources.py -rsx",
+      "result": "final repaired source passed 36 focused cancellation/streaming tests, Ruff, Pyright with zero errors/warnings, API-doc and CLI-doc checks, strict documentation build, and five expected resource skips without opt-in"
+    },
+    {
+      "command": "POSIX distribution recipe from Engineering Runbook using a fresh mktemp directory",
+      "result": "wheel and sdist built and verified; isolated install; frame-compare version and --help passed"
+    }
+  ],
+  "retained_pre_repair_failures": [
+    {
+      "case": "verification-pair plateau assertion",
+      "observed_growth_bytes": 95109120,
+      "original_limit_bytes": 67108864,
+      "disposition": "test instrumentation corrected",
+      "reason": "The assertion incorrectly treated the intentional discovery-to-verification phase allocation transition as same-phase duration growth. The two stores are alternatives, and the retained-byte assertions already prove they do not coexist. The duration-independent plateau assertion now applies to the two-hour direct-rate traversal and passes."
+    },
+    {
+      "case": "native outer cancellation first observation",
+      "elapsed_seconds": 4.126640165981371,
+      "active_child_at_return": true,
+      "disposition": "test instrumentation failure repaired",
+      "reason": "The test replaced the shared subprocess module with an incomplete proxy that omitted TimeoutExpired. Cleanup then raised AttributeError while matching the terminate timeout, preventing the production kill fallback from running. Patching only Popen preserves the real exception types; both the direct service and timed orchestration phase cancellation cases now pass."
+    },
+    {
+      "case": "Docker outer cancellation pre-repair observation",
+      "elapsed_seconds": 4.173138127000016,
+      "active_child_at_return": true,
+      "disposition": "test instrumentation failure repaired",
+      "reason": "The same incomplete test-only subprocess proxy omitted TimeoutExpired and prevented the production kill fallback from running. The final fresh image preserves the real subprocess exception types and passes both cancellation cases."
+    }
+  ],
+  "measurements": [
+    {
+      "case": "synthetic-container-150s-pcm44100-zero-offset-48000-verification",
+      "fixture_recipe": "Matroska; 160x90 black FFV1 at 1 fps; deterministic pink-noise mono PCM s16le at 44100 Hz; comparison is a byte copy",
+      "cold_or_warm": "newly generated files; filesystem cache state not controlled",
+      "frame_rate": "24/1",
+      "channel_strategy": "mono_downmix",
+      "windows": 5,
+      "window_seconds": 30,
+      "maximum_offset_seconds": 30,
+      "discovery_rate": 8000,
+      "verification_rate": 48000,
+      "decision_with_isolated_latch_open": "trusted_automatic +0f accepted; 5 raw/credible/voting/winning, 3 independent",
+      "whole_pair_elapsed_seconds": 1.587274833000265,
+      "rss": {
+        "baseline_bytes": 90734592,
+        "peak_combined_bytes": 226590720,
+        "peak_incremental_bytes": 135856128,
+        "peak_parent_sampled_bytes": 227164160,
+        "peak_child_sampled_bytes": 16924672,
+        "sample_count": 67,
+        "child_sample_count": 21,
+        "maximum_gap_seconds": 0.032806666975375265,
+        "maximum_active_children": 1,
+        "maximum_within_child_plateau_growth_bytes": 14106624,
+        "within_child_plateau_sample_counts": [4, 4, 4, 4]
+      },
+      "collections": [
+        {"phase": "discovery", "role": "reference", "rate": 8000, "horizon_samples": 1200000, "retained_bytes": 4800000, "elapsed_seconds": 0.25346508400980383, "end": "planned_end_reached"},
+        {"phase": "discovery", "role": "comparison", "rate": 8000, "horizon_samples": 1200000, "retained_bytes": 12480000, "elapsed_seconds": 0.2446739579900168, "end": "planned_end_reached"},
+        {"phase": "verification", "role": "reference", "rate": 48000, "horizon_samples": 7200000, "retained_bytes": 28800000, "elapsed_seconds": 0.2616070419899188, "end": "planned_end_reached"},
+        {"phase": "verification", "role": "comparison", "rate": 48000, "horizon_samples": 7200000, "retained_bytes": 28800192, "elapsed_seconds": 0.26313970796763897, "end": "planned_end_reached"}
+      ],
+      "pcm_disk_bytes_produced_by_alignment": 0,
+      "disposition": "pass"
+    },
+    {
+      "case": "synthetic-large-container-2h-pcm8000-zero-offset-direct",
+      "fixture_recipe": "two distinct files of at least 100 MiB each; Matroska; 160x90 black FFV1 at 1 fps; deterministic pink-noise mono PCM s16le at 8000 Hz; comparison is a byte copy",
+      "cold_or_warm": "newly generated files; filesystem cache state not controlled",
+      "frame_rate": "24/1",
+      "channel_strategy": "mono_downmix",
+      "windows": 5,
+      "window_seconds": 30,
+      "maximum_offset_seconds": 30,
+      "discovery_rate": 8000,
+      "verification_rate": null,
+      "decision_with_isolated_latch_open": "trusted_automatic +0f accepted; 5 raw/credible/voting/winning, 3 independent",
+      "whole_pair_elapsed_seconds": 2.211401875014417,
+      "rss": {
+        "baseline_bytes": 227065856,
+        "peak_combined_bytes": 244137984,
+        "peak_incremental_bytes": 17072128,
+        "peak_parent_sampled_bytes": 227344384,
+        "peak_child_sampled_bytes": 34095104,
+        "sample_count": 81,
+        "child_sample_count": 58,
+        "maximum_gap_seconds": 0.031687457987573,
+        "maximum_active_children": 1,
+        "maximum_within_child_plateau_growth_bytes": 0,
+        "within_child_plateau_sample_counts": [20, 20]
+      },
+      "collections": [
+        {"phase": "discovery", "role": "reference", "rate": 8000, "horizon_samples": 57600000, "retained_bytes": 4800000, "elapsed_seconds": 0.951432375004515, "end": "planned_end_reached"},
+        {"phase": "discovery", "role": "comparison", "rate": 8000, "horizon_samples": 57600000, "retained_bytes": 12480000, "elapsed_seconds": 0.9541496250312775, "end": "planned_end_reached"}
+      ],
+      "pcm_disk_bytes_produced_by_alignment": 0,
+      "disposition": "pass"
+    },
+    {
+      "case": "actual-outer-task-cancellation-during-2h-production-collection",
+      "whole_operation_elapsed_seconds": 2.113401625014376,
+      "review_launched": false,
+      "cache_written": false,
+      "diagnostic_written": false,
+      "active_child_at_cancelled_task_return": false,
+      "terminate_requests": 1,
+      "kill_requests": 1,
+      "all_child_returncodes_nonzero": true,
+      "disposition": "pass"
+    },
+    {
+      "case": "actual-timed-orchestration-phase-cancellation-during-first-comparison",
+      "whole_operation_elapsed_seconds": 2.115375875029713,
+      "review_launched": false,
+      "cache_written": false,
+      "diagnostic_written": false,
+      "phase_output_produced": false,
+      "phase_output_applied": false,
+      "trims_or_selected_frames_changed": false,
+      "next_comparison_started": false,
+      "active_child_at_cancelled_task_return": false,
+      "terminate_requests": 1,
+      "kill_requests": 1,
+      "all_child_returncodes_nonzero": true,
+      "disposition": "pass"
+    },
+    {
+      "case": "docker-linux-150s-pcm44100-zero-offset-48000-verification",
+      "whole_pair_elapsed_seconds": 2.288287250999929,
+      "decision_with_isolated_latch_open": "trusted_automatic +0f accepted",
+      "retained_bytes_by_phase": {"discovery": 17280000, "verification": 57600192},
+      "collection_elapsed_seconds": [0.2746148760002143, 0.28517308400023467, 0.3321330419998958, 0.2875813340001514],
+      "rss": {"baseline_bytes": 85729280, "peak_combined_bytes": 203808768, "peak_incremental_bytes": 118079488, "sample_count": 108, "child_sample_count": 37, "maximum_gap_seconds": 0.041801082999882055, "maximum_active_children": 1, "maximum_within_child_plateau_growth_bytes": 13053952, "within_child_plateau_sample_counts": [6, 6, 8, 6]},
+      "disposition": "pass"
+    },
+    {
+      "case": "docker-linux-2h-pcm8000-zero-offset-direct",
+      "whole_pair_elapsed_seconds": 1.7210560839998834,
+      "decision_with_isolated_latch_open": "trusted_automatic +0f accepted",
+      "retained_bytes": 17280000,
+      "collection_elapsed_seconds": [0.6414757090001331, 0.6591832090002754],
+      "rss": {"baseline_bytes": 94531584, "peak_combined_bytes": 177152000, "peak_incremental_bytes": 82620416, "sample_count": 84, "child_sample_count": 53, "maximum_gap_seconds": 0.0243252919999577, "maximum_active_children": 1, "maximum_within_child_plateau_growth_bytes": 3887104, "within_child_plateau_sample_counts": [18, 18]},
+      "disposition": "pass"
+    },
+    {
+      "case": "docker-linux-actual-outer-task-cancellation",
+      "whole_operation_elapsed_seconds": 0.1334455840001283,
+      "active_child_at_cancelled_task_return": false,
+      "terminate_requests": 1,
+      "kill_requests": 0,
+      "all_child_returncodes_nonzero": true,
+      "disposition": "pass"
+    },
+    {
+      "case": "docker-linux-actual-timed-orchestration-phase-cancellation",
+      "whole_operation_elapsed_seconds": 2.165839458999926,
+      "active_child_at_cancelled_task_return": false,
+      "review_launched": false,
+      "cache_written": false,
+      "diagnostic_written": false,
+      "phase_output_produced": false,
+      "phase_output_applied": false,
+      "trims_or_selected_frames_changed": false,
+      "next_comparison_started": false,
+      "terminate_requests": 1,
+      "kill_requests": 1,
+      "all_child_returncodes_nonzero": true,
+      "disposition": "pass"
+    }
+  ],
+  "mandatory_matrix": {
+    "codec_rates": {"status": "observed_pass_for_available_synthetic_cells", "evidence": "full native alignment integration, focused service suites, 44.1-to-48 kHz resource verification, direct 8 kHz long traversal, and canonical Docker pipeline passed; no cross-build byte equality was asserted"},
+    "origins_positions": {"status": "observed_pass_for_generated_cells", "evidence": "production integration covers origin/asymmetric starts and distributed positions", "blocker": "independently labeled real-media A/V-origin cells unavailable"},
+    "eof_integrity": {"status": "observed_pass_for_available_generated_cells", "evidence": "native and Docker production integration suites passed planned-end and EOF cases"},
+    "frame_decisions": {"status": "observed_pass_for_generated_cells", "evidence": "focused production service suites passed signs, zero, boundaries, halos, and edge guards; resource positives observed at +0f"},
+    "duration_support": {"status": "observed_pass_for_generated_cells", "evidence": "focused suites cover short/medium/long/custom tiers; 150-second and two-hour production pairs passed"},
+    "safety_controls": {"status": "observed_pass_for_existing_generated_matrix", "evidence": "focused production service/policy and full suites passed; no negative gained prospective authority and no holdout tuning occurred", "blocker": "R6 did not add independently labeled real-media negative controls before the cancellation stop condition"},
+    "sampling_limitations": {"status": "observed_pass_for_generated_cells", "evidence": "existing localized-edit production policy tests passed", "blocker": "no independently labeled real-media edit asset was available"},
+    "production_resources": {"status": "observed_pass", "evidence": "five 30-second windows, +/-30-second margins, 48 kHz verification with halos, allocation assertions, zero alignment PCM disk, one child, alternate phase stores, and early/late RSS comparisons within each individual long-running child after discarding its startup third"},
+    "rss_latency_macos": {"status": "observed_pass", "evidence": "150-second verification and two-hour direct-rate pairs remained below 512 MiB incremental combined sampled RSS and every collection remained below 120 seconds"},
+    "failure_lifetime": {"status": "observed_pass", "evidence": "awaited cancellation reaped the real FFmpeg child in native and canonical Docker service and orchestration-phase cases; terminate/kill calls and terminal nonzero return codes were observed"},
+    "application_cancellation": {"status": "observed_pass", "evidence": "actual timed alignment phase cancellation produced no diagnostics, review launch, cache write, phase output/application, trim or selection mutation, or next-comparison start"},
+    "persistence_authority": {"status": "observed_pass", "evidence": "isolated latch positives produced expected trusted decisions; shipped default remains held; focused service/orchestration/cache/native and full suites passed"},
+    "docker_linux": {"status": "observed_pass", "evidence": "canonical fresh-image runtime/application proof and 7 pipeline tests passed; same-image RSS/resource/planner plus direct-service and timed-phase cancellation cases passed with zero skips"},
+    "windows_portable": {"status": "blocked", "blocker": "No native Windows portable runtime or physical Windows host is available from this macOS task"},
+    "visible_vsview_windows": {"status": "blocked", "blocker": "No physical Windows desktop/visible VSView runtime is available; Docker and offscreen proof cannot satisfy this cell"},
+    "real_media": {"status": "blocked", "blocker": "No independently labeled real constant-zero, signed-offset, or mismatched mix/cut/track media was supplied or discoverable in the repository; synthetic fixtures are not relabeled as real media"}
+  },
+  "release_posture": {
+    "r6_accepted": false,
+    "automatic_authority_may_be_activated": false,
+    "blocking_reasons": [
+      "native Windows portable RSS/lifetime proof unavailable",
+      "physical Windows visible VSView metadata-v3/result-v1 acceptance unavailable",
+      "required independently labeled real-media matrix unavailable"
+    ]
+  },
+  "limitations": [
+    "Synthetic generated containers prove production runtime/resource behavior, not real-media A/V labels.",
+    "Sampled RSS is not an OS memory sandbox and cannot exclude a transient between samples.",
+    "The separate parent and child sampled peaks are not summed as the combined peak; peak_combined_bytes comes from one combined platform query.",
+    "The candidate is uncommitted by controller instruction, so Windows packaging from committed HEAD would not contain this R6 test/evidence worktree."
+  ]
+}
