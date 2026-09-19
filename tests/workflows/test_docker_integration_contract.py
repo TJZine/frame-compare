@@ -136,6 +136,8 @@ def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(
         "frame-compare-test",
         "-m",
         "pytest",
+        "-o",
+        "cache_dir=/tmp/frame-compare-resource-pytest-cache",
         RESOURCE_TEST,
         "-rsx",
         "-s",
