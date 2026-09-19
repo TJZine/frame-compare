@@ -497,10 +497,10 @@ unchanged.
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
   comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
   native VSView panel review is labeled `ALIGN | Native VSView review`. Interactive
-  alignment uses the indeterminate spinner presentation rather than a progress bar:
-  the comparison count is too small to make a bar or ETA useful, while the changing
-  description still identifies the active comparison. Structured JSON progress keeps
-  its measurable comparison milestones.
+  alignment uses a plain left-aligned activity line without a bar, count, ETA, or
+  spinner: the comparison count is too small to make those indicators useful, while
+  the changing description still identifies the active comparison. Structured JSON
+  progress keeps its measurable comparison milestones.
 - Before an optional native review opens, each non-applied current audio attempt emits a
   compact, inset `Audio Alignment` panel naming its retained display-only provisional
   candidate and `not applied` status, or stating that no usable candidate exists. The
@@ -509,7 +509,9 @@ unchanged.
   shipped automatic-authority hold is active, an otherwise-qualified candidate also
   reports `automatic_authority_held`. This does not
   add a successful JSON field or write human text to JSON stdout. The run-local
-  diagnostic location is reported only after a successful write.
+  diagnostic location is reported only after a successful write. The human Rich panel
+  owns that success presentation; `alignment_diagnostics_written` remains a structured
+  event for JSON/log output and is suppressed from interactive human output.
 - The pre-review evidence block keeps manual/human-authoritative `+0f`, held
   provisional `+0f`, and absence distinct. Held computed evidence reports that
   automatic application is temporarily disabled and that no computed correction was

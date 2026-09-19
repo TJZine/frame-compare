@@ -1099,6 +1099,7 @@ def _write_run_diagnostics(
     results_map: dict[str, AlignmentResult],
     provenances: dict[str, AlignmentProvenance],
     review_outcome: AlignmentReviewOutcome,
+    emit_success_log: bool,
     only_keys: set[str] | None = None,
     confirmed_frame_pairs: tuple[tuple[str, int, int], ...] = (),
 ) -> set[str]:
@@ -1139,7 +1140,7 @@ def _write_run_diagnostics(
             )
             continue
         written.add(key)
-    if written:
+    if written and emit_success_log:
         log.info("alignment_diagnostics_written", path="alignment_diagnostics/")
     return written
 
@@ -1228,6 +1229,7 @@ async def align_clips_from_request(
         results_map=results_map,
         provenances=provenances,
         review_outcome=initial_outcome,
+        emit_success_log=json_output,
     )
     _present_alignment_evidence(
         request=request,
@@ -1289,6 +1291,7 @@ async def align_clips_from_request(
             results_map=results_map,
             provenances=provenances,
             review_outcome=review.review_outcome,
+            emit_success_log=json_output,
             only_keys=diagnostic_keys,
             confirmed_frame_pairs=review.confirmed_frame_pairs,
         )

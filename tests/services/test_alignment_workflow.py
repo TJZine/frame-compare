@@ -10,6 +10,7 @@ from unittest.mock import ANY, MagicMock, call, patch
 import numpy as np
 import pytest
 import tomli_w
+from structlog.testing import capture_logs
 
 from frame_compare.services import alignment as alignment_service
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
@@ -375,6 +376,50 @@ def test_diagnostic_write_failure_does_not_change_alignment_authority(
 
     assert result.applied
     assert result.frame_offset == 24
+
+
+@pytest.mark.parametrize(("json_output", "expected_event"), [(False, False), (True, True)])
+@patch("frame_compare.services.alignment_audio.probe_fps")
+@patch("frame_compare.services.alignment._estimate_audio_pair")
+def test_successful_diagnostic_log_is_reserved_for_json_output(
+    mock_estimate: MagicMock,
+    mock_probe: MagicMock,
+    json_output: bool,
+    expected_event: bool,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comp.mkv"
+    reference.touch()
+    comparison.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    mock_estimate.return_value = AlignmentConsensus(
+        0,
+        0.99,
+        True,
+        "accepted",
+        1,
+        1,
+        1.0,
+        2.0,
+    )
+    config = AlignmentConfig(cache_results=False)
+    request = replace(
+        alignment_request(
+            reference=reference,
+            comparisons=[comparison],
+            config=config,
+            generated_dir=tmp_path,
+        ),
+        alignment_diagnostics_dir=tmp_path / "alignment_diagnostics",
+        alignment_diagnostics_root=tmp_path.parent,
+    )
+
+    with capture_logs() as logs:
+        align_clips_from_request(request, config, json_output=json_output)
+
+    events = [entry["event"] for entry in logs]
+    assert ("alignment_diagnostics_written" in events) is expected_event
 
 
 def test_computed_attempt_retains_resolved_stream_and_window_facts(

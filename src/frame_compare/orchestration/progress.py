@@ -78,7 +78,7 @@ def start_phase_progress(
         reporter.start_phase(name, total=total)
         return
     if name == "align" and isinstance(reporter, RichProgressReporter):
-        reporter.start_indeterminate(display_label)
+        reporter.start_phase(display_label, total=1)
         return
     reporter.start_phase(display_label, total=total)
 

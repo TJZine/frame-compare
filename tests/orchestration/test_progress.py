@@ -151,7 +151,7 @@ def test_select_reporter_no_color_non_tty_returns_plain():
     assert isinstance(reporter, PlainProgressReporter)
 
 
-def test_interactive_alignment_uses_spinner_without_discarding_log_progress() -> None:
+def test_interactive_alignment_uses_plain_activity_without_discarding_log_progress() -> None:
     rich_reporter = RichProgressReporter(no_color=True)
     start_phase_progress(
         rich_reporter,
@@ -161,8 +161,8 @@ def test_interactive_alignment_uses_spinner_without_discarding_log_progress() ->
     )
 
     rich_task = rich_reporter._progress.tasks[0]  # noqa: SLF001
-    assert rich_task.total is None
-    assert rich_task.fields["presentation"] == "indeterminate"
+    assert rich_task.total == 1
+    assert rich_task.fields["presentation"] == "simple"
     rich_reporter.complete_phase()
 
     log_reporter = LogProgressReporter()
