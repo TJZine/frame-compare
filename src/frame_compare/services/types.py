@@ -364,6 +364,8 @@ class AudioAlignmentDecision:
     unassessed_gates: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if self.state not in {"trusted_automatic", "provisional", "unavailable"}:
+            raise ValueError("audio decision state is invalid")
         if self.state == "unavailable" and self.candidate is not None:
             raise ValueError("unavailable audio decision cannot have a candidate")
         if self.state != "unavailable" and self.candidate is None:
@@ -428,6 +430,10 @@ class AudioAlignmentAttempt:
     collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = ()
 
     def __post_init__(self) -> None:
+        if self.status not in {"complete", "preanalysis_rejection", "aborted"}:
+            raise ValueError("audio attempt status is invalid")
+        if self.status != "complete" and self.decision.state != "unavailable":
+            raise ValueError("non-complete audio attempts require an unavailable decision")
         _require_int(self.comparison_ordinal, "comparison_ordinal", minimum=1)
         _require_int(self.sample_rate, "sample_rate", minimum=1)
         _require_int(self.fps_num, "fps_num", minimum=1)

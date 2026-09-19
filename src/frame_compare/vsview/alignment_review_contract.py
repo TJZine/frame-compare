@@ -622,10 +622,15 @@ def _parse_audio_review(
             authority_origin=origin,
             comparison_ordinal=comparison_ordinal,
         )
-    elif attempt is not None:
-        raise AlignmentReviewContractError(
-            "historical alignment evidence must not invent an attempt"
-        )
+    else:
+        if attempt is not None:
+            raise AlignmentReviewContractError(
+                "historical alignment evidence must not invent an attempt"
+            )
+        if origin == "computed_this_run":
+            raise AlignmentReviewContractError(
+                "current computed authority requires its trusted attempt"
+            )
     return AlignmentReviewAudioReview(
         current_authority=AlignmentReviewCurrentAuthority(origin=origin, frame_offset=frame_offset),
         evidence_availability=availability,
@@ -673,7 +678,8 @@ def _validate_audio_attempt(
             or any(char not in "0123456789abcdef" for char in digest)
         ):
             raise AlignmentReviewContractError("alignment review source identity is invalid")
-    if attempt["status"] not in {"complete", "preanalysis_rejection", "aborted"}:
+    status = attempt["status"]
+    if status not in {"complete", "preanalysis_rejection", "aborted"}:
         raise AlignmentReviewContractError("alignment review attempt status is invalid")
     if (
         cast(int, attempt["sample_rate"]) <= 0
@@ -902,6 +908,15 @@ def _validate_audio_attempt(
     candidate = decision["candidate"]
     if state not in {"trusted_automatic", "provisional", "unavailable"}:
         raise AlignmentReviewContractError("alignment review audio decision is invalid")
+    if status != "complete" and state != "unavailable":
+        raise AlignmentReviewContractError(
+            "non-complete alignment attempts require an unavailable decision"
+        )
+    if state != "trusted_automatic" and authority_origin in {
+        "computed_this_run",
+        "shared_computed_offsets",
+    }:
+        raise AlignmentReviewContractError("untrusted audio evidence became authoritative")
     _require_int_fields(
         decision,
         (
@@ -953,11 +968,10 @@ def _validate_audio_attempt(
         candidate_offset = candidate_data["frame_offset"]
         if not _is_int(candidate_offset):
             raise AlignmentReviewContractError("alignment review candidate offset is invalid")
-        if state == "trusted_automatic":
-            if authority_origin != "computed_this_run" or suggested_offset != candidate_offset:
-                raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
-        elif authority_origin in {"computed_this_run", "shared_computed_offsets"}:
-            raise AlignmentReviewContractError("provisional audio evidence became authoritative")
+        if state == "trusted_automatic" and (
+            authority_origin != "computed_this_run" or suggested_offset != candidate_offset
+        ):
+            raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
     stability = attempt["stability"]
     if stability is not None:
         stability_data = _strict_dict(stability, _STABILITY_KEYS, "stability")

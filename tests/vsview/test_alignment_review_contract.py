@@ -268,7 +268,87 @@ def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> Non
     }
     review = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
-    with pytest.raises(AlignmentReviewContractError, match="provisional audio evidence"):
+    with pytest.raises(AlignmentReviewContractError, match="untrusted audio evidence"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
+        )
+
+
+@pytest.mark.parametrize("status", ["preanalysis_rejection", "aborted"])
+def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) -> None:
+    attempt = asdict(audio_attempt())
+    attempt["status"] = status
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="non-complete alignment attempts"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        )
+
+    decision = cast(dict[str, object], attempt["decision"])
+    decision.update(state="unavailable", candidate=None)
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+
+    parsed_attempt = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed_attempt is not None
+    assert parsed_attempt["status"] == status
+
+
+def test_workspace_metadata_rejects_computed_authority_without_trusted_attempt() -> None:
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+            "evidence_availability": "historical_details_unavailable",
+            "audio_attempt": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="requires its trusted attempt"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
+        )
+
+
+def test_workspace_metadata_rejects_unavailable_attempt_as_computed_authority() -> None:
+    attempt = asdict(audio_attempt())
+    decision = cast(dict[str, object], attempt["decision"])
+    decision.update(
+        state="unavailable",
+        candidate=None,
+        primary_reason="analysis_budget_exceeded",
+    )
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match="untrusted audio evidence"):
         parse_alignment_review_workspace_metadata(
             (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
         )

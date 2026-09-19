@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -17,6 +18,8 @@ from frame_compare.services.types import (
     AudioAlignmentCollectionRecord,
     AudioAlignmentDecision,
     AudioAlignmentWindowRecord,
+    AudioAttemptStatus,
+    AudioDecisionState,
     SelectedAudioStreamEvidence,
 )
 
@@ -181,6 +184,22 @@ def maximum_audio_attempt() -> AudioAlignmentAttempt:
         collection_observation="observed",
         collection_summaries=collections,
     )
+
+
+def test_audio_attempt_rejects_invalid_or_contradictory_states() -> None:
+    attempt = audio_attempt()
+
+    with pytest.raises(ValueError, match="decision state"):
+        replace(attempt.decision, state=cast(AudioDecisionState, "invalid"))
+    with pytest.raises(ValueError, match="attempt status"):
+        replace(attempt, status=cast(AudioAttemptStatus, "invalid"))
+    for status in ("preanalysis_rejection", "aborted"):
+        with pytest.raises(ValueError, match="non-complete audio attempts"):
+            replace(attempt, status=status)
+
+    unavailable = replace(attempt.decision, state="unavailable", candidate=None)
+    for status in ("preanalysis_rejection", "aborted"):
+        assert replace(attempt, status=status, decision=unavailable).status == status
 
 
 def test_collection_record_rejects_invalid_counts_and_failure_topology() -> None:
