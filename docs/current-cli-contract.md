@@ -494,9 +494,13 @@ unchanged.
   `[SKIP]` subdued yellow, and `[FAIL]` red. The description remains normally styled,
   and no-color output retains the same literal markers.
 - Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
-  lookup is shown as `ALIGN | Checking saved offsets` without a nested task, typed
-  comparison work uses `ALIGN | Comparison N | <prepared presentation>`, and optional
-  native VSView panel review is labeled `ALIGN | Native VSView review`. Interactive
+  lookup is shown as `ALIGN | Checking saved offsets` without a nested task. Fresh
+  comparison work is shown while active as `ALIGN | Analyzing audio | Comparison N |
+  <prepared presentation>`; a declined confirmed offset that can reuse its earlier
+  computed evidence is shown as `ALIGN | Using cached audio evidence | Comparison N |
+  <prepared presentation>`. Completed typed comparison milestones use `ALIGN |
+  Comparison N | <prepared presentation>`, and optional native VSView panel review is
+  labeled `ALIGN | Native VSView review`. Interactive
   alignment uses a plain left-aligned activity line without a bar, count, ETA, or
   spinner: the comparison count is too small to make those indicators useful, while
   the changing description still identifies the active comparison. Structured JSON

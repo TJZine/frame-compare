@@ -1,6 +1,7 @@
 """Core audio alignment computation and progress workflow tests."""
 
 import asyncio
+import threading
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -102,6 +103,7 @@ def test_alignment_computed_results_advance_phase_progress(
     reporter.start_indeterminate.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
     assert descriptions[0] == "ALIGN | Checking saved offsets"
+    assert descriptions.count("ALIGN | Analyzing audio | Comparison 1 | comp.mkv") == 1
     assert descriptions.count("ALIGN | Comparison 1 | comp.mkv") == 1
 
 
@@ -119,8 +121,20 @@ def test_alignment_advances_each_computed_comparison_before_starting_next(
     comp_a.touch()
     comp_b.touch()
     mock_probe.return_value = Fraction(24, 1)
-    mock_estimate.return_value = AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+    analysis_started = threading.Event()
+
+    def estimate_after_progress(*_args: object, **_kwargs: object) -> AlignmentConsensus:
+        assert analysis_started.wait(timeout=2)
+        return AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+
+    mock_estimate.side_effect = estimate_after_progress
     reporter = MagicMock(spec=ProgressReporter)
+
+    def record_description(description: str) -> None:
+        if description == "ALIGN | Analyzing audio | Comparison 1 | comp_a.mkv":
+            analysis_started.set()
+
+    reporter.set_description.side_effect = record_description
 
     config = AlignmentConfig(cache_results=False)
     request = alignment_request(
@@ -133,6 +147,8 @@ def test_alignment_advances_each_computed_comparison_before_starting_next(
 
     assert reporter.advance.call_count == 2
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
+    assert descriptions.count("ALIGN | Analyzing audio | Comparison 1 | comp_a.mkv") == 1
+    assert descriptions.count("ALIGN | Analyzing audio | Comparison 2 | comp_b.mkv") == 1
     assert descriptions.count("ALIGN | Comparison 1 | comp_a.mkv") == 1
     assert descriptions.count("ALIGN | Comparison 2 | comp_b.mkv") == 1
 

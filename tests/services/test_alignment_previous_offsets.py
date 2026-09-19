@@ -581,6 +581,7 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
         "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
         lambda **_: False,
     )
+    progress = Mock(spec=ProgressReporter)
 
     with (
         patch("frame_compare.services.alignment_audio.probe_fps") as mock_probe,
@@ -588,13 +589,16 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
     ):
         mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
-        results = align_clips_from_request(request, config)
+        results = align_clips_from_request(request, config, progress=progress)
 
     assert results[0].source == "cached"
     assert results[0].frame_offset == 3
     mock_probe.assert_not_called()
     mock_estimate.assert_not_called()
     mock_vs.assert_called_once()
+    progress.set_description.assert_any_call(
+        "ALIGN | Using cached audio evidence | Comparison 1 | comp.mkv"
+    )
 
 
 def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_back(

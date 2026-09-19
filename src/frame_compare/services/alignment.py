@@ -325,6 +325,7 @@ def _compute_missing_alignments(
     progress: ProgressReporter | None,
     progress_descriptions: dict[Path, str] | None = None,
     comparison_ordinals: dict[Path, int] | None = None,
+    on_comparison_started: Callable[[AlignmentClipRequest], None] | None = None,
     cancellation: threading.Event | None = None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
@@ -345,6 +346,8 @@ def _compute_missing_alignments(
         comparison_ordinal = (comparison_ordinals or {}).get(comp.path, fallback_ordinal)
         if progress:
             progress.set_description(descriptions.get(comp.path, f"ALIGN | {comp.path.name}"))
+        if on_comparison_started is not None:
+            on_comparison_started(comp)
 
         estimate = alignment_consensus.hold_automatic_consensus(
             _estimate_audio_pair(
@@ -553,6 +556,7 @@ def _compute_missing_alignments_with_provenance(
     progress: ProgressReporter | None,
     progress_descriptions: dict[Path, str],
     comparison_ordinals: dict[Path, int],
+    on_comparison_started: Callable[[AlignmentClipRequest], None] | None = None,
     cancellation: threading.Event | None = None,
 ) -> None:
     _compute_missing_alignments(
@@ -564,6 +568,7 @@ def _compute_missing_alignments_with_provenance(
         progress=progress,
         progress_descriptions=progress_descriptions,
         comparison_ordinals=comparison_ordinals,
+        on_comparison_started=on_comparison_started,
         cancellation=cancellation,
     )
     raise_if_alignment_cancelled(cancellation)
@@ -590,6 +595,7 @@ def _compute_requested_alignments(
     results_map: dict[str, AlignmentResult],
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
+    on_comparison_started: Callable[[AlignmentClipRequest], None] | None,
     cancellation: threading.Event,
 ) -> Fraction:
     """Run only blocking probe, collection, and numeric work in the owned worker."""
@@ -608,6 +614,7 @@ def _compute_requested_alignments(
             comparison.path: ordinal
             for ordinal, comparison in enumerate(request.comparisons, start=1)
         },
+        on_comparison_started=on_comparison_started,
         cancellation=cancellation,
     )
     raise_if_alignment_cancelled(cancellation)
@@ -622,8 +629,19 @@ async def _await_audio_computation(
     results_map: dict[str, AlignmentResult],
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
+    progress: ProgressReporter | None,
 ) -> Fraction:
     cancellation = threading.Event()
+    loop = asyncio.get_running_loop()
+    analysis_descriptions = _request_analysis_progress_descriptions(request)
+
+    def report_comparison_started(comparison: AlignmentClipRequest) -> None:
+        if progress is not None:
+            loop.call_soon_threadsafe(
+                progress.set_description,
+                analysis_descriptions[comparison.path],
+            )
+
     worker = asyncio.create_task(
         asyncio.to_thread(
             _compute_requested_alignments,
@@ -633,6 +651,7 @@ async def _await_audio_computation(
             results_map=results_map,
             provenances=provenances,
             fps_reference=fps_reference,
+            on_comparison_started=report_comparison_started,
             cancellation=cancellation,
         ),
         name="alignment-audio-computation",
@@ -692,12 +711,34 @@ def _record_resolved_alignment_request_progress(
     progress: ProgressReporter | None,
     request: AlignmentRequest,
     results_map: dict[str, AlignmentResult],
+    provenances: dict[str, AlignmentProvenance],
+    cached_audio_evidence_only: bool = False,
 ) -> None:
     progress_descriptions = _request_progress_descriptions(request)
+    comparisons = request.comparisons
+    if cached_audio_evidence_only:
+        comparisons = [
+            comparison
+            for comparison in request.comparisons
+            if (
+                provenance := provenances.get(
+                    _alignment_key(request.reference.path, comparison.path)
+                )
+            )
+            is not None
+            and provenance.provenance == "shared_computed_offsets"
+        ]
+    for comparison in request.comparisons:
+        key = _alignment_key(request.reference.path, comparison.path)
+        provenance = provenances.get(key)
+        if provenance is not None and provenance.provenance == "shared_computed_offsets":
+            progress_descriptions[comparison.path] = progress_descriptions[comparison.path].replace(
+                "ALIGN | ", "ALIGN | Using cached audio evidence | ", 1
+            )
     _record_resolved_alignment_progress(
         progress=progress,
         reference=request.reference.path,
-        comparisons=[comparison.path for comparison in request.comparisons],
+        comparisons=[comparison.path for comparison in comparisons],
         results_map=results_map,
         progress_descriptions=progress_descriptions,
     )
@@ -709,6 +750,13 @@ def _request_progress_descriptions(request: AlignmentRequest) -> dict[Path, str]
             f"ALIGN | Comparison {index} | {comparison.presentation_name or comparison.path.name}"
         )
         for index, comparison in enumerate(request.comparisons, start=1)
+    }
+
+
+def _request_analysis_progress_descriptions(request: AlignmentRequest) -> dict[Path, str]:
+    return {
+        path: description.replace("ALIGN | ", "ALIGN | Analyzing audio | ", 1)
+        for path, description in _request_progress_descriptions(request).items()
     }
 
 
@@ -1202,6 +1250,7 @@ async def align_clips_from_request(
             progress=progress,
             request=request,
             results_map=results_map,
+            provenances=provenances,
         )
         fps_reference = await _await_audio_computation(
             request=request,
@@ -1210,6 +1259,7 @@ async def align_clips_from_request(
             results_map=results_map,
             provenances=provenances,
             fps_reference=fps_reference,
+            progress=progress,
         )
         descriptions = _request_progress_descriptions(request)
         for comparison in requested_comparisons:
@@ -1218,6 +1268,14 @@ async def align_clips_from_request(
                 result=results_map[_alignment_key(reference, comparison.path)],
                 description=descriptions[comparison.path],
             )
+    else:
+        _record_resolved_alignment_request_progress(
+            progress=progress,
+            request=request,
+            results_map=results_map,
+            provenances=provenances,
+            cached_audio_evidence_only=True,
+        )
 
     initial_outcome: AlignmentReviewOutcome = (
         "pending"
