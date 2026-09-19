@@ -471,9 +471,10 @@ verification collection. When discovery and requested rates differ, all verifica
 intervals and halos are frozen before I/O and the original bounded global hypotheses are
 translated through their local origins. Direct-rate work uses at most two decodes per
 comparison; verification uses at most four. No PCM survives into another comparison.
-`alignment_consensus`
-translates local unequal-window lag through the two stream origins before applying the
-public sign convention. It applies extraction-integrity, base-credible, voting,
+`alignment_correlation.estimate_alignment_offset` converts the raw correlation lag to the
+public `reference source frame - comparison source frame` sign.
+`alignment_consensus` translates that signed local offset through the reference and
+comparison stream origins before applying extraction-integrity, base-credible, voting,
 independent-support, and automatic-authority gates. Base-credible evidence requires the
 requested-rate score floor, meaningful finite signal/overlap, and peak floor; voting also
 requires 90% useful observed coverage and the configured thresholds. Any base-credible
