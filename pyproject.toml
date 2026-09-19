@@ -76,7 +76,7 @@ dev = [
     "pyyaml>=6.0.3",
     "pyright>=1.1.414",
     "nodejs-wheel-binaries>=24.19.0",
-    "ruff>=0.16.7",
+    "ruff>=0.16.8",
     "respx>=0.23.1",
     "pip-audit==2.10.1",
 ]
