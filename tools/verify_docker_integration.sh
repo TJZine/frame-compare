@@ -10,7 +10,8 @@ Fails if any tests are skipped (the “real deps work” gate).
 
 Defaults:
   --service frame-compare-test
-  Runs: pytest -v tests/integration/ tests/vs/
+  Runs: pytest -v --ignore=tests/integration/test_alignment_streaming_resources.py \
+    tests/integration/ tests/vs/
 
 Environment:
   FRAME_COMPARE_REQUIRE_LIBPLACEBO=1  Require app-level libplacebo tonemap to succeed.
@@ -141,11 +142,14 @@ if [[ "${#docker_env_args[@]}" -gt 0 ]]; then
   docker_cmd+=("${docker_env_args[@]}")
 fi
 
+pytest_cli_args=()
 if [[ "${#pytest_paths[@]}" -eq 0 ]]; then
   pytest_paths=(tests/integration/ tests/vs/)
+  pytest_cli_args+=(--ignore=tests/integration/test_alignment_streaming_resources.py)
 fi
+pytest_cli_args+=("${pytest_paths[@]}")
 
-printf -v pytest_args ' %q' "${pytest_paths[@]}"
+printf -v pytest_args ' %q' "${pytest_cli_args[@]}"
 
 docker_cmd+=(
   "$service"

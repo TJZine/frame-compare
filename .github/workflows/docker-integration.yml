@@ -35,3 +35,11 @@ jobs:
 
       - name: Run canonical Docker verification
         run: bash tools/verify_docker_integration.sh --no-cache
+
+      - name: Run opt-in alignment resource proof
+        run: >-
+          docker compose run --rm --no-deps
+          -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1
+          --entrypoint python
+          frame-compare-test
+          -m pytest tests/integration/test_alignment_streaming_resources.py -rsx -s
