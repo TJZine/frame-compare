@@ -77,10 +77,14 @@ def test_positive_start_aac_matches_same_runtime_continuous_oracle(
         sample_rate=output_rate,
         channel_strategy="mono_downmix",
     ) as oracle:
+        assert isinstance(oracle, np.ndarray)
+        assert not isinstance(oracle, np.memmap)
+        retained_oracle_prefix = oracle[:16].copy()
         for interval, collected in zip(intervals, result.intervals, strict=True):
             expected = np.asarray(oracle[interval.start_sample : interval.end_sample])
             assert collected.actual_sample_count == interval.sample_count
             assert np.array_equal(collected.samples, expected)
+    assert np.array_equal(oracle[:16], retained_oracle_prefix)
 
 
 @pytest.mark.integration

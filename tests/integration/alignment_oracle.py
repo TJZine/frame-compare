@@ -13,7 +13,7 @@ import json
 import math
 import subprocess
 import wave
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from fractions import Fraction
@@ -338,8 +338,8 @@ def continuous_decode(
     *,
     sample_rate: int,
     channel_strategy: AlignmentChannelStrategy,
-) -> Iterator[np.memmap]:
-    """Decode one selected stream from origin and expose bounded temporary storage."""
+) -> Generator[np.ndarray]:
+    """Decode one selected stream from origin into a bounded independent array."""
     with TemporaryDirectory(prefix="frame-compare-continuous-oracle-") as directory:
         raw_path = Path(directory) / "oracle.f32le"
         argv = continuous_decode_argv(
@@ -356,13 +356,12 @@ def continuous_decode(
                 check=True,
                 timeout=ORACLE_TIMEOUT_SECONDS,
             )
-        if raw_path.stat().st_size > ORACLE_RAW_BYTE_LIMIT:
+        raw_size = raw_path.stat().st_size
+        if raw_size > ORACLE_RAW_BYTE_LIMIT:
             raise AssertionError("continuous oracle exceeded the per-case raw-data cap")
-        samples = np.memmap(raw_path, dtype=np.float32, mode="r")
-        try:
-            yield samples
-        finally:
-            del samples
+        if raw_size % np.dtype(np.float32).itemsize:
+            raise AssertionError("continuous oracle returned an invalid float32 payload")
+        yield np.fromfile(raw_path, dtype=np.float32)
 
 
 def compare_with_oracle(
