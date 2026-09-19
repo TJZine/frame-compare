@@ -1,7 +1,6 @@
 """Core audio alignment computation and progress workflow tests."""
 
 import asyncio
-import os
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -596,8 +595,7 @@ def test_source_replacement_after_discovery_invalidates_the_attempt(
     )
 
     def replace_after_collection(*_args: object, **_kwargs: object) -> CollectedAudioPhase:
-        stat = comparison.stat()
-        os.utime(comparison, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+        comparison.write_bytes(b"changed")
         signal = np.arange(100, dtype=np.float32)
         return CollectedAudioPhase(
             windows=(AudioWindow(signal, signal, 0, 0),),
@@ -639,8 +637,7 @@ def test_request_identity_mismatch_rejects_before_probe_or_collection(
         config=config,
         generated_dir=tmp_path,
     )
-    stat = comparison.stat()
-    os.utime(comparison, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+    comparison.write_bytes(b"changed")
     select_reference = MagicMock()
     select_comparison = MagicMock()
     collect = MagicMock()
@@ -735,8 +732,7 @@ def test_reference_mutation_between_comparisons_rejects_before_cached_stream_use
         result = real_estimate(*args, **kwargs)
         estimates += 1
         if estimates == 1:
-            stat = reference.stat()
-            os.utime(reference, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+            reference.write_bytes(b"changed")
         return result
 
     monkeypatch.setattr(alignment_service, "_estimate_audio_pair", mutate_after_first)

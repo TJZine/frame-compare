@@ -396,6 +396,7 @@ def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
         '"audio_attempt":null}',
         "x" * (128 * 1024 + 1),
     ],
+    ids=("duplicate-keys", "oversized"),
 )
 def test_workspace_metadata_rejects_duplicate_or_oversized_audio_review(
     audio_review: str,
