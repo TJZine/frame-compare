@@ -94,7 +94,7 @@ remains a v1 file with the same path and offset semantics.
 
 Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
 a unique display-qualified candidate survived an attempt; under the internal
-`continuous-origin-qualified-stability-2097152-v9-held` policy it is shown as a clearly
+`continuous-origin-qualified-channel-corroboration-2097152-v10-held` policy it is shown as a clearly
 unaccepted review hint and is never applied or passed as the authoritative integer/null
 field. Its decision
 records `automatic_authority_held` when the qualified policy would otherwise pass. `unavailable`
@@ -111,7 +111,7 @@ confirmation is a separate fact and does not rewrite the original audio attempt.
 
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
-schema-v2 file records selected stream metadata, every planned window outcome, raw
+schema-v3 file records selected stream metadata, every planned window outcome, raw
 candidate and quality facts, the aggregate decision, and the final review resolution.
 It also retains bounded continuous-collection summaries and useful-overlap/coverage
 facts when observed. Shortage and observed-EOF states remain explicit; a failed collection
@@ -132,6 +132,17 @@ full subprocess stderr. Source identity digests are pseudonymous rather than ano
 and sharing a run folder also shares its bounded labels and timing facts. The file is
 diagnostic only: editing, corrupting, or deleting it cannot change trims or cache reuse.
 It is retained until the run folder is deleted.
+
+When the default mono downmix has too little independent support because an otherwise
+valid row misses the fixed waveform floor, Frame Compare can inspect the exact common
+`FL`, `FR`, and `FC` channel names in fixed order. It uses at most three views, releases
+each view's PCM before collecting the next, and still counts one observation per temporal
+window. Two same-frame activity/coverage/peak-valid views are required and at least one
+must meet the unchanged waveform floor; any base-credible named view in another frame
+bin vetoes the hint. The retained score and peak aggregates are explicitly channel-view
+evidence. Such evidence is always a provisional manual-review hint: it cannot become an
+automatic alignment, enter the shared computed cache, or authorize a trim, even after
+the qualified mono estimator is activated later.
 
 ## Native VSView alignment review
 
@@ -202,11 +213,11 @@ duplicate, incomplete, or out-of-bounds sidecars are rejected before any offset 
 applied. Missing modern `_Range` is reported once but remains unset, preserving
 VSView's native range inference; other native diagnostics remain inherited.
 
-Generated Frame Compare sessions use metadata v3 while the result sidecar remains v1.
-Metadata v1/v2, unknown-version, mixed-version, and malformed Frame Compare sessions must
+Generated Frame Compare sessions use metadata v4 while the result sidecar remains v1.
+Metadata v1/v2/v3, unknown-version, mixed-version, and malformed Frame Compare sessions must
 be regenerated after upgrading; they are not migrated into trust. Ordinary VSView
 sessions without Frame Compare metadata remain inert. Shared alignment cache schema v2,
-diagnostic artifact schema v2, and manual override schema v1 are separate contracts and
+diagnostic artifact schema v3, and manual override schema v1 are separate contracts and
 are unchanged by this session-metadata update.
 
 The native-panel workflow uses each source exactly once, named outputs, public

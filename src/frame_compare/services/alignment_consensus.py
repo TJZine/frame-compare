@@ -38,6 +38,11 @@ from frame_compare.services.types import (
     AudioAlignmentCollectionRecord,
     AudioAlignmentDecision,
     AudioAlignmentWindowRecord,
+    AudioChannelCollectionRecord,
+    AudioChannelCorroboration,
+    AudioChannelView,
+    AudioChannelViewRecord,
+    AudioChannelWindowRecord,
     AudioPeakRatio,
 )
 
@@ -45,6 +50,7 @@ _REVIEW_SCORE_FLOOR = 0.90
 _REVIEW_PEAK_RATIO_FLOOR = 1.50
 _STABILITY_COVERAGE_FLOOR = 0.90
 AUTOMATIC_AUTHORITY_HOLD_REASON = "automatic_authority_held"
+CHANNEL_CORROBORATION_REASON = "channel_corroboration_provisional"
 _AUTOMATIC_AUTHORITY_HELD = True
 
 
@@ -404,6 +410,7 @@ class AlignmentConsensus:
     credible_windows: int = 0
     voting_windows: int = 0
     independent_windows: int = 0
+    channel_corroboration: AudioChannelCorroboration | None = None
 
 
 @dataclass
@@ -798,6 +805,476 @@ def _support_facts(
     else:
         state = "complete"
     return actual_start, actual_end, expected, min(1.0, coverage), state
+
+
+def channel_corroboration_window_indices(result: AlignmentConsensus) -> tuple[int, ...]:
+    """Return fixed-floor mono rows eligible for named-view corroboration."""
+    decision = result.decision
+    if (
+        decision is None
+        or decision.state == "trusted_automatic"
+        or decision.primary_reason == AUTOMATIC_AUTHORITY_HOLD_REASON
+        or "insufficient_independent_support" not in decision.failed_gates
+        or "credible_contradiction" in decision.failed_gates
+        or "frame_boundary_guard" in decision.failed_gates
+        or "search_edge_guard" in decision.failed_gates
+    ):
+        return ()
+    return tuple(
+        index
+        for index, record in enumerate(result.window_records)
+        if record.terminal_category == "correlated"
+        and _record_has_integrity(record)
+        and record.actual_coverage is not None
+        and record.actual_coverage >= _STABILITY_COVERAGE_FLOOR
+        and record.requested_score is not None
+        and math.isfinite(record.requested_score)
+        and record.requested_score < _REVIEW_SCORE_FLOOR
+        and record.requested_sample_lag is not None
+    )
+
+
+def _missing_channel_view(view: AudioChannelView, reason: str) -> AudioChannelViewRecord:
+    return AudioChannelViewRecord(
+        view=view,
+        requested_sample_lag=None,
+        requested_frame_candidate=None,
+        requested_score=None,
+        peak_ratio=None,
+        actual_reference_count=None,
+        actual_comparison_count=None,
+        actual_useful_reference_start=None,
+        actual_useful_reference_end=None,
+        actual_coverage=None,
+        activity_valid=False,
+        coverage_valid=False,
+        base_credible=False,
+        agrees=False,
+        contradiction=False,
+        rejection_reason=reason,
+    )
+
+
+def corroborate_channel_views(
+    mono_result: AlignmentConsensus,
+    *,
+    plan: AudioAnalysisPlan,
+    channel_plan: alignment_audio.AudioChannelViewPlan,
+    config: AlignmentConfig,
+    fps: Fraction,
+    phase_loader: Callable[[AudioChannelView], alignment_audio.CollectedAudioPhase],
+    cancellation: threading.Event | None = None,
+) -> AlignmentConsensus:
+    """Apply the fixed R6C rule without granting channel evidence authority."""
+    records_by_view: dict[AudioChannelView, dict[int, AudioChannelViewRecord]] = {}
+    collections: list[AudioChannelCollectionRecord] = []
+    collection_failure: str | None = None
+    radius = max(1, round(config.sample_rate * 0.005))
+    requested_limit = int(config.max_offset_seconds * config.sample_rate)
+    for view in channel_plan.views:
+        raise_if_alignment_cancelled(cancellation)
+        try:
+            phase = phase_loader(view)
+        except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
+            raise
+        except AudioAlignmentError as exc:
+            collections.extend(
+                AudioChannelCollectionRecord(view=view, summary=summary)
+                for summary in exc.collection_summaries
+            )
+            collection_failure = exc.category
+            break
+        collections.extend(
+            AudioChannelCollectionRecord(view=view, summary=summary) for summary in phase.summaries
+        )
+        view_records: dict[int, AudioChannelViewRecord] = {}
+        for plan_index, spec, window in zip(
+            channel_plan.window_indices,
+            channel_plan.windows,
+            phase.windows,
+            strict=True,
+        ):
+            raise_if_alignment_cancelled(cancellation)
+            reference_count = int(window.reference.size)
+            comparison_count = int(window.comparison.size)
+            origin_delta = window.reference_start_sample - window.comparison_start_sample
+            try:
+                raw = estimate_alignment_offset(
+                    window.reference,
+                    window.comparison,
+                    config=replace(
+                        config,
+                        sample_rate=plan.requested_sample_rate,
+                        correlation_mode="raw_fft",
+                        preprocessing_mode="standard",
+                        refinement_mode="disabled",
+                        refinement_sample_rate=None,
+                    ),
+                    alignment_offset_bounds_samples=(
+                        -requested_limit - origin_delta,
+                        requested_limit - origin_delta,
+                    ),
+                    cancellation=cancellation,
+                )
+                requested_lag = origin_delta + raw.sample_offset
+                correction, score = refine_aligned_score(
+                    window.reference,
+                    window.comparison,
+                    preprocessing_mode="standard",
+                    correction_bounds_samples=(
+                        requested_lag - radius - origin_delta,
+                        requested_lag + radius - origin_delta,
+                    ),
+                    cancellation=cancellation,
+                )
+                del correction
+                useful_start, useful_end, _expected, coverage, _state = _support_facts(
+                    reference_start=window.reference_start_sample,
+                    reference_count=reference_count,
+                    comparison_start=window.comparison_start_sample,
+                    comparison_count=comparison_count,
+                    planned_reference_start=spec.reference_start_sample,
+                    planned_reference_count=spec.reference_sample_count,
+                    planned_comparison_start=spec.comparison_start_sample,
+                    planned_comparison_count=spec.comparison_sample_count,
+                    requested_offset=requested_lag,
+                )
+                peak = _peak_value(raw.peak_ratio)
+                activity_valid = True
+                coverage_valid = coverage >= _STABILITY_COVERAGE_FLOOR
+                peak_valid = peak is not None and _peak_passes(
+                    raw.peak_ratio, _REVIEW_PEAK_RATIO_FLOOR
+                )
+                base_credible = coverage_valid and peak_valid and score >= _REVIEW_SCORE_FLOOR
+                mono_lag = mono_result.window_records[plan_index].requested_sample_lag
+                if mono_lag is None:
+                    raise ValueError("eligible mono row is missing its requested-rate lag")
+                rejection = None
+                if not coverage_valid:
+                    rejection = "coverage_floor"
+                elif not peak_valid:
+                    rejection = "peak_floor"
+                elif abs(requested_lag - mono_lag) > radius:
+                    rejection = "outside_correction_neighborhood"
+                elif score < _REVIEW_SCORE_FLOOR:
+                    rejection = "waveform_floor"
+                view_records[plan_index] = AudioChannelViewRecord(
+                    view=view,
+                    requested_sample_lag=requested_lag,
+                    requested_frame_candidate=samples_to_frames(
+                        requested_lag, config.sample_rate, fps
+                    ),
+                    requested_score=score,
+                    peak_ratio=peak,
+                    actual_reference_count=reference_count,
+                    actual_comparison_count=comparison_count,
+                    actual_useful_reference_start=useful_start,
+                    actual_useful_reference_end=useful_end,
+                    actual_coverage=coverage,
+                    activity_valid=activity_valid,
+                    coverage_valid=coverage_valid,
+                    base_credible=base_credible,
+                    agrees=False,
+                    contradiction=False,
+                    rejection_reason=rejection,
+                )
+            except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
+                raise
+            except AudioAlignmentError as exc:
+                view_records[plan_index] = AudioChannelViewRecord(
+                    view=view,
+                    requested_sample_lag=None,
+                    requested_frame_candidate=None,
+                    requested_score=None,
+                    peak_ratio=None,
+                    actual_reference_count=reference_count,
+                    actual_comparison_count=comparison_count,
+                    actual_useful_reference_start=None,
+                    actual_useful_reference_end=None,
+                    actual_coverage=None,
+                    activity_valid=False,
+                    coverage_valid=False,
+                    base_credible=False,
+                    agrees=False,
+                    contradiction=False,
+                    rejection_reason=exc.category,
+                )
+        records_by_view[view] = view_records
+        del phase
+
+    channel_windows: list[AudioChannelWindowRecord] = []
+    for plan_index in channel_plan.window_indices:
+        mono_record = mono_result.window_records[plan_index]
+        mono_lag = mono_record.requested_sample_lag
+        if mono_lag is None:
+            raise ValueError("eligible mono row is missing its requested-rate lag")
+        views = [
+            records_by_view.get(view, {}).get(
+                plan_index,
+                _missing_channel_view(view, collection_failure or "not_collected"),
+            )
+            for view in channel_plan.views
+        ]
+        eligible = [
+            item
+            for item in views
+            if item.activity_valid
+            and item.coverage_valid
+            and item.peak_ratio is not None
+            and _peak_passes(
+                float("inf") if item.peak_ratio == "unbounded" else item.peak_ratio,
+                _REVIEW_PEAK_RATIO_FLOOR,
+            )
+            and item.requested_sample_lag is not None
+            and abs(item.requested_sample_lag - mono_lag) <= radius
+        ]
+        view_groups: dict[int, list[AudioChannelViewRecord]] = {}
+        for item in eligible:
+            if item.requested_frame_candidate is not None:
+                view_groups.setdefault(item.requested_frame_candidate, []).append(item)
+        qualifying: list[tuple[int, list[AudioChannelViewRecord]]] = [
+            (frame, members)
+            for frame, members in view_groups.items()
+            if len(members) >= 2 and any(member.base_credible for member in members)
+        ]
+        qualifying.sort(key=lambda item: item[0])
+        selected = qualifying[0] if len(qualifying) == 1 else None
+        contradiction = False
+        if selected is not None:
+            frame, agreeing = selected
+            contradiction = any(
+                item.base_credible and item.requested_frame_candidate != frame for item in views
+            )
+            contradiction = contradiction or any(
+                record.review_qualified
+                and record.requested_frame_candidate is not None
+                and record.requested_frame_candidate != frame
+                for record in mono_result.window_records
+            )
+            boundary = _frame_boundary_crossed(
+                mono_lag - radius,
+                mono_lag + radius,
+                sample_rate=config.sample_rate,
+                fps=fps,
+            ) or _is_exact_half_frame(mono_lag, sample_rate=config.sample_rate, fps=fps)
+            edge = abs(mono_lag) >= requested_limit
+            credible_scores = [
+                item.requested_score
+                for item in agreeing
+                if item.base_credible and item.requested_score is not None
+            ]
+            peaks = [
+                float("inf") if item.peak_ratio == "unbounded" else item.peak_ratio
+                for item in agreeing
+                if item.peak_ratio is not None
+            ]
+            corroborated = not contradiction and not boundary and not edge
+            representative = int(
+                median_low(
+                    item.requested_sample_lag
+                    for item in agreeing
+                    if item.requested_sample_lag is not None
+                )
+            )
+            agreeing_names: tuple[AudioChannelView, ...] = tuple(item.view for item in agreeing)
+            updated_views = tuple(
+                replace(
+                    item,
+                    agrees=item.view in agreeing_names,
+                    contradiction=(item.base_credible and item.requested_frame_candidate != frame),
+                )
+                for item in views
+            )
+            channel_windows.append(
+                AudioChannelWindowRecord(
+                    logical_id=mono_record.logical_id,
+                    mono_sample_lag=mono_lag,
+                    corroborated=corroborated,
+                    representative_sample_lag=representative if corroborated else None,
+                    representative_frame_candidate=(
+                        samples_to_frames(representative, config.sample_rate, fps)
+                        if corroborated
+                        else None
+                    ),
+                    actual_useful_reference_start=(
+                        max(
+                            item.actual_useful_reference_start
+                            for item in agreeing
+                            if item.actual_useful_reference_start is not None
+                        )
+                        if corroborated
+                        else None
+                    ),
+                    actual_useful_reference_end=(
+                        min(
+                            item.actual_useful_reference_end
+                            for item in agreeing
+                            if item.actual_useful_reference_end is not None
+                        )
+                        if corroborated
+                        else None
+                    ),
+                    agreeing_views=agreeing_names if corroborated else (),
+                    minimum_credible_score=min(credible_scores) if corroborated else None,
+                    minimum_peak_ratio=_peak_value(min(peaks)) if corroborated else None,
+                    contradiction=contradiction,
+                    reason=(
+                        "credible_cross_frame_veto"
+                        if contradiction
+                        else "frame_boundary_guard"
+                        if boundary
+                        else "search_edge_guard"
+                        if edge
+                        else "corroborated"
+                    ),
+                    views=updated_views,
+                )
+            )
+        else:
+            credible_frames = {
+                item.requested_frame_candidate
+                for item in views
+                if item.base_credible and item.requested_frame_candidate is not None
+            }
+            channel_windows.append(
+                AudioChannelWindowRecord(
+                    logical_id=mono_record.logical_id,
+                    mono_sample_lag=mono_lag,
+                    corroborated=False,
+                    representative_sample_lag=None,
+                    representative_frame_candidate=None,
+                    actual_useful_reference_start=None,
+                    actual_useful_reference_end=None,
+                    agreeing_views=(),
+                    minimum_credible_score=None,
+                    minimum_peak_ratio=None,
+                    contradiction=len(credible_frames) > 1,
+                    reason=(collection_failure or "no_unique_corroboration"),
+                    views=tuple(views),
+                )
+            )
+
+    corroborated = [window for window in channel_windows if window.corroborated]
+    window_groups: dict[int, list[AudioChannelWindowRecord]] = {}
+    for window in corroborated:
+        if window.representative_frame_candidate is not None:
+            window_groups.setdefault(window.representative_frame_candidate, []).append(window)
+    ordered = sorted(window_groups.values(), key=lambda group: (-len(group), group[0].logical_id))
+    winner = (
+        ordered[0] if ordered and (len(ordered) == 1 or len(ordered[0]) > len(ordered[1])) else []
+    )
+    winner_ids = {window.logical_id for window in winner}
+    synthetic_records = [
+        replace(
+            mono_result.window_records[channel_plan.window_indices[channel_windows.index(window)]],
+            actual_useful_reference_start=window.actual_useful_reference_start,
+            actual_useful_reference_end=window.actual_useful_reference_end,
+        )
+        for window in channel_windows
+        if window.logical_id in winner_ids
+    ]
+    reference_duration = round(
+        Fraction(plan.reference_duration_samples * config.sample_rate, plan.sample_rate)
+    )
+    comparison_duration = round(
+        Fraction(plan.comparison_duration_samples * config.sample_rate, plan.sample_rate)
+    )
+    _selected, independent_count = _independent_support(
+        synthetic_records,
+        winner_ids,
+        config=config,
+        sample_rate=config.sample_rate,
+        reference_duration=reference_duration,
+        comparison_duration=comparison_duration,
+        offsets={window.logical_id: window.representative_sample_lag or 0 for window in winner},
+    )
+    required = _minimum_independent_count(
+        min(reference_duration, comparison_duration),
+        sample_rate=config.sample_rate,
+        config=config,
+    )
+    global_contradiction = any(window.contradiction for window in channel_windows)
+    if winner and independent_count >= required and not global_contradiction:
+        candidate = AudioAlignmentCandidate(
+            sample_offset=int(
+                median_low(
+                    window.representative_sample_lag
+                    for window in winner
+                    if window.representative_sample_lag is not None
+                )
+            ),
+            sample_rate=config.sample_rate,
+            frame_offset=winner[0].representative_frame_candidate or 0,
+            supporting_window_ids=tuple(window.logical_id for window in winner),
+            median_score=float(
+                np.median(
+                    [
+                        window.minimum_credible_score
+                        for window in winner
+                        if window.minimum_credible_score is not None
+                    ]
+                )
+            ),
+            minimum_peak_ratio=_peak_value(
+                min(
+                    float("inf")
+                    if window.minimum_peak_ratio == "unbounded"
+                    else window.minimum_peak_ratio
+                    for window in winner
+                    if window.minimum_peak_ratio is not None
+                )
+            )
+            or "unbounded",
+        )
+        channel = AudioChannelCorroboration(
+            status="corroborated",
+            reason=CHANNEL_CORROBORATION_REASON,
+            candidate=candidate,
+            independent_windows=independent_count,
+            windows=tuple(channel_windows),
+            collections=tuple(collections),
+        )
+        decision = mono_result.decision
+        if decision is None:
+            raise ValueError("channel corroboration requires a mono decision")
+        decision = replace(
+            decision,
+            state="provisional",
+            candidate=candidate,
+            primary_reason=CHANNEL_CORROBORATION_REASON,
+            failed_gates=tuple(
+                dict.fromkeys((*decision.failed_gates, CHANNEL_CORROBORATION_REASON))
+            ),
+        )
+        return replace(
+            mono_result,
+            score=candidate.median_score,
+            ambiguity_ratio=(
+                float("inf")
+                if candidate.minimum_peak_ratio == "unbounded"
+                else candidate.minimum_peak_ratio
+            ),
+            applied=False,
+            diagnostic=CHANNEL_CORROBORATION_REASON,
+            decision=decision,
+            channel_corroboration=channel,
+        )
+    reason = (
+        "credible_cross_frame_veto"
+        if global_contradiction
+        else collection_failure or "insufficient_channel_temporal_support"
+    )
+    return replace(
+        mono_result,
+        channel_corroboration=AudioChannelCorroboration(
+            status="rejected",
+            reason=reason,
+            candidate=None,
+            independent_windows=independent_count,
+            windows=tuple(channel_windows),
+            collections=tuple(collections),
+        ),
+    )
 
 
 def estimate_staged_consensus_offset(

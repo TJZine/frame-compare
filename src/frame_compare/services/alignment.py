@@ -312,6 +312,7 @@ def _build_audio_attempt(
         stability=consensus.stability,
         collection_observation="observed" if consensus.collection_summaries else "not_observed",
         collection_summaries=consensus.collection_summaries,
+        channel_corroboration=consensus.channel_corroboration,
     )
 
 
@@ -528,6 +529,49 @@ def _estimate_audio_pair(
             verification_spec_builder=build_verification_specs,
             cancellation=cancellation,
         )
+        eligible_indices = alignment_consensus.channel_corroboration_window_indices(consensus)
+        views = (
+            alignment_audio.common_named_channel_views(reference_stream, comparison_stream)
+            if config.channel_strategy == "mono_downmix"
+            else ()
+        )
+        channel_plan = alignment_audio.plan_channel_view_corroboration(
+            plan,
+            eligible_indices,
+            views=views,
+        )
+        if isinstance(channel_plan, alignment_audio.AudioChannelViewPlan):
+
+            def load_channel_view(
+                view: alignment_audio.AudioChannelView,
+            ) -> alignment_audio.CollectedAudioPhase:
+                check_identities()
+                phase = alignment_audio.collect_channel_view_phase(
+                    reference,
+                    comparison,
+                    reference_stream,
+                    comparison_stream,
+                    channel_plan,
+                    view,
+                    sample_rate=config.sample_rate,
+                    cancellation=cancellation,
+                )
+                try:
+                    check_identities()
+                except AudioAlignmentError as exc:
+                    exc.collection_summaries = phase.summaries
+                    raise
+                return phase
+
+            consensus = alignment_consensus.corroborate_channel_views(
+                consensus,
+                plan=plan,
+                channel_plan=channel_plan,
+                config=config,
+                fps=fps_reference,
+                phase_loader=load_channel_view,
+                cancellation=cancellation,
+            )
     consensus = alignment_consensus.hold_automatic_consensus(consensus)
     if reference_request is None or comparison_request is None:
         return consensus
@@ -897,6 +941,13 @@ def _normal_evidence_lines(
                 f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
             ]
         )
+        if attempt.channel_corroboration is not None:
+            channel = attempt.channel_corroboration
+            lines.append(
+                "Channel-view evidence: "
+                f"{channel.independent_windows} independent temporal observations; "
+                f"status={channel.status}; reason={channel.reason}."
+            )
     else:
         lines = [
             f"Comparison {ordinal} - No usable audio candidate. No automatic correction applied.",
@@ -1064,6 +1115,20 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
             f"review={window.review_qualified}, result={window.terminal_stage}/{window.terminal_category}, "
             f"relation={window.purpose}/{window.parent_id or 'root'}"
         )
+    channel = attempt.channel_corroboration
+    if channel is not None:
+        lines.append(
+            f"  Channel-view evidence: status={channel.status}; reason={channel.reason}; "
+            f"independent={channel.independent_windows}; collections={len(channel.collections)}"
+        )
+        for window in channel.windows:
+            lines.append(
+                f"    {window.logical_id}/channel: corroborated={window.corroborated}; "
+                f"representative={window.representative_sample_lag}/"
+                f"{window.representative_frame_candidate}; agreeing={window.agreeing_views}; "
+                f"score={window.minimum_credible_score}; peak={window.minimum_peak_ratio}; "
+                f"contradiction={window.contradiction}; reason={window.reason}"
+            )
     return lines
 
 

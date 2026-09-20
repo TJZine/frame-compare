@@ -30,6 +30,7 @@ from frame_compare.services.types import (
     AlignmentChannelStrategy,
     AlignmentConfig,
     AudioAlignmentCollectionRecord,
+    AudioChannelView,
     AudioMetadataMatch,
     SelectedAudioStreamEvidence,
 )
@@ -161,6 +162,16 @@ class CollectedAudioPhase:
 
     windows: tuple[AudioWindow, ...]
     summaries: tuple[AudioAlignmentCollectionRecord, ...]
+
+
+@dataclass(frozen=True)
+class AudioChannelViewPlan:
+    """Admitted requested-rate intervals for fixed named-channel corroboration."""
+
+    views: tuple[AudioChannelView, ...]
+    window_indices: tuple[int, ...]
+    windows: tuple[AudioWindowSpec, ...]
+    retained_samples_per_view: int
 
 
 def _decode_stderr(stderr: bytes) -> str:
@@ -646,6 +657,31 @@ def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
     return "pan=mono|c0=c0"
 
 
+_EXACT_LAYOUT_VIEWS: dict[str, tuple[AudioChannelView, ...]] = {
+    "stereo": ("FL", "FR"),
+    "2.0": ("FL", "FR"),
+    "3.0": ("FL", "FR", "FC"),
+    "4.0": ("FL", "FR", "FC"),
+    "5.0": ("FL", "FR", "FC"),
+    "5.0(side)": ("FL", "FR", "FC"),
+    "5.1": ("FL", "FR", "FC"),
+    "5.1(side)": ("FL", "FR", "FC"),
+    "6.1": ("FL", "FR", "FC"),
+    "7.1": ("FL", "FR", "FC"),
+    "7.1(wide)": ("FL", "FR", "FC"),
+}
+
+
+def common_named_channel_views(
+    reference_stream: AudioStreamInfo,
+    comparison_stream: AudioStreamInfo,
+) -> tuple[AudioChannelView, ...]:
+    """Return only explicitly defined FL/FR/FC views shared by both layouts."""
+    reference = _EXACT_LAYOUT_VIEWS.get(reference_stream.channel_layout or "", ())
+    comparison = set(_EXACT_LAYOUT_VIEWS.get(comparison_stream.channel_layout or "", ()))
+    return tuple(view for view in reference if view in comparison)
+
+
 def _fft_size(sample_count: int) -> int:
     return 1 << max(0, sample_count - 1).bit_length()
 
@@ -884,10 +920,14 @@ def continuous_collection_argv(
     sample_rate: int,
     end_sample: int,
     channel_strategy: AlignmentChannelStrategy,
+    channel_view: AudioChannelView | None = None,
 ) -> list[str]:
     """Build the canonical origin-based, endpoint-limited FFmpeg recipe."""
     filters: list[str] = []
-    if channel_strategy == "mono_downmix":
+    if channel_view is not None:
+        channel_args = []
+        filters.append(f"pan=mono|c0={channel_view}")
+    elif channel_strategy == "mono_downmix":
         channel_args = ["-ac", "1"]
     else:
         channel_args = []
@@ -947,6 +987,7 @@ def _collect_role(
     channel_strategy: AlignmentChannelStrategy,
     max_retained_samples: int,
     cancellation: threading.Event | None,
+    channel_view: AudioChannelView | None = None,
 ) -> tuple[ContinuousAudioCollection, AudioAlignmentCollectionRecord]:
     raise_if_alignment_cancelled(cancellation)
     horizon = max(interval.end_sample for interval in intervals)
@@ -957,6 +998,7 @@ def _collect_role(
             sample_rate=sample_rate,
             end_sample=horizon,
             channel_strategy=channel_strategy,
+            channel_view=channel_view,
         ),
         intervals,
         planned_end_sample=horizon,
@@ -1148,6 +1190,140 @@ def collect_verification_phase(
             )
             for reference_interval, comparison_interval in zip(
                 reference_result.intervals, comparison_result.intervals, strict=True
+            )
+        ),
+        summaries=(reference_summary, comparison_summary),
+    )
+
+
+def plan_channel_view_corroboration(
+    plan: AudioAnalysisPlan,
+    window_indices: tuple[int, ...],
+    *,
+    views: tuple[AudioChannelView, ...],
+) -> AudioChannelViewPlan | AudioAnalysisBudgetExceeded:
+    """Admit fixed named-view work inside the existing production budgets."""
+    if len(views) < 2 or len(views) > 3 or not window_indices:
+        return AudioAnalysisBudgetExceeded("channel_views_unavailable")
+    rate = plan.requested_sample_rate
+    windows: list[AudioWindowSpec] = []
+    retained = 0
+    total_fft = 0
+    radius = max(1, round(rate * 0.005))
+    scored_positions = 0
+    for index in window_indices:
+        source = plan.windows[index]
+        reference_start = round(Fraction(source.reference_start_sample * rate, plan.sample_rate))
+        reference_end = round(
+            Fraction(
+                (source.reference_start_sample + source.reference_sample_count) * rate,
+                plan.sample_rate,
+            )
+        )
+        comparison_start = round(Fraction(source.comparison_start_sample * rate, plan.sample_rate))
+        comparison_end = round(
+            Fraction(
+                (source.comparison_start_sample + source.comparison_sample_count) * rate,
+                plan.sample_rate,
+            )
+        )
+        reference_count = reference_end - reference_start
+        comparison_count = comparison_end - comparison_start
+        pair_samples = reference_count + comparison_count
+        fft_points = _fft_size(pair_samples - 1)
+        if pair_samples > _MAX_SCORING_PAIR_SAMPLES or fft_points > _MAX_FFT_POINTS:
+            return AudioAnalysisBudgetExceeded("channel_view_scoring_exceeds_peak_budget")
+        retained += pair_samples
+        total_fft += fft_points * len(views)
+        scored_positions += (
+            len(views)
+            * (2 * radius + 2)
+            * min(reference_count, comparison_count, _MAX_SCORE_POSITIONS_PER_EVALUATION)
+        )
+        windows.append(
+            AudioWindowSpec(
+                reference_start,
+                reference_count,
+                comparison_start,
+                comparison_count,
+            )
+        )
+    if retained > _SCORING_SAMPLE_WORK_BUDGET:
+        return AudioAnalysisBudgetExceeded("channel_view_scoring_exceeds_total_budget")
+    if total_fft > _FFT_WORK_BUDGET:
+        return AudioAnalysisBudgetExceeded("channel_view_fft_exceeds_work_budget")
+    if scored_positions > _MAX_SCORED_POSITIONS:
+        return AudioAnalysisBudgetExceeded("channel_view_scoring_exceeds_work_budget")
+    return AudioChannelViewPlan(
+        views=views,
+        window_indices=window_indices,
+        windows=tuple(windows),
+        retained_samples_per_view=retained,
+    )
+
+
+def collect_channel_view_phase(
+    reference_path: Path,
+    comparison_path: Path,
+    reference_stream: AudioStreamInfo,
+    comparison_stream: AudioStreamInfo,
+    plan: AudioChannelViewPlan,
+    view: AudioChannelView,
+    *,
+    sample_rate: int,
+    cancellation: threading.Event | None = None,
+) -> CollectedAudioPhase:
+    """Collect one requested-rate named view with two sequential origin decodes."""
+    if view not in plan.views:
+        raise ValueError("channel view is outside the admitted plan")
+    reference_intervals = tuple(
+        AudioSampleInterval(spec.reference_start_sample, spec.reference_sample_count)
+        for spec in plan.windows
+    )
+    comparison_intervals = tuple(
+        AudioSampleInterval(spec.comparison_start_sample, spec.comparison_sample_count)
+        for spec in plan.windows
+    )
+    reference_result, reference_summary = _collect_role(
+        reference_path,
+        reference_stream,
+        reference_intervals,
+        phase="verification",
+        role="reference",
+        sample_rate=sample_rate,
+        channel_strategy="mono_downmix",
+        max_retained_samples=plan.retained_samples_per_view,
+        cancellation=cancellation,
+        channel_view=view,
+    )
+    try:
+        comparison_result, comparison_summary = _collect_role(
+            comparison_path,
+            comparison_stream,
+            comparison_intervals,
+            phase="verification",
+            role="comparison",
+            sample_rate=sample_rate,
+            channel_strategy="mono_downmix",
+            max_retained_samples=plan.retained_samples_per_view,
+            cancellation=cancellation,
+            channel_view=view,
+        )
+    except AudioAlignmentError as exc:
+        exc.collection_summaries = (reference_summary, *exc.collection_summaries)
+        raise
+    return CollectedAudioPhase(
+        windows=tuple(
+            AudioWindow(
+                reference=reference_interval.samples,
+                comparison=comparison_interval.samples,
+                reference_start_sample=reference_interval.start_sample,
+                comparison_start_sample=comparison_interval.start_sample,
+            )
+            for reference_interval, comparison_interval in zip(
+                reference_result.intervals,
+                comparison_result.intervals,
+                strict=True,
             )
         ),
         summaries=(reference_summary, comparison_summary),

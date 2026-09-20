@@ -1267,7 +1267,7 @@ the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 The generated session carries an explicit UUID session identity, one reference role,
 ordered comparison roles/keys/ordinals, presentation names, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v3. The panel derives display bounds from public
+schema v4. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
 the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
 sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
@@ -1429,7 +1429,7 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `continuous-origin-qualified-stability-2097152-v9-held` policy, computed cache hits and embedded computed
+  `continuous-origin-qualified-channel-corroboration-2097152-v10-held` policy, computed cache hits and embedded computed
   fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
   only whether prior human-confirmed offsets are reused. `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
@@ -1574,7 +1574,7 @@ negative rather than unbounded scanning.
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
 qualified-policy evidence, and an explicit audio decision: `provisional` or `unavailable`
-under the shipped `continuous-origin-qualified-stability-2097152-v9-held` automatic-authority hold.
+under the shipped `continuous-origin-qualified-channel-corroboration-2097152-v10-held` automatic-authority hold.
 An otherwise-qualified computed attempt records
 `automatic_authority_held`; `trusted_automatic` is not produced while that internal
 hold is active. A provisional candidate uses fixed display-only floors (score at
@@ -1585,10 +1585,19 @@ provisional/unavailable even when the future policy would otherwise pass; comput
 fields and trusted native hints stay null. The sampled support is bounded and does not claim
 drift compensation or exhaustive edit detection.
 
+For the default `mono_downmix` strategy only, a weak but extraction/coverage-valid
+mono row may be corroborated by the fixed-order intersection of explicitly named
+`FL`, `FR`, and `FC` views when the mono policy lacks independent temporal support.
+At least two same-frame, peak-valid named views are required, at least one must meet
+the fixed waveform floor, and any base-credible cross-frame named view vetoes the
+hint. The resulting aggregate is labeled channel-view evidence and is permanently
+provisional-only: it never becomes a mono voter, automatic authority, a computed-cache
+write, or an applied trim.
+
 ## Persistence Rules
 
 Fresh runs write one pathless diagnostic artifact per comparison at
-`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v2 is marked
+`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v3 is marked
 `diagnostic_only`, is limited to 128 KiB per comparison, and contains no media path,
 PCM, raw command line, full subprocess stderr, environment value, or credential. It
 is atomically snapshotted before optional review and may be atomically replaced once

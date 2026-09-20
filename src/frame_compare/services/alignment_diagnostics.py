@@ -13,7 +13,7 @@ from frame_compare.services.types import AlignmentResult, AudioAlignmentAttempt
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _MAX_ARTIFACT_BYTES = 128 * 1024
 
 type AlignmentReviewOutcome = Literal[

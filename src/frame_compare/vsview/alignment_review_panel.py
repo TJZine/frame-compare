@@ -907,6 +907,24 @@ def _audio_details(
             f"cleanup_failures={collection['cleanup_failure_count']}; "
             f"failures={collection['failure_count']}"
         )
+    channel = attempt["channel_corroboration"]
+    if isinstance(channel, dict):
+        channel_data = cast(dict[str, object], channel)
+        lines.append(
+            "Channel-view evidence: "
+            f"status={channel_data['status']}; reason={channel_data['reason']}; "
+            f"independent temporal observations={channel_data['independent_windows']}"
+        )
+        for window in cast(list[dict[str, object]], channel_data["windows"]):
+            lines.append(
+                f"{window['logical_id']}/channel: corroborated={window['corroborated']}; "
+                f"representative={window['representative_sample_lag']}/"
+                f"{window['representative_frame_candidate']}; "
+                f"agreeing={window['agreeing_views']}; "
+                f"score={window['minimum_credible_score']}; "
+                f"peak={window['minimum_peak_ratio']}; "
+                f"contradiction={window['contradiction']}; reason={window['reason']}"
+            )
     for stream in cast(list[dict[str, object]], attempt["selected_streams"]):
         lines.append(
             f"{stream['role']}: a:{stream['audio_stream_index']} (absolute {stream['absolute_stream_index']}), "

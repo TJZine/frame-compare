@@ -1679,6 +1679,42 @@ def test_continuous_recipe_is_origin_based_and_endpoint_limited() -> None:
     assert not {"-ss", "-copyts", "-fs"} & set(argv)
 
 
+def test_named_channel_recipe_uses_an_exact_pan_view() -> None:
+    argv = alignment_audio.continuous_collection_argv(
+        Path("reference.mkv"),
+        _stream(10),
+        sample_rate=8000,
+        end_sample=240000,
+        channel_strategy="mono_downmix",
+        channel_view="FC",
+    )
+
+    assert "-ac" not in argv
+    assert argv[argv.index("-af") + 1] == ("pan=mono|c0=FC,aresample=8000,atrim=end_sample=240000")
+    assert not {"-ss", "-copyts", "-fs"} & set(argv)
+
+
+@pytest.mark.parametrize(
+    ("reference_layout", "comparison_layout", "expected"),
+    [
+        ("5.1", "5.1(side)", ("FL", "FR", "FC")),
+        ("stereo", "5.1", ("FL", "FR")),
+        ("mono", "5.1", ()),
+        (None, "5.1", ()),
+        ("5.1(custom)", "5.1", ()),
+    ],
+)
+def test_common_named_channel_views_require_exact_known_layouts(
+    reference_layout: str | None,
+    comparison_layout: str | None,
+    expected: tuple[str, ...],
+) -> None:
+    reference = replace(_stream(10), channel_layout=reference_layout)
+    comparison = replace(_stream(10), channel_layout=comparison_layout)
+
+    assert alignment_audio.common_named_channel_views(reference, comparison) == expected
+
+
 def test_stream_probe_prefers_selected_stream_duration_over_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -19,6 +19,10 @@ from frame_compare.services.types import (
     AudioAlignmentDecision,
     AudioAlignmentWindowRecord,
     AudioAttemptStatus,
+    AudioChannelCollectionRecord,
+    AudioChannelCorroboration,
+    AudioChannelViewRecord,
+    AudioChannelWindowRecord,
     AudioDecisionState,
     SelectedAudioStreamEvidence,
 )
@@ -100,7 +104,7 @@ def audio_attempt() -> AudioAlignmentAttempt:
         comparison_identity_digest="b" * 64,
         comparison_ordinal=1,
         status="complete",
-        estimator_policy="continuous-origin-qualified-stability-2097152-v9-held",
+        estimator_policy="continuous-origin-qualified-channel-corroboration-2097152-v10-held",
         diagnostic_policy="retained-audio-evidence-v1",
         media_runtime_fingerprint="alignment-runtime",
         ffmpeg_version="not_observed",
@@ -176,6 +180,54 @@ def maximum_audio_attempt() -> AudioAlignmentAttempt:
             ("verification", "comparison"),
         )
     )
+    assert base.decision.candidate is not None
+    channel_candidate = replace(
+        base.decision.candidate,
+        supporting_window_ids=tuple(window.logical_id for window in windows),
+    )
+    channel_windows = tuple(
+        AudioChannelWindowRecord(
+            logical_id=window.logical_id,
+            mono_sample_lag=0,
+            corroborated=True,
+            representative_sample_lag=0,
+            representative_frame_candidate=0,
+            actual_useful_reference_start=window.planned_reference_start,
+            actual_useful_reference_end=window.planned_reference_start + 8000,
+            agreeing_views=("FL", "FR", "FC"),
+            minimum_credible_score=0.99,
+            minimum_peak_ratio=2.0,
+            contradiction=False,
+            reason="corroborated",
+            views=tuple(
+                AudioChannelViewRecord(
+                    view=view,
+                    requested_sample_lag=0,
+                    requested_frame_candidate=0,
+                    requested_score=0.99,
+                    peak_ratio=2.0,
+                    actual_reference_count=8000,
+                    actual_comparison_count=8000,
+                    actual_useful_reference_start=window.planned_reference_start,
+                    actual_useful_reference_end=window.planned_reference_start + 8000,
+                    actual_coverage=1.0,
+                    activity_valid=True,
+                    coverage_valid=True,
+                    base_credible=True,
+                    agrees=True,
+                    contradiction=False,
+                    rejection_reason=None,
+                )
+                for view in ("FL", "FR", "FC")
+            ),
+        )
+        for window in windows
+    )
+    channel_collections = tuple(
+        AudioChannelCollectionRecord(view=view, summary=replace(summary, phase="verification"))
+        for view in ("FL", "FR", "FC")
+        for summary in collections[:2]
+    )
     return replace(
         base,
         planned_window_count=16,
@@ -183,6 +235,14 @@ def maximum_audio_attempt() -> AudioAlignmentAttempt:
         decision=replace(base.decision, raw_correlated_windows=16),
         collection_observation="observed",
         collection_summaries=collections,
+        channel_corroboration=AudioChannelCorroboration(
+            status="corroborated",
+            reason="channel_corroboration_provisional",
+            candidate=channel_candidate,
+            independent_windows=3,
+            windows=channel_windows,
+            collections=channel_collections,
+        ),
     )
 
 
@@ -304,7 +364,7 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
     )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert before_digest == after_digest == payload["original_attempt_digest"]
     assert before_size < 128 * 1024
     assert after_size < 128 * 1024

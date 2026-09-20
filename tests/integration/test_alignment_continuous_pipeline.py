@@ -116,7 +116,10 @@ def test_real_service_collects_distributed_windows_from_one_decode_per_source(
     assert result.frame_offset is None
     assert result.audio_attempt is not None
     attempt = result.audio_attempt
-    assert attempt.estimator_policy == "continuous-origin-qualified-stability-2097152-v9-held"
+    assert (
+        attempt.estimator_policy
+        == "continuous-origin-qualified-channel-corroboration-2097152-v10-held"
+    )
     assert attempt.collection_observation == "observed"
     assert len(attempt.collection_summaries) == 2
     assert attempt.planned_window_count == 5

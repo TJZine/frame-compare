@@ -42,6 +42,7 @@ type AudioCollectionEnd = Literal["planned_end_reached", "observed_eof", "not_ob
 type AudioCollectionObservation = Literal["observed", "not_observed"]
 type AudioWindowCoverageState = Literal["complete", "short", "empty", "not_observed"]
 type AudioWindowQualityDisposition = Literal["qualified", "rejected", "not_observed"]
+type AudioChannelView = Literal["FL", "FR", "FC"]
 
 
 def _require_int(value: object, name: str, *, minimum: int | None = None) -> None:
@@ -345,6 +346,188 @@ class AudioAlignmentCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class AudioChannelViewRecord:
+    """One bounded corresponding-channel estimate for a primary window."""
+
+    view: AudioChannelView
+    requested_sample_lag: int | None
+    requested_frame_candidate: int | None
+    requested_score: float | None
+    peak_ratio: AudioPeakRatio | None
+    actual_reference_count: int | None
+    actual_comparison_count: int | None
+    actual_useful_reference_start: int | None
+    actual_useful_reference_end: int | None
+    actual_coverage: float | None
+    activity_valid: bool
+    coverage_valid: bool
+    base_credible: bool
+    agrees: bool
+    contradiction: bool
+    rejection_reason: str | None
+
+    def __post_init__(self) -> None:
+        if self.view not in {"FL", "FR", "FC"}:
+            raise ValueError("channel view is invalid")
+        for name in (
+            "requested_sample_lag",
+            "requested_frame_candidate",
+            "actual_reference_count",
+            "actual_comparison_count",
+            "actual_useful_reference_start",
+            "actual_useful_reference_end",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _require_int(
+                    value,
+                    name,
+                    minimum=0 if name.startswith("actual_") else None,
+                )
+        if (self.actual_useful_reference_start is None) != (
+            self.actual_useful_reference_end is None
+        ):
+            raise ValueError("channel-view useful interval requires both endpoints")
+        if (
+            self.actual_useful_reference_start is not None
+            and self.actual_useful_reference_end is not None
+            and self.actual_useful_reference_end < self.actual_useful_reference_start
+        ):
+            raise ValueError("channel-view useful interval is reversed")
+        if self.requested_score is not None and not math.isfinite(self.requested_score):
+            raise ValueError("channel-view score must be finite")
+        if isinstance(self.peak_ratio, float) and not math.isfinite(self.peak_ratio):
+            raise ValueError("unbounded peak ratio must use the explicit string encoding")
+        if self.actual_coverage is not None and (
+            not math.isfinite(self.actual_coverage) or not 0 <= self.actual_coverage <= 1
+        ):
+            raise ValueError("channel-view coverage must be between zero and one")
+        if self.coverage_valid and (self.actual_coverage is None or self.actual_coverage < 0.90):
+            raise ValueError("coverage-valid channel view requires 90% coverage")
+        if self.base_credible and (
+            not self.activity_valid
+            or not self.coverage_valid
+            or self.requested_score is None
+            or self.requested_score < 0.90
+        ):
+            raise ValueError("base-credible channel view has inconsistent evidence")
+        if self.agrees and (
+            not self.activity_valid
+            or not self.coverage_valid
+            or self.requested_sample_lag is None
+            or self.requested_frame_candidate is None
+            or self.peak_ratio is None
+        ):
+            raise ValueError("agreeing channel view has incomplete evidence")
+
+
+@dataclass(frozen=True, slots=True)
+class AudioChannelWindowRecord:
+    """Fixed-rule channel corroboration outcome for one temporal observation."""
+
+    logical_id: str
+    mono_sample_lag: int
+    corroborated: bool
+    representative_sample_lag: int | None
+    representative_frame_candidate: int | None
+    actual_useful_reference_start: int | None
+    actual_useful_reference_end: int | None
+    agreeing_views: tuple[AudioChannelView, ...]
+    minimum_credible_score: float | None
+    minimum_peak_ratio: AudioPeakRatio | None
+    contradiction: bool
+    reason: str
+    views: tuple[AudioChannelViewRecord, ...]
+
+    def __post_init__(self) -> None:
+        if not self.logical_id:
+            raise ValueError("channel window logical ID is required")
+        _require_int(self.mono_sample_lag, "mono_sample_lag")
+        for name in ("representative_sample_lag", "representative_frame_candidate"):
+            value = getattr(self, name)
+            if value is not None:
+                _require_int(value, name)
+        if (self.actual_useful_reference_start is None) != (
+            self.actual_useful_reference_end is None
+        ):
+            raise ValueError("channel useful interval requires both endpoints")
+        if (
+            self.actual_useful_reference_start is not None
+            and self.actual_useful_reference_end is not None
+            and self.actual_useful_reference_end < self.actual_useful_reference_start
+        ):
+            raise ValueError("channel useful interval is reversed")
+        if tuple(view.view for view in self.views) not in {
+            ("FL", "FR"),
+            ("FL", "FR", "FC"),
+        }:
+            raise ValueError("channel views must use fixed FL/FR/FC order")
+        if len(set(self.agreeing_views)) != len(self.agreeing_views):
+            raise ValueError("agreeing channel views must be unique")
+        if not set(self.agreeing_views) <= {view.view for view in self.views}:
+            raise ValueError("agreeing channel views must belong to the window")
+        if self.minimum_credible_score is not None and not math.isfinite(
+            self.minimum_credible_score
+        ):
+            raise ValueError("channel window score must be finite")
+        if isinstance(self.minimum_peak_ratio, float) and not math.isfinite(
+            self.minimum_peak_ratio
+        ):
+            raise ValueError("unbounded peak ratio must use the explicit string encoding")
+        complete = all(
+            value is not None
+            for value in (
+                self.representative_sample_lag,
+                self.representative_frame_candidate,
+                self.actual_useful_reference_start,
+                self.actual_useful_reference_end,
+                self.minimum_credible_score,
+                self.minimum_peak_ratio,
+            )
+        )
+        if self.corroborated != (complete and len(self.agreeing_views) >= 2):
+            raise ValueError("corroborated channel window has inconsistent summary")
+
+
+@dataclass(frozen=True, slots=True)
+class AudioChannelCollectionRecord:
+    """One named-view continuous collection summary."""
+
+    view: AudioChannelView
+    summary: AudioAlignmentCollectionRecord
+
+
+@dataclass(frozen=True, slots=True)
+class AudioChannelCorroboration:
+    """Bounded provisional-only corresponding-channel evidence."""
+
+    status: Literal["corroborated", "rejected"]
+    reason: str
+    candidate: AudioAlignmentCandidate | None
+    independent_windows: int
+    windows: tuple[AudioChannelWindowRecord, ...]
+    collections: tuple[AudioChannelCollectionRecord, ...]
+
+    def __post_init__(self) -> None:
+        if self.status not in {"corroborated", "rejected"}:
+            raise ValueError("channel corroboration status is invalid")
+        if (self.status == "corroborated") != (self.candidate is not None):
+            raise ValueError("channel corroboration candidate is inconsistent")
+        _require_int(self.independent_windows, "independent_windows", minimum=0)
+        if len(self.windows) > 16:
+            raise ValueError("channel corroboration exceeds the window bound")
+        if len(self.collections) > 6:
+            raise ValueError("channel corroboration exceeds the collection bound")
+        keys = {(item.view, item.summary.role) for item in self.collections}
+        if len(keys) != len(self.collections):
+            raise ValueError("channel collection summaries must be unique")
+        if self.candidate is not None and not set(self.candidate.supporting_window_ids) <= {
+            window.logical_id for window in self.windows
+        }:
+            raise ValueError("channel candidate support must belong to its windows")
+
+
+@dataclass(frozen=True, slots=True)
 class AudioAlignmentDecision:
     """Diagnostic decision kept separate from applied alignment authority."""
 
@@ -432,6 +615,7 @@ class AudioAlignmentAttempt:
     stability: "AlignmentStabilitySummary | None" = None
     collection_observation: AudioCollectionObservation = "not_observed"
     collection_summaries: tuple[AudioAlignmentCollectionRecord, ...] = ()
+    channel_corroboration: AudioChannelCorroboration | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"complete", "preanalysis_rejection", "aborted"}:

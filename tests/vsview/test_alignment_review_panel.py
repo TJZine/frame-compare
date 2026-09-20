@@ -380,7 +380,7 @@ def test_metadata_v1_session_requires_regeneration(tmp_path: Path) -> None:
 
     assert panel.error_label.text() == (
         "Alignment review requires a newly generated session. "
-        "This session uses metadata v1; this version requires v3."
+        "This session uses metadata v1; this version requires v4."
     )
     assert "Inactive" in panel.progress_label.text()
     assert not panel.keep_button.isEnabled()

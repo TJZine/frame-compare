@@ -354,7 +354,7 @@ def test_workspace_metadata_rejects_unavailable_attempt_as_computed_authority() 
         )
 
 
-@pytest.mark.parametrize("old_version", [1, 2, 99])
+@pytest.mark.parametrize("old_version", [1, 2, 3, 99])
 def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
     old_version: int,
 ) -> None:
@@ -371,7 +371,7 @@ def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
 
     with pytest.raises(
         AlignmentReviewContractError,
-        match=rf"newly generated session.*metadata v{old_version}.*requires v3",
+        match=rf"newly generated session.*metadata v{old_version}.*requires v4",
     ):
         parse_alignment_review_workspace_metadata((_reference_output(0), old_comparison))
 
@@ -384,7 +384,7 @@ def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
         metadata=dict(old_reference.metadata) | {ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1},
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v3"):
+    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v4"):
         parse_alignment_review_workspace_metadata((_comparison_output(1, 1), old_reference))
 
 

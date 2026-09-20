@@ -314,11 +314,12 @@ recovery requirement.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
 - `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
   manual alignment overrides for the current run
-- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v2,
+- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v3,
   diagnostic-only audio evidence owned by
   `frame_compare.services.alignment_diagnostics`. Each pathless file is bounded to
-  128 KiB, contains at most 16 primary window outcomes and four optional collection
-  summaries, and is written atomically before optional review. Current attempts retain
+  128 KiB, contains at most 16 primary window outcomes, four mono collection summaries,
+  and six optional named-channel collection summaries, and is written atomically before
+  optional review. Current attempts retain
   observed continuous collection facts; preanalysis rejections remain `not_observed`.
   A final review outcome may replace the envelope once while preserving the canonical
   original-attempt digest. These files are never read by alignment, trim, or
@@ -326,7 +327,7 @@ recovery requirement.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
   (VSView's BestSource workspace is not a Frame Compare source-loader change).
-  Frame Compare metadata in generated sessions is schema v3; metadata v1/v2,
+  Frame Compare metadata in generated sessions is schema v4; metadata v1/v2/v3,
   unknown, or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
@@ -433,7 +434,7 @@ dependency or decode failures remain warning-only for optional alignment. The at
 retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
 and a separate display-only provisional candidate. The shipped
-`continuous-origin-qualified-stability-2097152-v9-held` policy keeps computed authority held: an otherwise
+`continuous-origin-qualified-channel-corroboration-2097152-v10-held` policy keeps computed authority held: an otherwise
 qualified computed result records `automatic_authority_held`, has null applied
 offsets, and cannot reach trims or shared-cache writes. Manual confirmation replaces
 authority without replacing that original attempt. Immutable `ClipState` carries the
@@ -471,6 +472,14 @@ verification collection. When discovery and requested rates differ, all verifica
 intervals and halos are frozen before I/O and the original bounded global hypotheses are
 translated through their local origins. Direct-rate work uses at most two decodes per
 comparison; verification uses at most four. No PCM survives into another comparison.
+After that mono path completes, the default `mono_downmix` strategy may collect the
+fixed-order intersection of explicitly named `FL`, `FR`, and `FC` views when mono
+evidence lacks independent support and an integrity/coverage-valid primary row missed
+the fixed waveform floor. Each view is collected as one sequential reference/comparison
+pair at the requested rate through the same origin, EOF, cancellation, identity, and
+cleanup owner, then its PCM is released before the next view. At most six additional
+collections occur. Views corroborate one temporal observation per planned window and
+never become mono voters or independent observations themselves.
 `alignment_correlation.estimate_alignment_offset` converts the raw correlation lag to the
 public `reference source frame - comparison source frame` sign.
 `alignment_consensus` translates that signed local offset through the reference and
@@ -491,7 +500,14 @@ outside the fixed internal work budget produce a typed non-applied
 `analysis_budget_exceeded` consensus rather than widening config validation, truncating
 the requested search silently, or attempting unbounded work. The estimator-policy token
 includes this strategy so older computed cache entries are not reused. The current
-`continuous-origin-qualified-stability-2097152-v9-held` safety policy also prevents computed
+The fixed channel rule requires two activity/coverage/peak-valid named views in one
+frame bin and the existing correction neighborhood, including at least one view at the
+unchanged waveform floor. A base-credible named view in another frame bin vetoes the
+hint. Qualifying channel evidence creates only a distinctly labeled provisional manual-
+review candidate; it cannot set `review_qualified`, join mono authority voters, satisfy
+a mono trust gate, override a credible contradiction, write computed cache authority,
+or reach trims. The current
+`continuous-origin-qualified-channel-corroboration-2097152-v10-held` safety policy also prevents computed
 results from authorizing trims or new cache writes.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
@@ -512,9 +528,9 @@ Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
-service-projected audio evidence as metadata schema v3. The
+service-projected audio evidence as metadata schema v4. The
 typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
-strict metadata-v3/result-v1 topology and primitive DTO validation, trusted
+strict metadata-v4/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it remains inert for ordinary or
@@ -925,7 +941,7 @@ Runtime ownership matrix:
 | Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and origin-based FFmpeg/channel extraction policy | `frame_compare.services.alignment_audio` |
 | One-child continuous FFmpeg collection, bounded pipe drainage, admitted interval retention, endpoint classification, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
 | Audio correlation, unequal-length lag mapping, overlap-normalized confidence, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
-| Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
+| Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, ambiguity gating, and provisional-only corresponding-channel corroboration | `frame_compare.services.alignment_consensus` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
@@ -968,8 +984,8 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v3 transport required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v3/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v4 transport required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v4/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
 | `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
