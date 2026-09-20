@@ -1,6 +1,164 @@
 {
   "schema_version": 1,
   "purpose": "R6 production continuous-alignment runtime, resource, physical-Windows, and release-gate evidence",
+  "r6e_windows_channel_acceptance": {
+    "schema_version": 1,
+    "observed_at_utc": "2026-09-20",
+    "purpose": "R6E physical-Windows portable, runtime, and private-media acceptance of committed R6D held corresponding-channel corroboration",
+    "source": {
+      "checkout_commit": "a2a89b37a47f77c2b8fc727e1a97608566a22d75",
+      "production_source_commit": "9b45de8c9d4382e2d230f34df32abb3f4cd1b6e1",
+      "checkout_clean_before_build": true,
+      "packaged_commit": "a2a89b37a47f77c2b8fc727e1a97608566a22d75",
+      "production_code_changed": false,
+      "automatic_authority_default": "held",
+      "estimator_identity": "continuous-origin-qualified-channel-corroboration-2097152-v10-held"
+    },
+    "portable_bundle": {
+      "zip_sha256": "9c7e0c050dced124e67f1f291c5e323c5270e65c11efc4cb120d20163e9f2150",
+      "bundle_info_sha256": "ba0c99a6e95fe96adb8bea5342577297c204d2e5619a0b5e701169ee26835596",
+      "bundle_inventory_sha256": "d665f8a3f75e42dee593495babc8909bcec1ed6c8110f2a503af3575c999ae27",
+      "bundle_info_schema": 3,
+      "bundle_inventory_schema": 2,
+      "bundle_kind": "full",
+      "platform": "windows-x64",
+      "app_version": "0.6.0",
+      "requirements_lock_sha256": "52e7706ed49dcd1f090433cca28079092860773c25fd173ff6a63fbc7366f9ce",
+      "media_runtime_fingerprint": "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7",
+      "alignment_runtime_fingerprint": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
+      "extracted_verifier": "pass",
+      "extracted_verifier_checks": ["zip_layout", "extraction", "metadata_provenance", "license_inventory_101", "launcher_help", "launcher_version", "doctor_json", "install", "installed_shim_version", "installed_shim_help"]
+    },
+    "environment": {
+      "os": "Windows 10 Home build 19045, 64-bit",
+      "cpu": "AMD Ryzen 9 5900X 12-Core Processor, 12 cores, 24 logical processors",
+      "python": "3.13.15",
+      "frame_compare": "0.6.0",
+      "ffmpeg": "n8.1.2-34-g9b6c8969e0-20260731",
+      "ffprobe": "n8.1.2-34-g9b6c8969e0-20260731",
+      "vapoursynth": "R79 API R4.2",
+      "vsview": "0.11.0",
+      "pyside6": "6.11.2",
+      "vs_placebo": "2.0.4",
+      "doctor_success": true,
+      "doctor_noncritical_finding": "slow.pics returned HTTP 403"
+    },
+    "private_original_case": {
+      "construction_class": "retained private three-file peer-release case; exact common E-AC-3 5.1(side) layouts with FL/FR/FC",
+      "source_count": 3,
+      "sample_rate_hz": 8000,
+      "frame_rate": "24000/1001",
+      "isolated_config_cache": true,
+      "whole_alignment_elapsed_seconds": 131.73685109999496,
+      "channel_fallback_collection_elapsed_seconds": 74.67540229990846,
+      "maximum_simultaneous_children": 1,
+      "child_count_total": 13,
+      "all_child_returncodes": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "all_children_exited_before_return": true,
+      "reader_threads_before_after": {"alignment_audio_computation": [0, 0], "alignment_stdout_reader": [0, 0], "alignment_stderr_reader": [0, 0]},
+      "handles": {"parent_before": 163, "parent_peak": 210, "parent_after": 182, "child_peak": 264},
+      "rss": {"method": "Win32 GetProcessMemoryInfo WorkingSetSize, simultaneous parent plus active child at 20 ms", "baseline_parent_bytes": 56127488, "peak_parent_bytes": 136376320, "peak_child_bytes": 22839296, "peak_combined_bytes": 136376320, "peak_incremental_bytes": 80248832, "sample_count": 4273, "child_sample_count": 4155, "maximum_gap_seconds": 0.038021599990315735},
+      "comparison_1": {
+        "mono_collection_count": 2,
+        "channel_collection_count": 0,
+        "decision": {"state": "provisional", "selected_frame": 0, "temporal_support_count": 3, "reason": "automatic_authority_held"},
+        "mono_windows": [
+          {"id": "primary-01", "lag": 0, "frame": 0, "score": 1.0, "peak_ratio": 3.614173758252488, "activity": "observed", "coverage": 1.0, "credibility": "qualified", "rejection": null},
+          {"id": "primary-02", "lag": 0, "frame": 0, "score": 0.9999999999999998, "peak_ratio": 10.469956295963271, "activity": "observed", "coverage": 1.0, "credibility": "qualified", "rejection": null},
+          {"id": "primary-03", "lag": 0, "frame": 0, "score": 1.0000000000000004, "peak_ratio": 7.561453518302704, "activity": "observed", "coverage": 1.0, "credibility": "qualified", "rejection": null},
+          {"id": "primary-04", "lag": 0, "frame": 0, "score": 1.0, "peak_ratio": 13.819696009502593, "activity": "observed", "coverage": 1.0, "credibility": "qualified", "rejection": null},
+          {"id": "primary-05", "lag": 157862, "frame": 473, "score": 0.025555538585320153, "peak_ratio": 1.008688608076804, "activity": "observed", "coverage": 1.0, "credibility": "rejected", "rejection": "quality_floor"}
+        ],
+        "disposition": {"applied": false, "computed_cache_written": false, "trim_input_written": false}
+      },
+      "comparison_2": {
+        "mono_collection_count": 2,
+        "channel_collection_count": 6,
+        "channel_collection_eligibility": "only three extraction-valid mono rows below the waveform floor",
+        "decision": {"state": "provisional", "selected_frame": 0, "temporal_support_count": 0, "reason": "insufficient_independent_support"},
+        "mono_windows": [
+          {"id": "primary-01", "lag": 47, "frame": 0, "score": 0.9505343801006562, "peak_ratio": 3.405630519502227, "activity": "observed", "coverage": 1.0, "credibility": "qualified", "rejection": null},
+          {"id": "primary-02", "lag": 47, "frame": 0, "score": 0.9195665729803004, "peak_ratio": 10.086426805310017, "activity": "observed", "coverage": 1.0, "credibility": "qualified", "rejection": null},
+          {"id": "primary-03", "lag": 47, "frame": 0, "score": 0.6234738044142025, "peak_ratio": 4.1539260390097175, "activity": "observed", "coverage": 1.0, "credibility": "rejected", "rejection": "waveform_floor"},
+          {"id": "primary-04", "lag": 47, "frame": 0, "score": 0.7227164771722876, "peak_ratio": 13.260365937001495, "activity": "observed", "coverage": 1.0, "credibility": "rejected", "rejection": "waveform_floor"},
+          {"id": "primary-05", "lag": 49, "frame": 0, "score": 0.6528766927261278, "peak_ratio": 1.076732522132903, "activity": "observed", "coverage": 1.0, "credibility": "rejected", "rejection": "waveform_floor"}
+        ],
+        "channel_windows": [
+          {"id": "primary-03", "mono_lag": 47, "selected_frame": 0, "temporal_support_count": 1, "agreeing_views": ["FL", "FR", "FC"], "contradiction": false, "veto": false, "result": "corroborated_temporal_observation", "views": [{"view": "FL", "lag": 47, "frame": 0, "score": 0.9359580807131914, "peak_ratio": 2.355863101651284, "activity": true, "coverage": 1.0, "credible": true, "rejection": null}, {"view": "FR", "lag": 49, "frame": 0, "score": 0.8569670466919861, "peak_ratio": 2.7419174726489293, "activity": true, "coverage": 1.0, "credible": false, "rejection": "waveform_floor"}, {"view": "FC", "lag": 47, "frame": 0, "score": 0.7599033457272683, "peak_ratio": 3.9892597129826464, "activity": true, "coverage": 1.0, "credible": false, "rejection": "waveform_floor"}]},
+          {"id": "primary-04", "mono_lag": 47, "selected_frame": 0, "temporal_support_count": 1, "agreeing_views": ["FL", "FR", "FC"], "contradiction": false, "veto": false, "result": "corroborated_temporal_observation", "views": [{"view": "FL", "lag": 49, "frame": 0, "score": 0.9796176486299167, "peak_ratio": 10.104010697900748, "activity": true, "coverage": 1.0, "credible": true, "rejection": null}, {"view": "FR", "lag": 49, "frame": 0, "score": 0.9558861263333697, "peak_ratio": 9.894461520454735, "activity": true, "coverage": 1.0, "credible": true, "rejection": null}, {"view": "FC", "lag": 47, "frame": 0, "score": 0.6952159273649564, "peak_ratio": 10.272672607248854, "activity": true, "coverage": 1.0, "credible": false, "rejection": "waveform_floor"}]},
+          {"id": "primary-05", "mono_lag": 49, "selected_frame": 0, "temporal_support_count": 1, "agreeing_views": ["FL", "FC"], "contradiction": false, "veto": false, "result": "corroborated_temporal_observation", "views": [{"view": "FL", "lag": 49, "frame": 0, "score": 0.9503570285789593, "peak_ratio": 1.8604405790938143, "activity": true, "coverage": 1.0, "credible": true, "rejection": null}, {"view": "FR", "lag": 49, "frame": 0, "score": 0.9454908722996845, "peak_ratio": 1.1748100410523545, "activity": true, "coverage": 1.0, "credible": false, "rejection": "peak_floor"}, {"view": "FC", "lag": 49, "frame": 0, "score": 0.9009886553019735, "peak_ratio": 2.552253284990881, "activity": true, "coverage": 1.0, "credible": true, "rejection": null}]}
+        ],
+        "channel_result": {"status": "rejected", "reason": "insufficient_channel_temporal_support", "independent_windows": 0, "views_are_independent_votes": false},
+        "disposition": {"applied": false, "computed_cache_written": false, "trim_input_written": false}
+      },
+      "authority_artifacts": {"alignment_result_count": 0, "alignment_reuse_count": 0, "manual_override_count": 0},
+      "presentation": {"expected_hint": "+0f", "mono_and_channel_sections_separate": true, "qualified_unassessed_contradicted_provisional_states_distinct": true, "disposition": "pass"}
+    },
+    "controlled_real_media_derivatives": {
+      "privacy": "All media and raw result artifacts remained ignored and untracked. Labels are construction classes; no private source names or paths are retained.",
+      "shared_settings": {"duration_seconds": 95, "frame_rate": "24000/1001", "audio": "FLAC 5.1(side) derived from retained real media", "video": "deterministic test carrier", "production_service": true},
+      "assets": [
+        {"class": "retained-real-audio base", "bytes": 43258457, "sha256": "1216f592acb789bc9d6e3527dd333e2eda3df96b0ad1f4a7a584529d407c8c53"},
+        {"class": "zero-frame independently remuxed control", "bytes": 41957581, "sha256": "4f506baf3edfcfed6a62c3bf81d40a0c1031b85b8cd282a01a10b102b2920e5f"},
+        {"class": "positive-five-frame trim control", "bytes": 43150369, "sha256": "e933f5efcfdeffd7f9138009c7422ec24cf1a3cc0d569d155377b0a25cd1f115"},
+        {"class": "mismatched retained-media segment", "bytes": 45333354, "sha256": "039d9a35d77f3442c9d166f16c10e3d52b6eb4c838e7fd0d9c2161f96368ba2c"},
+        {"class": "digital-silence low-information control", "bytes": 15582489, "sha256": "5cea824409966f214a6f018903a3c607df6c3f762fcd9ba9e31bb4f48c075e05"},
+        {"class": "permuted-channel control", "bytes": 43258457, "sha256": "ed3296e0c508ed49a3bcb77fed7f8e363b59f05a9bd63d61e38ec1f9345700ac"}
+      ],
+      "cases": [
+        {"case": "zero-frame-control", "expected_frame": 0, "selected_frame": 0, "candidate_sample": 0, "state": "provisional", "reason": "automatic_authority_held", "elapsed_seconds": 0.69005090004066, "applied": false, "authority_files": 0},
+        {"case": "positive-five-frame-control", "expected_frame": 5, "selected_frame": 5, "candidate_sample": 1668, "state": "provisional", "reason": "automatic_authority_held", "elapsed_seconds": 0.6634546999703161, "applied": false, "authority_files": 0},
+        {"case": "negative-five-frame-control", "expected_frame": -5, "selected_frame": -5, "candidate_sample": -1668, "state": "provisional", "reason": "automatic_authority_held", "elapsed_seconds": 0.6678906999877654, "applied": false, "authority_files": 0},
+        {"case": "mismatched-segment-control", "expected_frame": null, "selected_frame": null, "state": "unavailable", "reason": "no_voting_windows", "channel_status": "rejected", "channel_reason": "insufficient_channel_temporal_support", "false_corroborated_hint": false, "elapsed_seconds": 4.635778900003061, "applied": false, "authority_files": 0},
+        {"case": "digital-silence-control", "expected_frame": null, "selected_frame": null, "state": "unavailable", "reason": "no_usable_windows", "false_corroborated_hint": false, "elapsed_seconds": 0.48072719998890534, "applied": false, "authority_files": 0},
+        {"case": "permuted-channel-control", "expected_frame": 0, "selected_frame": 0, "state": "provisional", "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_corroboration": false, "elapsed_seconds": 0.682713899994269, "applied": false, "authority_files": 0}
+      ],
+      "maximum_simultaneous_children": 1,
+      "all_children_exited": true,
+      "all_reader_threads_after": 0,
+      "all_computed_cache_or_trim_outputs": 0,
+      "disposition": "pass"
+    },
+    "lifetime": {
+      "success": {"case": "private-original", "elapsed_seconds": 131.73685109999496, "maximum_simultaneous_children": 1, "all_children_exited_before_return": true, "reader_threads_after": 0, "authority_files": 0},
+      "cancellation": {"elapsed_seconds": 0.3222013999475166, "child_count": 1, "child_returncodes": [1], "terminate_requests": 1, "kill_requests": 0, "maximum_simultaneous_children": 1, "rss_peak_incremental_bytes": 20992000, "handles_parent_before_peak_after": [163, 184, 170], "reader_threads_after": 0, "cleanup_complete_before_return": true, "authority_files": 0},
+      "partial_nonzero_failure": {"elapsed_seconds": 0.17792829999234527, "injected_partial_bytes": 4097, "child_count": 1, "child_returncodes": [7], "terminate_requests": 0, "kill_requests": 0, "maximum_simultaneous_children": 1, "rss_peak_incremental_bytes": 4345856, "handles_parent_before_peak_after": [163, 180, 170], "reader_threads_after": 0, "cleanup_complete_before_return": true, "result_state": "unavailable", "reason": "no_usable_windows", "authority_files": 0},
+      "disposition": "pass_no_leaked_children_readers_or_partial_authority"
+    },
+    "visible_vsview": {
+      "capture_sha256": "49c8e2b327ec673e4629ab4c7e678ef5f004e5ec42936f8882413bdf8e68debd",
+      "capture_bytes": 54611,
+      "sources_ready": "3/3",
+      "markers": ["Provisional audio candidate: +0f — NOT APPLIED", "Provisional audio candidate: +0f — NOT APPLIED"],
+      "reasons": ["automatic authority held", "insufficient independent support"],
+      "hint_moved_playheads": false,
+      "hint_mutated_visited_state": false,
+      "closed_without_saving": true,
+      "portable_exit_code": 1,
+      "portable_exit_reason": "FC-4005 fail-closed because the review result was intentionally not saved",
+      "current_offsets_retained": true,
+      "authority_files_after_close": 0,
+      "disposition": "pass"
+    },
+    "verification": {
+      "commands": [
+        {"command": "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 -ManifestPath tools/windows_portable/manifest.windows-x64.json -OutDir <ignored-bundle> -CacheDir <ignored-cache>", "result": "pass"},
+        {"command": "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/verify_extracted_bundle.ps1 -ZipPath <ignored-zip> -ExtractRoot <ignored-extract> -DoctorStdoutPath <ignored-json> -DoctorStderrPath <ignored-stderr> -ExpectedCommitSha a2a89b37a47f77c2b8fc727e1a97608566a22d75", "result": "pass"},
+        {"command": "uv run --no-sync pytest -q tests/integration/test_alignment_oracle_policy.py", "result": "pass", "tests": 103},
+        {"command": "uv run --no-sync pytest -q tests/integration/test_alignment_channel_corroboration_production.py", "result": "pass", "tests": 1, "media_executables": "exact portable bundle"},
+        {"command": "FRAME_COMPARE_CHANNEL_CORROBORATION=1 uv run --no-sync pytest -q tests/integration/test_alignment_channel_corroboration.py tests/integration/test_alignment_channel_corroboration_production.py -rsx", "result": "platform_limit", "passed": 1, "failed": 1, "reason": "the opt-in synthetic matrix invokes POSIX ps and has no Windows RSS implementation; the production test passed and native Win32 measurements are recorded above"},
+        {"command": "uv run --no-sync pytest -q tests/integration/test_alignment_continuous_pipeline.py tests/integration/test_alignment_streaming_resources.py -rsx", "result": "pass_with_expected_opt_in_skips", "passed": 7, "skipped": 5},
+        {"command": "FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 uv run --no-sync pytest -q tests/integration/test_alignment_streaming_resources.py -rsx", "result": "platform_limit", "failed": 2, "reason": "resource sampler explicitly fails outside Linux /proc and macOS ps; physical-Windows Win32 resource acceptance is recorded above"}
+      ],
+      "json_parse": "pass",
+      "hash_format_validation": "pass",
+      "git_diff_check": "pass",
+      "tracked_diff_scope": "only tests/fixtures/alignment_oracle/streaming-production-results.json"
+    },
+    "privacy": "No private paths, filenames, media, screenshots, identifying metadata, raw PCM, stderr, or packet data are tracked. Only sanitized hashes, construction classes, commands, scalar outcomes, and conclusions are retained. The previously deleted historical artifact directory was not recreated and its old hashes were not reverified.",
+    "limitations": ["The private original case is one retained media lineage, not general calibration.", "Sampled RSS cannot exclude a transient between 20 ms observations.", "The repository opt-in resource tests have no Windows sampler; physical-Windows acceptance used direct Win32 process, RSS, handle, reader, cancellation, and failure measurements against the packaged production service."],
+    "acceptance": {"r6e_gate": "pass", "corresponding_channel_authority": "permanently provisional_only", "automatic_application": false, "computed_cache_write": false, "trim_input_write": false, "release_authority_activated": false}
+  },
   "candidate": {
     "repository": "TJZine/frame-compare",
     "base_commit": "bd3f7aa997130cb864cf1a39897bb1b102469247",
