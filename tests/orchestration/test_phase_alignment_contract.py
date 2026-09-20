@@ -7,12 +7,13 @@ import pytest
 
 from frame_compare.orchestration import phase_alignment
 from frame_compare.services import alignment as alignment_service
+from frame_compare.services import alignment_consensus
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
-from tests.services.test_alignment_diagnostics import audio_attempt
+from tests.services.test_alignment_diagnostics import audio_attempt, maximum_audio_attempt
 
 
 def test_alignment_request_uses_untrimmed_probe_frame_count(
@@ -93,6 +94,96 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
                 audio_attempt=attempt,
             )
         ],
+    )
+
+    output = _run_align_phase(ctx, selected_frames=[0])
+
+    assert output.comparisons[0].alignment is None
+    assert output.comparisons[0].audio_attempt == attempt
+    assert output.reference.trim.trim_start_frames == 0
+    assert output.comparisons[0].trim.trim_start_frames == 0
+
+
+def test_channel_corroboration_cannot_reach_trim_authority_with_latch_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    attempt = maximum_audio_attempt()
+    channel = attempt.channel_corroboration
+    assert channel is not None
+    assert channel.candidate is not None
+    windows = tuple(
+        replace(
+            window,
+            review_qualified=index < 2,
+            configured_quality=index < 2,
+            vote_disposition="voted" if index < 2 else "failed",
+        )
+        for index, window in enumerate(attempt.windows[:5])
+    )
+    channel_windows = channel.windows[2:5]
+    channel_candidate = replace(
+        channel.candidate,
+        supporting_window_ids=tuple(window.logical_id for window in channel_windows),
+    )
+    channel = replace(
+        channel,
+        candidate=channel_candidate,
+        windows=channel_windows,
+    )
+    attempt = replace(
+        attempt,
+        planned_window_count=5,
+        windows=windows,
+        decision=replace(
+            attempt.decision,
+            state="provisional",
+            candidate=channel_candidate,
+            primary_reason="channel_corroboration_provisional",
+            raw_correlated_windows=5,
+            failed_gates=("channel_corroboration_provisional",),
+        ),
+        channel_corroboration=channel,
+    )
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+    monkeypatch.setattr(
+        phase_alignment,
+        "align_clips_from_request",
+        lambda *_args, **_kwargs: [
+            AlignmentResult(
+                reference_clip=ctx.reference.path.name,
+                comparison_clip=comparison.path.name,
+                frame_offset=None,
+                time_offset_seconds=None,
+                correlation_score=channel_candidate.median_score,
+                algorithm="cross_correlation",
+                source="computed",
+                applied=False,
+                diagnostic="channel_corroboration_provisional",
+                audio_attempt=attempt,
+            )
+        ],
+    )
+    real_calculate_trims = phase_alignment.calculate_alignment_trims
+
+    def reject_authoritative_trim_input(
+        ref_num_frames: int,
+        comp_offsets: list[int | None],
+        comp_num_frames: list[int],
+    ) -> tuple[tuple[int, int], list[tuple[int, int]]]:
+        if any(offset is not None for offset in comp_offsets):
+            pytest.fail("channel corroboration reached authoritative trim input")
+        return real_calculate_trims(ref_num_frames, comp_offsets, comp_num_frames)
+
+    monkeypatch.setattr(
+        phase_alignment, "calculate_alignment_trims", reject_authoritative_trim_input
+    )
+    monkeypatch.setattr(
+        phase_alignment,
+        "ClipAlignmentState",
+        lambda **_kwargs: pytest.fail("channel corroboration reached alignment application"),
     )
 
     output = _run_align_phase(ctx, selected_frames=[0])
