@@ -500,7 +500,7 @@ outside the fixed internal work budget produce a typed non-applied
 `analysis_budget_exceeded` consensus rather than widening config validation, truncating
 the requested search silently, or attempting unbounded work. The estimator-policy token
 includes this strategy so older computed cache entries are not reused. The current
-The fixed channel rule requires two activity/coverage/peak-valid named views in one
+fixed channel rule requires two activity/coverage/peak-valid named views in one
 frame bin and the existing correction neighborhood, including at least one view at the
 unchanged waveform floor. A base-credible named view in another frame bin vetoes the
 hint. Qualifying channel evidence creates only a distinctly labeled provisional manual-

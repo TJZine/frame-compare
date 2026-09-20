@@ -1149,7 +1149,14 @@ def corroborate_channel_views(
                     minimum_credible_score=None,
                     minimum_peak_ratio=None,
                     contradiction=len(credible_frames) > 1,
-                    reason=(collection_failure or "no_unique_corroboration"),
+                    reason=(
+                        collection_failure
+                        or (
+                            "credible_cross_frame_veto"
+                            if len(credible_frames) > 1
+                            else "no_unique_corroboration"
+                        )
+                    ),
                     views=tuple(views),
                 )
             )

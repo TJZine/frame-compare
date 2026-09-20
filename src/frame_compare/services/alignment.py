@@ -931,8 +931,9 @@ def _normal_evidence_lines(
                 f"Comparison {ordinal} - Audio alignment requires review. "
                 f"Provisional candidate: {candidate.frame_offset:+d}f (not applied).",
                 (
-                    f"{decision.consensus_windows}/{decision.raw_correlated_windows} correlated "
-                    f"windows agree; evidence raw={decision.raw_correlated_windows}, "
+                    f"Mono evidence: {decision.consensus_windows}/"
+                    f"{decision.raw_correlated_windows} correlated windows agree; "
+                    f"raw={decision.raw_correlated_windows}, "
                     f"credible={decision.credible_windows}, voting={decision.voting_windows}, "
                     f"winning={decision.winning_windows}, independent={decision.independent_windows}; "
                     f"configured consensus requires "

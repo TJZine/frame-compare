@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from frame_compare.services import alignment_audio
+from frame_compare.services import alignment_audio, alignment_consensus
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.types import AlignmentConfig, AudioAlignmentCollectionRecord
 from tests.services.alignment_request_test_support import alignment_request
@@ -146,6 +146,17 @@ def _offset_timeline(signal: np.ndarray, offset: int) -> np.ndarray:
             8,
             True,
             "channel_corroboration_provisional",
+            "latch_disabled",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
             "positive",
             "corroborated",
             400,
@@ -197,6 +208,7 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
     expected_status: str | None,
     offset: int,
     expected_frame: int | None,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     reference = tmp_path / "reference.mka"
     comparison = tmp_path / "comparison.mka"
@@ -211,7 +223,7 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         minimum_valid_windows=3,
         confidence_threshold=1.0 if view_case == "strict_user_thresholds" else 0.0,
         ambiguity_peak_ratio=100.0 if view_case == "strict_user_thresholds" else 1.0,
-        cache_results=False,
+        cache_results=view_case == "latch_disabled",
     )
     stream = _stream()
     plan = alignment_audio.plan_audio_analysis(stream, stream, config=config)
@@ -248,7 +260,8 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
             "FC": sources["FL"],
         }
     elif view_case == "conflicting":
-        comparison_views["FC"] = _offset_timeline(comparison_views["FC"], 400)
+        comparison_views["FR"] = _offset_timeline(comparison_views["FR"], 400)
+        comparison_views["FC"] = _offset_timeline(comparison_views["FC"], -400)
     elif view_case == "localized":
         comparison_views = {
             view: (0.55 * source + np.sqrt(1 - 0.55**2) * noise).astype(np.float32)
@@ -309,6 +322,14 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
 
     monkeypatch.setattr(alignment_audio, "collect_discovery_phase", discovery)
     monkeypatch.setattr(alignment_audio, "collect_channel_view_phase", channel)
+    if view_case == "latch_disabled":
+        monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+        monkeypatch.setattr(
+            "frame_compare.services.alignment.save_reusable_offsets",
+            lambda *_args, **_kwargs: pytest.fail(
+                "channel-only provisional evidence must not authorize a cache write"
+            ),
+        )
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
@@ -317,10 +338,12 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
     )
 
     result = asyncio.run(align_clips_from_request(request, config, reference_fps=Fraction(24)))
+    presented = capsys.readouterr().err
 
     assert decode_count == expected_decodes
     assert result[0].applied is False
     assert result[0].frame_offset is None
+    assert result[0].time_offset_seconds is None
     assert result[0].audio_attempt is not None
     attempt = result[0].audio_attempt
     assert (attempt.channel_corroboration is not None) is expected_channel
@@ -334,6 +357,8 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
             assert attempt.decision.candidate is not None
             assert attempt.decision.candidate.frame_offset == expected_frame
             assert attempt.channel_corroboration.independent_windows == 3
+            assert "Mono evidence:" in presented
+            assert "Channel-view evidence:" in presented
             assert all(
                 not window.views[0].contradiction
                 for window in attempt.channel_corroboration.windows
@@ -341,6 +366,12 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         else:
             assert attempt.channel_corroboration.candidate is None
             assert attempt.decision.primary_reason == expected_reason
+            if view_case == "conflicting":
+                assert attempt.channel_corroboration.reason == "credible_cross_frame_veto"
+                assert all(
+                    window.reason == "credible_cross_frame_veto"
+                    for window in attempt.channel_corroboration.windows
+                )
             if view_case in {"one_window", "two_windows"}:
                 assert sum(
                     window.corroborated for window in attempt.channel_corroboration.windows

@@ -754,7 +754,6 @@ def _validate_audio_attempt(
         _validate_collection_summary(data, collection_keys)
     if observation == "observed" and not typed_collections:
         raise AlignmentReviewContractError("observed alignment collection facts are absent")
-    _validate_channel_corroboration(attempt["channel_corroboration"])
     streams = attempt["selected_streams"]
     windows = attempt["windows"]
     if not isinstance(streams, list):
@@ -821,6 +820,7 @@ def _validate_audio_attempt(
     if len(typed_windows) > 18:
         raise AlignmentReviewContractError("alignment review windows are invalid")
     window_ids: list[str] = []
+    primary_window_ids: set[str] = set()
     primary_count = 0
     correlated_count = 0
     for window in typed_windows:
@@ -831,6 +831,7 @@ def _validate_audio_attempt(
         window_ids.append(logical_id)
         if data["purpose"] == "primary":
             primary_count += 1
+            primary_window_ids.add(logical_id)
         elif data["purpose"] not in {"disputed_recheck", "zero_check"}:
             raise AlignmentReviewContractError("alignment review window purpose is invalid")
         if data["terminal_category"] == "correlated":
@@ -946,6 +947,10 @@ def _validate_audio_attempt(
         raise AlignmentReviewContractError("alignment review window identifiers are duplicated")
     if primary_count != attempt["planned_window_count"]:
         raise AlignmentReviewContractError("alignment review planned window count is inconsistent")
+    _validate_channel_corroboration(
+        attempt["channel_corroboration"],
+        primary_window_ids=primary_window_ids,
+    )
     decision = _strict_dict(attempt["decision"], _DECISION_KEYS, "audio decision")
     _validate_scalar_tree(decision, skip=("candidate",))
     state = decision["state"]
@@ -1045,7 +1050,11 @@ def _validate_audio_attempt(
     )
 
 
-def _validate_channel_corroboration(raw: object) -> None:
+def _validate_channel_corroboration(
+    raw: object,
+    *,
+    primary_window_ids: set[str],
+) -> None:
     if raw is None:
         return
     data = _strict_dict(raw, _CHANNEL_CORROBORATION_KEYS, "channel corroboration")
@@ -1071,6 +1080,8 @@ def _validate_channel_corroboration(raw: object) -> None:
         if not typed_supporting or any(
             not isinstance(item, str) or not item for item in typed_supporting
         ):
+            raise AlignmentReviewContractError("channel candidate support is invalid")
+        if len(set(cast(list[str], typed_supporting))) != len(typed_supporting):
             raise AlignmentReviewContractError("channel candidate support is invalid")
     collections = data["collections"]
     if not isinstance(collections, list):
@@ -1103,27 +1114,37 @@ def _validate_channel_corroboration(raw: object) -> None:
     for window in typed_windows:
         window_data = _strict_dict(window, _CHANNEL_WINDOW_KEYS, "channel window")
         logical_id = window_data["logical_id"]
-        if not isinstance(logical_id, str) or not logical_id or logical_id in window_ids:
+        if (
+            not isinstance(logical_id, str)
+            or not logical_id
+            or logical_id in window_ids
+            or logical_id not in primary_window_ids
+        ):
             raise AlignmentReviewContractError("channel window identifier is invalid")
         window_ids.add(logical_id)
         _require_int_fields(window_data, ("mono_sample_lag",))
         _require_nullable_int_fields(
             window_data,
-            (
-                "representative_sample_lag",
-                "representative_frame_candidate",
-                "actual_useful_reference_start",
-                "actual_useful_reference_end",
-            ),
+            ("representative_sample_lag", "representative_frame_candidate"),
+        )
+        _require_nullable_int_fields(
+            window_data,
+            ("actual_useful_reference_start", "actual_useful_reference_end"),
+            minimum=0,
         )
         _require_bool_fields(window_data, ("corroborated", "contradiction"))
         _require_nullable_number_fields(window_data, ("minimum_credible_score",))
         _require_peak_ratio(window_data, "minimum_peak_ratio", nullable=True)
+        reason = window_data["reason"]
+        if not isinstance(reason, str) or not reason:
+            raise AlignmentReviewContractError("channel window reason is invalid")
         agreeing = window_data["agreeing_views"]
         if not isinstance(agreeing, list):
             raise AlignmentReviewContractError("channel agreeing views are invalid")
         typed_agreeing = cast(list[object], agreeing)
-        if any(view not in {"FL", "FR", "FC"} for view in typed_agreeing):
+        if any(view not in {"FL", "FR", "FC"} for view in typed_agreeing) or len(
+            set(typed_agreeing)
+        ) != len(typed_agreeing):
             raise AlignmentReviewContractError("channel agreeing views are invalid")
         views = window_data["views"]
         if not isinstance(views, list):
@@ -1132,6 +1153,7 @@ def _validate_channel_corroboration(raw: object) -> None:
         if len(typed_views) not in {2, 3}:
             raise AlignmentReviewContractError("channel window views are invalid")
         view_names: list[object] = []
+        agreeing_view_names: list[object] = []
         for view in typed_views:
             view_data = _strict_dict(view, _CHANNEL_VIEW_KEYS, "channel view")
             view_names.append(view_data["view"])
@@ -1140,13 +1162,16 @@ def _validate_channel_corroboration(raw: object) -> None:
             _require_nullable_int_fields(
                 view_data,
                 (
-                    "requested_sample_lag",
-                    "requested_frame_candidate",
                     "actual_reference_count",
                     "actual_comparison_count",
                     "actual_useful_reference_start",
                     "actual_useful_reference_end",
                 ),
+                minimum=0,
+            )
+            _require_nullable_int_fields(
+                view_data,
+                ("requested_sample_lag", "requested_frame_candidate"),
             )
             _require_nullable_number_fields(view_data, ("requested_score", "actual_coverage"))
             _require_peak_ratio(view_data, "peak_ratio", nullable=True)
@@ -1163,12 +1188,72 @@ def _validate_channel_corroboration(raw: object) -> None:
             rejection = view_data["rejection_reason"]
             if rejection is not None and not isinstance(rejection, str):
                 raise AlignmentReviewContractError("channel view rejection is invalid")
+            useful_start = view_data["actual_useful_reference_start"]
+            useful_end = view_data["actual_useful_reference_end"]
+            if (useful_start is None) != (useful_end is None) or (
+                useful_start is not None
+                and useful_end is not None
+                and cast(int, useful_end) < cast(int, useful_start)
+            ):
+                raise AlignmentReviewContractError("channel view useful interval is invalid")
+            coverage = view_data["actual_coverage"]
+            if coverage is not None and not 0 <= cast(float, coverage) <= 1:
+                raise AlignmentReviewContractError("channel view coverage is invalid")
+            coverage_valid = cast(bool, view_data["coverage_valid"])
+            peak_valid = _peak_ratio_at_least(view_data["peak_ratio"], 1.50)
+            if coverage_valid and (coverage is None or cast(float, coverage) < 0.90):
+                raise AlignmentReviewContractError("coverage-valid channel view is inconsistent")
+            if cast(bool, view_data["base_credible"]) and (
+                not cast(bool, view_data["activity_valid"])
+                or not coverage_valid
+                or view_data["requested_score"] is None
+                or cast(float, view_data["requested_score"]) < 0.90
+                or not peak_valid
+            ):
+                raise AlignmentReviewContractError("base-credible channel view is inconsistent")
+            if cast(bool, view_data["agrees"]):
+                agreeing_view_names.append(view_data["view"])
+                if (
+                    not cast(bool, view_data["activity_valid"])
+                    or not coverage_valid
+                    or view_data["requested_sample_lag"] is None
+                    or view_data["requested_frame_candidate"] is None
+                    or not peak_valid
+                ):
+                    raise AlignmentReviewContractError("agreeing channel view is inconsistent")
         if tuple(view_names) not in {("FL", "FR"), ("FL", "FR", "FC")}:
             raise AlignmentReviewContractError("channel views are out of fixed order")
+        if tuple(typed_agreeing) != tuple(agreeing_view_names):
+            raise AlignmentReviewContractError("channel agreeing views are inconsistent")
+        complete = all(
+            window_data[name] is not None
+            for name in (
+                "representative_sample_lag",
+                "representative_frame_candidate",
+                "actual_useful_reference_start",
+                "actual_useful_reference_end",
+                "minimum_credible_score",
+                "minimum_peak_ratio",
+            )
+        )
+        corroborated = cast(bool, window_data["corroborated"])
+        if corroborated != (complete and len(typed_agreeing) >= 2):
+            raise AlignmentReviewContractError("corroborated channel window is inconsistent")
+        if corroborated and (
+            cast(bool, window_data["contradiction"])
+            or cast(float, window_data["minimum_credible_score"]) < 0.90
+            or not _peak_ratio_at_least(window_data["minimum_peak_ratio"], 1.50)
+        ):
+            raise AlignmentReviewContractError("corroborated channel window is inconsistent")
     if candidate is not None:
         candidate_data = cast(dict[str, object], candidate)
         supporting = cast(list[object], candidate_data["supporting_window_ids"])
-        if not set(cast(list[str], supporting)) <= window_ids:
+        corroborated_ids = {
+            cast(str, window["logical_id"])
+            for window in cast(list[dict[str, object]], typed_windows)
+            if window["corroborated"] is True
+        }
+        if not set(cast(list[str], supporting)) <= corroborated_ids:
             raise AlignmentReviewContractError("channel candidate support is invalid")
 
 
@@ -1314,6 +1399,15 @@ def _require_peak_ratio(data: Mapping[str, object], name: str, *, nullable: bool
     if value == "unbounded":
         return
     _require_number_fields(data, (name,))
+
+
+def _peak_ratio_at_least(value: object, floor: float) -> bool:
+    return value == "unbounded" or (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= floor
+    )
 
 
 def _validate_scalar_tree(data: Mapping[str, object], *, skip: tuple[str, ...] = ()) -> None:

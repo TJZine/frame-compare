@@ -459,6 +459,73 @@ def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
 
 
 @pytest.mark.parametrize(
+    ("tamper", "match"),
+    [
+        ("base_credible_without_facts", "base-credible channel view"),
+        ("agreeing_below_peak_floor", "agreeing channel view"),
+        ("agreeing_membership", "channel agreeing views are inconsistent"),
+        ("incomplete_corroborated_window", "corroborated channel window"),
+        ("candidate_supports_rejected_window", "channel candidate support"),
+        ("duplicate_agreeing_views", "channel agreeing views"),
+        ("foreign_channel_window", "channel window identifier"),
+    ],
+)
+def test_workspace_metadata_rejects_inconsistent_channel_topology(
+    tamper: str,
+    match: str,
+) -> None:
+    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
+    channel = cast(dict[str, object], attempt["channel_corroboration"])
+    windows = cast(list[dict[str, object]], channel["windows"])
+    window = windows[0]
+    views = cast(list[dict[str, object]], window["views"])
+    if tamper == "base_credible_without_facts":
+        views[0]["requested_score"] = None
+        views[0]["peak_ratio"] = None
+    elif tamper == "agreeing_below_peak_floor":
+        views[0]["base_credible"] = False
+        views[0]["peak_ratio"] = 1.0
+    elif tamper == "agreeing_membership":
+        views[0]["agrees"] = False
+    elif tamper == "incomplete_corroborated_window":
+        window["representative_sample_lag"] = None
+    elif tamper == "candidate_supports_rejected_window":
+        window.update(
+            {
+                "corroborated": False,
+                "representative_sample_lag": None,
+                "representative_frame_candidate": None,
+                "actual_useful_reference_start": None,
+                "actual_useful_reference_end": None,
+                "agreeing_views": [],
+                "minimum_credible_score": None,
+                "minimum_peak_ratio": None,
+                "reason": "no_unique_corroboration",
+            }
+        )
+        for view in views:
+            view["agrees"] = False
+    elif tamper == "duplicate_agreeing_views":
+        window["agreeing_views"] = ["FL", "FL"]
+    else:
+        window["logical_id"] = "foreign-primary"
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    with pytest.raises(AlignmentReviewContractError, match=match):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        )
+
+
+@pytest.mark.parametrize(
     ("section", "field", "value", "match"),
     [
         ("attempt", "confidence_threshold", float("nan"), "confidence_threshold"),
