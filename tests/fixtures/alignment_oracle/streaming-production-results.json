@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "purpose": "R6 production continuous-alignment runtime, resource, and release-gate evidence",
+  "purpose": "R6 production continuous-alignment runtime, resource, physical-Windows, and release-gate evidence",
   "candidate": {
     "repository": "TJZine/frame-compare",
     "base_commit": "bd3f7aa997130cb864cf1a39897bb1b102469247",
@@ -36,6 +36,227 @@
     "ffprobe": "7.1.5-0+deb13u1",
     "rss_method": "linux /proc/<pid>/status VmRSS; one combined parent/active-child observation per sample",
     "candidate_source": "fresh image built from the same uncommitted R6 worktree"
+  },
+  "windows_evidence": {
+    "share_safe_identity": "physical-windows-real-media-zero-offset-candidate-set-1",
+    "privacy": "No media names, absolute media paths, generated VSView scripts, raw PCM, or credentials are retained in this record.",
+    "environment": {
+      "platform": "Windows 10 Home 10.0.19045 build 19045, 64-bit",
+      "runtime": "physical Windows unmanaged source checkout",
+      "frame_compare_version": "0.6.0",
+      "python": "3.13.7",
+      "ffmpeg": "git-2025-11-02-a677b38-ffmpeg-windows-build-helpers",
+      "ffprobe": "git-2025-11-02-a677b38-ffmpeg-windows-build-helpers",
+      "vapoursynth": "R79 API R4.2",
+      "vs_placebo": "2.0.4",
+      "media_runtime_profile": "unmanaged-windows",
+      "alignment_runtime_fingerprint": "8aeba52eb49aa3d05abf0f79de898dd07c6d958bbdb8e9002934080f4a01adf9",
+      "doctor_success": true,
+      "doctor_noncritical_findings": ["slow.pics returned HTTP 520"]
+    },
+    "original_run": {
+      "observed_at_utc": "2026-09-19",
+      "checkout_identity": {
+        "run_time_checkout_inferred_from_reflog": "9401f47177a68cdd9a4202a8680c6d73e099a546",
+        "run_info_embeds_commit": false,
+        "run_time_dirty_state_known": false,
+        "contains_diagnostic_invariants_commit_8044716f": true,
+        "contains_active_audio_progress_commit_73ecea72": false
+      },
+      "command": "uv run --no-sync python -m frame_compare.cli.entry run",
+      "command_provenance": "recovered from the retained CLI capture; the run used the default root and config/config.toml",
+      "status": "completed_with_warnings",
+      "started_at_utc": "2026-09-19T17:50:58Z",
+      "completed_at_utc": "2026-09-19T17:56:44Z",
+      "source_count": 3,
+      "comparison_count": 2,
+      "fresh_computation": true,
+      "source_names_and_paths_in_record": false,
+      "automatic_authority_default": "held",
+      "frame_rate": "24000/1001",
+      "source_frame_counts": [143487, 143023, 143023],
+      "reference_semantics": "One of three peer release sources was selected as the calculation baseline; it is not an independently authoritative master.",
+      "prior_human_confirmed_zero_offsets_offered": true,
+      "prior_offsets_reused": false,
+      "reuse_prompt_response": "n",
+      "alignment_phase_elapsed_seconds": 270.566730200022,
+      "run_elapsed_seconds": 345.9034887999878,
+      "configuration": {
+        "requested_rate": 16000,
+        "discovery_rate": 8000,
+        "maximum_offset_seconds": 30.0,
+        "correlation_mode": "raw_fft",
+        "preprocessing_mode": "none",
+        "channel_strategy": "mono_downmix",
+        "window_plan": "default long-duration tier: five distributed 30-second windows",
+        "minimum_valid_windows": 1,
+        "consensus_minimum_ratio": 1.0,
+        "refinement_mode": "disabled",
+        "stream_selection": "automatic metadata",
+        "use_vsview": true,
+        "force_interactive": false
+      },
+      "artifact_hash_verification": "all nine retained artifacts were found and recomputed SHA-256 values matched the previously recorded values byte-for-byte",
+      "artifact_sha256": {
+        "run_info.toml": "9dc620fda1c28571dc158e63730ec13d5aa9f4ade17ed603558bf4520d67d616",
+        "run_result.toml": "67e028008e69e6f0cc077eabb50bcea1e116470716420c8f6f447c538dbb66a7",
+        "comparison-1.json": "24190ea7e3d692bf9dcf5b42fbe83efc6a2d16013e8c084f27fc884e50ac0ae2",
+        "comparison-2.json": "b4c9800f9c9f71a6d23dd27bd76857baf3a987c5024a24ce8f5988b7850e874e",
+        "manual_overrides.toml": "ded52fb29b54899209362106e1c4ced54d429789141eac47eda850395fcd68c2",
+        "alignment-result.json": "bb2354aa34373eabe923911d78b7dc3806016ab0078e8ab6a4c9a67e5a0af09b",
+        "cli-run-plan-and-sources.png": "81ed4455ccdaaead55b5d9ae2593f5fca377adece83e5a0933863217afe5dfa1",
+        "cli-alignment-and-vsview.png": "09edba76bef7965293658111066780bf30647e163f82e0247588b8ccb62d1f93",
+        "cli-run-summary.png": "06c429cf80f5cc2a571d68a0a13ec6c64f89149435348cffe7974c8c92041c36"
+      },
+      "comparisons": [
+        {
+          "ordinal": 1,
+          "expected_relationship": {"frame_offset": 0, "confidence": "user-reported quick check, not independently constructed ground truth"},
+          "diagnostic_schema": 2,
+          "evidence_availability": "current_attempt",
+          "collection_observation": "observed",
+          "selected_streams": "automatic a:0 on both sides; E-AC-3; 48000 Hz; 5.1(side); English; default; original; non-commentary",
+          "collections": [
+            {"phase": "discovery", "role": "reference", "rate": 8000, "elapsed_seconds": 13.221529299975373, "retained_bytes": 4800000, "end": "planned_end_reached", "cleanup_failures": 0},
+            {"phase": "discovery", "role": "comparison", "rate": 8000, "elapsed_seconds": 13.069562699995004, "retained_bytes": 12480000, "end": "planned_end_reached", "cleanup_failures": 0},
+            {"phase": "verification", "role": "reference", "rate": 16000, "elapsed_seconds": 13.157237000006717, "retained_bytes": 9600000, "end": "planned_end_reached", "cleanup_failures": 0},
+            {"phase": "verification", "role": "comparison", "rate": 16000, "elapsed_seconds": 13.102415200031828, "retained_bytes": 9600072, "end": "planned_end_reached", "cleanup_failures": 0}
+          ],
+          "window_centers": [
+            {"id": "primary-01", "seconds": 15.0, "discovery_center_sample": 120000, "verification_center_sample": 240000, "frame_approx": 360, "sample_offset": 0, "frame_offset": 0, "score": 1.0, "peak_ratio": 3.614173758252488, "disposition": "qualified_voted"},
+            {"id": "primary-02", "seconds": 1503.652, "discovery_center_sample": 12029216, "verification_center_sample": 24058432, "frame_approx": 36052, "sample_offset": 0, "frame_offset": 0, "score": 1.0, "peak_ratio": 10.469956295963271, "disposition": "qualified_voted"},
+            {"id": "primary-03", "seconds": 2992.304, "discovery_center_sample": 23938432, "verification_center_sample": 47876864, "frame_approx": 71744, "sample_offset": 0, "frame_offset": 0, "score": 1.0, "peak_ratio": 7.561453518302704, "disposition": "qualified_voted"},
+            {"id": "primary-04", "seconds": 4480.956, "discovery_center_sample": 35847648, "verification_center_sample": 71695296, "frame_approx": 107436, "sample_offset": 0, "frame_offset": 0, "score": 1.0000000000000002, "peak_ratio": 13.819696009502593, "disposition": "qualified_voted"},
+            {"id": "primary-05", "seconds": 5969.608, "discovery_center_sample": 47756864, "verification_center_sample": 95513728, "frame_approx": 143127, "sample_offset": 315723, "frame_offset": 473, "score": 0.013357916104409048, "peak_ratio": 1.008688608076804, "disposition": "rejected_failed", "video_bound": "center is beyond the two shortest sources' final frame"}
+          ],
+          "decision": {"state": "provisional", "candidate_sample_offset": 0, "candidate_frame_offset": 0, "raw": 5, "credible": 4, "voting": 4, "winning": 4, "independent": 3, "failed_gates": ["automatic_authority_held"], "stability": "possible_discontinuity", "change_position_seconds": 5225.282, "change_position_frame_approx": 125281},
+          "original_final_resolution": "interactive_confirmed_this_run +0f"
+        },
+        {
+          "ordinal": 2,
+          "expected_relationship": {"frame_offset": 0, "confidence": "user-reported quick check, not independently constructed ground truth"},
+          "diagnostic_schema": 2,
+          "evidence_availability": "current_attempt",
+          "collection_observation": "observed",
+          "selected_streams": "automatic a:0 on both sides; E-AC-3; 48000 Hz; 5.1(side); English; default; original; non-commentary",
+          "collections": [
+            {"phase": "discovery", "role": "reference", "rate": 8000, "elapsed_seconds": 13.202111599966884, "retained_bytes": 4800000, "end": "planned_end_reached", "cleanup_failures": 0},
+            {"phase": "discovery", "role": "comparison", "rate": 8000, "elapsed_seconds": 11.297339999990072, "retained_bytes": 12480000, "end": "planned_end_reached", "cleanup_failures": 0},
+            {"phase": "verification", "role": "reference", "rate": 16000, "elapsed_seconds": 13.276192300021648, "retained_bytes": 9600000, "end": "planned_end_reached", "cleanup_failures": 0},
+            {"phase": "verification", "role": "comparison", "rate": 16000, "elapsed_seconds": 11.348544700013008, "retained_bytes": 9599696, "end": "planned_end_reached", "cleanup_failures": 0}
+          ],
+          "window_centers": [
+            {"id": "primary-01", "seconds": 15.0, "discovery_center_sample": 120000, "verification_center_sample": 240000, "frame_approx": 360, "sample_offset": 94, "frame_offset": 0, "score": 0.9501278416697125, "peak_ratio": 3.405630519502227, "disposition": "qualified_voted"},
+            {"id": "primary-02", "seconds": 1498.804, "discovery_center_sample": 11990432, "verification_center_sample": 23980864, "frame_approx": 35935, "sample_offset": 93, "frame_offset": 0, "score": 0.9086374781164824, "peak_ratio": 10.086426805310017, "disposition": "qualified_voted"},
+            {"id": "primary-03", "seconds": 2982.608, "discovery_center_sample": 23860864, "verification_center_sample": 47721728, "frame_approx": 71511, "sample_offset": 94, "frame_offset": 0, "score": 0.6058724879435262, "peak_ratio": 4.1539260390097175, "disposition": "rejected_failed"},
+            {"id": "primary-04", "seconds": 4466.412, "discovery_center_sample": 35731296, "verification_center_sample": 71462592, "frame_approx": 107087, "sample_offset": 94, "frame_offset": 0, "score": 0.7020071260794909, "peak_ratio": 13.260365937001495, "disposition": "rejected_failed"},
+            {"id": "primary-05", "seconds": 5950.216, "discovery_center_sample": 47601728, "verification_center_sample": 95203456, "frame_approx": 142663, "sample_offset": 99, "frame_offset": 0, "score": 0.7353245845413297, "peak_ratio": 1.076732522132903, "disposition": "rejected_failed"}
+          ],
+          "decision": {"state": "provisional", "candidate_sample_offset": 93, "candidate_seconds": 0.0058125, "candidate_frame_offset": 0, "raw": 5, "credible": 2, "voting": 2, "winning": 2, "independent": 0, "failed_gates": ["insufficient_independent_support"], "stability": "stable"},
+          "original_final_resolution": "interactive_confirmed_this_run +0f"
+        }
+      ],
+      "original_native_review": {"whole_set_result": "one schema-v1 sidecar with two ordered confirmed decisions", "cli_review_result": "Accepted 2 confirmed pair(s); 0 comparison(s) kept their current offset.", "manual_offsets_applied": [0, 0]}
+    },
+    "follow_up": {
+      "observed_at_utc": "2026-09-19/20",
+      "source_commit": "9c68627423dff9220d65244a142fb4060b2912e4",
+      "source_subject": "docs(alignment): record Windows acceptance evidence",
+      "dirty_state_before_each_run": "clean; only ignored isolated temporary outputs were created",
+      "interactive_command": "uv run --no-sync python -m frame_compare.cli.entry run --root . --config .tmp/audio-alignment-windows-followup-9c686274/ui-run-config.toml --verbose",
+      "interactive_configuration": "fresh output; previous offsets disabled; requested 16 kHz verification; VSView enabled; raw_fft; no preprocessing; mono downmix; report and upload disabled",
+      "ui_contract": {
+        "readiness": "3/3 sources visibly ready",
+        "provisional_hints": ["comparison 1 +0f — NOT APPLIED", "comparison 2 +0f — NOT APPLIED"],
+        "manual_fields": "both manual-entry fields were blank when expanded",
+        "playheads_and_visited_state": "user moved playheads personally; displaying hints did not move playheads or mark sources visited",
+        "details": "both diagnostic detail panels were readable and actionable",
+        "marker_bounds": "all inspected frames were inside the common video bounds; visible marker rendering was not separately captured",
+        "close_without_save": "CLI rejected the missing review result, retained current offsets, and no alignment-result or manual-overrides authority file was created",
+        "authority_result_file_count": 0
+      },
+      "visual_observations": [
+        {"frame": 5000, "provenance": "original run", "result": "zero-frame agreement across all three sources"},
+        {"frame": 10000, "provenance": "original run", "result": "zero-frame agreement across all three sources"},
+        {"frame": 71744, "provenance": "follow-up; comparison 1 primary-03 center", "result": "zero-frame agreement across all three sources"},
+        {"frame": 71511, "provenance": "follow-up; comparison 2 rejected primary-03 center", "result": "zero-frame agreement across all three sources"},
+        {"frame": 107087, "provenance": "follow-up; comparison 2 rejected primary-04 center", "result": "zero-frame agreement across all three sources"},
+        {"frame": 125281, "provenance": "follow-up; comparison 1 reported warning position", "result": "zero-frame agreement across all three sources; scene contains pouring rain"},
+        {"frame": 130147, "provenance": "follow-up; later than warning", "result": "zero-frame agreement across all three sources"},
+        {"frame": 142663, "provenance": "follow-up; comparison 2 rejected primary-05 center and near common end", "result": "zero-frame agreement across all three sources"},
+        {"frame": 143127, "provenance": "comparison 1 rejected primary-05 center", "result": "unable to inspect visually because the exact center is beyond the two shortest sources' final frame 143022"}
+      ],
+      "audio_observations": {
+        "manual_listening": "unable to determine reliably because VSView does not provide aligned multi-source audio switching; the user declined to overstate an unreliable sequential comparison",
+        "method": "temporary role-paired 16 kHz mono excerpts were decoded with the same selected streams and analyzed locally; no PCM is retained in tracked evidence",
+        "comparison_1_warning_position": "12-second excerpts at 5225.282 seconds were sample-identical: both RMS -28.930 dBFS, zero-lag correlation 1.0, best lag 0, difference at the numerical floor",
+        "comparison_1_rejected_window": "the exact 30-second primary-05 core was sample-identical but low-information: both RMS -80.368 dBFS overall, correlation 1.0, and the final 15 seconds were digital silence; the 473-frame row is therefore a silence/near-silence correlation artifact, not observed edit evidence",
+        "comparison_2_rejected_windows": [
+          {"id": "primary-03", "reference_rms_dbfs": -31.676, "comparison_rms_dbfs": -26.951, "zero_lag_correlation": -0.0836, "best_absolute_lag_samples": 94, "best_correlation": 0.604964},
+          {"id": "primary-04", "reference_rms_dbfs": -26.038, "comparison_rms_dbfs": -15.746, "zero_lag_correlation": -0.1204, "best_absolute_lag_samples": 94, "best_correlation": 0.687061},
+          {"id": "primary-05", "reference_rms_dbfs": -46.672, "comparison_rms_dbfs": -49.950, "zero_lag_correlation": -0.0513, "best_absolute_lag_samples": 99, "best_correlation": 0.730112}
+        ],
+        "comparison_2_interpretation": "the selected streams have genuine waveform and level differences but a stable approximately 5.9–6.2 ms relation; this is consistent with different mix/mastering/encode lineage, does not identify a cause, and does not by itself justify automatic authority"
+      },
+      "interactive_artifact_sha256": {
+        "run_info.toml": "8aab6e850e37446f48f7260b5127b761ae818cb70738df788d662bc3ef50957f",
+        "run_result.toml": "94ea266d159343c20952e5fbe78ffb38f3c9a1da26c9bdbc406532ee6ba7f688",
+        "comparison-1.json": "758378e4473b6cf047a210cb54b9dee97d2b95b0a9b61da20dfd60b7946d35e4",
+        "comparison-2.json": "be15d15113d9a80627cbd0aef2f0b27d225160efca86d461f1a05e78cb2b1d84",
+        "temporary-config.toml": "306e58f251862ccad3ac68803b68497d8c022afd92bf6c55b8f6d106523285f7",
+        "alignment-panel.png": "36c4b7f246c67fdcd2011ac3e3a079da9d4407f256d28cf5f6348fe9d292421a",
+        "comparison-1-details.png": "b88ee61e8687ffc20f90cab29e3aea3665f52d9bf645ef72e46c3bf0bdec95ae",
+        "comparison-2-details.png": "f1f2644ebe035d46ee97ce700a9bd79471973e5565beb5329ed6c73bb45b5b61"
+      },
+      "timing_comparison": {
+        "controls": "same clean commit, three inputs, automatic stream selections, frame plan, raw_fft, no preprocessing, mono downmix, 30-second maximum offset, previous offsets disabled, VSView disabled, force interaction disabled, fresh output and alignment cache; requested rate and output/log paths were the only differences",
+        "discovery_note": "both runs use 8 kHz discovery; the requested rate changes whether a separate 16 kHz verification phase is collected and scored",
+        "runs": [
+          {
+            "requested_rate": 8000,
+            "command": "& uv run --no-sync python -m frame_compare.cli.entry run --root . --config .tmp/audio-alignment-windows-followup-9c686274/timing-8k-config.toml --verbose 2>&1 | Tee-Object -FilePath '.tmp/audio-alignment-windows-followup-9c686274/timing-8k-cli-output.txt'",
+            "status": "completed_with_warnings",
+            "cache": "miss",
+            "alignment_phase_seconds": 55.582762699981686,
+            "collection_seconds_total": 54.9490402000374,
+            "collection_seconds_by_comparison": [28.5379793000175, 26.4110609000199],
+            "ffmpeg_collection_passes": 4,
+            "comparison_1": {"candidate_sample_offset": 0, "candidate_frame_offset": 0, "raw": 5, "credible": 4, "voting": 4, "winning": 4, "independent": 3, "decision": "provisional", "reason": "automatic_authority_held"},
+            "comparison_2": {"candidate_sample_offset": 47, "candidate_seconds": 0.005875, "candidate_frame_offset": 0, "raw": 5, "credible": 2, "voting": 2, "winning": 2, "independent": 0, "decision": "provisional", "reason": "insufficient_independent_support"},
+            "artifact_sha256": {"run_info.toml": "eee12a417c3bb60bd6320ad02c62218774809a31d38b3c19fe89c5dc5ee259dd", "run_result.toml": "e1c9a85ff44d3564aac460d4b4b5dd635c4d08612aa47885fc0a87bf3f4ce067", "comparison-1.json": "46f58b145284c959f50437373efab025e544b69f0a28bab73777b08018279c36", "comparison-2.json": "a55305c75dd769e3d4c99cfef05467bf17490616f9c908e94d900d5215269582", "temporary-config.toml": "3d245f1648b27b6d40de85abbe035a94facdfa3e3317b4c1ece96b02a7f0837c", "complete-cli-output.txt": "33d694846bb3794d9b1b5bbf5544e9dcff3cb70d43968c87a7da45bb47af9300"}
+          },
+          {
+            "requested_rate": 16000,
+            "command": "& uv run --no-sync python -m frame_compare.cli.entry run --root . --config .tmp/audio-alignment-windows-followup-9c686274/timing-16k-config.toml --verbose 2>&1 | Tee-Object -FilePath '.tmp/audio-alignment-windows-followup-9c686274/timing-16k-cli-output.txt'",
+            "status": "completed_with_warnings",
+            "cache": "miss",
+            "alignment_phase_seconds": 105.67163540003821,
+            "collection_seconds_total": 104.917056999926,
+            "collection_seconds_by_comparison": [54.8559010999743, 50.0611558999517],
+            "ffmpeg_collection_passes": 8,
+            "comparison_1": {"candidate_sample_offset": 0, "candidate_frame_offset": 0, "raw": 5, "credible": 4, "voting": 4, "winning": 4, "independent": 3, "decision": "provisional", "reason": "automatic_authority_held"},
+            "comparison_2": {"candidate_sample_offset": 93, "candidate_seconds": 0.0058125, "candidate_frame_offset": 0, "raw": 5, "credible": 2, "voting": 2, "winning": 2, "independent": 0, "decision": "provisional", "reason": "insufficient_independent_support"},
+            "artifact_sha256": {"run_info.toml": "2a841ad6db3a03f2ec71dbc576a9ce3c6ce9b5648c6814ac895a8cc61483f2da", "run_result.toml": "7ebcbcf13bd9b3be694e3ce3cdd034eabc225d822cd3c0bfca48fa60fe0e3688", "comparison-1.json": "4b52c61d31649a0835e04bfa97fb06371bda795b74434c38500d53bdfc4ab3ce", "comparison-2.json": "f078d254d32c1b694ddb7387f0864ca31c1f37cce8581ca36b8e4dfd14be4c4d", "temporary-config.toml": "44d686852213ea54d9e6844b34c49d5513160edfde2fa05f1d4cba3d830a81db", "complete-cli-output.txt": "1aea667ddc130ba13838f69641971569d57786bbbf73bfcd71d959ec595f5975"}
+          }
+        ],
+        "result": "8 kHz preserved the same +0f frame candidates, evidence counts, decision states, and warning reasons while reducing alignment-phase time by 50.0888727000565 seconds (47.4005%, 1.901x speedup) and collection time by 49.9680167998886 seconds (47.6262%) on this one case; this is not general benchmark proof or justification to change the default"
+      },
+      "remediation_follow_up": {
+        "scope": "future separately planned implementation after the current evidence changes are locked",
+        "highest_return_change": "separate evidence eligibility from match confidence so silent or otherwise uninformative rows remain diagnostic but cannot manufacture drift/discontinuity claims; excluded intervals remain explicit unassessed coverage",
+        "research_direction": "after reproducing low-level decode, channel, band, and scoring facts, test a bounded log-band spectral candidate fallback followed by requested-rate waveform verification and representation-specific confidence",
+        "guardrails": ["do not lower the 0.90 waveform credibility floor from this case", "do not replace rejected lags with zero", "do not allow unlimited channel/band/method retries", "preserve credible minority contradictions", "model continuous delay before whole-frame quantization", "keep new representations provisional until held-out negatives establish their own authority contract"]
+      }
+    },
+    "limitations": {
+      "windows_simultaneous_parent_child_rss": "unavailable; no supported sampler was implemented and no Task Manager estimate is substituted",
+      "windows_cancellation_and_handle_lifetime": "unavailable from these normal runs",
+      "portable_bundle_candidate": "unavailable; all Windows runs were unmanaged source checkouts",
+      "known_signed_offset_real_media": "unavailable",
+      "mismatched_mix_cut_track_real_media": "unavailable",
+      "visible_marker_rendering": "not separately captured",
+      "real_media_label_strength": "the user repeatedly observed zero-frame visual agreement, but this one correlated release set is not an independently constructed ground-truth corpus"
+    }
   },
   "historical_scalar_integrity": {
     "p3-results.json": "23954481c7057c1010236885c8c5249d91b106a4d38d6d06fb6da4862ff613c6",
@@ -263,23 +484,25 @@
     "application_cancellation": {"status": "observed_pass", "evidence": "actual timed alignment phase cancellation produced no diagnostics, review launch, cache write, phase output/application, trim or selection mutation, or next-comparison start"},
     "persistence_authority": {"status": "observed_pass", "evidence": "isolated latch positives produced expected trusted decisions; shipped default remains held; focused service/orchestration/cache/native and full suites passed"},
     "docker_linux": {"status": "observed_pass", "evidence": "canonical fresh-image runtime/application proof and 7 pipeline tests passed; same-image RSS/resource/planner plus direct-service and timed-phase cancellation cases passed with zero skips"},
-    "windows_portable": {"status": "blocked", "blocker": "No native Windows portable runtime or physical Windows host is available from this macOS task"},
-    "visible_vsview_windows": {"status": "blocked", "blocker": "No physical Windows desktop/visible VSView runtime is available; Docker and offscreen proof cannot satisfy this cell"},
-    "real_media": {"status": "blocked", "blocker": "No independently labeled real constant-zero, signed-offset, or mismatched mix/cut/track media was supplied or discoverable in the repository; synthetic fixtures are not relabeled as real media"}
+    "windows_portable": {"status": "blocked", "evidence": "physical Windows unmanaged source-checkout execution completed on exact clean commit 9c68627423dff9220d65244a142fb4060b2912e4", "blocker": "exact portable-bundle candidate identity plus simultaneous parent-and-active-FFmpeg RSS, cancellation, process, and handle-lifetime proof remain unavailable"},
+    "visible_vsview_windows": {"status": "observed_partial", "evidence": "physical Windows showed readiness 3/3, two provisional-not-applied hints, blank manual fields, no hint-induced playhead/visited mutation, readable diagnostics, and close-without-save retaining current offsets with no authority result", "blocker": "visible marker rendering was not separately captured"},
+    "real_media": {"status": "observed_partial", "evidence": "one user-described peer-release zero-offset candidate set remained at zero-frame visual agreement across early, middle, warning-position, later, and near-end checks; exact rejected-window audio analysis explained the low-information tail and confirmed stable sub-frame timing in the alternate waveform case", "blocker": "no independently labeled real known signed-offset or mismatched mix/cut/track pair was supplied; one correlated release set is not a general corpus"}
   },
   "release_posture": {
     "r6_accepted": false,
     "automatic_authority_may_be_activated": false,
     "blocking_reasons": [
-      "native Windows portable RSS/lifetime proof unavailable",
-      "physical Windows visible VSView metadata-v3/result-v1 acceptance unavailable",
-      "required independently labeled real-media matrix unavailable"
+      "exact Windows portable-bundle identity and native simultaneous RSS/cancellation/process/handle-lifetime proof unavailable",
+      "visible Windows marker rendering not separately captured",
+      "independently labeled real known signed-offset and mismatched mix/cut/track cells unavailable"
     ]
   },
   "limitations": [
     "Synthetic generated containers prove production runtime/resource behavior, not real-media A/V labels.",
     "Sampled RSS is not an OS memory sandbox and cannot exclude a transient between samples.",
     "The separate parent and child sampled peaks are not summed as the combined peak; peak_combined_bytes comes from one combined platform query.",
-    "The candidate is uncommitted by controller instruction, so Windows packaging from committed HEAD would not contain this R6 test/evidence worktree."
+    "The original macOS/Docker R6 candidate was an explicitly recorded uncommitted evidence worktree; the physical-Windows follow-up instead used exact clean source commit 9c68627423dff9220d65244a142fb4060b2912e4.",
+    "The controlled 8/16 kHz result is one real-media case and does not justify changing the default rate or any authority threshold.",
+    "Audio evidence cannot independently prove video continuity where audio is silent, identical, or shared across visually different material."
   ]
 }
