@@ -14,9 +14,10 @@ Owner: Main GPT-5.6 Sol orchestration task; sequential Codex new tasks with cont
 **Tracked path:** `docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md`
 **Original plan date:** September 14, 2026
 **Replacement date:** September 15, 2026
+**Post-R6 remediation amendment:** September 20, 2026
 **Inspected pushed head:** `0df9c369a9abf19de3cce87de95ccd50ef7ecf1a`
 **Original investigation baseline:** `326da610a1f6d9baee7ea58d509f05f59af0f004`
-**Replacement packages:** R0–R7, all not started at authoring.
+**Replacement packages:** R0–R7, plus post-evidence R6A/R6B before R7 activation.
 
 This document replaces the previous contents at this path. It is the only active plan for this workstream. Completed historical work remains recorded below and in its immutable commits and scalar evidence. Historical instructions prohibiting continuous production decoding or directing another P5 seek experiment are superseded, not outstanding tasks.
 
@@ -41,6 +42,13 @@ No new runtime dependency, user-facing tuning switch, independent-seek fallback,
 Continuous decoding is not whole-track retention. It also is not exhaustive edit detection: discarded intervals are not analyzed. Acceptance means sufficiently strong distributed support for one correction without a credible contradiction in sampled evidence, not proof that every source frame or every audio sample matches.
 
 The canonical audio coordinate system does not independently prove the relationship to video frame zero. Preserve the existing `reference source frame - comparison source frame` sign convention and the product's matching-A/V-relationship assumption. Do not add timestamp compensation, silence insertion, stretching, or inferred A/V-origin correction. Independently labeled video/real-media evidence is required for release claims about frame alignment.
+
+Post-R6 Windows evidence established one bounded diagnostic defect and one separate
+research question. A rejected low-information lag can currently enter stability and
+manufacture a discontinuity warning; repair that eligibility boundary without changing
+candidate generation, waveform credibility floors, or authority. The alternate-mix case
+found a consistent sub-frame candidate but insufficient qualified temporal support; keep
+it provisional while existing bounded methods are measured before any perceptual fallback.
 
 ## 2. Preserved history and evidence limits
 
@@ -442,7 +450,8 @@ Use distinct estimator identities at behavior-changing checkpoints, reserving th
 R0: audio-authority-hold-2097152-v6
 R3: continuous-origin-distributed-2097152-v7-held
 R5: continuous-origin-qualified-2097152-v8-held
-R7: continuous-origin-qualified-2097152-v9
+R6A: continuous-origin-qualified-stability-2097152-v9-held
+R7: continuous-origin-qualified-stability-2097152-v10
 ```
 
 Every later extraction/scoring/trust change or behavioral rollback gets a fresh identity. Never restore an old token to resurrect withdrawn cached authority.
@@ -475,7 +484,7 @@ Update current architecture/CLI/guide text in each behavior-changing package. Re
 
 ### Common dispatch, proof, and commit rules
 
-Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R7**. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
+Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R6A -> R6B -> adjudication -> R7**. R6A repairs the confirmed diagnostic defect. R6B measures the unresolved confidence question and does not imply that a fallback will be implemented. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
 
 Each unit has an effort boundary of one objective, its directly affected callers/tests/docs, and repairs caused by that change. It does not include unrelated cleanup or another architecture experiment. A consequential scope/contract change returns to the controller before dependent work proceeds. Read-only investigation inside the unit and routine implementation judgment do not require a separate planning task.
 
@@ -640,14 +649,121 @@ Exercise prospective automatic authority through isolated tests of the existing 
 
 **Controller commit:** `test(alignment): verify continuous alignment release gates`
 
+### R6A — Qualify stability evidence and preserve unassessed coverage
+
+**Dispatch:** Luna xhigh. The defect, owner seam, invariants, and direct regression proof
+are settled; no new signal-processing design is authorized.
+**Dependencies:** R5 integrated and the R6 physical-Windows evidence reproduced and
+adjudicated.
+
+**Write boundary / likely files:** `services/alignment_consensus.py`,
+`services/alignment_stability.py`, the existing alignment presentation/report/native-panel
+owners only where needed to state qualified versus unassessed coverage, focused service,
+orchestration, and VSView tests, and current architecture/CLI/audio-guide text. Reuse the
+existing diagnostic-v2 window records and stability summary unless truthful presentation
+cannot be achieved; no config, dependency, cache schema, native metadata/result schema,
+extraction, or candidate-generation change is authorized.
+
+**Work:** Build stability input only after extraction integrity and base credibility are
+known. A row that fails the fixed review floors, integrity, finiteness, or applicable
+coverage requirements remains in the ordered window diagnostics but cannot vote on
+`stable`, `variable`, `possible_drift`, or `possible_discontinuity`. Use the base credibility
+boundary rather than user-relaxable defaults so a permissive configuration cannot promote
+noise, while a stricter user threshold cannot hide a base-credible contradiction. Present
+stability as scoped to qualified observed windows and identify rejected planned intervals
+as unassessed; never replace their lag with zero or claim continuity through them. Keep
+the authority hold enabled and install the held R6A identity.
+
+**Invariants:** The candidate, raw rows, scores, peak ratios, winning group, independent
+support, contradiction veto, manual-review behavior, applied fields, and hold state are
+unchanged. Credible minority regimes remain visible and retain their authority veto.
+Stability remains diagnostic only. A midpoint between qualified adjacent windows may be
+described only as an approximate interval between observations, not an observed edit
+location.
+
+**Acceptance/tests:** Reproduce four strong zero windows plus the recorded finite
+low-information 473-frame tail: the candidate and authority decision stay unchanged, the
+tail remains rejected and visible, no discontinuity is reported, and the missing interval
+is disclosed as unassessed. Cover permissive defaults, stricter user thresholds, failed
+integrity/coverage, fewer than three qualified observations, genuine qualified monotonic
+drift, a qualified dominant jump, and a base-credible cross-frame contradiction. Assert
+diagnostic/cache/native round trips under the fresh identity and that no schema or public
+config field changed.
+
+**Verification:** G1, G2, and G5. Run the focused regression through the production
+consensus/service and presentation paths, not only the pure classifier. Existing R6
+runtime/resource measurements remain relevant because extraction, subprocess lifetime,
+and budgets do not change; Windows visible wording is rechecked later with the exact
+committed candidate.
+
+**Rollback:** Restore the hold under another fresh identity while retaining the raw window
+evidence; never restore the false warning path or reuse v8/v9 cache authority.
+
+**Stop/replan:** The repair changes candidate selection, authority, thresholds, extraction,
+public config, a persisted/native schema, or requires inventing a general signal-information
+threshold. Return any such need to the controller before editing it.
+
+**Controller commit:** `fix(alignment): qualify stability evidence`
+
+### R6B — Measure existing confidence methods before a fallback
+
+**Dispatch:** Sol medium. This is a bounded diagnostic/evidence unit whose value depends on
+cross-boundary decode, channel, scoring, and proof interpretation rather than production
+feature implementation.
+**Dependencies:** R6A integrated and verified; exact clean candidate available on the
+physical Windows host with the private three-source set.
+
+**Write boundary / likely files:** isolated untracked experiment artifacts on the Windows
+host and the canonical share-safe scalar record
+`tests/fixtures/alignment_oracle/streaming-production-results.json`; this ledger is updated
+separately by the controller. A small test-only helper is allowed only if existing FFmpeg,
+NumPy, and repository test utilities cannot express a reproducible measurement. No
+production module, public/config behavior, dependency, or authority identity changes.
+
+**Work:** Reconstruct the recorded weak windows with pinned streams and decode settings.
+Measure pre-normalization level/activity/zero facts, effective FFmpeg decoder/rematrix/DRC
+provenance when observable, corresponding deterministic channel views, full-overlap versus
+current capped scoring, raw FFT versus PHAT, and a small predeclared fixed-band set. Compare
+16 kHz normal bandwidth, 16 kHz matched to the 8 kHz bandwidth, 8 kHz with that matched
+bandwidth, and the existing 8 kHz discovery to 16 kHz verification path. Keep window
+locations, search horizon, channel view, and candidate budgets fixed. Record top and
+bounded alternative candidates, score/peak facts, lag error/spread, elapsed work, and the
+whole declared method count so cherry-picked best-of-many results cannot masquerade as
+confidence.
+
+**Acceptance:** Explain whether the alternate-mix weakness comes from decode/rematrix
+provenance, channel cancellation, bandwidth, capped scoring, candidate generation, or the
+waveform confidence contract. Preserve the current provisional decision and authority
+hold. Results must distinguish observed facts from inference and contain no media names,
+paths, PCM, or full private commands. One source lineage remains a case study, not a
+calibration corpus.
+
+**Verification:** Recompute all retained hashes, validate JSON, inspect exact commands and
+source SHA privately, run `git diff --check`, and controller-review every scalar claim
+against the raw outputs. No full Python or Docker rerun is required when production code
+is untouched.
+
+**Rollback:** Discard untracked experiment artifacts or revert only the evidence update;
+production behavior is unchanged.
+
+**Stop/adjudication gate:** Stop after measurement. If existing bounded methods explain or
+recover the case safely, do not add log-band features. Otherwise author a separate
+decision-complete provisional-only log-band experiment with bounded top-three candidates,
+requested-rate waveform verification, lineage-separated positives/negatives, resource
+admission, and representation-specific confidence. No fallback, threshold change, default
+rate change, or automatic authority is authorized by R6B itself.
+
+**Controller commit:** `test(alignment): record confidence ablation evidence`
+
 ### R7 — Activate only the verified integrated estimator
 
-**Dispatch:** Luna xhigh for the bounded latch/identity/documentation change after the controller verifies R6 acceptance.
-**Dependencies:** R0–R6 accepted; consequential review findings resolved; no missing required runtime/real-media/resource/physical-Windows gate.
+**Dispatch:** Luna xhigh for the bounded latch/identity/documentation change after the controller verifies R6/R6A acceptance and adjudicates R6B.
+**Dependencies:** R0–R6A accepted; R6B adjudicated; consequential review findings resolved;
+no missing required runtime/real-media/resource/physical-Windows gate.
 
 **Write boundary / likely files:** The service-owned authority latch, estimator identity, explicit activation/cache/trim tests, release/CLI/guide/architecture text, and this ledger. No extraction, thresholds, planner, or scoring changes.
 
-**Work:** Disable the hold, install the R7 fresh identity, and document the exact delivered support and residual sampling/A/V assumptions. Remove temporary hold-specific user copy from the active path, but keep regression proof and the conservative rollback route.
+**Work:** Disable the hold, install the R7 v10 fresh identity, and document the exact delivered support and residual sampling/A/V assumptions. Remove temporary hold-specific user copy from the active path, but keep regression proof and the conservative rollback route.
 
 **Acceptance/tests:** Run unpatched production-default positive and negative service/CLI tests. Verify actual trusted zero/nonzero, provisional/unavailable outcomes, trim inputs, manual preservation, old held-policy cache misses, and current accepted-cache reuse. Rebuild the candidate package from committed source and obtain matching-SHA runtime/visible-native smoke for the changed authority presentation. Do not publish while candidate proof is pending.
 
@@ -817,8 +933,10 @@ After activation, publish the actual qualified policy, cache invalidation, sessi
 | R3 staged extraction | Implementation complete; physical acceptance pending | `4b1bd250` | Continuous discovery/verification, endpoint/EOF evidence, exact rate coordinates, and production budgets passed native macOS, fresh Docker/Linux arm64, and canonical Python/docs proof; physical-Windows acceptance remains pending. |
 | R4 application cancellation | Implementation complete; physical acceptance pending | `233b8c6c` | Real outer-task cancellation, cleanup-before-reraise, fatal incomplete-cleanup handling, and partial-output suppression passed canonical Python and fresh Docker/Linux arm64 proof; physical-Windows reader/process release remains pending. |
 | R5 trust policy | Implementation complete; production acceptance pending | `d342cc26` | Qualified integrity, credibility, agreement, independent-support, duration-tier, edge-guard, and held-authority proof passed canonical Python/docs and fresh Docker/Linux arm64 gates; R6 still owns production resource/real-media and physical-Windows acceptance. |
-| R6 production acceptance | Partial evidence complete; blocked | `897d40da`, Windows evidence through `9c686274` | Native macOS and canonical Docker resource/RSS/cancellation gates passed. Physical Windows unmanaged execution, visible VSView review, close-without-save, full-program zero-frame observations, and controlled 8/16 kHz measurements are consolidated in the canonical evidence record. Portable Windows RSS/lifetime, visible marker capture, and independently labeled signed-offset/mismatch cells remain blocking. |
-| R7 activation | Blocked by incomplete R6 acceptance | — | Exact portable candidate/RSS/lifetime proof, the remaining visible marker cell, independently labeled real signed-offset and mismatch cells, unpatched defaults, and a separate adjudicated remediation package are required. |
+| R6 production acceptance | Partial evidence complete; blocked | `897d40da`, Windows evidence through `bc49e9bd` | Native macOS and canonical Docker resource/RSS/cancellation gates passed. Physical Windows unmanaged execution, visible VSView review, close-without-save, full-program zero-frame observations, and controlled 8/16 kHz measurements are consolidated in the canonical evidence record. Portable Windows RSS/lifetime, visible marker capture, and independently labeled signed-offset/mismatch cells remain blocking. |
+| R6A stability eligibility | Dependency-ready | — | Repair the confirmed false-discontinuity path under a fresh held identity without changing candidates, thresholds, schemas, or authority. |
+| R6B confidence ablation | Blocked by R6A and Windows candidate availability | — | Measure existing decode/channel/band/rate/scoring behavior on the private source set, then stop for adjudication before any fallback design. |
+| R7 activation | Blocked by incomplete R6/R6A/R6B acceptance | — | Exact portable candidate/RSS/lifetime proof, the remaining visible marker cell, independently labeled real signed-offset and mismatch cells, unpatched defaults, and completed remediation/ablation adjudication are required. |
 
 For each checkpoint record task model/effort actually used, owner disposition, files, commit, commands/results/skips, evidence locations, unresolved risks, and the next permitted unit. Do not mark a package accepted from intended tests. When the workstream and release handoff are complete, change this file to `Status: Historical` in the same pass; otherwise keep the unresolved gate explicit.
 
@@ -894,8 +1012,8 @@ For each checkpoint record task model/effort actually used, owner disposition, f
 - **Visual result:** the original frames 5,000 and 10,000 plus follow-up frames 71,744, 71,511, 107,087, 125,281, 130,147, and 142,663 all showed zero-frame agreement across the three sources. These cover early, representative middle, Comparison 2 rejected windows 3–5, Comparison 1's reported warning position, a later point, and a point near the common end. Comparison 1's rejected fifth-window center at approximately frame 143,127 is beyond the two shortest sources' final frame 143,022 and was correctly recorded as visually unavailable rather than inferred.
 - **Audio interpretation:** sequential manual listening in VSView could not provide a reliable aligned comparison, so no manual listening conclusion is claimed. Temporary role-paired 16 kHz mono analysis found Comparison 1 sample-identical at the reported 5,225.282-second warning position. Its exact final 30-second core was also identical but approximately -80.37 dBFS overall and ended with 15 seconds of digital silence; the non-credible 473-frame row is therefore a low-information correlation artifact, not observed edit evidence. Comparison 2's rejected windows had different level/waveform characteristics yet a stable 94–99-sample relationship at 16 kHz (approximately 5.9–6.2 ms). That supports the `+0f` provisional hint but does not identify the mix/encode cause or independently satisfy automatic authority.
 - **Controlled requested-rate comparison:** both noninteractive cache-miss runs used 8 kHz discovery; requested 8 kHz required four total FFmpeg collections and completed alignment in 55.5828 seconds with 54.9490 seconds of collection, while requested 16 kHz added verification, required eight collections, and completed alignment in 105.6716 seconds with 104.9171 seconds of collection. Eight kHz reduced alignment time by 50.0889 seconds (47.40%, 1.901x) and preserved both `+0f` frame candidates, all raw/credible/voting/winning/independent counts, decision states, and warning reasons. This one case is not general benchmark proof and does not justify changing the default.
-- **Product finding and deferred remediation:** the authority behavior was appropriately conservative, but the stability presentation is not: a row that fails credibility can still manufacture `possible_discontinuity` through the looser stability eligibility path. The next separately planned remediation should first separate representation-specific information/eligibility from match confidence, retain low-information rows as diagnostics and unassessed coverage, and prevent them from voting on drift/discontinuity. Only after low-level reproduction should a bounded log-band spectral candidate fallback be evaluated for alternate mixes, followed by requested-rate waveform verification and its own calibrated authority contract. Do not lower the 0.90 waveform floor, replace rejected lags with zero, hide credible minority contradictions, or tune from this source set.
-- **Remaining stop gate:** R6 and R7 remain blocked. These runs do not supply an exact Windows portable-bundle identity, simultaneous parent-plus-active-FFmpeg RSS, native cancellation/process/handle-lifetime proof, visible marker rendering, an independently labeled real known signed-offset pair, or an independently labeled real mismatched mix/cut/track pair. Automatic authority remains held; no production, test, public/config, estimator, policy, or threshold change belongs to this evidence-only commit.
+- **Product finding and planned remediation:** the authority behavior was appropriately conservative, but the stability presentation is not: a row that fails credibility can still manufacture `possible_discontinuity` through the looser stability eligibility path. R6A now owns the bounded eligibility repair, retention of low-information rows as diagnostics/unassessed coverage, and the held v9 identity. R6B then owns low-level existing-method measurements and must stop for adjudication; a bounded log-band spectral candidate fallback is considered only if those measurements justify a separately planned provisional-only experiment. Do not lower the 0.90 waveform floor, replace rejected lags with zero, hide credible minority contradictions, or tune from this source set.
+- **Remaining stop gate:** R6, R6B, and R7 remain blocked; R6A is dependency-ready. These runs do not supply an exact Windows portable-bundle identity, simultaneous parent-plus-active-FFmpeg RSS, native cancellation/process/handle-lifetime proof, visible marker rendering, an independently labeled real known signed-offset pair, or an independently labeled real mismatched mix/cut/track pair. Automatic authority remains held; no production, test, public/config, estimator, policy, or threshold change belongs to this evidence-only commit.
 
 ## 14. Source record
 
