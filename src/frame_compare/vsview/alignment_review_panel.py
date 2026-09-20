@@ -920,11 +920,18 @@ def _audio_details(
             f"commentary-match={stream['commentary_match']}"
         )
     stability = attempt["stability"]
-    if (
-        isinstance(stability, dict)
-        and cast(dict[str, object], stability).get("classification") == "stable"
-    ):
-        lines.append("Offset variation: stable (diagnostic only)")
+    if isinstance(stability, dict):
+        stability_data = cast(dict[str, object], stability)
+        valid_windows = cast(int, stability_data["valid_windows"])
+        planned_windows = cast(int, attempt["planned_window_count"])
+        scope = f"{valid_windows}/{planned_windows} qualified observed windows"
+        if valid_windows < planned_windows:
+            scope += "; rejected or unobserved planned intervals remain unassessed"
+        lines.append(
+            "Offset variation: "
+            f"{cast(str, stability_data['classification'])} "
+            f"(diagnostic only; scoped to {scope})"
+        )
     for window in cast(list[dict[str, object]], attempt["windows"]):
         lines.append(
             f"{window['logical_id']}: ref={window['planned_reference_start']}+{window['planned_reference_count']}, "

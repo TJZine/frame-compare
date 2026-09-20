@@ -390,9 +390,12 @@ unchanged.
   ranges, offsets, selected aligned frames, and alignment warning context
   for comparisons with material alignment information. Material non-constant offset
   evidence adds one concise stability row and one bounded warning stating that the
-  applied constant offset was retained and should be verified. Stable or insufficient
-  evidence does not warn. Verbose mode may also show stable evidence and valid-window
-  counts; individual diagnostic windows are never printed.
+  applied constant offset was retained and should be verified. Stability is scoped to
+  extraction-integrity, fixed-credibility, coverage-qualified observed windows; rejected
+  or unobserved planned intervals remain unassessed. Any displayed change position is
+  approximate and between observations, not an observed edit location. Stable or
+  insufficient evidence does not warn. Verbose mode may also show stable evidence and
+  valid-window counts; individual diagnostic windows are never printed.
   It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
 - After sources load, normal human output uses one `[OK] Sources — N loaded`
@@ -1426,7 +1429,7 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `continuous-origin-qualified-2097152-v8-held` policy, computed cache hits and embedded computed
+  `continuous-origin-qualified-stability-2097152-v9-held` policy, computed cache hits and embedded computed
   fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
   only whether prior human-confirmed offsets are reused. `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
@@ -1571,7 +1574,7 @@ negative rather than unbounded scanning.
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
 qualified-policy evidence, and an explicit audio decision: `provisional` or `unavailable`
-under the shipped `continuous-origin-qualified-2097152-v8-held` automatic-authority hold.
+under the shipped `continuous-origin-qualified-stability-2097152-v9-held` automatic-authority hold.
 An otherwise-qualified computed attempt records
 `automatic_authority_held`; `trusted_automatic` is not produced while that internal
 hold is active. A provisional candidate uses fixed display-only floors (score at

@@ -133,9 +133,11 @@ async def run_align_phase(
                 "variable",
             }:
                 detail = {
-                    "possible_drift": "may drift across the source",
-                    "possible_discontinuity": "varies across the source; possible edit discontinuity",
-                    "variable": "varies across the source",
+                    "possible_drift": "may drift across qualified observed windows",
+                    "possible_discontinuity": (
+                        "varies across qualified observed windows; possible edit discontinuity"
+                    ),
+                    "variable": "varies across qualified observed windows",
                 }[result.stability.classification]
                 position = result.stability.change_position_seconds
                 if (
@@ -144,7 +146,8 @@ async def run_align_phase(
                 ):
                     seconds = round(position)
                     detail += (
-                        f" near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+                        " approximately between observations around "
+                        f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
                     )
                 warnings.append(
                     f"align: {comparison.label} alignment {detail}. "

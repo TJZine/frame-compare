@@ -906,6 +906,9 @@ def _normal_evidence_lines(
             f"winning={decision.winning_windows}, independent={decision.independent_windows}. "
             f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
         ]
+    stability_scope = _stability_scope_line(attempt)
+    if stability_scope is not None:
+        lines.append(stability_scope)
     lines.append(_format_stream_summary(attempt))
     _reference, comparison = attempt.selected_streams
     mismatches: list[str] = []
@@ -924,6 +927,19 @@ def _trim_explanation(offset: int) -> str:
     if offset > 0:
         return f"Trim {offset}f from the reference"
     return f"Trim {abs(offset)}f from the comparison"
+
+
+def _stability_scope_line(attempt: AudioAlignmentAttempt) -> str | None:
+    stability = attempt.stability
+    if stability is None:
+        return None
+    scope = f"{stability.valid_windows}/{attempt.planned_window_count} qualified observed windows"
+    if stability.valid_windows < attempt.planned_window_count:
+        scope += "; rejected or unobserved planned intervals remain unassessed"
+    return (
+        f"Stability: {stability.classification.replace('_', ' ')}; "
+        f"scoped to {scope} (diagnostic only)."
+    )
 
 
 def _alignment_evidence_row(line: str) -> tuple[str, str, str]:

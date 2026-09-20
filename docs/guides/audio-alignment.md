@@ -73,7 +73,10 @@ ignored with a warning rather than treated as authoritative evidence.
 
 Computed alignment may also classify bounded evidence across the source as stable,
 possible drift, possible discontinuity, variable, or insufficient. This summary is
-diagnostic only: computed evidence remains separate from trim authority while the
+diagnostic only and is scoped to extraction-integrity, fixed-credibility,
+coverage-qualified observed windows; rejected or unobserved planned intervals remain
+unassessed. Any reported change position is an approximate interval between observations,
+not an observed edit location. Computed evidence remains separate from trim authority while the
 automatic hold is active; explicit or human-confirmed offsets remain authoritative.
 Consensus groups windows only when their requested-rate sample estimates produce the
 same integer source-frame correction at the reference FPS. It does not merge adjacent
@@ -91,7 +94,7 @@ remains a v1 file with the same path and offset semantics.
 
 Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
 a unique display-qualified candidate survived an attempt; under the internal
-`continuous-origin-qualified-2097152-v8-held` policy it is shown as a clearly
+`continuous-origin-qualified-stability-2097152-v9-held` policy it is shown as a clearly
 unaccepted review hint and is never applied or passed as the authoritative integer/null
 field. Its decision
 records `automatic_authority_held` when the qualified policy would otherwise pass. `unavailable`

@@ -150,6 +150,7 @@ def _observed_estimate(
     plan: AudioAnalysisPlan,
     config: AlignmentConfig,
     actual_counts: tuple[int, ...] | None = None,
+    comparison_counts: tuple[int, ...] | None = None,
     estimate_fn: Any | None = None,
     horizon: int | None = None,
     summaries_override: tuple[AudioAlignmentCollectionRecord, ...] | None = None,
@@ -162,14 +163,19 @@ def _observed_estimate(
         estimate_fn or (lambda *_args, **_kwargs: next(remaining)),
     )
     counts = actual_counts or tuple(spec.reference_sample_count for spec in plan.windows)
+    comparison_sizes = comparison_counts or tuple(
+        spec.comparison_sample_count for spec in plan.windows
+    )
     windows = tuple(
         AudioWindow(
             np.ones(count),
-            np.ones(count),
+            np.ones(comparison_count),
             spec.reference_start_sample,
             spec.comparison_start_sample,
         )
-        for spec, count in zip(plan.windows, counts, strict=True)
+        for spec, count, comparison_count in zip(
+            plan.windows, counts, comparison_sizes, strict=True
+        )
     )
     observed_horizon = horizon or max(
         spec.comparison_start_sample + spec.comparison_sample_count for spec in plan.windows
@@ -198,10 +204,13 @@ def _observed_plan(
     starts: tuple[int, ...],
     *,
     count: int = 3000,
+    comparison_count: int | None = None,
     rate: int = 100,
     durations: tuple[int, int] = (0, 0),
 ) -> AudioAnalysisPlan:
-    specs = tuple(AudioWindowSpec(start, count, start, count) for start in starts)
+    specs = tuple(
+        AudioWindowSpec(start, count, start, comparison_count or count) for start in starts
+    )
     return AudioAnalysisPlan(
         rate,
         rate,
@@ -300,6 +309,121 @@ def test_observed_policy_accepts_four_strong_windows_with_independent_support(
     assert result.independent_windows == 3
     assert result.decision is not None
     assert result.decision.state == "trusted_automatic"
+    assert result.stability is not None
+    assert result.stability.classification == "stable"
+    assert result.stability.valid_windows == 4
+
+
+def test_stability_ignores_rejected_low_information_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _observed_plan(
+        (0, 500_000, 1_000_000, 1_500_000, 2_000_000),
+        count=400_000,
+        comparison_count=800_000,
+        rate=16_000,
+    )
+    result = _observed_estimate(
+        monkeypatch,
+        [
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(315_723, 0.01336, 1.00869),
+        ],
+        plan=plan,
+        config=AlignmentConfig(
+            sample_rate=16_000,
+            max_offset_seconds=30.0,
+            confidence_threshold=0.0,
+            ambiguity_peak_ratio=1.0,
+        ),
+        actual_counts=(400_000,) * 5,
+        comparison_counts=(800_000,) * 5,
+        fps=Fraction(24_000, 1_001),
+    )
+
+    assert result.applied
+    assert result.sample_offset == 0
+    assert result.stability is not None
+    assert result.stability.classification == "stable"
+    assert result.stability.valid_windows == 4
+    assert result.diagnostic == "accepted"
+    assert result.consensus_windows == 4
+    assert result.decision is not None
+    assert result.decision.state == "trusted_automatic"
+    assert result.decision.candidate is not None
+    assert result.decision.candidate.sample_offset == 0
+    assert result.decision.candidate.supporting_window_ids == (
+        "primary-01",
+        "primary-02",
+        "primary-03",
+        "primary-04",
+    )
+    tail = result.window_records[-1]
+    assert tail.requested_sample_lag == 315_723
+    assert tail.requested_frame_candidate == 473
+    assert tail.requested_score == pytest.approx(0.01336)
+    assert tail.peak_ratio == pytest.approx(1.00869)
+    assert tail.quality_disposition == "rejected"
+    assert tail.actual_coverage is not None
+    assert tail.actual_coverage == pytest.approx(1.0)
+    assert "stability_unassessed_coverage" in result.decision.unassessed_gates
+
+
+@pytest.mark.parametrize(
+    ("offsets", "classification"),
+    [
+        ((0, 100, 200, 300), "possible_drift"),
+        ((0, 0, 400, 400), "possible_discontinuity"),
+    ],
+)
+def test_stability_classifies_qualified_observed_windows(
+    monkeypatch: pytest.MonkeyPatch,
+    offsets: tuple[int, ...],
+    classification: str,
+) -> None:
+    plan = _observed_plan((0, 3000, 6000, 9000), count=1000)
+    result = _observed_estimate(
+        monkeypatch,
+        [CorrelationEstimate(offset, 0.99, 2.0) for offset in offsets],
+        plan=plan,
+        config=AlignmentConfig(sample_rate=100),
+    )
+
+    assert result.stability is not None
+    assert result.stability.classification == classification
+    assert result.stability.valid_windows == 4
+
+
+def test_stability_keeps_base_credible_contradiction_with_stricter_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _observed_plan((0, 3000, 6000, 9000))
+    result = _observed_estimate(
+        monkeypatch,
+        [
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(0, 0.99, 2.0),
+            CorrelationEstimate(400, 0.99, 2.0),
+            CorrelationEstimate(400, 0.99, 2.0),
+        ],
+        plan=plan,
+        config=AlignmentConfig(
+            sample_rate=100,
+            confidence_threshold=0.999,
+            ambiguity_peak_ratio=3.0,
+        ),
+    )
+
+    assert result.stability is not None
+    assert result.stability.classification == "possible_discontinuity"
+    assert result.stability.valid_windows == 4
+    assert result.decision is not None
+    assert result.decision.credible_windows == 4
+    assert result.decision.voting_windows == 0
+    assert "credible_contradiction" in result.decision.failed_gates
 
 
 def test_observed_policy_trusted_candidate_uses_only_winning_voters(
@@ -413,6 +537,9 @@ def test_observed_policy_keeps_one_survivor_and_four_failures_untrusted(
         "insufficient_signal",
         "insufficient_signal",
     ]
+    assert result.stability is not None
+    assert result.stability.classification == "insufficient_evidence"
+    assert result.stability.valid_windows == 1
 
 
 def test_observed_policy_rejects_coverage_just_below_ninety_percent(
@@ -434,6 +561,9 @@ def test_observed_policy_rejects_coverage_just_below_ninety_percent(
     assert result.decision.voting_windows == 0
     assert result.window_records[0].actual_coverage == pytest.approx(0.899)
     assert result.window_records[0].vote_disposition == "abstained"
+    assert result.stability is not None
+    assert result.stability.classification == "insufficient_evidence"
+    assert result.stability.valid_windows == 0
 
 
 def test_observed_policy_accepts_coverage_at_ninety_percent(
@@ -453,6 +583,8 @@ def test_observed_policy_accepts_coverage_at_ninety_percent(
     assert result.independent_windows >= 1
     assert result.window_records[0].actual_coverage == pytest.approx(0.9)
     assert result.window_records[0].vote_disposition == "voted"
+    assert result.stability is not None
+    assert result.stability.valid_windows == 1
 
 
 def test_actual_overlap_confidence_rejection_does_not_expose_an_offset() -> None:
@@ -566,6 +698,9 @@ def test_observed_policy_requires_collection_integrity_before_candidate_review(
     assert "extraction_integrity" in result.decision.failed_gates
     assert result.credible_windows == 0
     assert result.voting_windows == 0
+    assert result.stability is not None
+    assert result.stability.classification == "insufficient_evidence"
+    assert result.stability.valid_windows == 0
 
 
 def test_discovery_failure_without_collection_evidence_is_unavailable(
@@ -1089,7 +1224,6 @@ def test_observed_policy_rejects_invalid_score_stage_provenance(
     rejected = alignment_consensus._finish_consensus(
         [CorrelationEstimate(0, 0.99, 2.0)],
         [record.logical_id],
-        [],
         [record],
         config=AlignmentConfig(sample_rate=100),
         fps=Fraction(24),
@@ -1134,7 +1268,6 @@ def test_requested_rate_records_require_discovery_and_verification_integrity(
     discovery_only = alignment_consensus._finish_consensus(
         candidate,
         candidate_ids,
-        [],
         [record],
         config=AlignmentConfig(sample_rate=100),
         fps=Fraction(24),
@@ -1156,7 +1289,6 @@ def test_requested_rate_records_require_discovery_and_verification_integrity(
     with_verification = alignment_consensus._finish_consensus(
         candidate,
         candidate_ids,
-        [],
         [record],
         config=AlignmentConfig(sample_rate=100),
         fps=Fraction(24),

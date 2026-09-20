@@ -115,9 +115,13 @@ def _format_stability(summary: AlignmentStabilitySummary) -> str:
     text = summary.classification.replace("_", " ")
     if summary.offset_min_frames is not None and summary.offset_max_frames is not None:
         text += f"; {summary.offset_min_frames:+d}..{summary.offset_max_frames:+d} frames"
+    text += f"; scoped to {summary.valid_windows} qualified observed windows"
     if summary.change_position_seconds is not None:
         seconds = round(summary.change_position_seconds)
-        text += f"; change near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+        text += (
+            "; approximate interval between observations around "
+            f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+        )
     return text
 
 

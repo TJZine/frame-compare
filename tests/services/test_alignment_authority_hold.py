@@ -365,6 +365,35 @@ def test_quiet_mode_explains_held_automatic_authority(
     assert "no computed correction was applied" in captured.err
 
 
+def test_quiet_mode_discloses_unassessed_stability_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = AlignmentConfig(cache_results=False)
+    request = _request(tmp_path, config)
+    stability = AlignmentStabilitySummary("stable", 4, 0, 0, 0, 0, 0, None)
+    consensus = _held_candidate_consensus()
+    attempt = replace(consensus.audio_attempt, stability=stability)
+    consensus = replace(consensus, stability=stability, audio_attempt=attempt)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: consensus,
+    )
+
+    align_clips_from_request(
+        request,
+        config,
+        reference_fps=Fraction(24),
+        quiet=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "4/5 qualified observed windows" in captured.err
+    assert "rejected or unobserved planned intervals remain unassessed" in captured.err
+    assert "diagnostic only" in captured.err
+
+
 def test_current_identity_shared_computed_hit_cannot_bypass_hold(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

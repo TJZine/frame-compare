@@ -43,6 +43,7 @@ from frame_compare.services.types import (
 
 _REVIEW_SCORE_FLOOR = 0.90
 _REVIEW_PEAK_RATIO_FLOOR = 1.50
+_STABILITY_COVERAGE_FLOOR = 0.90
 AUTOMATIC_AUTHORITY_HOLD_REASON = "automatic_authority_held"
 _AUTOMATIC_AUTHORITY_HELD = True
 
@@ -417,28 +418,6 @@ class _StagedWindow:
     global_analysis_offset: Fraction
 
 
-def _valid_evidence(
-    estimate: CorrelationEstimate | None,
-    *,
-    start: int,
-    end: int,
-    config: AlignmentConfig,
-) -> AlignmentWindowEvidence | None:
-    if (
-        estimate is None
-        or estimate.score < config.confidence_threshold
-        or estimate.peak_ratio < config.ambiguity_peak_ratio
-    ):
-        return None
-    return AlignmentWindowEvidence(
-        start_sample=start,
-        end_sample=end,
-        sample_offset=estimate.sample_offset,
-        score=estimate.score,
-        peak_ratio=estimate.peak_ratio,
-    )
-
-
 def _reject(
     diagnostic: str,
     *,
@@ -512,7 +491,6 @@ def analysis_budget_exceeded(*, config: AlignmentConfig, fps: Fraction) -> Align
 def _finish_consensus(
     candidates: list[CorrelationEstimate],
     candidate_ids: list[str],
-    evidence: list[AlignmentWindowEvidence],
     window_records: list[AudioAlignmentWindowRecord],
     *,
     config: AlignmentConfig,
@@ -523,12 +501,6 @@ def _finish_consensus(
     source_duration_samples: tuple[int, int] = (0, 0),
     source_sample_rate: int | None = None,
 ) -> AlignmentConsensus:
-    window_evidence = tuple(sorted(evidence, key=lambda item: item.start_sample))
-    stability = classify_alignment_stability(
-        window_evidence,
-        sample_rate=config.sample_rate,
-        fps=fps,
-    )
     requires_verification = any(record.score_stage == "requested_rate" for record in window_records)
     gate_i = _collection_integrity(
         collection_summaries,
@@ -555,7 +527,7 @@ def _finish_consensus(
             voting = (
                 credible
                 and record.actual_coverage is not None
-                and record.actual_coverage >= 0.90
+                and record.actual_coverage >= _STABILITY_COVERAGE_FLOOR
                 and estimate.score >= configured_score_floor
                 and _peak_passes(estimate.peak_ratio, configured_peak_floor)
             )
@@ -576,6 +548,35 @@ def _finish_consensus(
         else:
             updated_records.append(record)
     window_records = updated_records
+
+    stability_evidence: list[AlignmentWindowEvidence] = []
+    for record in window_records:
+        if (
+            record.logical_id not in credible_ids
+            or record.actual_coverage is None
+            or record.actual_coverage < _STABILITY_COVERAGE_FLOOR
+        ):
+            continue
+        estimate = estimates[record.logical_id]
+        start = record.actual_useful_reference_start
+        end = record.actual_useful_reference_end
+        if start is None or end is None:
+            continue
+        stability_evidence.append(
+            AlignmentWindowEvidence(
+                start_sample=start,
+                end_sample=end,
+                sample_offset=estimate.sample_offset,
+                score=estimate.score,
+                peak_ratio=estimate.peak_ratio,
+            )
+        )
+    window_evidence = tuple(sorted(stability_evidence, key=lambda item: item.start_sample))
+    stability = classify_alignment_stability(
+        window_evidence,
+        sample_rate=config.sample_rate,
+        fps=fps,
+    )
 
     def group_by_frame(ids: set[str]) -> dict[int, list[tuple[CorrelationEstimate, str]]]:
         groups: dict[int, list[tuple[CorrelationEstimate, str]]] = {}
@@ -747,6 +748,11 @@ def _finish_consensus(
         fps,
         qualified_winning_ids=winning_ids,
     )
+    if len(window_evidence) < len(window_records):
+        decision = replace(
+            decision,
+            unassessed_gates=(*decision.unassessed_gates, "stability_unassessed_coverage"),
+        )
     decision = replace(
         decision,
         failed_gates=tuple(dict.fromkeys((*failed, *decision.failed_gates))),
@@ -844,7 +850,6 @@ def estimate_staged_consensus_offset(
             for index, spec in enumerate(plan.windows)
         )
         result = _finish_consensus(
-            [],
             [],
             [],
             list(window_records),
@@ -962,7 +967,6 @@ def estimate_staged_consensus_offset(
 
     candidates: list[CorrelationEstimate] = []
     candidate_ids: list[str] = []
-    evidence: list[AlignmentWindowEvidence] = []
     boundary_guard_ids: set[str] = set()
     search_edge_ids: set[str] = set()
     for item in staged:
@@ -1119,14 +1123,6 @@ def estimate_staged_consensus_offset(
             estimate = CorrelationEstimate(requested_offset, score, item.local_estimate.peak_ratio)
             candidates.append(estimate)
             candidate_ids.append(item.logical_id)
-            valid = _valid_evidence(
-                estimate,
-                start=planned_reference_start,
-                end=planned_reference_start + planned_reference_count,
-                config=config,
-            )
-            if valid is not None:
-                evidence.append(valid)
         records[item.index] = AudioAlignmentWindowRecord(
             logical_id=item.logical_id,
             purpose="primary",
@@ -1174,7 +1170,6 @@ def estimate_staged_consensus_offset(
     result = _finish_consensus(
         candidates,
         candidate_ids,
-        evidence,
         [records[index] for index in range(len(plan.windows))],
         config=config,
         fps=fps,

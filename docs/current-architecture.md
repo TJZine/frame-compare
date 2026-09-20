@@ -433,7 +433,7 @@ dependency or decode failures remain warning-only for optional alignment. The at
 retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
 and a separate display-only provisional candidate. The shipped
-`continuous-origin-qualified-2097152-v8-held` policy keeps computed authority held: an otherwise
+`continuous-origin-qualified-stability-2097152-v9-held` policy keeps computed authority held: an otherwise
 qualified computed result records `automatic_authority_held`, has null applied
 offsets, and cannot reach trims or shared-cache writes. Manual confirmation replaces
 authority without replacing that original attempt. Immutable `ClipState` carries the
@@ -480,6 +480,8 @@ requested-rate score floor, meaningful finite signal/overlap, and peak floor; vo
 requires 90% useful observed coverage and the configured thresholds. Any base-credible
 estimate in another applied frame bin is a hard veto, even when stricter configuration
 excludes it from voting. The default ratio is unanimity among voting-qualified windows.
+Stability is classified only from extraction-integrity, fixed-credibility, and coverage-qualified
+observed windows; rejected or unobserved planned intervals remain diagnostic and unassessed.
 The duration-tier temporal-support requirement applies to actual useful intervals even
 when explicit window length or stride changes the planned shape; custom planning does not
 waive short full-source or medium/long endpoint support.
@@ -489,7 +491,7 @@ outside the fixed internal work budget produce a typed non-applied
 `analysis_budget_exceeded` consensus rather than widening config validation, truncating
 the requested search silently, or attempting unbounded work. The estimator-policy token
 includes this strategy so older computed cache entries are not reused. The current
-`continuous-origin-qualified-2097152-v8-held` safety policy also prevents computed
+`continuous-origin-qualified-stability-2097152-v9-held` safety policy also prevents computed
 results from authorizing trims or new cache writes.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.

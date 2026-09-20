@@ -190,7 +190,7 @@ def test_run_align_phase_warns_without_changing_material_variable_alignment(
     assert output.comparisons[0].alignment.relative_offset_frames == 2
     assert output.comparisons[0].alignment.stability == summary
     assert output.warnings == [
-        "align: Encode 1 alignment varies across the source. "
+        "align: Encode 1 alignment varies across qualified observed windows. "
         "The applied constant offset was retained and should be verified."
     ]
 

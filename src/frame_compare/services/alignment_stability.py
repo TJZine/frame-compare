@@ -18,7 +18,7 @@ def classify_alignment_stability(
     sample_rate: int,
     fps: Fraction,
 ) -> AlignmentStabilitySummary:
-    """Classify ordered valid windows without influencing alignment selection."""
+    """Classify ordered qualified observed windows for diagnostics only."""
     ordered = tuple(sorted(evidence, key=lambda item: (item.start_sample, item.end_sample)))
     offsets = [samples_to_frames(item.sample_offset, sample_rate, fps) for item in ordered]
     if len(offsets) < 3:
