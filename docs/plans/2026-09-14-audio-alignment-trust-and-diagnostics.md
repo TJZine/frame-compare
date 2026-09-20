@@ -17,7 +17,7 @@ Owner: Main GPT-5.6 Sol orchestration task; sequential Codex new tasks with cont
 **Post-R6 remediation amendment:** September 20, 2026
 **Inspected pushed head:** `0df9c369a9abf19de3cce87de95ccd50ef7ecf1a`
 **Original investigation baseline:** `326da610a1f6d9baee7ea58d509f05f59af0f004`
-**Replacement packages:** R0–R7, plus post-evidence R6A/R6B/R6C before R7 activation.
+**Replacement packages:** R0–R7, plus post-evidence R6A–R6E before R7 activation.
 
 This document replaces the previous contents at this path. It is the only active plan for this workstream. Completed historical work remains recorded below and in its immutable commits and scalar evidence. Historical instructions prohibiting continuous production decoding or directing another P5 seek experiment are superseded, not outstanding tasks.
 
@@ -452,7 +452,8 @@ R0: audio-authority-hold-2097152-v6
 R3: continuous-origin-distributed-2097152-v7-held
 R5: continuous-origin-qualified-2097152-v8-held
 R6A: continuous-origin-qualified-stability-2097152-v9-held
-R7: continuous-origin-qualified-stability-2097152-v10
+R6D: continuous-origin-qualified-channel-corroboration-2097152-v10-held
+R7: continuous-origin-qualified-channel-corroboration-2097152-v11
 ```
 
 Every later extraction/scoring/trust change or behavioral rollback gets a fresh identity. Never restore an old token to resurrect withdrawn cached authority.
@@ -485,7 +486,7 @@ Update current architecture/CLI/guide text in each behavior-changing package. Re
 
 ### Common dispatch, proof, and commit rules
 
-Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R6A -> R6B -> adjudication -> R6C -> adjudication -> R7**. R6A repairs the confirmed diagnostic defect. R6B measures the unresolved confidence question. R6C calibrates the one bounded existing-method hypothesis that survived R6B; neither evidence package implies that a fallback will be implemented. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
+Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R6A -> R6B -> adjudication -> R6C -> adjudication -> R6D -> R6E -> R7**. R6A repairs the confirmed diagnostic defect. R6B measures the unresolved confidence question. R6C calibrates the one bounded existing-method hypothesis that survived R6B. R6D may implement only the adjudicated held/provisional behavior, and R6E owns its exact Windows/private-media acceptance. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
 
 Each unit has an effort boundary of one objective, its directly affected callers/tests/docs, and repairs caused by that change. It does not include unrelated cleanup or another architecture experiment. A consequential scope/contract change returns to the controller before dependent work proceeds. Read-only investigation inside the unit and routine implementation judgment do not require a separate planning task.
 
@@ -822,15 +823,141 @@ does not authorize that package, a log-band path, a default-rate change, or R7 a
 
 **Controller commit:** `test(alignment): calibrate channel corroboration evidence`
 
+### R6D — Add held, provisional corresponding-channel corroboration
+
+**Dispatch:** Sol medium. This slice crosses stream-layout selection, bounded continuous
+collection, per-window scoring, consensus diagnostics, schema projection, cancellation,
+and resource proof; the R6C rule is settled, but integrating it without authority drift
+requires material cross-boundary judgment.
+**Dependencies:** R6C integrated, controller-reproduced on native macOS and canonical
+Docker/Linux, and adjudicated with zero declared negative corroborations or capped/full
+safety-disposition differences.
+
+**Write boundary / likely files:** `services/alignment_audio.py`,
+`services/alignment_streaming.py` only if its existing scalar/mono ownership must be
+minimally generalized, `services/alignment_consensus.py`, `services/types.py`, existing
+diagnostic/presentation/native-projection owners, focused service/integration/orchestration/
+VSView tests, and current architecture/CLI/audio-guide text. No new dependency, CLI/config
+field, cache/result/manual schema, public tuning control, spectral representation, or
+automatic-authority path. If retained per-view facts require a shape change, coordinate
+diagnostic schema v3 and native metadata v4 while retaining native result v1, shared cache
+v2, manual override v1, the 128 KiB per-comparison cap, and regeneration rather than a
+compatibility reader.
+
+**Work:** Keep the normal mono path first and unchanged. Run corroboration only for the
+default `mono_downmix` strategy when the prospective mono policy lacks required independent
+support and at least one extraction/coverage-valid primary row missed the fixed waveform
+floor. Do not run it for `best_channel`, a prospectively trusted mono result, extraction or
+coverage failure without a scored row, or streams without at least two exactly named common
+views from fixed order `FL`, `FR`, `FC`. Infer no channel labels or layout equivalence.
+
+For eligible rows, collect only the needed planned intervals at the requested rate through
+the existing continuous origin/EOF/process owner. Process at most three named views, one
+reference/comparison view pair at a time; retain scalar evidence and release each view's PCM
+before the next. Permit at most six additional sequential collections per comparison, one
+active child, no cross-comparison PCM cache, no whole-track PCM file, and no independent
+seek fallback. Reuse current cancellation, deadline, admission, source-identity, and cleanup
+failure semantics.
+
+Apply the exact R6C rule: at least two activity/coverage-valid views with the unchanged
+peak floor, raw-FFT top lags in the existing correction neighborhood and one frame bin,
+and at least one unchanged-waveform-floor view; any base-credible named view in another
+frame bin vetoes. A channel view never becomes a temporal vote. Each corroborated window
+is one observation, and existing non-overlapping duration-tier support is still required.
+Use `median_low` of actually observed agreeing view lags for a deterministic window/sample
+representative. Preserve all mono and per-view lag/score/peak/coverage/rejection facts. For
+the provisional candidate summary, use the median of each window's minimum base-credible
+agreeing-view score and the minimum peak across all required agreeing views; label those
+aggregates as channel-view evidence, not a synthetic waveform score.
+
+Channel-corroborated evidence may create or improve only a `provisional` manual-review hint
+under the fresh held-v10 identity. It cannot set `review_qualified`, join mono authority
+voters, satisfy a mono trust gate, override a base-credible mono or channel contradiction,
+write computed cache authority, or reach trims. This permanent provisional-only distinction
+must survive later R7 latch activation unless a new separately calibrated package changes it.
+
+**Acceptance/tests:** Run the R6C signed-positive and negative families through the actual
+production service/orchestration path. Positives yield the correct signed provisional frame
+hint with three independent temporal observations and no application; every negative stays
+unavailable/provisional-only as appropriate, with conflicting regimes retained and zero
+false corroborated rows. Cover an already sufficient mono result with no extra collection,
+mono failure caused only by extraction/coverage, `best_channel`, mono/stereo or unknown/
+incompatible layouts, fewer than two common named views, view collection/EOF/identity/
+cleanup failure, cancellation between every added phase, one/two corroborated windows,
+boundary/search-edge cases, stricter and permissive user thresholds, old held cache misses,
+manual authority, maximum diagnostic/native shape under 128 KiB, and exact decode/lifetime
+counts. Existing mono candidates, rows, scores, stability, contradictions, and authority
+results are byte/field-equivalent when the fallback is ineligible or does not corroborate.
+
+**Verification:** G1–G5 plus focused native and canonical Docker production-path/resource
+tests. Demonstrate one active child, bounded retained PCM/RSS, cleanup before cancellation
+returns, no output after cancellation/failure, and unchanged behavior when ineligible.
+R6E owns physical-Windows portable/runtime/private-media acceptance against the exact
+committed R6D candidate; R6D is not release acceptance by itself.
+
+**Rollback:** Restore the authority hold under another fresh identity and remove the
+channel-only production path plus coordinated diagnostic/native fields together. Preserve
+R6B/R6C scalar evidence and the normal mono implementation; never restore an old identity.
+
+**Stop/replan:** Any need to lower a floor, guess channel mappings, search view subsets,
+count views as temporal support, change config/default rate, add a dependency/representation,
+exceed existing collection/deadline/RSS/diagnostic bounds, weaken cancellation or source
+identity, or allow channel evidence into automatic authority returns to the controller.
+
+**Controller commit:** `feat(alignment): add held channel corroboration`
+
+### R6E — Complete exact Windows and private-media acceptance for R6D
+
+**Dispatch:** Sol medium on the physical Windows host. The work is bounded evidence, but it
+requires portable-build identity, parent/child resource and handle interpretation, visible
+native review, controlled real-media labels, and private-case adjudication.
+**Dependencies:** Controller-reviewed R6D commit with all native macOS/Docker gates passing;
+an exact clean candidate available to the Windows host; private media kept outside Git.
+
+**Write boundary / likely files:** Isolated untracked Windows artifacts and the canonical
+share-safe scalar record `tests/fixtures/alignment_oracle/streaming-production-results.json`;
+the controller updates this ledger separately. No production, config, dependency, schema,
+identity, threshold, cache, native behavior, or plan edit.
+
+**Work/acceptance:** Build or verify the exact portable candidate and record its source and
+artifact identities. Run the production three-file case from a clean isolated config/cache;
+confirm the expected bounded channel collections, retained mono/per-view facts, `+0f`
+provisional hint, v10 hold, no computed application/cache authority, and truthful qualified/
+unassessed presentation. Measure simultaneous parent-plus-active-FFmpeg RSS, child/reader/
+handle lifetime, cancellation, total/fallback phase time, and cleanup. Capture visible
+candidate markers and close-without-save behavior in VSView.
+
+Create untracked controlled derivatives from real retained media for an independently known
+positive and negative signed frame offset and for a mismatched mix/cut/track case. Record
+only hashes, construction class, labels, bounded scalar outcomes, and commands with private
+paths/names removed. Both signs and zero must be correct and provisional-only; mismatch,
+quiet/low-information, incompatible/permuted, or conflicting evidence must not produce a
+false corroborated hint or any authority. The original private set remains a case study,
+not the label source for these controls.
+
+**Verification:** Validate all hashes/JSON, run the focused production/oracle/resource tests
+from the exact portable source, inspect process exit/handle facts, run `git diff --check`,
+and have the controller audit each retained scalar against raw private output. Stop before
+R7; no full unrelated Python/Docker rerun is required for evidence-only changes.
+
+**Rollback:** Discard private artifacts or revert only the evidence addition. R6D remains
+held and cannot authorize trims.
+
+**Stop/replan:** Any wrong sign/frame, false negative corroboration, cap/full safety change,
+unbounded resource/lifetime result, stale/nonexact package, missing visible marker, or
+production behavior inconsistent with the R6D commit blocks R7 and returns to R6D repair.
+
+**Controller commit:** `test(alignment): verify channel corroboration on Windows`
+
 ### R7 — Activate only the verified integrated estimator
 
-**Dispatch:** Luna xhigh for the bounded latch/identity/documentation change after the controller verifies R6/R6A acceptance and adjudicates R6B/R6C.
-**Dependencies:** R0–R6A accepted; R6B and R6C adjudicated; consequential review findings resolved;
+**Dispatch:** Luna xhigh for the bounded latch/identity/documentation change after the controller verifies R6/R6A/R6D/R6E acceptance and adjudicates R6B/R6C.
+**Dependencies:** R0–R6E accepted; consequential review findings resolved;
 no missing required runtime/real-media/resource/physical-Windows gate.
 
 **Write boundary / likely files:** The service-owned authority latch, estimator identity, explicit activation/cache/trim tests, release/CLI/guide/architecture text, and this ledger. No extraction, thresholds, planner, or scoring changes.
 
-**Work:** Disable the hold, install the R7 v10 fresh identity, and document the exact delivered support and residual sampling/A/V assumptions. Remove temporary hold-specific user copy from the active path, but keep regression proof and the conservative rollback route.
+**Work:** Disable the hold only for the qualified mono estimator, install the R7 v11 fresh identity, and document the exact delivered support and residual sampling/A/V assumptions. Channel-corroborated candidates remain permanently provisional-only. Remove temporary global-hold copy from the active mono path while keeping channel-specific provisional copy, regression proof, and the conservative rollback route.
 
 **Acceptance/tests:** Run unpatched production-default positive and negative service/CLI tests. Verify actual trusted zero/nonzero, provisional/unavailable outcomes, trim inputs, manual preservation, old held-policy cache misses, and current accepted-cache reuse. Rebuild the candidate package from committed source and obtain matching-SHA runtime/visible-native smoke for the changed authority presentation. Do not publish while candidate proof is pending.
 
@@ -1003,8 +1130,10 @@ After activation, publish the actual qualified policy, cache invalidation, sessi
 | R6 production acceptance | Partial evidence complete; blocked | `897d40da`, Windows evidence through `bc49e9bd` | Native macOS and canonical Docker resource/RSS/cancellation gates passed. Physical Windows unmanaged execution, visible VSView review, close-without-save, full-program zero-frame observations, and controlled 8/16 kHz measurements are consolidated in the canonical evidence record. Portable Windows RSS/lifetime, visible marker capture, and independently labeled signed-offset/mismatch cells remain blocking. |
 | R6A stability eligibility | Complete; exact Windows wording/runtime follow-up remains in R6 | `e9e185d0` | Fixed-base-credible, integrity-valid, coverage-qualified observed windows now exclusively own stability; rejected intervals remain visible and unassessed under held v9. Full Python/static/docs proof passed. |
 | R6B confidence ablation | Complete; adjudicated | `1a6b974b`, corrected by `ceb05d0f` | The fixed 12-method Windows ablation identifies waveform confidence after successful raw-FFT recall as the alternate-mix failure stage. Fixed bands, PHAT, and a log-band experiment are not justified. Corresponding named channels are the only surviving bounded hypothesis, but the case is not calibration and the full-overlap run did not rerun refinement selection. |
-| R6C channel corroboration calibration | Dependency-ready | — | Predeclare one fixed corresponding-channel rule and test lineage-separated signed positives and adversarial negatives with complete capped/full refinement and resource evidence. Stop before production behavior. |
-| R7 activation | Blocked by incomplete R6/R6C acceptance | — | Exact portable candidate/RSS/lifetime proof, the remaining visible marker cell, independently labeled real signed-offset and mismatch cells, unpatched defaults, and completed channel-corroboration adjudication are required. |
+| R6C channel corroboration calibration | Complete; adjudicated | `a3eb1569` | Three lineage-separated signed positives and six negative families passed one predeclared FL/FR/FC rule on native macOS and canonical Docker/Linux. Complete capped/full refinement changed seven sample winners but no frame, threshold-side, candidate, contradiction, or safety disposition. Evidence remains synthetic and provisional-only. |
+| R6D held channel corroboration | Dependency-ready | — | Implement only the fixed R6C rule after eligible mono failure, retain bounded per-view facts, and preserve a permanent provisional-only boundary under fresh held v10. |
+| R6E Windows channel acceptance | Blocked by R6D | — | Exact portable/private-media/resource/handle/visible-marker and independently labeled real signed-offset/mismatch acceptance for R6D. |
+| R7 activation | Blocked by incomplete R6D/R6E acceptance | — | Exact portable candidate/RSS/lifetime proof, visible markers, independently labeled real signed-offset and mismatch cells, unpatched defaults, and completed held-channel production acceptance are required. Channel corroboration remains provisional after activation. |
 
 For each checkpoint record task model/effort actually used, owner disposition, files, commit, commands/results/skips, evidence locations, unresolved risks, and the next permitted unit. Do not mark a package accepted from intended tests. When the workstream and release handoff are complete, change this file to `Status: Historical` in the same pass; otherwise keep the unresolved gate explicit.
 
@@ -1099,6 +1228,15 @@ For each checkpoint record task model/effort actually used, owner disposition, f
 - **Controller correction:** line-by-line source/evidence review found one overclaim: R6B measured full-overlap scores only at candidates already chosen by the production path, while requested-rate refinement chooses among nearby corrections with the capped scorer. `ceb05d0f` (`test(alignment): clarify score-cap evidence`) corrects only that interpretation and limitation; it changes no scalar. Coarse FFT generation is cap-independent, but full-versus-capped candidate-selection equivalence remains unproven until the complete refinement neighborhood is rerun.
 - **Verification:** the controller validated JSON, all declared counts and retained-candidate shapes, the reported Comparison 2 lag/score facts, and the no-log-band disposition; `uv run --no-sync pytest -q tests/integration/test_alignment_oracle_policy.py` passed, and both evidence commits passed `git diff --check`. The Windows task reported its private validator, hash checks, clean-tree checks, and the same oracle-policy test passing. The private raw artifacts and their hashes cannot be independently reproduced on this macOS host, so those are retained task observations rather than controller-reproduced proof.
 - **Adjudication / next unit:** preserve the current provisional result and v9 authority hold. Do not implement log-band, PHAT, a threshold reduction, best-channel selection, a default-rate change, or automatic authority. R6C is dependency-ready and owns a lineage-separated, negative-controlled, resource-measured test-only calibration of one fixed corresponding-channel corroboration rule, including complete capped/full refinement. It must stop again before any production fallback. R6 and R7 remain blocked by the portable-Windows RSS/lifetime, visible-marker, independently labeled signed-offset, and mismatch gates.
+
+#### R6C execution record and adjudication — September 20, 2026
+
+- **Task/runtime:** standalone Codex new task `01a0bcd7-5c0b-7c33-99f4-751ead488655`, explicitly configured `gpt-5.6-sol` at `medium` for multichannel fixture design, production-equivalent refinement, resource proof, and interpretation. It was the sole writer and sent its completion directly to the orchestrator; no task-status polling or monitor was used. The controller reviewed every line of the 508-line test and the complete canonical scalar addition and found no repair-worthy discrepancy.
+- **Owner disposition and integrated evidence:** `a3eb1569` (`test(alignment): calibrate channel corroboration evidence`) adds only opt-in `tests/integration/test_alignment_channel_corroboration.py` and the top-level `channel_corroboration_calibration` evidence block in `streaming-production-results.json`. Production, plan, public/config, dependency, schema, identity, cache, native, presentation, and authority surfaces are untouched. The test hash `abc72d153a39649a2eafa9bd306eb1bfb368add29eeb3cc6de09ff404e365df5` matches the committed source.
+- **Acceptance evidence:** one predeclared fixed-order `FL`/`FR`/`FC` rule was exercised at the default 8 kHz requested rate over three independently seeded zero/+1,600/−1,600-sample positives and six negative families: unrelated programs, silence/low information, repeated structure, incompatible/permuted channels, conflicting per-channel offsets, and localized mix/cut/track mismatch. All nine positive temporal rows produced the correct 0/+5/−5 frame bins with three independent windows per case. No negative row corroborated; the conflicting-offset family retained three cross-frame contradictions. Views remained one observation per temporal window and never added independent support.
+- **Scoring/resource evidence:** the complete ±40-sample requested-rate neighborhood was rerun with production-capped and full-overlap scoring. Seven sample-level winners differed per runtime and the maximum absolute score delta was `0.09809988247725332` native / `0.09809988253793245` Docker, with zero 0.90-threshold-side, frame-bin, positive/negative, or contradiction changes. Native macOS FFmpeg 9.0.2 used 36 decodes, 93,312,000 generated/retained fixture bytes, 11.1264 seconds, and 129,597,440 incremental sampled combined RSS. Canonical Docker/Linux arm64 FFmpeg 7.1.5 used the same decodes/bytes, 60.2349 seconds, and 145,588,224 incremental sampled combined RSS, all below 512 MiB.
+- **Controller verification:** the controller independently reran the opt-in matrix natively and in canonical image `sha256:baea14a5eb3e43c738c81663a784be930c99e4c24df3d45bca2b8eafcc47f769`; both passed. The native rerun reproduced all deterministic candidates, scores, counts, and dispositions while timing/RSS varied within bounds. The controller recomputed all case counts, nine correct positive rows, zero negative corroborations, three contradictions, seven capped/full lag differences, maximum score delta, and zero threshold-side changes; validated JSON and the test hash; passed the 103-case oracle-policy suite, touched-file Ruff format/check, and `git diff --check`; and confirmed a clean tree. The task's fresh Docker rebuild reached the final editable-install layer but Docker-internal ENOSPC blocked completion even after recoverable build-cache pruning, so both task and controller used the exact previously verified canonical image with current source bind-mounted.
+- **Adjudication / next unit:** R6C passes its evidence-only gate. It does not establish real-media release acceptance or automatic authority, and sampled RSS cannot exclude between-sample transients. R6D is dependency-ready and may implement only the fixed rule as a held, provisional-only path with bounded sequential collection and retained representation-specific evidence. R6E then owns exact physical-Windows/private-media acceptance. Log-band, PHAT, threshold/default-rate changes, view-subset search, and channel-derived automatic authority remain prohibited.
 
 ## 14. Source record
 
