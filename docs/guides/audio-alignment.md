@@ -94,7 +94,7 @@ remains a v1 file with the same path and offset semantics.
 
 Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
 a unique display-qualified candidate survived an attempt; under the internal
-`continuous-origin-qualified-channel-corroboration-2097152-v10-held` policy it is shown as a clearly
+`continuous-origin-qualified-channel-corroboration-2097152-v11-held` policy it is shown as a clearly
 unaccepted review hint and is never applied or passed as the authoritative integer/null
 field. Its decision
 records `automatic_authority_held` when the qualified policy would otherwise pass. `unavailable`
@@ -140,7 +140,11 @@ each view's PCM before collecting the next, and still counts one observation per
 window. Two same-frame activity/coverage/peak-valid views are required and at least one
 must meet the unchanged waveform floor; any base-credible named view in another frame
 bin vetoes the hint. The retained score and peak aggregates are explicitly channel-view
-evidence. Such evidence is always a provisional manual-review hint: it cannot become an
+evidence. The duration-tier check combines each corroborated channel window with unique
+same-frame, fixed-base-credible mono observations; a shared logical window is counted once,
+with its channel evidence replacing the weak mono row. Mono observations contribute only
+their temporal interval and lag, never channel confidence or authority. Such evidence is
+always a provisional manual-review hint: it cannot become an
 automatic alignment, enter the shared computed cache, or authorize a trim, even after
 the qualified mono estimator is activated later.
 

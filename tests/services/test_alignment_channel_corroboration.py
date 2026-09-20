@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -146,6 +147,61 @@ def _offset_timeline(signal: np.ndarray, offset: int) -> np.ndarray:
             8,
             True,
             "channel_corroboration_provisional",
+            "mixed_support_strict",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support_latch_disabled",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support",
+            "corroborated",
+            400,
+            1,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support",
+            "corroborated",
+            -400,
+            -1,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
             "latch_disabled",
             "corroborated",
             0,
@@ -184,6 +240,17 @@ def _offset_timeline(signal: np.ndarray, offset: int) -> np.ndarray:
         (
             0.55,
             "mono_downmix",
+            2,
+            False,
+            "no_unique_candidate",
+            "mixed_mono_conflict",
+            None,
+            0,
+            None,
+        ),
+        (
+            0.55,
+            "mono_downmix",
             8,
             True,
             "channel_corroboration_provisional",
@@ -219,11 +286,11 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         max_offset_seconds=1,
         channel_strategy=channel_strategy,  # type: ignore[arg-type]
         window_length_seconds=2,
-        window_stride_seconds=23,
+        window_stride_seconds=24,
         minimum_valid_windows=3,
-        confidence_threshold=1.0 if view_case == "strict_user_thresholds" else 0.0,
-        ambiguity_peak_ratio=100.0 if view_case == "strict_user_thresholds" else 1.0,
-        cache_results=view_case == "latch_disabled",
+        confidence_threshold=1.0 if "strict" in view_case else 0.0,
+        ambiguity_peak_ratio=100.0 if "strict" in view_case else 1.0,
+        cache_results="latch_disabled" in view_case,
     )
     stream = _stream()
     plan = alignment_audio.plan_audio_analysis(stream, stream, config=config)
@@ -236,10 +303,26 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
     }
     noise = rng.standard_normal(sample_count).astype(np.float32)
     mono_reference = sources["FL"]
+    mono_comparison_unshifted = (
+        mono_strength * mono_reference + np.sqrt(max(0.0, 1.0 - mono_strength**2)) * noise
+    ).astype(np.float32)
+    if view_case.startswith("mixed_support"):
+        for spec in plan.windows[:2]:
+            start = spec.reference_start_sample
+            end = start + spec.reference_sample_count
+            mono_comparison_unshifted[start:end] = mono_reference[start:end]
+    elif view_case == "mixed_mono_conflict":
+        first, second = plan.windows[:2]
+        first_end = first.reference_start_sample + first.reference_sample_count
+        mono_comparison_unshifted[first.reference_start_sample : first_end] = mono_reference[
+            first.reference_start_sample : first_end
+        ]
+        second_end = second.reference_start_sample + second.reference_sample_count
+        mono_comparison_unshifted[second.reference_start_sample : second_end] = mono_reference[
+            second.reference_start_sample + 400 : second_end + 400
+        ]
     mono_comparison = _offset_timeline(
-        (mono_strength * mono_reference + np.sqrt(max(0.0, 1.0 - mono_strength**2)) * noise).astype(
-            np.float32
-        ),
+        mono_comparison_unshifted,
         offset,
     )
     comparison_views = dict(sources)
@@ -322,7 +405,7 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
 
     monkeypatch.setattr(alignment_audio, "collect_discovery_phase", discovery)
     monkeypatch.setattr(alignment_audio, "collect_channel_view_phase", channel)
-    if view_case == "latch_disabled":
+    if "latch_disabled" in view_case:
         monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
         monkeypatch.setattr(
             "frame_compare.services.alignment.save_reusable_offsets",
@@ -357,6 +440,77 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
             assert attempt.decision.candidate is not None
             assert attempt.decision.candidate.frame_offset == expected_frame
             assert attempt.channel_corroboration.independent_windows == 3
+            if view_case.startswith("mixed_support"):
+                corroborated = [
+                    window
+                    for window in attempt.channel_corroboration.windows
+                    if window.corroborated
+                ]
+                assert len(corroborated) == 3
+                assert len(attempt.decision.candidate.supporting_window_ids) == 3
+                mono_by_id = {window.logical_id: window for window in attempt.windows}
+                channel_ids = {window.logical_id for window in corroborated}
+                channel_records = [
+                    replace(
+                        mono_by_id[window.logical_id],
+                        actual_useful_reference_start=window.actual_useful_reference_start,
+                        actual_useful_reference_end=window.actual_useful_reference_end,
+                    )
+                    for window in corroborated
+                ]
+                _selected, channel_only_count = alignment_consensus._independent_support(
+                    channel_records,
+                    channel_ids,
+                    config=config,
+                    sample_rate=config.sample_rate,
+                    reference_duration=95 * config.sample_rate,
+                    comparison_duration=95 * config.sample_rate,
+                    offsets={
+                        window.logical_id: window.representative_sample_lag or 0
+                        for window in corroborated
+                    },
+                )
+                assert channel_only_count == 0
+                mono_ids = {
+                    window.logical_id
+                    for window in attempt.windows
+                    if window.review_qualified and window.actual_coverage == 1.0
+                }
+                assert mono_ids.isdisjoint(channel_ids)
+                assert len(mono_ids | channel_ids) == 5
+                assert expected_frame is not None
+                assert (
+                    alignment_consensus._combined_channel_independent_support(
+                        attempt.windows,
+                        [*corroborated, corroborated[0]],
+                        winning_frame=expected_frame,
+                        config=config,
+                        reference_duration=95 * config.sample_rate,
+                        comparison_duration=95 * config.sample_rate,
+                    )
+                    == 3
+                )
+                overlap_start = corroborated[0].actual_useful_reference_start
+                overlap_end = corroborated[0].actual_useful_reference_end
+                overlapping = [
+                    replace(
+                        window,
+                        actual_useful_reference_start=overlap_start,
+                        actual_useful_reference_end=overlap_end,
+                    )
+                    for window in corroborated
+                ]
+                assert (
+                    alignment_consensus._combined_channel_independent_support(
+                        attempt.windows,
+                        overlapping,
+                        winning_frame=expected_frame,
+                        config=config,
+                        reference_duration=95 * config.sample_rate,
+                        comparison_duration=95 * config.sample_rate,
+                    )
+                    == 0
+                )
             assert "Mono evidence:" in presented
             assert "Channel-view evidence:" in presented
             assert all(
@@ -378,3 +532,5 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
                 ) == (1 if view_case == "one_window" else 2)
     else:
         assert attempt.decision.primary_reason == expected_reason
+        if view_case == "mixed_mono_conflict":
+            assert "credible_contradiction" in attempt.decision.failed_gates

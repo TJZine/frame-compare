@@ -434,7 +434,7 @@ dependency or decode failures remain warning-only for optional alignment. The at
 retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
 and a separate display-only provisional candidate. The shipped
-`continuous-origin-qualified-channel-corroboration-2097152-v10-held` policy keeps computed authority held: an otherwise
+`continuous-origin-qualified-channel-corroboration-2097152-v11-held` policy keeps computed authority held: an otherwise
 qualified computed result records `automatic_authority_held`, has null applied
 offsets, and cannot reach trims or shared-cache writes. Manual confirmation replaces
 authority without replacing that original attempt. Immutable `ClipState` carries the
@@ -479,7 +479,11 @@ the fixed waveform floor. Each view is collected as one sequential reference/com
 pair at the requested rate through the same origin, EOF, cancellation, identity, and
 cleanup owner, then its PCM is released before the next view. At most six additional
 collections occur. Views corroborate one temporal observation per planned window and
-never become mono voters or independent observations themselves.
+never become mono voters or independent observations themselves. The channel candidate's
+duration-tier check combines unique same-frame, fixed-base-credible mono observations
+with corroborated channel windows; channel evidence replaces rather than double-counts
+a weak mono row with the same logical ID. Mono evidence contributes only its retained
+interval and lag to that temporal check and cannot alter channel confidence or authority.
 `alignment_correlation.estimate_alignment_offset` converts the raw correlation lag to the
 public `reference source frame - comparison source frame` sign.
 `alignment_consensus` translates that signed local offset through the reference and
@@ -507,7 +511,7 @@ hint. Qualifying channel evidence creates only a distinctly labeled provisional 
 review candidate; it cannot set `review_qualified`, join mono authority voters, satisfy
 a mono trust gate, override a credible contradiction, write computed cache authority,
 or reach trims. The current
-`continuous-origin-qualified-channel-corroboration-2097152-v10-held` safety policy also prevents computed
+`continuous-origin-qualified-channel-corroboration-2097152-v11-held` safety policy also prevents computed
 results from authorizing trims or new cache writes.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.

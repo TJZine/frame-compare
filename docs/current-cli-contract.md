@@ -1429,7 +1429,7 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `continuous-origin-qualified-channel-corroboration-2097152-v10-held` policy, computed cache hits and embedded computed
+  `continuous-origin-qualified-channel-corroboration-2097152-v11-held` policy, computed cache hits and embedded computed
   fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
   only whether prior human-confirmed offsets are reused. `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
@@ -1574,7 +1574,7 @@ negative rather than unbounded scanning.
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
 qualified-policy evidence, and an explicit audio decision: `provisional` or `unavailable`
-under the shipped `continuous-origin-qualified-channel-corroboration-2097152-v10-held` automatic-authority hold.
+under the shipped `continuous-origin-qualified-channel-corroboration-2097152-v11-held` automatic-authority hold.
 An otherwise-qualified computed attempt records
 `automatic_authority_held`; `trusted_automatic` is not produced while that internal
 hold is active. A provisional candidate uses fixed display-only floors (score at
@@ -1591,8 +1591,11 @@ mono row may be corroborated by the fixed-order intersection of explicitly named
 At least two same-frame, peak-valid named views are required, at least one must meet
 the fixed waveform floor, and any base-credible cross-frame named view vetoes the
 hint. The resulting aggregate is labeled channel-view evidence and is permanently
-provisional-only: it never becomes a mono voter, automatic authority, a computed-cache
-write, or an applied trim.
+provisional-only. Its duration-tier check combines unique same-frame, fixed-base-credible
+mono observations with corroborated channel windows, replacing rather than double-counting
+the weak mono row for a shared logical ID. Mono observations supply temporal coverage only;
+they do not become channel views, alter channel confidence aggregates, grant automatic
+authority, enter a computed-cache write, or authorize an applied trim.
 
 ## Persistence Rules
 

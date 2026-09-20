@@ -855,6 +855,53 @@ def _missing_channel_view(view: AudioChannelView, reason: str) -> AudioChannelVi
     )
 
 
+def _combined_channel_independent_support(
+    mono_records: tuple[AudioAlignmentWindowRecord, ...],
+    channel_windows: list[AudioChannelWindowRecord],
+    *,
+    winning_frame: int,
+    config: AlignmentConfig,
+    reference_duration: int,
+    comparison_duration: int,
+) -> int:
+    """Count unique same-frame mono/channel observations through the existing tier owner."""
+    support_records = {
+        record.logical_id: record
+        for record in mono_records
+        if record.review_qualified
+        and record.actual_coverage is not None
+        and record.actual_coverage >= _STABILITY_COVERAGE_FLOOR
+        and record.requested_frame_candidate == winning_frame
+        and record.requested_sample_lag is not None
+        and _record_has_integrity(record)
+    }
+    support_offsets = {
+        logical_id: record.requested_sample_lag
+        for logical_id, record in support_records.items()
+        if record.requested_sample_lag is not None
+    }
+    mono_by_id = {record.logical_id: record for record in mono_records}
+    for window in channel_windows:
+        mono_record = mono_by_id[window.logical_id]
+        support_records[window.logical_id] = replace(
+            mono_record,
+            actual_useful_reference_start=window.actual_useful_reference_start,
+            actual_useful_reference_end=window.actual_useful_reference_end,
+        )
+        if window.representative_sample_lag is not None:
+            support_offsets[window.logical_id] = window.representative_sample_lag
+    _selected, independent_count = _independent_support(
+        list(support_records.values()),
+        set(support_records),
+        config=config,
+        sample_rate=config.sample_rate,
+        reference_duration=reference_duration,
+        comparison_duration=comparison_duration,
+        offsets=support_offsets,
+    )
+    return independent_count
+
+
 def corroborate_channel_views(
     mono_result: AlignmentConsensus,
     *,
@@ -1170,30 +1217,24 @@ def corroborate_channel_views(
     winner = (
         ordered[0] if ordered and (len(ordered) == 1 or len(ordered[0]) > len(ordered[1])) else []
     )
-    winner_ids = {window.logical_id for window in winner}
-    synthetic_records = [
-        replace(
-            mono_result.window_records[channel_plan.window_indices[channel_windows.index(window)]],
-            actual_useful_reference_start=window.actual_useful_reference_start,
-            actual_useful_reference_end=window.actual_useful_reference_end,
-        )
-        for window in channel_windows
-        if window.logical_id in winner_ids
-    ]
     reference_duration = round(
         Fraction(plan.reference_duration_samples * config.sample_rate, plan.sample_rate)
     )
     comparison_duration = round(
         Fraction(plan.comparison_duration_samples * config.sample_rate, plan.sample_rate)
     )
-    _selected, independent_count = _independent_support(
-        synthetic_records,
-        winner_ids,
-        config=config,
-        sample_rate=config.sample_rate,
-        reference_duration=reference_duration,
-        comparison_duration=comparison_duration,
-        offsets={window.logical_id: window.representative_sample_lag or 0 for window in winner},
+    winning_frame = winner[0].representative_frame_candidate if winner else None
+    independent_count = (
+        _combined_channel_independent_support(
+            mono_result.window_records,
+            winner,
+            winning_frame=winning_frame,
+            config=config,
+            reference_duration=reference_duration,
+            comparison_duration=comparison_duration,
+        )
+        if winning_frame is not None
+        else 0
     )
     required = _minimum_independent_count(
         min(reference_duration, comparison_duration),
