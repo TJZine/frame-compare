@@ -20,9 +20,10 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 ## Recommended workflow
 
-1. Let automatic alignment collect and report an offset candidate.
-2. Review the evidence, hold notice, and warnings; computed authority is currently
-   held and does not authorize a trim.
+1. Let automatic alignment collect and report an offset candidate. A qualified mono
+   result may apply automatically; channel corroboration remains provisional and is
+   never applied.
+2. Review the evidence and warnings, especially for provisional or unavailable results.
 3. Use the native VSView panel for optional alignment review when the route is
    available and the evidence needs visual confirmation. It is not part of automatic
    correlation: position each source in the viewer, then save the complete lineup once.
@@ -63,8 +64,9 @@ distinct successful collection outcomes; failed collection PCM is never usable.
 ## Previous offset reuse
 
 Interactively confirmed offsets can be stored in the shared alignment reuse cache.
-While the automatic-authority hold is active, computed results are not written or reused
-as trim authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
+Qualified mono computed results may be written and reused as trim authority under the
+current v12 policy. Channel-provisional evidence is never written or reused as trim
+authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
 selected reference relationship, audio stream choices, alignment settings, and relevant
 runtime identity.
 
@@ -76,8 +78,8 @@ possible drift, possible discontinuity, variable, or insufficient. This summary 
 diagnostic only and is scoped to extraction-integrity, fixed-credibility,
 coverage-qualified observed windows; rejected or unobserved planned intervals remain
 unassessed. Any reported change position is an approximate interval between observations,
-not an observed edit location. Computed evidence remains separate from trim authority while the
-automatic hold is active; explicit or human-confirmed offsets remain authoritative.
+not an observed edit location. Channel-provisional computed evidence remains separate
+from trim authority; explicit or human-confirmed offsets remain authoritative.
 Consensus groups windows only when their requested-rate sample estimates produce the
 same integer source-frame correction at the reference FPS. It does not merge adjacent
 frames or use the diagnostic stability classification for acceptance. The winning
@@ -92,12 +94,12 @@ are recomputed or reviewed normally. Schema-v1 entries are ignored and recompute
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
 remains a v1 file with the same path and offset semantics.
 
-Fresh computation distinguishes two shipped audio-evidence states. `provisional` means
-a unique display-qualified candidate survived an attempt; under the internal
-`continuous-origin-qualified-channel-corroboration-2097152-v11-held` policy it is shown as a clearly
-unaccepted review hint and is never applied or passed as the authoritative integer/null
-field. Its decision
-records `automatic_authority_held` when the qualified policy would otherwise pass. `unavailable`
+Fresh computation distinguishes three shipped audio-evidence states. `trusted_automatic`
+means a qualified mono candidate passed every authority gate and is applied. `provisional`
+means a unique display-qualified candidate survived an attempt but remains a clearly
+unaccepted review hint, including every channel-corroborated candidate. Under the internal
+`continuous-origin-qualified-channel-corroboration-2097152-v12` policy, channel evidence is
+never applied or passed as authoritative integer/null fields. `unavailable`
 means no unique usable
 candidate exists, and Frame Compare does not invent zero. The
 display-only qualification floor is score 0.90 and peak ratio 1.50. Raw, base-credible,
@@ -105,9 +107,10 @@ voting-qualified, winning, and independent counts are reported separately. Votin
 90% useful observed coverage and applies each configured threshold as the maximum of that
 threshold and the policy floor; `consensus_minimum_ratio` applies to voting-qualified
 windows. A base-credible estimate in another frame bin is a hard contradiction, even if
-a stricter setting excludes it from voting. The automatic hold independently prevents
-computed application. Manual
-confirmation is a separate fact and does not rewrite the original audio attempt.
+a stricter setting excludes it from voting. Channel corroboration independently prevents
+computed application. Manual confirmation is a separate fact and does not rewrite the
+original audio attempt. The v12 identity invalidates v11-held computed cache entries and
+embedded computed results; cache schema v2 and the manual-override schema remain unchanged.
 
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded

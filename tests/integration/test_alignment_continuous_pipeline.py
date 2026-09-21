@@ -112,13 +112,12 @@ def test_real_service_collects_distributed_windows_from_one_decode_per_source(
 
     assert len(production_decodes) == 2
     assert [path for path, _ in production_decodes] == [reference, comparison]
-    assert result.applied is False
-    assert result.frame_offset is None
+    assert result.applied is True
+    assert result.frame_offset == 0
     assert result.audio_attempt is not None
     attempt = result.audio_attempt
     assert (
-        attempt.estimator_policy
-        == "continuous-origin-qualified-channel-corroboration-2097152-v11-held"
+        attempt.estimator_policy == "continuous-origin-qualified-channel-corroboration-2097152-v12"
     )
     assert attempt.collection_observation == "observed"
     assert len(attempt.collection_summaries) == 2

@@ -512,18 +512,17 @@ unchanged.
   compact, inset `Audio Alignment` panel naming its retained display-only provisional
   candidate and `not applied` status, or stating that no usable candidate exists. The
   panel uses the prepared comparison identity and aligned status, evidence, reason,
-  stream, review-action, and diagnostics rows. While the
-  shipped automatic-authority hold is active, an otherwise-qualified candidate also
-  reports `automatic_authority_held`. This does not
+  stream, review-action, and diagnostics rows. A qualified mono candidate is shown
+  as accepted and applied; channel-corroborated evidence remains a clearly
+  provisional, not-applied candidate. This does not
   add a successful JSON field or write human text to JSON stdout. The run-local
   diagnostic location is reported only after a successful write. The human Rich panel
   owns that success presentation; `alignment_diagnostics_written` remains a structured
   event for JSON/log output and is suppressed from interactive human output.
-- The pre-review evidence block keeps manual/human-authoritative `+0f`, held
-  provisional `+0f`, and absence distinct. Held computed evidence reports that
-  automatic application is temporarily disabled and that no computed correction was
-  applied; a display candidate is still shown as `Provisional candidate: +Nf (not
-  applied)`. Rejected evidence without one reports `No usable audio candidate. No
+- The pre-review evidence block keeps manual/human-authoritative `+0f`, applied
+  qualified-mono `+0f`, channel-corroborated provisional `+0f`, and absence distinct.
+  Channel evidence is shown as `Provisional candidate: +Nf (not applied)` and never
+  authorizes a correction; rejected evidence without one reports `No usable audio candidate. No
   automatic correction applied.` Selected stream rows name each audio ordinal as
   `a:N` and distinguish automatic metadata selection from an explicit override.
   Historical computed and human reuse are labeled separately and do not fabricate
@@ -539,8 +538,8 @@ unchanged.
 - Normal interactive VSView launch presentation omits generated script and command
   telemetry. `--verbose` retains those launch facts and bounded startup-failure
   evidence. When a current-interpreter readiness check detects a missing optional
-  module, normal mode emits one sanitized warning and continues with held, non-applied
-  audio evidence; forced interactive failure remains fatal. A successful VSView
+  module, normal mode emits one sanitized warning and continues with the existing
+  automatic or manual audio authority; forced interactive failure remains fatal. A successful VSView
   child continues to inherit its native stdout and stderr diagnostics. When Frame
   Compare reports missing, unspecified, or malformed preview color properties, the
   generated session applies the same explicit BT.709 preview defaults that VSView
@@ -1429,9 +1428,10 @@ converted to this sign convention before consensus evidence, hints, caching, and
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `continuous-origin-qualified-channel-corroboration-2097152-v11-held` policy, computed cache hits and embedded computed
-  fallbacks remain non-applied regardless of `previous_offsets`; the policy controls
-  only whether prior human-confirmed offsets are reused. `disabled` is the default and
+  `continuous-origin-qualified-channel-corroboration-2097152-v12` policy, qualified
+  mono computed cache hits and embedded computed fallbacks may remain authoritative
+  regardless of `previous_offsets`; channel-corroborated evidence is never reused as
+  computed authority. `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
   results may still write to the shared reuse cache when `cache_results = true`.
   `prompt` shows a Rich stderr table for a complete
@@ -1573,16 +1573,16 @@ negative rather than unbounded scanning.
 
 Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
-qualified-policy evidence, and an explicit audio decision: `provisional` or `unavailable`
-under the shipped `continuous-origin-qualified-channel-corroboration-2097152-v11-held` automatic-authority hold.
-An otherwise-qualified computed attempt records
-`automatic_authority_held`; `trusted_automatic` is not produced while that internal
-hold is active. A provisional candidate uses fixed display-only floors (score at
+qualified-policy evidence, and an explicit audio decision: `trusted_automatic`,
+`provisional`, or `unavailable` under the shipped
+`continuous-origin-qualified-channel-corroboration-2097152-v12` policy. An otherwise-qualified
+mono attempt produces `trusted_automatic` and applied frame/time fields. Channel
+corroboration always produces `provisional` evidence, even when the qualified policy
+would otherwise pass. A provisional candidate uses fixed display-only floors (score at
 least 0.90 and peak ratio at least 1.50) and a unique largest frame-equivalent group.
 It never supplies an applied offset, trim, cache value, or trusted VSView hint. A manual
-result keeps the original attempt as separate diagnostic history. Held results remain
-provisional/unavailable even when the future policy would otherwise pass; computed frame/time
-fields and trusted native hints stay null. The sampled support is bounded and does not claim
+result keeps the original attempt as separate diagnostic history. Channel-provisional
+results keep computed frame/time authority null. The sampled support is bounded and does not claim
 drift compensation or exhaustive edit detection.
 
 For the default `mono_downmix` strategy only, a weak but extraction/coverage-valid
@@ -1615,9 +1615,10 @@ Diagnostic files are never read for offset selection, trim application, or share
 cache reuse. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
 authority unchanged; a containment or symlink escape remains fail-closed. The shared
-alignment cache remains schema v2 and stores eligible authority only. Computed results
-are not written while the automatic-authority hold is active, and historical computed
-cache hits do not fabricate current stream or window evidence or authorize trims.
+alignment cache remains schema v2 and stores eligible authority only. Qualified mono
+computed results may be written and reused under v12; channel-provisional results are
+never written as computed authority. Historical cache hits do not fabricate current
+stream or window evidence.
 
 `run --write-config` persists the effective config after applying the mapped overrides
 above. That means the flags in the previous section are persistent when combined with

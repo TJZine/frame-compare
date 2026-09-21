@@ -259,7 +259,7 @@ def _offset_timeline(signal: np.ndarray, offset: int) -> np.ndarray:
             0,
             0,
         ),
-        (1.0, "mono_downmix", 2, False, "automatic_authority_held", "positive", None, 0, None),
+        (1.0, "mono_downmix", 2, False, "accepted", "positive", None, 0, 0),
         (0.55, "best_channel", 2, False, "no_voting_windows", "positive", None, 0, None),
     ],
 )
@@ -424,9 +424,14 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
     presented = capsys.readouterr().err
 
     assert decode_count == expected_decodes
-    assert result[0].applied is False
-    assert result[0].frame_offset is None
-    assert result[0].time_offset_seconds is None
+    if expected_reason == "accepted":
+        assert result[0].applied is True
+        assert result[0].frame_offset == expected_frame
+        assert result[0].time_offset_seconds == pytest.approx(offset / config.sample_rate)
+    else:
+        assert result[0].applied is False
+        assert result[0].frame_offset is None
+        assert result[0].time_offset_seconds is None
     assert result[0].audio_attempt is not None
     attempt = result[0].audio_attempt
     assert (attempt.channel_corroboration is not None) is expected_channel

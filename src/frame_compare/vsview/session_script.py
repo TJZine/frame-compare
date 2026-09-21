@@ -528,7 +528,7 @@ def main():
         authority = audio_review["current_authority"]
         if audio_decision is not None and audio_decision["state"] == "provisional":
             provisional_offset = audio_decision["candidate"]["frame_offset"]
-            audio_hint = f"Provisional {provisional_offset:+d}f — NOT APPLIED"
+            audio_hint = f"Provisional {provisional_offset:+d}f - NOT APPLIED"
             hint_pair = "Verify manually; this candidate is not a confirmed alignment"
             trim_hint = f"Reason: {audio_decision['primary_reason']}"
         elif audio_decision is not None and audio_decision["state"] == "trusted_automatic":

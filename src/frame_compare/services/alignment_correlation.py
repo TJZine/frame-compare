@@ -17,7 +17,7 @@ FloatArray = npt.NDArray[np.float64]
 # Legacy array callers remain bounded. Production alignment uses a stricter
 # per-window FFT and total-work budget in alignment_audio.
 ALIGNMENT_ANALYSIS_SAMPLE_LIMIT = 1 << 21
-ALIGNMENT_ESTIMATOR_POLICY = "continuous-origin-qualified-channel-corroboration-2097152-v11-held"
+ALIGNMENT_ESTIMATOR_POLICY = "continuous-origin-qualified-channel-corroboration-2097152-v12"
 
 _EPSILON = 1e-12
 _MIN_OVERLAP_SAMPLES = 3

@@ -434,19 +434,21 @@ dependency or decode failures remain warning-only for optional alignment. The at
 retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
 and a separate display-only provisional candidate. The shipped
-`continuous-origin-qualified-channel-corroboration-2097152-v11-held` policy keeps computed authority held: an otherwise
-qualified computed result records `automatic_authority_held`, has null applied
-offsets, and cannot reach trims or shared-cache writes. Manual confirmation replaces
-authority without replacing that original attempt. Immutable `ClipState` carries the
-attempt even when its applied `alignment` remains null. `alignment_correlation` converts its raw
+`continuous-origin-qualified-channel-corroboration-2097152-v12` policy allows an otherwise
+qualified mono result to become trusted automatic authority after every existing
+integrity, quality, support, contradiction, boundary, search-edge, and configured
+gate passes. It reaches the existing trim and computed-cache paths. Channel
+corroboration remains a permanently provisional manual-review candidate and cannot
+reach those paths. Manual confirmation replaces authority without replacing that
+original attempt. Immutable `ClipState` carries the attempt even when its applied
+`alignment` remains null. `alignment_correlation` converts its raw
 correlation lag into the signed `reference source frame - comparison source frame`
 contract before consensus results reach hints, caches, or trim calculation. Immutable
 orchestration alignment state carries that summary to warning and human-report owners
 without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
-previous-offset reuse policy. While the shipped automatic-authority hold is active,
-computed cache hits and embedded computed fallbacks are retained as non-applied
-evidence; only validated human-confirmed authority can be reused through the
-`previous_offsets` policy.
+previous-offset reuse policy. Current v12 computed cache hits may reuse qualified
+mono authority, while channel-only evidence remains non-applied; validated
+human-confirmed authority continues to reuse through the `previous_offsets` policy.
 
 Computed alignment work is planned against typed timing for each selected audio stream.
 `alignment_audio` owns stream-relative duration/origin normalization, the fixed peak and
@@ -511,8 +513,9 @@ hint. Qualifying channel evidence creates only a distinctly labeled provisional 
 review candidate; it cannot set `review_qualified`, join mono authority voters, satisfy
 a mono trust gate, override a credible contradiction, write computed cache authority,
 or reach trims. The current
-`continuous-origin-qualified-channel-corroboration-2097152-v11-held` safety policy also prevents computed
-results from authorizing trims or new cache writes.
+`continuous-origin-qualified-channel-corroboration-2097152-v12` policy activates
+qualified mono authority for trims and computed-cache writes while channel
+corroboration remains permanently provisional and cannot authorize either.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr

@@ -35,8 +35,18 @@ def align_clips_from_request(*args: object, **kwargs: object):
     return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
+@pytest.fixture(autouse=True)
+def automatic_authority_hold_is_explicit_for_rollback_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep the R0 rollback assertions held while R7 defaults to active authority."""
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", True)
+
+
 def _held_candidate_consensus(offset: int = 0) -> alignment_consensus.AlignmentConsensus:
     attempt = audio_attempt()
+    stability = AlignmentStabilitySummary("stable", 5, 0, 0, 0, 0, 0, None)
+    attempt = replace(attempt, stability=stability)
     existing_candidate = attempt.decision.candidate
     assert existing_candidate is not None
     candidate = replace(
@@ -61,6 +71,7 @@ def _held_candidate_consensus(offset: int = 0) -> alignment_consensus.AlignmentC
         consensus_windows=5,
         consensus_ratio=1.0,
         ambiguity_ratio=2.0,
+        stability=stability,
         decision=decision,
         audio_attempt=attempt,
     )
@@ -187,6 +198,175 @@ def test_service_hold_keeps_strong_computed_offsets_non_applied(
     assert result.audio_attempt.decision.primary_reason == "automatic_authority_held"
     assert "automatic_authority_held" in result.audio_attempt.decision.failed_gates
     assert not (tmp_path / "shared-alignment" / "alignment_reuse.toml").exists()
+
+
+@pytest.mark.parametrize("offset", [0, 24, -24])
+def test_r7_qualified_mono_authority_reaches_application_and_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    offset: int,
+) -> None:
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+    config = AlignmentConfig(sample_rate=24, cache_results=True)
+    request = _request(tmp_path, config)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: _held_candidate_consensus(offset),
+    )
+
+    result = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert result.applied is True
+    assert result.frame_offset == offset
+    assert result.time_offset_seconds == offset / 24
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.decision.state == "trusted_automatic"
+    assert (tmp_path / "shared-alignment" / "alignment_reuse.toml").exists()
+
+
+def test_r7_current_v12_cache_hit_is_authoritative_without_recompute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+    config = AlignmentConfig(sample_rate=24, cache_results=True)
+    request = _request(tmp_path, config)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: _held_candidate_consensus(24),
+    )
+    first = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+    assert first.applied is True
+
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: pytest.fail("current v12 cache hit must not recompute"),
+    )
+    second = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert second.source == "cached"
+    assert second.applied is True
+    assert second.frame_offset == 24
+
+
+def test_r7_v11_cache_identity_misses_and_fresh_mono_result_applies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AlignmentConfig(sample_rate=24, cache_results=True)
+    request = _request(tmp_path, config)
+    comparison = request.comparisons[0]
+    cached = AlignmentResult(
+        reference_clip=request.reference.path.name,
+        comparison_clip=comparison.path.name,
+        frame_offset=3,
+        time_offset_seconds=0.125,
+        correlation_score=0.99,
+        algorithm="cross_correlation",
+        source="computed",
+        stability=AlignmentStabilitySummary("stable", 1, 1, 1, 1, 1, 0, None),
+    )
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+    monkeypatch.setattr(
+        alignment_reuse_cache,
+        "ALIGNMENT_ESTIMATOR_POLICY",
+        "continuous-origin-qualified-channel-corroboration-2097152-v11-held",
+    )
+    alignment_reuse_cache.save_reusable_offsets(
+        request,
+        [
+            AlignmentProvenance(
+                result=cached,
+                comparison_cache_key=alignment_reuse_cache.comparison_cache_key(comparison),
+                provenance="computed_this_run",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        alignment_reuse_cache,
+        "ALIGNMENT_ESTIMATOR_POLICY",
+        "continuous-origin-qualified-channel-corroboration-2097152-v12",
+    )
+    calls = 0
+
+    def estimate(*_args: object, **_kwargs: object) -> alignment_consensus.AlignmentConsensus:
+        nonlocal calls
+        calls += 1
+        return _held_candidate_consensus(0)
+
+    monkeypatch.setattr("frame_compare.services.alignment._estimate_audio_pair", estimate)
+
+    result = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert calls == 1
+    assert result.source == "computed"
+    assert result.applied is True
+    assert result.frame_offset == 0
+
+
+def test_r7_v11_embedded_computed_result_misses_before_mono_recompute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AlignmentConfig(cache_results=True, previous_offsets="disabled")
+    request = _request(tmp_path, config)
+    comparison = request.comparisons[0]
+    manual = AlignmentResult(
+        reference_clip=request.reference.path.name,
+        comparison_clip=comparison.path.name,
+        frame_offset=0,
+        time_offset_seconds=0.0,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+    )
+    computed = AlignmentResult(
+        reference_clip=request.reference.path.name,
+        comparison_clip=comparison.path.name,
+        frame_offset=3,
+        time_offset_seconds=0.125,
+        correlation_score=0.99,
+        algorithm="cross_correlation",
+        source="computed",
+        stability=AlignmentStabilitySummary("stable", 1, 1, 1, 1, 1, 0, None),
+    )
+    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+    monkeypatch.setattr(
+        alignment_reuse_cache,
+        "ALIGNMENT_ESTIMATOR_POLICY",
+        "continuous-origin-qualified-channel-corroboration-2097152-v11-held",
+    )
+    alignment_reuse_cache.save_reusable_offsets(
+        request,
+        [
+            AlignmentProvenance(
+                result=manual,
+                comparison_cache_key=alignment_reuse_cache.comparison_cache_key(comparison),
+                provenance="interactive_confirmed_this_run",
+                computed_result=computed,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        alignment_reuse_cache,
+        "ALIGNMENT_ESTIMATOR_POLICY",
+        "continuous-origin-qualified-channel-corroboration-2097152-v12",
+    )
+    calls = 0
+
+    def estimate(*_args: object, **_kwargs: object) -> alignment_consensus.AlignmentConsensus:
+        nonlocal calls
+        calls += 1
+        return _held_candidate_consensus(0)
+
+    monkeypatch.setattr("frame_compare.services.alignment._estimate_audio_pair", estimate)
+
+    result = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
+
+    assert calls == 1
+    assert result.source == "computed"
+    assert result.applied is True
+    assert result.frame_offset == 0
 
 
 def test_service_keeps_one_candidate_provisional_without_independent_support(

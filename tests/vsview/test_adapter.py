@@ -735,7 +735,7 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
 
     joined = "\n".join(overlays)
     assert "Audio alignment accepted: +0f" in joined
-    assert "Provisional +0f — NOT APPLIED" in joined
+    assert "Provisional +0f - NOT APPLIED" in joined
     assert "No usable audio candidate" in joined
     assert "no trusted audio hint" not in joined
 
