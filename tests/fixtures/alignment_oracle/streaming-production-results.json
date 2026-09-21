@@ -4,7 +4,7 @@
   "r6e_windows_channel_acceptance": {
     "schema_version": 1,
     "observed_at_utc": "2026-09-20",
-    "purpose": "R6E physical-Windows portable, runtime, and private-media acceptance of committed R6D held corresponding-channel corroboration",
+    "purpose": "Historical, unaccepted R6E v10 physical-Windows attempt retained for audit; superseded by the September 21 proof-contract completion",
     "source": {
       "checkout_commit": "a2a89b37a47f77c2b8fc727e1a97608566a22d75",
       "production_source_commit": "9b45de8c9d4382e2d230f34df32abb3f4cd1b6e1",
@@ -157,7 +157,217 @@
     },
     "privacy": "No private paths, filenames, media, screenshots, identifying metadata, raw PCM, stderr, or packet data are tracked. Only sanitized hashes, construction classes, commands, scalar outcomes, and conclusions are retained. The previously deleted historical artifact directory was not recreated and its old hashes were not reverified.",
     "limitations": ["The private original case is one retained media lineage, not general calibration.", "Sampled RSS cannot exclude a transient between 20 ms observations.", "The repository opt-in resource tests have no Windows sampler; physical-Windows acceptance used direct Win32 process, RSS, handle, reader, cancellation, and failure measurements against the packaged production service."],
-    "acceptance": {"r6e_gate": "pass", "corresponding_channel_authority": "permanently provisional_only", "automatic_application": false, "computed_cache_write": false, "trim_input_write": false, "release_authority_activated": false}
+    "acceptance": {"r6e_gate": "historical_unaccepted_v10_attempt", "reason": "the natural weak comparison did not reach channel corroboration", "corresponding_channel_authority": "permanently provisional_only", "automatic_application": false, "computed_cache_write": false, "trim_input_write": false, "release_authority_activated": false}
+  },
+  "r6e_windows_channel_acceptance_completion": {
+    "schema_version": 1,
+    "observed_at_utc": "2026-09-21",
+    "purpose": "R6E physical-Windows completion under the September 21 proof-contract amendment for committed v11 held corresponding-channel corroboration",
+    "source": {
+      "controller_checkout": "60b201ecfcec5769df36c76e2ab423fab2718cfd",
+      "packaged_production_commit": "7acda52093e8345f544750280efccab3cae849ca",
+      "required_production_ancestors": ["5367f5eec20ab1dd28fc5ea6ba034d14a13a417f", "54225d3a850a445dff3b23022df45186a1821676", "7acda52093e8345f544750280efccab3cae849ca"],
+      "checkout_clean_at_start": true,
+      "controller_delta_from_packaged_commit": "plan_only",
+      "production_config_dependency_packaging_test_runtime_difference": false,
+      "production_code_changed": false,
+      "automatic_authority_default": "held",
+      "estimator_identity": "continuous-origin-qualified-channel-corroboration-2097152-v11-held"
+    },
+    "portable_bundle": {
+      "zip_sha256": "f00a90febce89e3e5b47b6d69165ea4a7f255f4694d6e42613eac1d378319fb2",
+      "zip_bytes": 377506541,
+      "bundle_info_sha256": "8db8da30c8f1ec64a687ebb50fa8050eb2751d59d1f1b8993dde7c361f0108cc",
+      "bundle_info_bytes": 792,
+      "bundle_inventory_sha256": "864d0bc4649d082183b11aecc5df8325685cd70f93ad77625bac3b27deda8db1",
+      "bundle_inventory_bytes": 88663,
+      "media_runtime_fingerprint": "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7",
+      "alignment_runtime_fingerprint": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
+      "bundle_kind": "full",
+      "platform": "windows-x64",
+      "app_version": "0.6.0",
+      "extracted_verifier": "pass",
+      "extracted_verifier_checks": ["zip_layout", "extraction", "metadata_provenance", "license_inventory_101", "launcher_help", "launcher_version", "doctor_json", "install", "installed_shim_version", "installed_shim_help"]
+    },
+    "environment": {
+      "os": "Windows 10 Home build 19045, 64-bit",
+      "cpu": "AMD Ryzen 9 5900X 12-Core Processor, 12 cores, 24 logical processors",
+      "python": "3.13.15",
+      "frame_compare": "0.6.0",
+      "ffmpeg": "n8.1.2-34-g9b6c8969e0-20260731",
+      "ffprobe": "n8.1.2-34-g9b6c8969e0-20260731",
+      "vapoursynth": "R79 API R4.2",
+      "vsview": "0.11.0",
+      "pyside6": "6.11.2",
+      "vs_placebo": "2.0.4"
+    },
+    "private_original_case": {
+      "construction_class": "retained private three-file peer-release case; exact common E-AC-3 5.1(side) layouts with FL/FR/FC",
+      "source_count": 3,
+      "sample_rate_hz": 8000,
+      "frame_rate": "24000/1001",
+      "fresh_isolated_config_cache_per_run": true,
+      "identical_completed_runs": 3,
+      "first_run_total_elapsed_seconds": 137.46280429995386,
+      "first_run_channel_fallback_elapsed_seconds": 78.6733522999566,
+      "three_run_total_elapsed_seconds": 418.8167640999891,
+      "maximum_simultaneous_children": 1,
+      "child_count_total": 30,
+      "all_child_returncodes": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "all_children_exited_before_return": true,
+      "reader_threads_after_each_run": 0,
+      "comparison_1": {
+        "result": "mono_sufficient",
+        "decision": {"state": "provisional", "selected_frame": 0, "candidate_sample": 0, "temporal_support_count": 3, "reason": "automatic_authority_held"},
+        "mono_window_columns": ["id", "lag_samples", "frame", "score", "peak_ratio", "coverage", "activity", "credibility", "rejection"],
+        "mono_windows": [
+          ["primary-01", 0, 0, 1.0, 3.614173758252488, 1.0, true, "qualified", null],
+          ["primary-02", 0, 0, 0.9999999999999998, 10.469956295963271, 1.0, true, "qualified", null],
+          ["primary-03", 0, 0, 1.0000000000000004, 7.561453518302704, 1.0, true, "qualified", null],
+          ["primary-04", 0, 0, 1.0, 13.819696009502593, 1.0, true, "qualified", null],
+          ["primary-05", 157862, 473, 0.025555538585320153, 1.008688608076804, 1.0, true, "rejected", "quality_floor"]
+        ],
+        "channel_fallback_invoked": false
+      },
+      "comparison_2": {
+        "result": "channel_corroborated",
+        "decision": {"state": "provisional", "selected_frame": 0, "candidate_sample": 49, "reason": "channel_corroboration_provisional", "contradiction": false, "veto": false},
+        "mono_window_columns": ["id", "lag_samples", "frame", "score", "peak_ratio", "coverage", "activity", "credibility", "rejection"],
+        "mono_windows": [
+          ["primary-01", 47, 0, 0.9505343801006562, 3.405630519502227, 1.0, true, "qualified", null],
+          ["primary-02", 47, 0, 0.9195665729803004, 10.086426805310017, 1.0, true, "qualified", null],
+          ["primary-03", 47, 0, 0.6234738044142025, 4.1539260390097175, 1.0, true, "rejected", "waveform_floor"],
+          ["primary-04", 47, 0, 0.7227164771722876, 13.260365937001495, 1.0, true, "rejected", "waveform_floor"],
+          ["primary-05", 49, 0, 0.6528766927261278, 1.076732522132903, 1.0, true, "rejected", "waveform_floor"]
+        ],
+        "channel_view_columns": ["window", "view", "lag_samples", "frame", "score", "peak_ratio", "coverage", "activity", "credible", "rejection"],
+        "channel_views": [
+          ["primary-03", "FL", 47, 0, 0.9359580807131914, 2.355863101651284, 1.0, true, true, null],
+          ["primary-03", "FR", 49, 0, 0.8569670466919861, 2.7419174726489293, 1.0, true, false, "waveform_floor"],
+          ["primary-03", "FC", 47, 0, 0.7599033457272683, 3.9892597129826464, 1.0, true, false, "waveform_floor"],
+          ["primary-04", "FL", 49, 0, 0.9796176486299167, 10.104010697900748, 1.0, true, true, null],
+          ["primary-04", "FR", 49, 0, 0.9558861263333697, 9.894461520454735, 1.0, true, true, null],
+          ["primary-04", "FC", 47, 0, 0.6952159273649564, 10.272672607248854, 1.0, true, false, "waveform_floor"],
+          ["primary-05", "FL", 49, 0, 0.9503570285789593, 1.8604405790938143, 1.0, true, true, null],
+          ["primary-05", "FR", 49, 0, 0.9454908722996845, 1.1748100410523545, 1.0, true, false, "peak_floor"],
+          ["primary-05", "FC", 49, 0, 0.9009886553019735, 2.552253284990881, 1.0, true, true, null]
+        ],
+        "per_window": [
+          {"id": "primary-03", "agreeing_views": ["FL", "FR", "FC"], "representative_lag_samples": 47, "selected_frame": 0, "temporal_observations": 1, "contradiction": false, "veto": false},
+          {"id": "primary-04", "agreeing_views": ["FL", "FR", "FC"], "representative_lag_samples": 49, "selected_frame": 0, "temporal_observations": 1, "contradiction": false, "veto": false},
+          {"id": "primary-05", "agreeing_views": ["FL", "FC"], "representative_lag_samples": 49, "selected_frame": 0, "temporal_observations": 1, "contradiction": false, "veto": false}
+        ],
+        "channel_corroboration": {"status": "corroborated", "independent_windows": 3, "views_are_independent_votes": false, "fixed_views": ["FL", "FR", "FC"], "selected_frame": 0, "contradiction": false, "veto": false}
+      },
+      "authority": {"application": false, "computed_cache": false, "manual": false, "trim_input": false, "authority_files": 0},
+      "rss": {
+        "method": "Win32 GetProcessMemoryInfo WorkingSetSize; same-timestamp parent plus active child sampled at 20 ms",
+        "parent_baseline_bytes": 58195968,
+        "sample_count": 13499,
+        "active_child_sample_count": 13126,
+        "maximum_sampling_gap_seconds": 0.044962799991481006,
+        "overall_maximum_combined_sample": {"sample_index": 5353, "monotonic_seconds": 512399.5468703, "parent_bytes": 142852096, "active_child_bytes": 0, "active_child_count": 0, "combined_bytes": 142852096, "incremental_bytes": 84656128},
+        "maximum_combined_sample_while_child_active": {"sample_index": 9931, "monotonic_seconds": 512541.5857167, "parent_bytes": 80965632, "active_child_bytes": 21848064, "active_child_count": 1, "combined_bytes": 102813696, "incremental_bytes": 44617728}
+      },
+      "handles": {
+        "initial_instrumentation_observation": [[165, 181], [181, 191], [191, 201]],
+        "initial_sequence_explanation": "the evidence harness retained one completed Popen object per child; ten retained objects explain each later +10 step",
+        "corrected_identical_completed_runs_before_peak_after": [[165, 183, 172], [172, 185, 172], [172, 200, 172], [172, 191, 172], [172, 184, 172]],
+        "corrected_run_child_returncodes": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "corrected_run_maximum_simultaneous_children": 1,
+        "corrected_run_reader_threads_after": 0,
+        "accounting": "one-time runtime initialization retained seven parent handles; completed-run after values then plateaued at 172; varying in-run peaks were transient and released before each return"
+      }
+    },
+    "signed_production_service_controls": {
+      "execution": "unchanged R6C/R6D matrix assertions with only the POSIX ps RSS reader rebound to Win32 GetProcessMemoryInfo",
+      "settings": {"sample_rate_hz": 8000, "frame_rate": "24000/1001", "window_samples": 2097152, "waveform_floor": 0.9, "peak_floor": 1.5, "fixed_views": ["FL", "FR", "FC"]},
+      "positives": [
+        {"case": "zero", "expected_frame": 0, "selected_frame": 0, "windows": 3, "status": "corroborated", "reason": "channel_corroboration_provisional"},
+        {"case": "positive-five", "expected_frame": 5, "selected_frame": 5, "windows": 3, "status": "corroborated", "reason": "channel_corroboration_provisional"},
+        {"case": "negative-five", "expected_frame": -5, "selected_frame": -5, "windows": 3, "status": "corroborated", "reason": "channel_corroboration_provisional"}
+      ],
+      "views_from_one_window_inflate_independent_support": false,
+      "negative_families": [
+        {"case": "unrelated-programs", "false_corroborations": 0},
+        {"case": "silence-low-information", "false_corroborations": 0},
+        {"case": "repeated-structure", "false_corroborations": 0},
+        {"case": "incompatible-permuted-channels", "false_corroborations": 0},
+        {"case": "conflicting-channel-offsets", "false_corroborations": 0, "contradiction": true, "reason": "credible_cross_frame_veto", "contradicted_windows": 3},
+        {"case": "localized-mix-cut-track-mismatch", "false_corroborations": 0}
+      ],
+      "decode_count": 36,
+      "retained_bytes": 93312000,
+      "elapsed_seconds": 34.26119369996013,
+      "rss": {"baseline_bytes": 58810368, "peak_bytes": 158986240, "incremental_bytes": 100175872},
+      "authority": {"application": false, "computed_cache": false, "trim_input": false}
+    },
+    "retained_real_timeline_controls": {
+      "shared_disposition": {"state": "provisional", "channel_fallback_invoked": false, "reason": "automatic_authority_held", "application": false, "computed_cache": false, "manual": false, "trim_input": false},
+      "cases": [
+        {"case": "zero", "expected_frame": 0, "selected_frame": 0, "candidate_sample": 0, "elapsed_seconds": 0.9157731999875978},
+        {"case": "positive-five", "expected_frame": 5, "selected_frame": 5, "candidate_sample": 1668, "elapsed_seconds": 0.7711984000052325},
+        {"case": "negative-five", "expected_frame": -5, "selected_frame": -5, "candidate_sample": -1668, "elapsed_seconds": 0.7878771999967285, "provenance": "the same hashed base and positive-five asset pair in reversed order"}
+      ]
+    },
+    "retained_real_negative_controls": [
+      {"case": "mismatched-mix-cut-track", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "elapsed_seconds": 0.7740866999956779},
+      {"case": "different-segment", "state": "unavailable", "selected_frame": null, "reason": "no_voting_windows", "false_channel_hint": false, "elapsed_seconds": 7.063037899963092},
+      {"case": "digital-silence", "state": "unavailable", "selected_frame": null, "reason": "no_usable_windows", "false_channel_hint": false, "elapsed_seconds": 0.5302250999957323},
+      {"case": "quiet-low-information", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "elapsed_seconds": 0.7720148999942467},
+      {"case": "permuted-channels", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "elapsed_seconds": 0.771197399997618}
+    ],
+    "lifetime": {
+      "cancellation_during_collection": {"outcome": "cancelled", "elapsed_seconds": 0.3323176999692805, "child_count": 2, "child_returncodes": [0, 1], "terminate_requests": 1, "kill_requests": 0, "maximum_simultaneous_children": 1, "all_children_reaped": true, "reader_threads_after": 0, "partial_result_authority": false, "application_cache_trim_outputs": 0},
+      "partial_output_then_nonzero": {"outcome": "unavailable", "reason": "no_usable_windows", "elapsed_seconds": 0.19741009996505454, "child_count": 1, "child_returncodes": [7], "terminate_requests": 0, "kill_requests": 0, "all_children_reaped": true, "reader_threads_after": 0, "partial_result_authority": false, "application_cache_trim_outputs": 0}
+    },
+    "visible_vsview": {
+      "portable_identity": "exact verified v11 package",
+      "sources_ready": "3/3",
+      "markers": ["Provisional audio candidate: +0f — NOT APPLIED", "Provisional audio candidate: +0f — NOT APPLIED"],
+      "comparison_reasons": ["automatic_authority_held", "channel_corroboration_provisional"],
+      "weak_comparison_repaired_reason_visible": true,
+      "qualified_unassessed_contradicted_provisional_facts_distinct": true,
+      "hint_moved_playheads": false,
+      "hint_mutated_visited_state": false,
+      "visited_sources_at_same_frame": true,
+      "closed_without_saving": true,
+      "current_offsets_retained": true,
+      "portable_exit_code": 1,
+      "portable_exit_reason": "FC-4005 fail-closed because the review result was intentionally not saved",
+      "launcher_elapsed_seconds": 566.962946899992,
+      "child_count": 10,
+      "child_returncodes": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "reader_threads_after": 0,
+      "authority_files_after_close": 0
+    },
+    "verification": {
+      "commands": [
+        {"command": "git diff --name-only 7acda52093e8345f544750280efccab3cae849ca..60b201ecfcec5769df36c76e2ab423fab2718cfd -- . :(exclude)docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md", "result": "pass_empty"},
+        {"command": "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/verify_extracted_bundle.ps1 -ZipPath <ignored-zip> -ExtractRoot <ignored-extract> -DoctorStdoutPath <ignored-json> -DoctorStderrPath <ignored-stderr> -ExpectedCommitSha 7acda52093e8345f544750280efccab3cae849ca", "result": "pass"},
+        {"command": "<portable-python> <ignored-evidence-harness> --mode success --case original-private-three-file-v11-final --reference <private-reference> --comparison <private-comparison-a> --comparison <private-comparison-b> --generated <ignored-fresh-root> --output <ignored-json> --repeat 3", "result": "pass"},
+        {"command": "<portable-python> <ignored-evidence-harness> --mode success --case retained-real-zero-handle-plateau-with-peaks --reference <retained-base> --comparison <zero-control> --generated <ignored-fresh-root> --output <ignored-json> --repeat 5", "result": "pass"},
+        {"command": "<portable-python> <ignored-evidence-harness> --mode cancel --case cancellation-during-collection-v11-final --reference <private-reference> --comparison <private-comparison> --generated <ignored-fresh-root> --output <ignored-json>", "result": "pass"},
+        {"command": "<portable-python> <ignored-evidence-harness> --mode failure --case partial-output-nonzero-v11-final --reference <private-reference> --comparison <private-comparison> --generated <ignored-fresh-root> --output <ignored-json>", "result": "pass"},
+        {"command": "<portable-python> <ignored-evidence-harness> --mode success --case <retained-real-zero-or-signed-or-negative-control> --reference <retained-control> --comparison <retained-control> --generated <ignored-fresh-root> --output <ignored-json>", "result": "pass_all_eight_cases"},
+        {"command": "<portable-python> <ignored-windows-matrix-runner>", "result": "pass_unchanged_assertions_with_win32_rss_substitution"},
+        {"command": "<portable-python> <ignored-evidence-harness> --mode success --case original-private-three-file-v11-visible-absolute --reference <private-reference> --comparison <private-comparison-a> --comparison <private-comparison-b> --generated <ignored-fresh-root> --output <ignored-json> --use-vsview", "result": "pass_visible_acceptance_then_expected_fc_4005_close_without_save"},
+        {"command": "uv run --no-sync pytest -q tests/services/test_alignment_channel_corroboration.py tests/integration/test_alignment_channel_corroboration_production.py tests/integration/test_alignment_oracle_policy.py tests/integration/test_alignment_continuous_pipeline.py tests/integration/test_alignment_streaming_resources.py -rsx", "result": "pass_with_expected_opt_in_skips", "passed": 132, "skipped": 5},
+        {"command": "uv run --no-sync pytest --collect-only -q tests/services/test_alignment_channel_corroboration.py tests/integration/test_alignment_channel_corroboration_production.py", "result": "pass", "service_tests": 21, "native_production_tests": 1},
+        {"command": "FRAME_COMPARE_CHANNEL_CORROBORATION=1 uv run --no-sync pytest -q tests/integration/test_alignment_channel_corroboration.py -rsx", "result": "platform_limit", "reason": "the unchanged repository matrix invokes POSIX ps before its cases and has no Windows RSS implementation; unchanged assertions passed with only that sampler rebound to Win32 GetProcessMemoryInfo"},
+        {"command": "FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 uv run --no-sync pytest -q tests/integration/test_alignment_streaming_resources.py -rsx", "result": "platform_limit", "passed": 3, "failed": 2, "reason": "the resource sampler explicitly supports only Linux /proc and macOS ps; direct physical-Windows measurements are retained above"}
+      ],
+      "canonical_json_parse": "pass",
+      "sha256_format_validation": "pass_all_65_values",
+      "new_package_sha256_recomputation": "pass_zip_bundle_info_bundle_inventory_and_embedded_runtime_fingerprints",
+      "scalar_audit_against_ignored_raw_output": "pass",
+      "git_diff_check": "pass",
+      "git_diff_cached_check": "pass",
+      "tracked_diff_scope": "only tests/fixtures/alignment_oracle/streaming-production-results.json"
+    },
+    "privacy": "Only sanitized source, package, and runtime identities; hashes and byte sizes; construction classes; redacted commands; bounded scalar outcomes; conclusions; and limitations are retained. No private paths, filenames, aliases, media, screenshots, PCM, raw output, stderr, packet data, usernames, or identifying metadata are tracked.",
+    "limitations": ["The natural positive is one retained private media lineage, not general calibration.", "A 20 ms RSS sampler cannot exclude a shorter transient between observations.", "The repository's opt-in resource samplers are POSIX-only; the exact assertions were exercised on Windows by substituting only the RSS reader with Win32 GetProcessMemoryInfo."],
+    "acceptance": {"r6e_gate": "pass", "corresponding_channel_authority": "permanently_provisional_only", "automatic_application": false, "computed_cache_write": false, "manual_authority": false, "trim_input_write": false, "release_authority_activated": false}
   },
   "candidate": {
     "repository": "TJZine/frame-compare",
