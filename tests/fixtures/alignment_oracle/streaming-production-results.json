@@ -302,21 +302,36 @@
       "rss": {"baseline_bytes": 58810368, "peak_bytes": 158986240, "incremental_bytes": 100175872},
       "authority": {"application": false, "computed_cache": false, "trim_input": false}
     },
+    "retained_real_asset_provenance": {
+      "historical_asset_catalog": "/r6e_windows_channel_acceptance/controlled_real_media_derivatives/assets",
+      "construction_evidence": "pre-execution raw construction records; expectations do not derive from observed alignment results",
+      "assets": {
+        "base": {"class": "retained-real-audio base", "bytes": 43258457, "sha256": "1216f592acb789bc9d6e3527dd333e2eda3df96b0ad1f4a7a584529d407c8c53", "catalog_source": "historical_asset_catalog"},
+        "zero_remix": {"class": "zero-frame independently remuxed control", "bytes": 41957581, "sha256": "4f506baf3edfcfed6a62c3bf81d40a0c1031b85b8cd282a01a10b102b2920e5f", "catalog_source": "historical_asset_catalog"},
+        "positive_five": {"class": "positive-five-frame trim control", "bytes": 43150369, "sha256": "e933f5efcfdeffd7f9138009c7422ec24cf1a3cc0d569d155377b0a25cd1f115", "catalog_source": "historical_asset_catalog"},
+        "different_segment": {"class": "mismatched retained-media segment", "bytes": 45333354, "sha256": "039d9a35d77f3442c9d166f16c10e3d52b6eb4c838e7fd0d9c2161f96368ba2c", "catalog_source": "historical_asset_catalog"},
+        "digital_silence": {"class": "digital-silence low-information control", "bytes": 15582489, "sha256": "5cea824409966f214a6f018903a3c607df6c3f762fcd9ba9e31bb4f48c075e05", "catalog_source": "historical_asset_catalog"},
+        "permuted_channels": {"class": "permuted-channel control", "bytes": 43258457, "sha256": "ed3296e0c508ed49a3bcb77fed7f8e363b59f05a9bd63d61e38ec1f9345700ac", "catalog_source": "historical_asset_catalog"},
+        "same_interval_alternate_track": {"class": "same-interval alternate peer-release audio-track control", "bytes": 45721179, "sha256": "18f837b37fd48bebcfbef52d123bf4d6a13683d290fdd9f48bcb6d24f2273175", "catalog_source": "predeclared_raw_construction_record; omitted from the historical catalog and clarified here"},
+        "quiet_minus_100db": {"class": "minus-100-dB retained-real same-asset control", "bytes": 19073964, "sha256": "431870c1488753be0205c5717fbdbd38155b0c068f8d56f18d7a746c8ba3a3d0", "catalog_source": "predeclared_raw_construction_record; omitted from the historical catalog and clarified here"}
+      }
+    },
     "retained_real_timeline_controls": {
       "shared_disposition": {"state": "provisional", "channel_fallback_invoked": false, "reason": "automatic_authority_held", "application": false, "computed_cache": false, "manual": false, "trim_input": false},
       "cases": [
-        {"case": "zero", "expected_frame": 0, "selected_frame": 0, "candidate_sample": 0, "elapsed_seconds": 0.9157731999875978},
-        {"case": "positive-five", "expected_frame": 5, "selected_frame": 5, "candidate_sample": 1668, "elapsed_seconds": 0.7711984000052325},
-        {"case": "negative-five", "expected_frame": -5, "selected_frame": -5, "candidate_sample": -1668, "elapsed_seconds": 0.7878771999967285, "provenance": "the same hashed base and positive-five asset pair in reversed order"}
+        {"case": "zero", "construction_class": "same retained-real interval with a zero-shift whole-program rematrix", "referenced_assets": {"reference": "base", "comparison": "zero_remix"}, "independently_expected_frame": 0, "expected_mono_disposition_after_r7_activation": {"state": "trusted_automatic", "selected_frame": 0}, "control_classification": "mono_positive", "state": "provisional", "reason": "automatic_authority_held", "selected_frame": 0, "candidate_sample": 0, "observed_result_matches_expectation": true, "elapsed_seconds": 0.9157731999875978},
+        {"case": "positive-five", "construction_class": "same retained-real asset with synchronized audio/video removal of the first five source frames", "referenced_assets": {"reference": "base", "comparison": "positive_five"}, "independently_expected_frame": 5, "expected_mono_disposition_after_r7_activation": {"state": "trusted_automatic", "selected_frame": 5}, "control_classification": "mono_positive", "state": "provisional", "reason": "automatic_authority_held", "selected_frame": 5, "candidate_sample": 1668, "observed_result_matches_expectation": true, "elapsed_seconds": 0.7711984000052325},
+        {"case": "negative-five", "construction_class": "reverse ordering of the exact base and positive-five pair", "referenced_assets": {"reference": "positive_five", "comparison": "base"}, "independently_expected_frame": -5, "expected_mono_disposition_after_r7_activation": {"state": "trusted_automatic", "selected_frame": -5}, "control_classification": "mono_positive", "state": "provisional", "reason": "automatic_authority_held", "selected_frame": -5, "candidate_sample": -1668, "observed_result_matches_expectation": true, "elapsed_seconds": 0.7878771999967285, "provenance": "the same hashed base and positive-five asset pair in reversed order"}
       ]
     },
-    "retained_real_negative_controls": [
-      {"case": "mismatched-mix-cut-track", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "elapsed_seconds": 0.7740866999956779},
-      {"case": "different-segment", "state": "unavailable", "selected_frame": null, "reason": "no_voting_windows", "false_channel_hint": false, "elapsed_seconds": 7.063037899963092},
-      {"case": "digital-silence", "state": "unavailable", "selected_frame": null, "reason": "no_usable_windows", "false_channel_hint": false, "elapsed_seconds": 0.5302250999957323},
-      {"case": "quiet-low-information", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "elapsed_seconds": 0.7720148999942467},
-      {"case": "permuted-channels", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "elapsed_seconds": 0.771197399997618}
+    "retained_real_additional_controls": [
+      {"case": "mismatched-mix-cut-track", "construction_class": "same 95-second source-time interval from two retained peer-release audio tracks or mixes with no deliberate temporal shift", "referenced_assets": {"reference": "base", "comparison": "same_interval_alternate_track"}, "independently_expected_frame": 0, "expected_mono_disposition_after_r7_activation": {"state": "trusted_automatic", "selected_frame": 0}, "control_classification": "mono_positive", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "observed_result_matches_expectation": true, "limitation": "The label denotes an alternate peer-release track or mix at the same source-time interval. It retains a known constant-zero frame relationship and does not prove rejection of an arbitrary mix, edit, cut, or track mismatch.", "elapsed_seconds": 0.7740866999956779},
+      {"case": "different-segment", "construction_class": "base interval begins at retained source time 600 seconds while comparison begins at 1200 seconds from the same source", "referenced_assets": {"reference": "base", "comparison": "different_segment"}, "independently_expected_frame": null, "expected_mono_disposition_after_r7_activation": {"state": "unavailable", "reason": "no_voting_windows"}, "control_classification": "general_negative", "state": "unavailable", "selected_frame": null, "reason": "no_voting_windows", "false_channel_hint": false, "observed_result_matches_expectation": true, "elapsed_seconds": 7.063037899963092},
+      {"case": "digital-silence", "construction_class": "two references to the same zero-amplitude derivative of the retained-real base; audio intentionally contains no alignment information", "referenced_assets": {"reference": "digital_silence", "comparison": "digital_silence"}, "independently_expected_frame": null, "expected_mono_disposition_after_r7_activation": {"state": "unavailable", "reason": "no_usable_windows"}, "control_classification": "general_negative", "state": "unavailable", "selected_frame": null, "reason": "no_usable_windows", "false_channel_hint": false, "observed_result_matches_expectation": true, "elapsed_seconds": 0.5302250999957323},
+      {"case": "quiet-low-information", "construction_class": "two references to the same minus-100-dB derivative of the retained-real base with unchanged timeline", "referenced_assets": {"reference": "quiet_minus_100db", "comparison": "quiet_minus_100db"}, "independently_expected_frame": 0, "expected_mono_disposition_after_r7_activation": {"state": "trusted_automatic", "selected_frame": 0}, "control_classification": "mono_positive", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "observed_result_matches_expectation": true, "limitation": "This exact same-asset pair proves signed zero-frame behavior after deterministic attenuation; it is not an independently unrelated low-information negative.", "elapsed_seconds": 0.7720148999942467},
+      {"case": "permuted-channels", "construction_class": "same-timeline retained-real base with FL and FR exchanged and SL and SR exchanged; channel permutation preserves the mono sum", "referenced_assets": {"reference": "base", "comparison": "permuted_channels"}, "independently_expected_frame": 0, "expected_mono_disposition_after_r7_activation": {"state": "trusted_automatic", "selected_frame": 0}, "control_classification": "channel_negative_only", "state": "provisional", "selected_frame": 0, "reason": "automatic_authority_held", "channel_fallback_invoked": false, "false_channel_hint": false, "observed_result_matches_expectation": true, "limitation": "Mono success prevented fallback, so this retained-real run establishes correct mono authority and no false channel hint; the signed production matrix owns incompatible-channel fallback rejection.", "elapsed_seconds": 0.771197399997618}
     ],
+    "prospective_mono_authority_audit": {"controls_reviewed": 8, "mono_positives": 5, "mono_negatives": 0, "channel_negative_only": 1, "general_negatives": 2, "prospective_false_mono_authorizations": 0, "r7_activation_blocked_by_these_controls": false, "disposition": "pass"},
     "lifetime": {
       "cancellation_during_collection": {"outcome": "cancelled", "elapsed_seconds": 0.3323176999692805, "child_count": 2, "child_returncodes": [0, 1], "terminate_requests": 1, "kill_requests": 0, "maximum_simultaneous_children": 1, "all_children_reaped": true, "reader_threads_after": 0, "partial_result_authority": false, "application_cache_trim_outputs": 0},
       "partial_output_then_nonzero": {"outcome": "unavailable", "reason": "no_usable_windows", "elapsed_seconds": 0.19741009996505454, "child_count": 1, "child_returncodes": [7], "terminate_requests": 0, "kill_requests": 0, "all_children_reaped": true, "reader_threads_after": 0, "partial_result_authority": false, "application_cache_trim_outputs": 0}
@@ -326,6 +341,11 @@
       "sources_ready": "3/3",
       "markers": ["Provisional audio candidate: +0f — NOT APPLIED", "Provisional audio candidate: +0f — NOT APPLIED"],
       "comparison_reasons": ["automatic_authority_held", "channel_corroboration_provisional"],
+      "panel_markers_and_diagnostic_reasons_encoding": "rendered_correctly",
+      "in_video_overlay_unicode_em_dash_encoding": "rendered_as_mojibake",
+      "in_video_overlay_not_applied_and_diagnostic_reasons_legible": true,
+      "encoding_defect_classification": "presentation_only_not_authority_mutation",
+      "r7_repair_before_activation_candidate_rebuild": true,
       "weak_comparison_repaired_reason_visible": true,
       "qualified_unassessed_contradicted_provisional_facts_distinct": true,
       "hint_moved_playheads": false,
@@ -358,16 +378,28 @@
         {"command": "FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 uv run --no-sync pytest -q tests/integration/test_alignment_streaming_resources.py -rsx", "result": "platform_limit", "passed": 3, "failed": 2, "reason": "the resource sampler explicitly supports only Linux /proc and macOS ps; direct physical-Windows measurements are retained above"}
       ],
       "canonical_json_parse": "pass",
-      "sha256_format_validation": "pass_all_65_values",
+      "sha256_format_validation": "pass_all_73_values",
       "new_package_sha256_recomputation": "pass_zip_bundle_info_bundle_inventory_and_embedded_runtime_fingerprints",
       "scalar_audit_against_ignored_raw_output": "pass",
       "git_diff_check": "pass",
       "git_diff_cached_check": "pass",
-      "tracked_diff_scope": "only tests/fixtures/alignment_oracle/streaming-production-results.json"
+      "tracked_diff_scope": "only tests/fixtures/alignment_oracle/streaming-production-results.json",
+      "controller_audit_follow_up": {
+        "base_commit": "0b570bdd3e4083a4e13b016ad6c5809faace950d",
+        "canonical_json_parse_and_structural_inspection": "pass",
+        "retained_real_asset_references_resolved": 8,
+        "new_64_character_hash_occurrences": 8,
+        "oracle_policy_command": "uv run --no-sync pytest -q tests/integration/test_alignment_oracle_policy.py",
+        "oracle_policy_result": "pass_103_tests",
+        "git_diff_check": "pass",
+        "git_diff_cached_check": "pass",
+        "privacy_scan": "pass",
+        "tracked_diff_scope": "only tests/fixtures/alignment_oracle/streaming-production-results.json"
+      }
     },
     "privacy": "Only sanitized source, package, and runtime identities; hashes and byte sizes; construction classes; redacted commands; bounded scalar outcomes; conclusions; and limitations are retained. No private paths, filenames, aliases, media, screenshots, PCM, raw output, stderr, packet data, usernames, or identifying metadata are tracked.",
-    "limitations": ["The natural positive is one retained private media lineage, not general calibration.", "A 20 ms RSS sampler cannot exclude a shorter transient between observations.", "The repository's opt-in resource samplers are POSIX-only; the exact assertions were exercised on Windows by substituting only the RSS reader with Win32 GetProcessMemoryInfo."],
-    "acceptance": {"r6e_gate": "pass", "corresponding_channel_authority": "permanently_provisional_only", "automatic_application": false, "computed_cache_write": false, "manual_authority": false, "trim_input_write": false, "release_authority_activated": false}
+    "limitations": ["The natural positive is one retained private media lineage, not general calibration.", "A 20 ms RSS sampler cannot exclude a shorter transient between observations.", "The repository's opt-in resource samplers are POSIX-only; the exact assertions were exercised on Windows by substituting only the RSS reader with Win32 GetProcessMemoryInfo.", "The retained-real alternate-track control has a known constant-zero relationship and does not establish rejection of arbitrary mix, edit, cut, or track mismatches.", "The Windows VSView panel markers and reasons rendered correctly, but the in-video overlay rendered the Unicode em dash as mojibake; NOT APPLIED and both reasons remained legible. This is a presentation/encoding defect, not an authority mutation, and should be repaired in R7 before rebuilding the activation candidate."],
+    "acceptance": {"r6e_gate": "pass", "prospective_mono_authority_audit": "pass", "r7_activation_blocked_by_retained_real_controls": false, "r7_activation_candidate_rebuild_requires_overlay_encoding_repair": true, "corresponding_channel_authority": "permanently_provisional_only", "automatic_application": false, "computed_cache_write": false, "manual_authority": false, "trim_input_write": false, "release_authority_activated": false}
   },
   "candidate": {
     "repository": "TJZine/frame-compare",
