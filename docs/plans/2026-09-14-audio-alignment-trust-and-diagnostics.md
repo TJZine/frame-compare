@@ -16,6 +16,7 @@ Owner: Main GPT-5.6 Sol orchestration task; sequential Codex new tasks with cont
 **Replacement date:** September 15, 2026
 **Post-R6 remediation amendment:** September 20, 2026
 **Post-R6E mixed-support amendment:** September 20, 2026
+**Post-R6E proof-contract amendment:** September 21, 2026
 **Inspected pushed head:** `0df9c369a9abf19de3cce87de95ccd50ef7ecf1a`
 **Original investigation baseline:** `326da610a1f6d9baee7ea58d509f05f59af0f004`
 **Replacement packages:** R0–R7, plus post-evidence R6A–R6E and R6D-R1 before R7 activation.
@@ -488,7 +489,7 @@ Update current architecture/CLI/guide text in each behavior-changing package. Re
 
 ### Common dispatch, proof, and commit rules
 
-Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R6A -> R6B -> adjudication -> R6C -> adjudication -> R6D -> R6E attempt -> R6D-R1 -> R6E completion -> R7**. R6A repairs the confirmed diagnostic defect. R6B measures the unresolved confidence question. R6C calibrates the one bounded existing-method hypothesis that survived R6B. R6D may implement only the adjudicated held/provisional behavior. The first R6E execution exposed a mixed-support defect, so R6D-R1 repairs only that contract before R6E repeats exact Windows/private-media acceptance. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
+Execute in order: **R0 -> R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R6A -> R6B -> adjudication -> R6C -> adjudication -> R6D -> R6E attempt -> R6D-R1 -> R6E proof-contract replan -> R6E completion -> R7**. R6A repairs the confirmed diagnostic defect. R6B measures the unresolved confidence question. R6C calibrates the one bounded existing-method hypothesis that survived R6B. R6D may implement only the adjudicated held/provisional behavior. The first R6E execution exposed a mixed-support defect, so R6D-R1 repairs only that contract. The repaired natural Windows case then passed while two predeclared retained-real rematrices remained mono-sufficient; the proof-contract replan separates those distinct responsibilities instead of tuning a control to a private threshold. Only the controller edits this ledger, stages changes, or commits. A task returns its diff and observed proof; the controller audits both and commits the bounded unit. No automatic push, PR, release, signing operation, or branch reset is authorized by a package's commit instruction.
 
 Each unit has an effort boundary of one objective, its directly affected callers/tests/docs, and repairs caused by that change. It does not include unrelated cleanup or another architecture experiment. A consequential scope/contract change returns to the controller before dependent work proceeds. Read-only investigation inside the unit and routine implementation judgment do not require a separate planning task.
 
@@ -967,8 +968,10 @@ do not reuse v10 or activate R7. Preserve the R6E attempt as rejected evidence.
 
 **Stop/replan:** Any need to lower a floor, count views, admit a different frame, infer
 layouts, change extraction/config/schema, exceed existing work/resource bounds, or permit
-channel evidence into automatic authority returns to the controller. A real-media
-channel-positive control that still cannot pass after this exact repair blocks R7.
+channel evidence into automatic authority returns to the controller. A naturally occurring
+real-media channel-positive case that cannot pass after this exact repair blocks R7. A
+constructed derivative that remains mono-sufficient returns to the proof contract rather
+than authorizing coefficient or threshold tuning.
 
 **Controller commit:** `fix(alignment): combine corroborated temporal support`
 
@@ -990,7 +993,7 @@ identity, threshold, cache, native behavior, or plan edit.
 **Work/acceptance:** Build or verify the exact portable candidate and record its source and
 artifact identities. Run the production three-file case from a clean isolated config/cache;
 confirm the expected bounded channel collections, retained mono/per-view facts, `+0f`
-provisional hint, v10 hold, no computed application/cache authority, and truthful qualified/
+provisional hint, v11 hold, no computed application/cache authority, and truthful qualified/
 unassessed presentation. Measure simultaneous parent-plus-active-FFmpeg RSS, child/reader/
 handle lifetime, cancellation, total/fallback phase time, and cleanup. Capture visible
 candidate markers and close-without-save behavior in VSView.
@@ -1003,17 +1006,24 @@ quiet/low-information, incompatible/permuted, or conflicting evidence must not p
 false corroborated hint or any authority. The original private set remains a case study,
 not the label source for these controls.
 
-The zero/positive/negative controls must actually enter the channel path: record
-`channel_corroboration.status=corroborated`, the correct frame, at least three independent
-combined temporal observations, `channel_corroboration_provisional`, and retained
-per-window mono/view facts. A mono-only `automatic_authority_held` result does not prove
-R6D-R1. Use a predeclared whole-program retained-real-media remix/rematrix construction
-that weakens mono while preserving at least two exact corresponding named views; do not
-tune it from production thresholds. Record whether the negative sign reuses a labeled
-asset pair in reverse order. For RSS, retain the same-timestamp parent and active-child
-components of the combined peak rather than separate maxima. For handles, show a repeated
-steady-state plateau or explicitly account for retained one-time handles; an unexplained
-post-run increase is not a no-leak claim.
+Separate the three proof responsibilities. The naturally occurring weak second comparison
+in the original private case is the retained-real channel-positive gate: it must record
+`channel_corroboration.status=corroborated`, frame zero, at least three independent combined
+temporal observations, `channel_corroboration_provisional`, and retained per-window
+mono/view facts. The exact R6C/R6D zero/positive/negative production-service controls own
+signed channel-path correctness and must pass on the exact Windows source with zero declared
+negative corroborations. The retained-real zero/positive/negative derivatives own independent
+timeline labels, sign, and no-authority behavior; they may remain mono-only when the normal
+mono-first path is sufficient. Record whether the negative sign reuses a labeled asset pair
+in reverse order. Do not add or tune a remix to force a score below the production floor:
+normalized waveform correlation and correlated real program channels made two predeclared
+whole-program rematrices mono-sufficient, so a threshold-targeted third construction would
+test the fixture rather than the fallback.
+
+For RSS, retain the same-timestamp parent and active-child components of the combined peak
+rather than separate maxima. For handles, show a repeated steady-state plateau or explicitly
+account for retained one-time handles; an unexplained post-run increase is not a no-leak
+claim.
 
 **Verification:** Validate all hashes/JSON, run the focused production/oracle/resource tests
 from the exact portable source, inspect process exit/handle facts, run `git diff --check`,
@@ -1023,9 +1033,12 @@ R7; no full unrelated Python/Docker rerun is required for evidence-only changes.
 **Rollback:** Discard private artifacts or revert only the evidence addition. R6D remains
 held and cannot authorize trims.
 
-**Stop/replan:** Any wrong sign/frame, false negative corroboration, cap/full safety change,
-unbounded resource/lifetime result, stale/nonexact package, missing visible marker, or
-production behavior inconsistent with the R6D commit blocks R7 and returns to R6D repair.
+**Stop/replan:** Any wrong sign/frame, false corroboration in a declared negative, failure
+of the naturally occurring private channel-positive case, signed production-control failure,
+cap/full safety change, unbounded resource/lifetime result, stale/nonexact package, missing
+visible marker, or production behavior inconsistent with the R6D-R1 commit blocks R7 and
+returns to the controller. A mono-sufficient retained-real signed derivative is not a channel
+failure and must not be forced into fallback.
 
 **Controller commit:** `test(alignment): verify channel corroboration on Windows`
 
@@ -1213,8 +1226,8 @@ After activation, publish the actual qualified policy, cache invalidation, sessi
 | R6C channel corroboration calibration | Complete; adjudicated | `a3eb1569` | Three lineage-separated signed positives and six negative families passed one predeclared FL/FR/FC rule on native macOS and canonical Docker/Linux. Complete capped/full refinement changed seven sample winners but no frame, threshold-side, candidate, contradiction, or safety disposition. Evidence remains synthetic and provisional-only. |
 | R6D held channel corroboration | Complete through R6D-R1 repair; Windows acceptance pending | `7bb4ea6a`, `9b45de8c`, repaired by `5367f5ee` | Per-window corroboration remains fixed and provisional-only. R6D-R1 now combines unique qualified mono and corroborated channel observations for duration proof under fresh held v11; native macOS and fresh Docker/Linux proof passed. |
 | R6D-R1 mixed temporal support | Complete | `5367f5ee`, proof completed by `54225d3a` | Existing duration tiers now evaluate unique same-frame mono/channel observations without counting views or shared logical IDs twice. Floors, extraction, schemas, bounds, config, and authority are unchanged; the orchestration trim boundary has explicit fail-on-call proof. |
-| R6E Windows channel acceptance | Dependency-ready; first attempt not accepted | `af80b0d7` (historical attempt) | Rebuild exact R6D-R1 source and repeat portable/private-media/resource/handle/visible acceptance. Retained-real zero/positive/negative controls must actually reach channel corroboration; clarify same-timestamp combined RSS, handle plateau, and negative-control asset provenance. |
-| R7 activation | Blocked by incomplete R6E acceptance | — | Exact repaired portable candidate/RSS/lifetime proof, visible markers, real signed channel-positive and mismatch cells, unpatched defaults, and completed held-channel production acceptance are required. Channel corroboration remains provisional after activation. |
+| R6E Windows channel acceptance | Dependency-ready under amended proof contract; completion pending | `af80b0d7` (historical attempt only) | Exact v11 portable identity and the natural private channel-positive case are verified. Complete signed production controls, retained-real timeline controls, negatives, same-timestamp RSS, handle plateau/accounting, cancellation/failure, and visible acceptance without tuning another remix. |
+| R7 activation | Blocked by incomplete R6E acceptance | — | Exact repaired portable resource/lifetime proof, visible repaired markers, signed channel-path controls, retained-real sign/mismatch cells, unpatched defaults, and completed held-channel production acceptance are required. Channel corroboration remains provisional after activation. |
 
 For each checkpoint record task model/effort actually used, owner disposition, files, commit, commands/results/skips, evidence locations, unresolved risks, and the next permitted unit. Do not mark a package accepted from intended tests. When the workstream and release handoff are complete, change this file to `Status: Historical` in the same pass; otherwise keep the unresolved gate explicit.
 
@@ -1342,7 +1355,14 @@ For each checkpoint record task model/effort actually used, owner disposition, f
 - **Owner disposition and integrated change:** `5367f5ee` (`fix(alignment): combine corroborated temporal support`) keeps `alignment_consensus` as the duration-tier owner. For channel duration proof it builds one logical-ID-keyed set from integrity/coverage-valid fixed-base-credible mono observations and same-frame corroborated channel windows; channel evidence replaces a shared weak mono row, and the unchanged `_independent_support` owner applies non-overlap and early/late tiers using each observation's retained interval and lag. Channel candidate construction, score/peak aggregates, fixed views/order, collection ceiling, contradictions, extraction, floors, rate, bounds, schemas, config, cache/result/manual versions, and public behavior remain unchanged. The fresh identity is `continuous-origin-qualified-channel-corroboration-2097152-v11-held`; R7 is reserved for v12.
 - **Acceptance evidence:** the production service seam now covers the R6E topology of two early credible mono observations plus three later channel-corroborated weak rows, proving that the prior channel-only support set has zero independent observations while the unique mixed set meets the long-duration tier. Zero and both signs remain correct and provisional-only. Coverage also includes strict/permissive configured thresholds, latch disabled with cache fail-on-call, shared-ID and overlapping-interval deduplication, one/two insufficient observations, channel-only support, mono-first ineligibility, mono and channel cross-frame vetoes, declared negative families, unchanged unsuccessful outcomes, and diagnostic/native topology. `54225d3a` (`test(alignment): protect corroboration trim boundary`) adds the controller-requested fail-on-call application and trim-input guards while preserving null comparison authority and zero trims.
 - **Controller verification:** focused mixed-support service, diagnostic, production integration, VSView/native-contract, and orchestration trim tests passed; the controller's final combined focused selection passed all 37 tests. Pyright reported zero errors/warnings, whole-repo Ruff and `git diff --check` passed. The worker reported full G1–G5 passing: full Python suite, Bandit with zero medium/high findings, both import contracts, generated API/CLI docs, strict Zensical, exact R6C positive/negative matrix with zero declared negative corroborations, and all five native resource cases. A fresh canonical arm64 build of production commit `5367f5ee` produced test image `sha256:e853316a86cf0e7a461364d4adc1234223aad81f8a3b0a4c83dbb474f43b001c` and runtime image `sha256:6923b5257e5344803a1e0382dd460ad5b47fe3c197e5e42150f3d8b76f9f6803`; runtime/application/provenance checks passed with Debian FFmpeg/ffprobe `7.1.5-0+deb13u1`, seven continuous-pipeline tests passed with zero skips, and the exact R6C/production-channel/five-resource selection passed seven tests in the same image. The later `54225d3a` commit changes only a macOS orchestration test, so it does not invalidate production/runtime proof.
-- **Remaining gate / next unit:** R6D-R1 is accepted on native macOS and canonical Docker/Linux. R6E is dependency-ready and must build exact clean source including `54225d3a`, rerun the original private case, and provide retained-real channel-positive zero/+/− controls plus mismatch/low-information/permuted negatives. It must also record same-timestamp combined-RSS components, establish a handle plateau or account for retained handles, and state negative-control asset reuse/provenance. Automatic authority remains held, channel evidence remains permanently provisional-only, and R7 remains blocked.
+- **Remaining gate / next unit:** R6D-R1 is accepted on native macOS and canonical Docker/Linux. R6E is dependency-ready under the later proof-contract amendment: the original private case owns retained-real channel-positive proof, exact production controls own signed channel-path proof, and retained-real derivatives own timeline labels/sign without being forced past a sufficient mono result. R6E must still complete mismatch/low-information/permuted negatives, same-timestamp combined RSS, handle plateau/accounting, cancellation/failure, provenance, and visible acceptance. Automatic authority remains held, channel evidence remains permanently provisional-only, and R7 remains blocked.
+
+#### R6E proof-contract replan — September 21, 2026
+
+- **Stopped constructed-control attempts:** two clean physical-Windows runs against exact source `7acda52093e8345f544750280efccab3cae849ca` and portable ZIP `f00a90febce89e3e5b47b6d69165ea4a7f255f4694d6e42613eac1d378319fb2` stopped without tracked changes or commits because their retained-real zero controls remained on the sufficient mono-first path. The second construction reused the exact production-integration polarity/gain transform (`FL=1.0`, `FR=-0.7`, `FC=0.45`, `LFE/SL/SR=-0.8`) and still produced five qualified mono windows with scores `0.991909`, `0.998260`, `0.999622`, `0.999613`, and `0.920400`. Both runs selected the correct zero frame, stayed unapplied, wrote no authority/cache/trim state, used one child at a time, and cleaned up; neither exercised channel fallback. No alternative coefficients, source search, threshold change, or tuning sweep ran.
+- **Decisive repaired-case diagnostic:** the same exact v11-held portable then ran only the naturally occurring private three-source case from a fresh ignored config/cache. The first comparison remained correctly mono-sufficient. The weak second comparison collected two mono phases plus six bounded channel phases: its first two mono rows were qualified, its last three mono rows missed the waveform floor, and all three later rows were corroborated at frame zero by fixed `FL`/`FR`/`FC` views with no contradiction. The repaired aggregate reported `status=corroborated`, candidate sample `49`, frame `0`, `independent_windows=3`, and `channel_corroboration_provisional`; ten children exited zero with maximum concurrency one, all readers were gone, no correction/cache/manual/trim authority existed, and the checkout remained clean. This proves R6D-R1 on the real topology that motivated it.
+- **Adjudication:** forcing separately labeled real derivatives into fallback is not a useful additional gate. Normalized correlation is intentionally insensitive to global gain, and correlated real program channels kept two predeclared rematrices above the fixed mono floor. Choosing stronger coefficients after observing `0.920400` would tune a fixture to policy rather than test production behavior. R6E therefore triangulates instead: the natural case proves real Windows fallback and mixed temporal support; the already fixed R6C/R6D zero/positive/negative controls prove signed channel-path behavior on the exact Windows source; retained-real signed derivatives prove independent timeline labels, sign, and no-authority behavior even when mono wins. Channel evidence remains permanently provisional, and R7 will activate only qualified mono authority.
+- **Next permitted work:** finish R6E evidence only under the amended contract. Preserve the exact candidate and historical `af80b0d7` block, run the remaining signed/negative/resource/lifetime/visible cells, update only the canonical sanitized evidence JSON, and commit only if every amended gate passes. R7 remains blocked.
 
 ## 14. Source record
 
