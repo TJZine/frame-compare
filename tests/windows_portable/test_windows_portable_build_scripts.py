@@ -704,8 +704,8 @@ def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
     ) in proof
     assert "active_panel.use_positions_button.click()\n            app.processEvents()" in proof
     assert "keep_panel.keep_button.click()\n            app.processEvents()" in proof
-    assert '"0 / 3 sources ready"' in proof
-    assert '"3 / 3 sources ready"' in proof
+    assert '"0/3 positions captured"' in proof
+    assert r'"3/3 positions captured \u2014 ready to confirm"' in proof
     assert '"alignment_positions=ok"' in proof
     assert '"alignment_keep_current=ok"' in proof
     assert '"alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "' in proof

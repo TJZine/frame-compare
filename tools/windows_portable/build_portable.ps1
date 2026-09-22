@@ -1356,7 +1356,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             active_panel.on_workspace_loaded()
             app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "0 / 3 sources ready",
+                active_panel.progress_label.text() == "0/3 positions captured",
                 "alignment panel did not start with an empty three-source lineup",
             )
             for output_index, frame in enumerate((1, 0, 2)):
@@ -1365,7 +1365,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                 active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
                 app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "3 / 3 sources ready",
+                active_panel.progress_label.text() == "3/3 positions captured \u2014 ready to confirm",
                 "alignment panel did not record every source position",
             )
             assert_true(

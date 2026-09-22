@@ -330,14 +330,14 @@ try:
     active_panel = AlignmentReviewPanel(active_parent, panel_api)
     active_panel.on_workspace_loaded()
     app.processEvents()
-    if active_panel.progress_label.text() != "0 / 3 sources ready":
+    if active_panel.progress_label.text() != "0/3 positions captured":
         raise SystemExit("alignment panel did not start with an empty three-source lineup")
     for output_index, frame in enumerate((1, 0, 2)):
         panel_api.current_voutput = voutputs[output_index]
         panel_api.current_frame = frame
         active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
         app.processEvents()
-    if active_panel.progress_label.text() != "3 / 3 sources ready":
+    if active_panel.progress_label.text() != "3/3 positions captured \u2014 ready to confirm":
         raise SystemExit("alignment panel did not record every source position")
     if active_panel.use_positions_button.text() != "Confirm these aligned positions":
         raise SystemExit("alignment panel primary action label changed")
