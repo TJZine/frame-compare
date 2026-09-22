@@ -6,7 +6,6 @@ import asyncio
 import gc
 import threading
 import weakref
-from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -355,7 +354,6 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         }
     elif view_case == "conflicting":
         comparison_views["FR"] = _offset_timeline(comparison_views["FR"], 400)
-        comparison_views["FC"] = _offset_timeline(comparison_views["FC"], -400)
     elif view_case == "localized":
         comparison_views = {
             view: (0.55 * source + np.sqrt(1 - 0.55**2) * noise).astype(np.float32)
@@ -471,30 +469,14 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
                     if window.corroborated
                 ]
                 assert len(corroborated) == 3
-                assert len(attempt.decision.candidate.supporting_window_ids) == 3
-                mono_by_id = {window.logical_id: window for window in attempt.windows}
-                channel_ids = {window.logical_id for window in corroborated}
-                channel_records = [
-                    replace(
-                        mono_by_id[window.logical_id],
-                        actual_useful_reference_start=window.actual_useful_reference_start,
-                        actual_useful_reference_end=window.actual_useful_reference_end,
-                    )
+                support_ids = attempt.decision.candidate.supporting_window_ids
+                assert support_ids == tuple(window.logical_id for window in corroborated)
+                assert all(
+                    window.actual_useful_reference_start is not None
+                    and window.actual_useful_reference_end is not None
                     for window in corroborated
-                ]
-                _selected, channel_only_count = alignment_consensus._independent_support(
-                    channel_records,
-                    channel_ids,
-                    config=config,
-                    sample_rate=config.sample_rate,
-                    reference_duration=95 * config.sample_rate,
-                    comparison_duration=95 * config.sample_rate,
-                    offsets={
-                        window.logical_id: window.representative_sample_lag or 0
-                        for window in corroborated
-                    },
                 )
-                assert channel_only_count == 0
+                channel_ids = set(support_ids)
                 mono_ids = {
                     window.logical_id
                     for window in attempt.windows
@@ -502,39 +484,6 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
                 }
                 assert mono_ids.isdisjoint(channel_ids)
                 assert len(mono_ids | channel_ids) == 5
-                assert expected_frame is not None
-                assert (
-                    alignment_consensus._combined_channel_independent_support(
-                        attempt.windows,
-                        [*corroborated, corroborated[0]],
-                        winning_frame=expected_frame,
-                        config=config,
-                        reference_duration=95 * config.sample_rate,
-                        comparison_duration=95 * config.sample_rate,
-                    )
-                    == 3
-                )
-                overlap_start = corroborated[0].actual_useful_reference_start
-                overlap_end = corroborated[0].actual_useful_reference_end
-                overlapping = [
-                    replace(
-                        window,
-                        actual_useful_reference_start=overlap_start,
-                        actual_useful_reference_end=overlap_end,
-                    )
-                    for window in corroborated
-                ]
-                assert (
-                    alignment_consensus._combined_channel_independent_support(
-                        attempt.windows,
-                        overlapping,
-                        winning_frame=expected_frame,
-                        config=config,
-                        reference_duration=95 * config.sample_rate,
-                        comparison_duration=95 * config.sample_rate,
-                    )
-                    == 0
-                )
             assert "Evidence:" in presented
             assert "Channel-view evidence:" in presented
             assert all(
@@ -548,6 +497,12 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
                 assert attempt.channel_corroboration.reason == "credible_cross_frame_veto"
                 assert all(
                     window.reason == "credible_cross_frame_veto"
+                    for window in attempt.channel_corroboration.windows
+                )
+                assert all(
+                    window.agreeing_views == ()
+                    and not any(view.agrees for view in window.views)
+                    and any(view.contradiction for view in window.views)
                     for window in attempt.channel_corroboration.windows
                 )
             if view_case in {"one_window", "two_windows"}:

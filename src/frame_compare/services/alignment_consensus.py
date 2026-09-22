@@ -1131,7 +1131,7 @@ def corroborate_channel_views(
             updated_views = tuple(
                 replace(
                     item,
-                    agrees=item.view in agreeing_names,
+                    agrees=corroborated and item.view in agreeing_names,
                     contradiction=(item.base_credible and item.requested_frame_candidate != frame),
                 )
                 for item in views
