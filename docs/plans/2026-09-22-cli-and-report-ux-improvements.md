@@ -65,7 +65,7 @@ mode, alignment algorithm, installer, or guided-tour project.
   after these UI changes; do not restore historical images as current evidence or
   alter that plan's status without its own acceptance.
 
-Use [AGENTS.md](../../AGENTS.md), the [runbook](../ENGINEERING_RUNBOOK.md),
+Use `AGENTS.md`, the [runbook](../ENGINEERING_RUNBOOK.md),
 [CLI contract](../current-cli-contract.md), and the report sections of the
 [architecture](../current-architecture.md) as authority. Apply Ponytail full mode
 with repository overrides. Default to one implementation agent and cohesive units;
