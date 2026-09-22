@@ -481,7 +481,7 @@ at the next checkpoint. Pending rows are not proof.
 | Activation | Complete | `51ef0132fa89d8ed36c6114c63157e2c13630085` / `edb10ef6f3e0b7c413a414374e26c8e4959080f4` | Current orchestrator; GPT-6, effort not exposed | This plan only; `edb10ef6` | Not applicable | Baseline/ancestry/authority, preamble/package/link checks, API drift, strict Zensical (no issues), staged diff and hooks passed. Initial site-link failure repaired before commit. | User approved extra workflow commit; no product edits |
 | C0 | Accepted | `edb10ef6f3e0b7c413a414374e26c8e4959080f4` / same | `01a0c7bd-430a-7590-86da-f91ffb5699fc`; `gpt-5.6-sol`, medium | Read-only; no implementation commit | Complete structured callback received; 69/53 commits, 86/66 historical touched paths; four reproductions; 11 focused tests passed | Independent source/workflow/range audit; AA-01/02 reproduced; same 11 tests passed, no skips; clean status | `docs(plan): record post-activation review closure`; details below |
 | F1 | Accepted locally and in Docker; Windows remains W1 | `cdd0fce3643dd57b6307ef43ae725975e539f633` / `5e75900ca572038105dc9e700ec5ee3759ac98bd` | `01a0c7cd-4fe7-7232-a1ee-dd892721fbdb`; `gpt-5.6-sol`, medium | Six authorized phase/test/current-doc files; `5e75900c` | Red/green regression, focused/full/static/docs and targeted canonical Docker passed; ignored logs `task-evidence/f1` | Every changed line inspected; focused phase/cache/manual/native integration passed; image source/lock hashes match | `docs(plan): record raw offset composition acceptance`; Windows still required |
-| F2 | Dispatched; user naming and no-compatibility clarifications delivered | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / pending | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Planner/channel/v2 policy refinement | Pending | Pending | Old results disposable; controller plan-only scope clarifications while worker runs |
+| F2 | Implementation returned; documentation repair required before acceptance | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / `c5554ea784921d65fe9a748ba133854a3d67d956` | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Twelve planner/channel/policy/test/current-doc files; `c5554ea7` | Full/static/docs pass with documented skips; targeted Docker and opt-in channel proof reported | Focused planner/channel/cache/authority/native-contract tests passed, no skips; documentation overstates midpoint split above 60 seconds | F2-R documentation-only repair next; F3 remains pending |
 | F3 | Pending F2 | Pending | Pending | Channel lifetime | Pending | Pending | Resource proof required |
 | F4 | Pending F3 | Pending | Pending | Current docs | Pending | Pending | Historical records unchanged |
 | F5 | Pending F4 | Pending | Pending | Narrow workflow filters/tests | Pending | Pending | Hosted CI pending push |
@@ -599,6 +599,34 @@ checked. Reuse the inspected full/static/Docker evidence because no subsequent p
 change invalidated it; the later R80 handoff is plan-only. Physical Windows remains W1.
 At A1 the broad Docker opt-in skip still needs explicit handling through the supported
 test selection/opt-in route; do not weaken zero-skip enforcement. F2 is next.
+
+### F2 controller checkpoint — bounded documentation repair
+
+The controller inspected the F2 diff and independently ran distributed planning,
+channel corroboration, reuse-cache, authority-hold, and VSView alignment-review
+contract tests. All passed without skips. The complete full-suite log shows expected
+runtime/platform/opt-in skips; these are not resource or Windows acceptance. Static
+and strict-doc logs pass. The broad Docker run still fails its zero-skip guard on the
+channel opt-in test; targeted Docker proof is distinct and final A1 remains required.
+
+One concrete correction is required before acceptance: all three changed current
+docs describe the entire default 30–90-second tier as midpoint halves. The actual
+planner splits integer halves only through 60 seconds; above 60 and below 90 it
+retains two capped 30-second endpoint windows with a gap. This is the intended bounded
+behavior, so repair prose only and preserve larger configured minimum-window behavior.
+F2-R may edit only those three current docs, verify against source and existing
+boundary tests, run API-doc and strict documentation checks, and commit separately.
+
+The callback's starting SHA was mistyped and its model description was inconclusive.
+The ledger uses the exact dispatch SHA and explicit tool model/reasoning instead.
+Intervening controller plan clarifications and the user's independent runtime-plan
+commit are expected. The unrelated untracked CLI/report UX plan is preserved.
+Audio alignment remains a v2 refinement; old results remain disposable, without
+compatibility readers, migrations, or preservation requirements.
+
+Checkpoint API-doc validation passed. Controller strict-doc validation was blocked
+solely by the unrelated untracked CLI/report UX plan's root `AGENTS.md` site link
+(line 65); that file is preserved. This is not an F2 regression or a strict-doc pass.
 
 Activation commit: `docs(plan): activate audio alignment remediation and UX plan`.
 After all implementation, controller, and Windows gates pass, inspect every commit
