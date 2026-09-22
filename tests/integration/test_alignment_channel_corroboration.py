@@ -99,7 +99,7 @@ class _Resources:
             sampler.join(timeout=2)
         if process.returncode != 0:
             raise AssertionError(stderr.decode(errors="replace")[-2000:])
-        self.peak_combined_rss = max(self.peak_combined_rss, *samples)
+        self.peak_combined_rss = max((self.peak_combined_rss, *samples))
         return stdout
 
 

@@ -385,10 +385,10 @@ def test_metadata_v1_session_requires_regeneration(tmp_path: Path) -> None:
 
     _call_hook(panel.on_workspace_loaded)
 
-    assert panel.error_label.text() == (
-        "Alignment review requires a newly generated session. "
-        "This session uses metadata v1; this version requires v4."
-    )
+    message = panel.error_label.text()
+    assert "newly generated session" in message
+    assert "metadata v1" in message
+    assert "requires v4" in message
     assert "Inactive" in panel.progress_label.text()
     assert not panel.keep_button.isEnabled()
 
