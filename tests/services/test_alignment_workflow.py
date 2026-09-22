@@ -26,6 +26,7 @@ from frame_compare.services.alignment_audio import (
 )
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_correlation import CorrelationEstimate
+from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
@@ -855,13 +856,23 @@ def _presented_attempt_result(
     quiet: bool = False,
     json_output: bool = False,
     progress: ProgressReporter | None = None,
+    sample_offset: int = 0,
 ) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference_fps = Fraction(24)
     attempt = audio_attempt()
     decision = attempt.decision
     if state == "trusted_automatic":
-        decision = replace(decision, state="trusted_automatic", primary_reason="accepted")
+        assert decision.candidate is not None
+        applied_frame = samples_to_frames(sample_offset, config.sample_rate, reference_fps)
+        decision = replace(
+            decision,
+            state="trusted_automatic",
+            primary_reason="accepted",
+            candidate=replace(decision.candidate, frame_offset=applied_frame),
+        )
         consensus = AlignmentConsensus(
-            0,
+            sample_offset,
             0.99,
             True,
             "accepted",
@@ -921,7 +932,6 @@ def _presented_attempt_result(
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
     comparison.touch()
-    config = AlignmentConfig(cache_results=False, no_color=True)
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
@@ -931,7 +941,7 @@ def _presented_attempt_result(
     align_clips_from_request(
         request,
         config,
-        reference_fps=Fraction(24),
+        reference_fps=reference_fps,
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
@@ -967,41 +977,39 @@ def test_normal_terminal_distinguishes_audio_states(
     assert "\x1b[" not in captured.err
 
 
-@pytest.mark.parametrize("offset", [-5, 0, 5])
+@pytest.mark.parametrize(
+    ("sample_offset", "rendered_offset"),
+    [(-4000, "-12f"), (0, "+0f"), (4000, "+12f")],
+)
 def test_normal_terminal_formats_signed_applied_offsets(
-    offset: int,
+    sample_offset: int,
+    rendered_offset: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    result = AlignmentResult(
-        reference_clip="ref.mkv",
-        comparison_clip="comp.mkv",
-        frame_offset=offset,
-        time_offset_seconds=offset / 24,
-        correlation_score=0.99,
-        algorithm="cross_correlation",
-        source="computed",
-    )
-    provenance = AlignmentProvenance(
-        result=result,
-        comparison_cache_key="ref:comp",
-        provenance="computed_this_run",
+    _presented_attempt_result(
+        tmp_path,
+        monkeypatch,
+        state="trusted_automatic",
+        sample_offset=sample_offset,
     )
 
-    lines = alignment_service._normal_evidence_lines(
-        ordinal=1,
-        result=result,
-        provenance=provenance,
-    )
-
-    assert lines == [
-        f"Comparison 1 - Audio alignment accepted: {offset:+d}f - APPLIED",
-        "No additional confirmation needed.",
-    ]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Comparison 1 - Audio alignment accepted: {rendered_offset} - APPLIED" in captured.err
+    assert "No additional confirmation needed." in captured.err
 
 
 @pytest.mark.parametrize("original_state", ["provisional", "unavailable"])
 def test_manual_authority_leads_over_original_audio_attempt(
     original_state: str,
 ) -> None:
+    """Pin the frozen precedence row for a state no public run presents yet.
+
+    Evidence is presented before native review, so ``align_clips_from_request``
+    cannot currently reach a manual result that retains an original audio attempt.
+    """
     attempt = audio_attempt()
     if original_state == "unavailable":
         attempt = replace(
@@ -1030,17 +1038,11 @@ def test_manual_authority_leads_over_original_audio_attempt(
         result=result,
         provenance=provenance,
     )
-    verbose_lines = alignment_service._verbose_evidence_lines(attempt)
 
-    assert lines[:2] == [
+    assert lines == [
         "Comparison 1 - Manually confirmed alignment: -3f - APPLIED",
         "No additional confirmation needed.",
     ]
-    assert verbose_lines[0] == (
-        "Original audio attempt: Provisional audio candidate: +0f - NOT APPLIED"
-        if original_state == "provisional"
-        else "Original audio attempt: No usable audio candidate - NOT APPLIED"
-    )
 
 
 def test_rich_terminal_groups_audio_evidence_in_an_aligned_panel(
@@ -1092,14 +1094,24 @@ def test_rich_terminal_narrow_no_color_render_keeps_decision_tokens(
     assert "\x1b[" not in rendered
 
 
+@pytest.mark.parametrize(
+    ("state", "original_attempt"),
+    [
+        ("provisional", "Original audio attempt: Provisional audio candidate: +0f - NOT APPLIED"),
+        ("unavailable", "Original audio attempt: No usable audio candidate - NOT APPLIED"),
+    ],
+)
 def test_verbose_terminal_adds_bounded_stream_and_window_details(
+    state: str,
+    original_attempt: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _presented_attempt_result(tmp_path, monkeypatch, state="provisional", verbose=True)
+    _presented_attempt_result(tmp_path, monkeypatch, state=state, verbose=True)
 
     captured = capsys.readouterr()
+    assert original_attempt in captured.err
     assert "Audio details:" in captured.err
     assert "primary-00:" in captured.err
     assert "actual=8000/8000" in captured.err
@@ -1139,6 +1151,11 @@ def test_json_mode_preserves_review_warning_for_applied_manual_history(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Pin the preserved JSON predicate for a state no public run presents yet.
+
+    Evidence is presented before native review, so ``align_clips_from_request``
+    cannot currently reach a manual result that retains an original audio attempt.
+    """
     attempt = audio_attempt()
     decision = attempt.decision
     expected_candidate: int | None = 0
@@ -1227,49 +1244,12 @@ def test_json_mode_preserves_review_warning_for_applied_manual_history(
 
 def test_json_mode_keeps_trusted_applied_result_silent(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    attempt = audio_attempt()
-    decision = replace(attempt.decision, state="trusted_automatic", primary_reason="accepted")
-    result = AlignmentResult(
-        reference_clip="ref.mkv",
-        comparison_clip="comp.mkv",
-        frame_offset=0,
-        time_offset_seconds=0.0,
-        correlation_score=1.0,
-        algorithm=None,
-        source="manual",
-        audio_attempt=replace(attempt, decision=decision),
-    )
-    reference = tmp_path / "ref.mkv"
-    comparison = tmp_path / "comp.mkv"
-    reference.touch()
-    comparison.touch()
-    config = AlignmentConfig(cache_results=False)
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        config=config,
-        generated_dir=tmp_path,
-    )
-    provenance = AlignmentProvenance(
-        result=result,
-        comparison_cache_key="ref:comp",
-        provenance="interactive_confirmed_this_run",
-        evidence_availability="current_attempt",
-    )
-
     with capture_logs() as logs:
-        alignment_service._present_alignment_evidence(
-            request=request,
-            results_map={"ref:comp": result},
-            provenances={"ref:comp": provenance},
-            config=config,
-            progress=None,
-            verbose=False,
-            quiet=False,
-            json_output=True,
-            diagnostics_written=False,
+        _presented_attempt_result(
+            tmp_path, monkeypatch, state="trusted_automatic", json_output=True
         )
 
     assert not any(entry["event"] == "audio_alignment_requires_review" for entry in logs)
