@@ -936,119 +936,122 @@ def corroborate_channel_views(
             AudioChannelCollectionRecord(view=view, summary=summary) for summary in phase.summaries
         )
         view_records: dict[int, AudioChannelViewRecord] = {}
-        for plan_index, spec, window in zip(
-            channel_plan.window_indices,
-            channel_plan.windows,
-            phase.windows,
-            strict=True,
-        ):
-            raise_if_alignment_cancelled(cancellation)
-            reference_count = int(window.reference.size)
-            comparison_count = int(window.comparison.size)
-            origin_delta = window.reference_start_sample - window.comparison_start_sample
-            try:
-                raw = estimate_alignment_offset(
-                    window.reference,
-                    window.comparison,
-                    config=replace(
-                        config,
-                        sample_rate=plan.requested_sample_rate,
-                        correlation_mode="raw_fft",
+        try:
+            for plan_index, spec, window in zip(
+                channel_plan.window_indices,
+                channel_plan.windows,
+                phase.windows,
+                strict=True,
+            ):
+                raise_if_alignment_cancelled(cancellation)
+                reference_count = int(window.reference.size)
+                comparison_count = int(window.comparison.size)
+                origin_delta = window.reference_start_sample - window.comparison_start_sample
+                try:
+                    raw = estimate_alignment_offset(
+                        window.reference,
+                        window.comparison,
+                        config=replace(
+                            config,
+                            sample_rate=plan.requested_sample_rate,
+                            correlation_mode="raw_fft",
+                            preprocessing_mode="standard",
+                            refinement_mode="disabled",
+                            refinement_sample_rate=None,
+                        ),
+                        alignment_offset_bounds_samples=(
+                            -requested_limit - origin_delta,
+                            requested_limit - origin_delta,
+                        ),
+                        cancellation=cancellation,
+                    )
+                    requested_lag = origin_delta + raw.sample_offset
+                    correction, score = refine_aligned_score(
+                        window.reference,
+                        window.comparison,
                         preprocessing_mode="standard",
-                        refinement_mode="disabled",
-                        refinement_sample_rate=None,
-                    ),
-                    alignment_offset_bounds_samples=(
-                        -requested_limit - origin_delta,
-                        requested_limit - origin_delta,
-                    ),
-                    cancellation=cancellation,
-                )
-                requested_lag = origin_delta + raw.sample_offset
-                correction, score = refine_aligned_score(
-                    window.reference,
-                    window.comparison,
-                    preprocessing_mode="standard",
-                    correction_bounds_samples=(
-                        requested_lag - radius - origin_delta,
-                        requested_lag + radius - origin_delta,
-                    ),
-                    cancellation=cancellation,
-                )
-                del correction
-                useful_start, useful_end, _expected, coverage, _state = _support_facts(
-                    reference_start=window.reference_start_sample,
-                    reference_count=reference_count,
-                    comparison_start=window.comparison_start_sample,
-                    comparison_count=comparison_count,
-                    planned_reference_start=spec.reference_start_sample,
-                    planned_reference_count=spec.reference_sample_count,
-                    planned_comparison_start=spec.comparison_start_sample,
-                    planned_comparison_count=spec.comparison_sample_count,
-                    requested_offset=requested_lag,
-                )
-                peak = _peak_value(raw.peak_ratio)
-                activity_valid = True
-                coverage_valid = coverage >= _STABILITY_COVERAGE_FLOOR
-                peak_valid = peak is not None and _peak_passes(
-                    raw.peak_ratio, _REVIEW_PEAK_RATIO_FLOOR
-                )
-                base_credible = coverage_valid and peak_valid and score >= _REVIEW_SCORE_FLOOR
-                mono_lag = mono_result.window_records[plan_index].requested_sample_lag
-                if mono_lag is None:
-                    raise ValueError("eligible mono row is missing its requested-rate lag")
-                rejection = None
-                if not coverage_valid:
-                    rejection = "coverage_floor"
-                elif not peak_valid:
-                    rejection = "peak_floor"
-                elif abs(requested_lag - mono_lag) > radius:
-                    rejection = "outside_correction_neighborhood"
-                elif score < _REVIEW_SCORE_FLOOR:
-                    rejection = "waveform_floor"
-                view_records[plan_index] = AudioChannelViewRecord(
-                    view=view,
-                    requested_sample_lag=requested_lag,
-                    requested_frame_candidate=samples_to_frames(
-                        requested_lag, config.sample_rate, fps
-                    ),
-                    requested_score=score,
-                    peak_ratio=peak,
-                    actual_reference_count=reference_count,
-                    actual_comparison_count=comparison_count,
-                    actual_useful_reference_start=useful_start,
-                    actual_useful_reference_end=useful_end,
-                    actual_coverage=coverage,
-                    activity_valid=activity_valid,
-                    coverage_valid=coverage_valid,
-                    base_credible=base_credible,
-                    agrees=False,
-                    contradiction=False,
-                    rejection_reason=rejection,
-                )
-            except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
-                raise
-            except AudioAlignmentError as exc:
-                view_records[plan_index] = AudioChannelViewRecord(
-                    view=view,
-                    requested_sample_lag=None,
-                    requested_frame_candidate=None,
-                    requested_score=None,
-                    peak_ratio=None,
-                    actual_reference_count=reference_count,
-                    actual_comparison_count=comparison_count,
-                    actual_useful_reference_start=None,
-                    actual_useful_reference_end=None,
-                    actual_coverage=None,
-                    activity_valid=False,
-                    coverage_valid=False,
-                    base_credible=False,
-                    agrees=False,
-                    contradiction=False,
-                    rejection_reason=exc.category,
-                )
+                        correction_bounds_samples=(
+                            requested_lag - radius - origin_delta,
+                            requested_lag + radius - origin_delta,
+                        ),
+                        cancellation=cancellation,
+                    )
+                    del correction
+                    useful_start, useful_end, _expected, coverage, _state = _support_facts(
+                        reference_start=window.reference_start_sample,
+                        reference_count=reference_count,
+                        comparison_start=window.comparison_start_sample,
+                        comparison_count=comparison_count,
+                        planned_reference_start=spec.reference_start_sample,
+                        planned_reference_count=spec.reference_sample_count,
+                        planned_comparison_start=spec.comparison_start_sample,
+                        planned_comparison_count=spec.comparison_sample_count,
+                        requested_offset=requested_lag,
+                    )
+                    peak = _peak_value(raw.peak_ratio)
+                    activity_valid = True
+                    coverage_valid = coverage >= _STABILITY_COVERAGE_FLOOR
+                    peak_valid = peak is not None and _peak_passes(
+                        raw.peak_ratio, _REVIEW_PEAK_RATIO_FLOOR
+                    )
+                    base_credible = coverage_valid and peak_valid and score >= _REVIEW_SCORE_FLOOR
+                    mono_lag = mono_result.window_records[plan_index].requested_sample_lag
+                    if mono_lag is None:
+                        raise ValueError("eligible mono row is missing its requested-rate lag")
+                    rejection = None
+                    if not coverage_valid:
+                        rejection = "coverage_floor"
+                    elif not peak_valid:
+                        rejection = "peak_floor"
+                    elif abs(requested_lag - mono_lag) > radius:
+                        rejection = "outside_correction_neighborhood"
+                    elif score < _REVIEW_SCORE_FLOOR:
+                        rejection = "waveform_floor"
+                    view_records[plan_index] = AudioChannelViewRecord(
+                        view=view,
+                        requested_sample_lag=requested_lag,
+                        requested_frame_candidate=samples_to_frames(
+                            requested_lag, config.sample_rate, fps
+                        ),
+                        requested_score=score,
+                        peak_ratio=peak,
+                        actual_reference_count=reference_count,
+                        actual_comparison_count=comparison_count,
+                        actual_useful_reference_start=useful_start,
+                        actual_useful_reference_end=useful_end,
+                        actual_coverage=coverage,
+                        activity_valid=activity_valid,
+                        coverage_valid=coverage_valid,
+                        base_credible=base_credible,
+                        agrees=False,
+                        contradiction=False,
+                        rejection_reason=rejection,
+                    )
+                except (AudioAlignmentCancellationError, AudioAlignmentCleanupError):
+                    raise
+                except AudioAlignmentError as exc:
+                    view_records[plan_index] = AudioChannelViewRecord(
+                        view=view,
+                        requested_sample_lag=None,
+                        requested_frame_candidate=None,
+                        requested_score=None,
+                        peak_ratio=None,
+                        actual_reference_count=reference_count,
+                        actual_comparison_count=comparison_count,
+                        actual_useful_reference_start=None,
+                        actual_useful_reference_end=None,
+                        actual_coverage=None,
+                        activity_valid=False,
+                        coverage_valid=False,
+                        base_credible=False,
+                        agrees=False,
+                        contradiction=False,
+                        rejection_reason=exc.category,
+                    )
+        finally:
+            phase = None
+            window = None
         records_by_view[view] = view_records
-        del phase
 
     channel_windows: list[AudioChannelWindowRecord] = []
     for plan_index in channel_plan.window_indices:

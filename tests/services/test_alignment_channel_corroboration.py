@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import threading
+import weakref
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -13,6 +16,7 @@ import pytest
 from frame_compare.services import alignment_audio, alignment_consensus
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_correlation import CorrelationEstimate
+from frame_compare.services.errors import AudioAlignmentCancellationError, AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
     AudioAlignmentCollectionRecord,
@@ -705,3 +709,138 @@ def test_weak_named_channel_dissent_does_not_veto_provisional_hint(
     assert result.channel_corroboration.status == "corroborated"
     assert result.channel_corroboration.candidate is not None
     assert result.channel_corroboration.candidate.frame_offset == 0
+
+
+@pytest.mark.parametrize("first_view_failure", [False, True])
+def test_channel_view_arrays_are_released_before_next_loader(
+    monkeypatch: pytest.MonkeyPatch,
+    first_view_failure: bool,
+) -> None:
+    spec = alignment_audio.AudioWindowSpec(0, 32, 0, 32)
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=1_000,
+        requested_sample_rate=1_000,
+        windows=(spec,),
+        peak_fft_points=64,
+        total_fft_points=64,
+        reference_duration_samples=32,
+        comparison_duration_samples=32,
+    )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR"),
+        window_indices=(0,),
+        windows=(spec,),
+        retained_samples_per_view=64,
+    )
+    mono_result = _synthetic_mono_result(plan)
+    first_array_refs: list[weakref.ReferenceType[np.ndarray]] = []
+    loader_calls = 0
+    estimate_calls = 0
+
+    def phase() -> alignment_audio.CollectedAudioPhase:
+        windows = (
+            alignment_audio.AudioWindow(
+                np.ones(32, dtype=np.float32),
+                np.ones(32, dtype=np.float32),
+                0,
+                0,
+            ),
+        )
+        first_array_refs.extend(
+            weakref.ref(array)
+            for window in windows
+            for array in (window.reference, window.comparison)
+        )
+        return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
+
+    def phase_loader(_view: str) -> alignment_audio.CollectedAudioPhase:
+        nonlocal loader_calls
+        loader_calls += 1
+        if loader_calls == 1:
+            return phase()
+        gc.collect()
+        assert all(reference() is None for reference in first_array_refs)
+        return phase()
+
+    def estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        nonlocal estimate_calls
+        estimate_calls += 1
+        if first_view_failure and estimate_calls == 1:
+            raise AudioAlignmentError("channel correlation failed")
+        return CorrelationEstimate(0, 1.0, 2.0)
+
+    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "refine_aligned_score",
+        lambda *_args, **_kwargs: (0, 1.0),
+    )
+
+    result = alignment_consensus.corroborate_channel_views(
+        mono_result,
+        plan=plan,
+        channel_plan=channel_plan,
+        config=AlignmentConfig(sample_rate=1_000, max_offset_seconds=1),
+        fps=Fraction(24),
+        phase_loader=phase_loader,
+    )
+
+    assert loader_calls == 2
+    assert result.applied is False
+
+
+def test_channel_view_arrays_are_released_before_cancellation_rethrows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = alignment_audio.AudioWindowSpec(0, 32, 0, 32)
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=1_000,
+        requested_sample_rate=1_000,
+        windows=(spec,),
+        peak_fft_points=64,
+        total_fft_points=64,
+        reference_duration_samples=32,
+        comparison_duration_samples=32,
+    )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR"),
+        window_indices=(0,),
+        windows=(spec,),
+        retained_samples_per_view=64,
+    )
+    mono_result = _synthetic_mono_result(plan)
+    cancellation = threading.Event()
+    array_refs: list[weakref.ReferenceType[np.ndarray]] = []
+
+    def phase_loader(_view: str) -> alignment_audio.CollectedAudioPhase:
+        windows = (
+            alignment_audio.AudioWindow(
+                np.ones(32, dtype=np.float32),
+                np.ones(32, dtype=np.float32),
+                0,
+                0,
+            ),
+        )
+        array_refs.extend(
+            weakref.ref(array)
+            for window in windows
+            for array in (window.reference, window.comparison)
+        )
+        cancellation.set()
+        return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
+
+    with pytest.raises(AudioAlignmentCancellationError):
+        try:
+            alignment_consensus.corroborate_channel_views(
+                mono_result,
+                plan=plan,
+                channel_plan=channel_plan,
+                config=AlignmentConfig(sample_rate=1_000, max_offset_seconds=1),
+                fps=Fraction(24),
+                phase_loader=phase_loader,
+                cancellation=cancellation,
+            )
+        except AudioAlignmentCancellationError:
+            gc.collect()
+            assert all(reference() is None for reference in array_refs)
+            raise
