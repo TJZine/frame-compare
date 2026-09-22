@@ -486,7 +486,7 @@ at the next checkpoint. Pending rows are not proof.
 | F4 | Accepted | `1133b11fd2b4ec46fc9e6cb695d700cb883116de` / `c15d230c638a0c33299fbddf7321e148cd8c62f0` | `01a0c80b-bf75-72a0-88ae-72b374fe7074`; Luna xhigh | Current CLI contract and command reference; `c15d230c` | Contract-doc/API/isolated strict docs and hooks passed | Every changed line and source facts inspected; contract-doc/API checks passed; tracked strict docs passed | F5 next; unrelated untracked site-link warning preserved |
 | F5 | Accepted trigger coverage; hosted gate pending | `dff31ed101bc8f5b78dc72f62b7ff0495f49e870` / `d4b571db466156db6fa42929fe28378b7b1509bf` | `01a0c816-6b9e-7751-9a45-734b5be9a236`; Luna xhigh | Workflow path filter and contract tests; `d4b571db` | Full/static/docs, Docker resources passed; broad guard remains non-pass | Every changed line checked; 21 independent workflow tests passed | U1 next; no hosted pass claim |
 | U1 | Accepted after U1-R; Windows remains W1 | `e9e70d8891c7c65264d650b2fbd759ca808d86fe` / `e07699581cc3a171230d19f6c99e16539dbaeab3` | `01a0c828-7d7d-7270-9d9e-4fda3f1be796`; Luna xhigh | Alignment presentation/callback, tests and current docs; `e0769958` | Focused/full/static checks reported; normal/narrow render captured | Complete diff inspected; focused tests passed; two concrete contract gaps reproduced | U1-R `6ea7e67a` accepted; U2 next |
-| U2 | Pending U1 | Pending | Pending | VSView presentation | Pending | Pending | Physical visible proof in W1 |
+| U2 | Returned; U2-R required | `5afe857c788481073053f67f74a97e35b86d070b` / `ecfdc90d1f83e021d087e5941f06791d35137639` | `01a0c854-688e-74d1-ae5b-83257c98e199`; Luna xhigh | Panel/tests/current docs; `ecfdc90d` | Full/static/docs/package and offscreen screenshots reported | Code and screenshots inspected; three UI regressions reproduced in Qt | U2-R next; A1 waits |
 | A1 | Pending U2 | Pending | Controller | Integration proof and plan record | Not applicable | Pending | No monitor delegation |
 | W1 | Pending A1 and physical host | Pending | Pending | Canonical sanitized evidence only | Pending | Pending | Mandatory before closeout |
 | Closeout | Pending all acceptance | Pending | Controller | Plan only | Not applicable | Complete range audit pending | Hosted status and limitations required |
@@ -804,3 +804,30 @@ retain disabled actions and saved-result focus behavior. Show the exact frozen s
 outcomes in existing per-source outcome labels. Original evidence remains in collapsed
 details with its original classification, including provisional rather than rejected.
 Use relative/native font emphasis and wrapping, no fixed-size design or new theme.
+
+
+### U2 controller checkpoint — saved state and active input basis
+
+Controller inspected production changes and three offscreen screenshots. Direct Qt
+reproductions found:
+
+- After confirming a provisional comparison, its unchanged audio summary still says
+  Visual confirmation required to use this hint. After confirming a different offset,
+  the unchanged accepted summary can still look like current applied authority.
+- Saved drafts stop receiving viewer callbacks, but the active source still displays
+  Viewing: frame 108 after the actual current frame changes to 150.
+- Entering an invalid source frame, switching to Known offsets and entering valid +5
+  produces ready-to-confirm while showing the inactive frame error in both source
+  status and error label.
+
+U2-R decisions: after save, hide the pre-save audio summary labels; retain original
+classification/facts in collapsed evidence details and saved outcomes in source lineup.
+Do not mutate the original attempt or authority payload. Stop displaying Viewing after
+save; frozen captured/entered positions remain available. Only active-basis validation
+may drive displayed errors, matching existing readiness/save validation; preserve the
+inactive drafts for switching back. Restore exact Entered source frame: {frame} copy
+without a second literal frame. Regressions must cover confirm and keep-current with
+mixed states, post-save viewer movement, invalid-frame to valid-offset basis switching
+and switching back. Capture mixed-state saved screenshots (the original keep-current
+capture used four identical reused authorities and did not exercise the full matrix).
+No result/schema/callback observation change or layout redesign. A1 remains pending.
