@@ -486,7 +486,7 @@ at the next checkpoint. Pending rows are not proof.
 | F4 | Accepted | `1133b11fd2b4ec46fc9e6cb695d700cb883116de` / `c15d230c638a0c33299fbddf7321e148cd8c62f0` | `01a0c80b-bf75-72a0-88ae-72b374fe7074`; Luna xhigh | Current CLI contract and command reference; `c15d230c` | Contract-doc/API/isolated strict docs and hooks passed | Every changed line and source facts inspected; contract-doc/API checks passed; tracked strict docs passed | F5 next; unrelated untracked site-link warning preserved |
 | F5 | Accepted trigger coverage; hosted gate pending | `dff31ed101bc8f5b78dc72f62b7ff0495f49e870` / `d4b571db466156db6fa42929fe28378b7b1509bf` | `01a0c816-6b9e-7751-9a45-734b5be9a236`; Luna xhigh | Workflow path filter and contract tests; `d4b571db` | Full/static/docs, Docker resources passed; broad guard remains non-pass | Every changed line checked; 21 independent workflow tests passed | U1 next; no hosted pass claim |
 | U1 | Accepted after U1-R; Windows remains W1 | `e9e70d8891c7c65264d650b2fbd759ca808d86fe` / `e07699581cc3a171230d19f6c99e16539dbaeab3` | `01a0c828-7d7d-7270-9d9e-4fda3f1be796`; Luna xhigh | Alignment presentation/callback, tests and current docs; `e0769958` | Focused/full/static checks reported; normal/narrow render captured | Complete diff inspected; focused tests passed; two concrete contract gaps reproduced | U1-R `6ea7e67a` accepted; U2 next |
-| U2 | Returned; U2-R required | `5afe857c788481073053f67f74a97e35b86d070b` / `ecfdc90d1f83e021d087e5941f06791d35137639` | `01a0c854-688e-74d1-ae5b-83257c98e199`; Luna xhigh | Panel/tests/current docs; `ecfdc90d` | Full/static/docs/package and offscreen screenshots reported | Code and screenshots inspected; three UI regressions reproduced in Qt | U2-R next; A1 waits |
+| U2 | Accepted after U2-R; physical Windows remains W1 | `5afe857c788481073053f67f74a97e35b86d070b` / `ecfdc90d1f83e021d087e5941f06791d35137639` | `01a0c854-688e-74d1-ae5b-83257c98e199`; Luna xhigh | Panel/tests/current docs; `ecfdc90d` | Full/static/docs/package and offscreen screenshots reported | Code and screenshots inspected; three UI regressions reproduced in Qt | U2-R `c0fb947d` accepted; A1-R Docker gate repair next |
 | A1 | Pending U2 | Pending | Controller | Integration proof and plan record | Not applicable | Pending | No monitor delegation |
 | W1 | Pending A1 and physical host | Pending | Pending | Canonical sanitized evidence only | Pending | Pending | Mandatory before closeout |
 | Closeout | Pending all acceptance | Pending | Controller | Plan only | Not applicable | Complete range audit pending | Hosted status and limitations required |
@@ -831,3 +831,38 @@ mixed states, post-save viewer movement, invalid-frame to valid-offset basis swi
 and switching back. Capture mixed-state saved screenshots (the original keep-current
 capture used four identical reused authorities and did not exercise the full matrix).
 No result/schema/callback observation change or layout redesign. A1 remains pending.
+
+
+### U2 and U2-R acceptance
+
+Repair task `01a0c873-4f36-7433-95e6-34d4d6a97fb1` ran Luna xhigh from
+`2e6e836cffab34d969ae49265893003f9327b218` to
+`c0fb947d49302a34587490cb885b45b5835ac03a`. Controller inspected every changed
+line, mixed-state normal/narrow/enlarged saved screenshots, and full/static/native
+proof logs. The repair hides stale pre-save summaries, retains immutable details,
+removes frozen Viewing claims, scopes displayed errors to active input basis and
+restores exact manual-entry copy. Controller independently passed all VSView tests
+and CLI-doc tests without skips. Worker fresh distribution/isolated vsview install,
+version/help and shipped-panel import passed. Evidence is indexed under
+`.codex/cache/task-evidence/u2-r/COMMANDS.md`. Tracked-doc strict validation passed;
+unrelated untracked plan links remain preserved. No physical-Windows claim.
+
+### A1-R — repair known canonical Docker opt-in mismatch
+
+Before final A1, a bounded writer will edit only `tools/verify_docker_integration.sh`
+and its workflow-contract test. The existing broad verifier includes the opt-in
+channel matrix but does not enable it, deterministically failing its zero-skip guard
+and preventing the following hosted resource step. This defect was observed repeatedly
+in F1–F5 and is now a concrete integration repair, not a new architecture decision.
+
+Controller decision: pass the existing `FRAME_COMPARE_CHANNEL_CORROBORATION=1` into
+the test container for canonical verifier invocations via the existing docker env-args
+array. No new flag, dependency, opt-in framework or test exclusion. Keep streaming
+resources excluded from the ordinary broad command and run them separately as before.
+Keep the global zero-skip guard and exact process failure propagation. Contract tests
+must prove the environment reaches Docker and retained guards still fail on skips.
+Run a fresh-image full canonical verifier (not a focused substitute), require all
+included tests to pass with zero skips, then run the exact opted-in resource suite.
+Record source/image identities and complete logs. Separate repair commit:
+`ci(alignment): enable channel proof in canonical Docker gate`.
+Controller A1 full integration remains required after repair acceptance.
