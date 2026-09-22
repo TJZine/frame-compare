@@ -10,11 +10,11 @@ FROM python:3.13.15-slim-trixie@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f
 
 # Deterministic media-runtime pins. Every Git checkout verifies both the exact
 # commit and a content-derived digest of the complete tracked source tree.
-ARG VAPOURSYNTH_VERSION=79
-ARG VAPOURSYNTH_SOURCE_COMMIT=acabf605b2205b32d65859bb2736405719d2fafd
-ARG VAPOURSYNTH_SOURCE_TREE_SHA256=f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527
-ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
-ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
+ARG VAPOURSYNTH_VERSION=80
+ARG VAPOURSYNTH_SOURCE_COMMIT=732845793a1caf5838d4f7b94f6ce668a19c908e
+ARG VAPOURSYNTH_SOURCE_TREE_SHA256=5d952607cfee17395d797f5c11d495366a9aa8a3ef6f40e2b0cf7ea2665861f2
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=28489ba081031c1107a59c34f4cf6a7bc5a484a50678dd0e30814a5301237b02
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=4ea6eb3a71c3db4c3cf6e005dd5c3ce33ccb786c6d5bedce35db3861ca8eb1ee
 ARG LSMASH_COMMIT=d186eb95388710a7a91f6fd353169b457ebbb9db
 ARG LSMASH_SOURCE_TREE_SHA256=89c0277c1533c3958fd16f093c2b0bd13a51fcacb748bf88e36f40eff2a7f651
 ARG OBUPARSE_COMMIT=a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8
@@ -75,12 +75,8 @@ RUN printf '%s\n' \
         "${VAPOURSYNTH_SOURCE_TREE_SHA256}" \
         /tmp/vapoursynth-src && \
     vs_include_dir="$(python -c 'import vapoursynth; print(vapoursynth.get_include())')" && \
-    test -f /tmp/vapoursynth-src/include/VapourSynth.h && \
-    test -f /tmp/vapoursynth-src/include/VSHelper.h && \
     test -f /tmp/vapoursynth-src/include/VapourSynth4.h && \
     test -f /tmp/vapoursynth-src/include/VSHelper4.h && \
-    cp /tmp/vapoursynth-src/include/VapourSynth.h "${vs_include_dir}/" && \
-    cp /tmp/vapoursynth-src/include/VSHelper.h "${vs_include_dir}/" && \
     cp /tmp/vapoursynth-src/include/VapourSynth4.h "${vs_include_dir}/" && \
     cp /tmp/vapoursynth-src/include/VSHelper4.h "${vs_include_dir}/" && \
     mkdir -p /opt/media-runtime-licenses && \
@@ -128,7 +124,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
     cd /build && \
     rm -rf /build/l-smash
 
-# Build L-SMASH-Works 1310 against the R79 API R4.2 wheel headers and
+# Build L-SMASH-Works 1310 against the R80 API4 wheel headers and
 # Debian Trixie's runtime-matched FFmpeg development libraries. Upstream's
 # Meson path is deprecated, but remains the narrow VapourSynth-only build and
 # avoids pulling unrelated optional dependencies into the runtime baseline.
@@ -227,10 +223,10 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.13.15-slim-trixie@sha256:8d9d0b8bcf6506481eae4907c18f5e3e7902e629f5f6d684f9e7c32e85e3ddf0 AS runtime
 
-ARG VAPOURSYNTH_VERSION=79
+ARG VAPOURSYNTH_VERSION=80
 ARG VS_PLACEBO_VERSION=2.0.4
-ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
-ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=28489ba081031c1107a59c34f4cf6a7bc5a484a50678dd0e30814a5301237b02
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=4ea6eb3a71c3db4c3cf6e005dd5c3ce33ccb786c6d5bedce35db3861ca8eb1ee
 ARG VS_PLACEBO_X86_64_WHEEL_SHA256=d38796b739ae231e12e7b4f9449b3cb29cc4a5fa9cd50e8147fdd9a202797fff
 ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=eb025cb3f8d723eeaa64dc19b26fa1a0a05b948eb0cedeb8645680d9695ba97d
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
@@ -274,7 +270,7 @@ RUN ldconfig && \
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
     LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=61e9aac2ad8af8039bd32a455759f803aba63fc2052f4dd2d9a92bea5bf21eb0 \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=44ca255ffb1bf354644c9ef73b023c88352a0bc70150984a82bef02fabcc3c16 \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \

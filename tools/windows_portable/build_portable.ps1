@@ -626,11 +626,11 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 
-  # R79 wheels carry the runtime DLL inside the vapoursynth package directory.
+  # R80 wheels carry the runtime DLL inside the vapoursynth package directory.
   # The launcher and validation PATH include this directory for Windows DLL lookup.
   $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
   if (!(Test-Path -LiteralPath $vsDllPackage)) {
-    throw "libvapoursynth.dll not found after wheel install in expected R79 package layout: $vsDllPackage"
+    throw "libvapoursynth.dll not found after wheel install in expected R80 package layout: $vsDllPackage"
   }
 
   Install-ProjectDistributionMetadata -BundleRoot $BundleRoot
@@ -967,7 +967,7 @@ def prove_vsview_distribution_contract() -> None:
         "pyside6-addons": "6.11.2",
         "pyside6-essentials": "6.11.2",
         "shiboken6": "6.11.2",
-        "vapoursynth-bestsource": "21.0",
+        "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "1.4.0",
         "vsview": "0.11.0",
@@ -1091,9 +1091,9 @@ def prove_vapoursynth_environment() -> None:
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
-    assert_true(version_major == 79 and version_minor == 0, f"expected VapourSynth R79, got {version!r}")
+    assert_true(version_major == 80 and version_minor == 0, f"expected VapourSynth R80, got {version!r}")
     assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
-    assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_version!r}")
+    assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
     assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
     canonical_lsmas_plugin = plugin_dir / "LSMASHSource.dll"

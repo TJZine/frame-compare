@@ -218,7 +218,7 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
 
     assert manifest["manifest_version"] == 2
-    assert manifest["bundle"]["vs_ref"] == "R79"
+    assert manifest["bundle"]["vs_ref"] == "R80"
     assert manifest["bundle"]["ffmpeg_policy"] == "lgpl-only"
     assert set(manifest["bundle"]["runtime_fingerprints"]) == {
         "analysis",
@@ -239,18 +239,18 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     assert python["source_ref"] == expected_python_version
     assert python["release_date"] == "2026-08-05"
 
-    vapoursynth = artifacts["vapoursynth-portable-r79"]
-    assert vapoursynth["version"] == "R79"
-    assert vapoursynth["url"].endswith("/R79/VapourSynth64-Portable-R79.zip")
-    assert vapoursynth["source_ref"] == "R79"
-    assert vapoursynth["source_commit"] == "acabf605b2205b32d65859bb2736405719d2fafd"
-    assert vapoursynth["bytes"] == 23160674
+    vapoursynth = artifacts["vapoursynth-portable-r80"]
+    assert vapoursynth["version"] == "R80"
+    assert vapoursynth["url"].endswith("/R80/VapourSynth64-Portable-R80.zip")
+    assert vapoursynth["source_ref"] == "R80"
+    assert vapoursynth["source_commit"] == "732845793a1caf5838d4f7b94f6ce668a19c908e"
+    assert vapoursynth["bytes"] == 31533239
     assert vapoursynth["sha256"] == (
-        "625b3410d903943107291592e90d6f521f829ebb8291d952ee91b8d674bbb153"
+        "5d927152d9db29d104c8960bf44d0df7777835f7741d310184bfae6fda2f4f22"
     )
-    assert vapoursynth["source_bytes"] == 657976
+    assert vapoursynth["source_bytes"] == 1014104
     assert vapoursynth["source_sha256"] == (
-        "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7"
+        "c014174f4468fefc0afacc7f020d3e41c5e3b22f2902197c506e752e6d71ac7e"
     )
 
     lsmas = artifacts["vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel"]
@@ -270,8 +270,8 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     assert placebo["install"]["type"] == "python_wheel"
     assert placebo["url"].endswith("-win_amd64.whl")
 
-    ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-07-31"]
-    assert ffmpeg["version"].startswith("n8.1.2-34-g9b6c8969e0")
+    ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-08-31"]
+    assert ffmpeg["version"].startswith("n8.1.2-50-g1a748fe2cd")
     assert ffmpeg["license"]["spdx"] == "LGPL-2.1-or-later"
     assert not any(artifact_id.startswith("ffms2") for artifact_id in artifacts)
 
@@ -303,7 +303,7 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
         '$vsDllPackage = Join-Path $sitePackages "vapoursynth\\\\libvapoursynth.dll"'
         in build_script
     )
-    assert "expected R79 package layout" in build_script
+    assert "expected R80 package layout" in build_script
     assert 'Join-Path $sitePackages "vapoursynth.dll"' not in build_script
     assert 'Join-Path $sitePackages "Lib\\\\site-packages\\\\vapoursynth.dll"' not in build_script
     assert "Install-PythonWheelArtifacts" in build_script
@@ -340,7 +340,7 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
         "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
         "pyside6-essentials-6.11.2-win-amd64-wheel": ("6.11.2", 76913043),
         "shiboken6-6.11.2-win-amd64-wheel": ("6.11.2", 1226578),
-        "vapoursynth-bestsource-21.0-win-amd64-wheel": ("21.0", 12315301),
+        "vapoursynth-bestsource-22-win-amd64-wheel": ("22", 15890493),
         "vspackrgb-1.4.0-win-amd64-wheel": ("1.4.0", 74394),
     }
     for artifact_id, (version, byte_count) in expected.items():
@@ -374,7 +374,7 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
         "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
         "pyside6-essentials": "pyside6-essentials-6.11.2-win-amd64-wheel",
         "shiboken6": "shiboken6-6.11.2-win-amd64-wheel",
-        "vapoursynth-bestsource": "vapoursynth-bestsource-21.0-win-amd64-wheel",
+        "vapoursynth-bestsource": "vapoursynth-bestsource-22-win-amd64-wheel",
         "vspackrgb": "vspackrgb-1.4.0-win-amd64-wheel",
     }
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
@@ -431,8 +431,8 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     for expected in (
         "Invoke-BundleRuntimeProof",
         "phase=$Phase start",
-        "version_major == 79",
-        "api_minor == 2",
+        "version_major == 80",
+        "api_minor == 3",
         "LWLibavSource",
         "LibavSMASHSource",
         "core.placebo.Tonemap",
@@ -1130,7 +1130,7 @@ def _write_extracted_verifier_fixture(
                 ("PySide6_Addons", "6.11.2"),
                 ("PySide6_Essentials", "6.11.2"),
                 ("shiboken6", "6.11.2"),
-                ("vapoursynth-bestsource", "21.0"),
+                ("vapoursynth-bestsource", "22"),
                 ("vspackrgb", "1.4.0"),
                 ("VSView", "0.11.0"),
                 ("vsview-cli", "1.2.0"),
@@ -1885,8 +1885,8 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "PySide6-Addons": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-Essentials": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "shiboken6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "VapourSynth": ("79", "LGPL-2.1-or-later"),
-        "vapoursynth-bestsource": ("21.0", "MIT"),
+        "VapourSynth": ("80", "LGPL-2.1-or-later"),
+        "vapoursynth-bestsource": ("22", "MIT"),
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "vspackrgb": ("1.4.0", "MIT"),

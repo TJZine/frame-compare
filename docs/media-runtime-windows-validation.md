@@ -30,13 +30,14 @@ The expected candidate profile is:
 | Component | Expected Windows identity |
 | --- | --- |
 | Python | 3.13.15 |
-| VapourSynth | R79, API R4.2 |
+| VapourSynth | R80, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
-| FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7` |
-| L-SMASH index token | `lsw1310-56c451f754fd` |
+| BestSource (VSView/UI only) | 22 |
+| FFmpeg | `n8.1.2-50-g1a748fe2cd`, BtbN win64 LGPL 8.1 build `autobuild-2026-08-31-13-27` |
+| Full runtime fingerprint | `a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8` |
+| L-SMASH index token | `lsw1310-097c1b9d605b` |
 
 ## 1. Exact source and repository gates
 
@@ -199,7 +200,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R79 independently from API R4.2.
+- VapourSynth reports R80 independently from API R4.3.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
@@ -300,7 +301,7 @@ Verify all of the following:
 
 - A legacy adjacent `<media>.lwi` is ignored and not deleted.
 - The candidate creates
-  `<media>.frame-compare-lsw1310-56c451f754fd.lwi`.
+  `<media>.frame-compare-lsw1310-097c1b9d605b.lwi`.
 - A second run reuses the candidate-owned index.
 - A corrupt candidate-owned index is removed and regenerated once.
 - A missing index is created normally.
@@ -322,16 +323,16 @@ Verify with old and newly generated data:
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the immediate predecessor to this 1310 candidate:
-the R79 / L-SMASH-Works 1296 bundle with full runtime fingerprint
-`59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd`.
+Keep one untouched installation of the immediate predecessor to this R80 candidate:
+the R79 / BestSource 21.0 / July 2026 FFmpeg bundle with full runtime fingerprint
+`27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7`.
 
 Required cases:
 
 1. Build the candidate code-only update ZIP and its manifest.
 2. Attempt to apply it to the previous bundle.
-3. Confirm refusal occurs before file replacement because the previous bundle is
-   pre-native-panel schema 2 (and its native-runtime fingerprint differs).
+3. Confirm refusal occurs before file replacement because the previous bundle's
+   full media-runtime fingerprint differs from the candidate's.
 4. With otherwise matching candidate fingerprints, confirm a schema-2 bundle still
    refuses before file replacement.
 5. Confirm an unsafe Python-dependency override does not bypass that refusal.

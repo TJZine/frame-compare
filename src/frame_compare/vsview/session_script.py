@@ -194,7 +194,7 @@ def safe_print(*args, **kwargs):
 
 
 def resolve_lwlibavsource(core):
-    """Resolve LWLibavSource from the VapourSynth R79 core.lsmas namespace."""
+    """Resolve LWLibavSource from the VapourSynth R80 core.lsmas namespace."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         return core.lsmas
     raise RuntimeError("LWLibavSource not found on core.lsmas")

@@ -283,8 +283,8 @@ recovery requirement.
   data.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1310-56c451f754fd` on managed/portable Windows,
-  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
+  `lsw1310-097c1b9d605b` on managed/portable Windows,
+  `lsw1310-d594aa1352e2` on unmanaged Windows, and `lsw1310-8a3ed7348dea`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored,

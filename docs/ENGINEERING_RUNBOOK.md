@@ -398,7 +398,7 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R79/API R4.2, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.11.0,
+   verify R80/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.11.0,
    PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before

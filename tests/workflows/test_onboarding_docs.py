@@ -17,13 +17,13 @@ def test_vsview_extra_pins_supported_native_windows_media_stack(repo_root: Path)
     assert {dependency for dependency in dependencies if dependency.startswith("vsview==")} == {
         "vsview==0.11.0"
     }
-    assert "vapoursynth==79" in dependencies
+    assert "vapoursynth==80" in dependencies
     assert "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'" in dependencies
     assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies
 
     native_install = _read_text_or_fail(repo_root / "docs" / "getting-started" / "native.md")
     assert "The `vsview` extra pins VSView 0.11.0" in native_install
-    assert "package to R79" in native_install
+    assert "package to R80" in native_install
     assert "`vapoursynth-lsmas 1310.0.0.0`" in native_install
     assert "`vs-placebo 2.0.4`" in native_install
 

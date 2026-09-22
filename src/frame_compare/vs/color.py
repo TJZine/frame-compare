@@ -31,7 +31,7 @@ def _uses_hdr_defaults(primaries: int, transfer: int) -> bool:
 
 
 def _bt2020_matrix_constant() -> int:
-    """Return the R79 non-constant-luminance BT.2020 matrix constant."""
+    """Return the R80 non-constant-luminance BT.2020 matrix constant."""
     import vapoursynth as vs
 
     return vs.MATRIX_BT2020_NCL

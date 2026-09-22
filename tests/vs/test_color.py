@@ -40,7 +40,7 @@ def test_infer_color_props_hd_defaults_to_bt709():
 
 
 def test_infer_color_props_hdr_matrix_prefers_ncl():
-    """Verify matrix backfill uses the R79 MATRIX_BT2020_NCL constant."""
+    """Verify matrix backfill uses the R80 MATRIX_BT2020_NCL constant."""
     clip = MagicMock()
     clip.height = 2160
     props = ColorProps(primaries=2, transfer=16, matrix=2, color_range=1)

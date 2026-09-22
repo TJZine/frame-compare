@@ -19,7 +19,7 @@ from ._helpers import write_valid_config_json as _write_valid_config_json
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
 _NEW_VERSION_CONTENT = '__version__ = "1.0.1"\n'
 _REQ_HASH = "3a0058b73f8a4872c3d0b27b99c017d9a8c087cf283d5f9923b0df35b44bfd82"
-_RUNTIME_HASH = "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7"
+_RUNTIME_HASH = "a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8"
 _POWERSHELL_KEYGEN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
@@ -113,10 +113,10 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
                 "platform": "windows-x64",
                 "media_runtime_fingerprint": _RUNTIME_HASH,
                 "media_runtime_fingerprints": {
-                    "analysis": "312f6703ff00e5f518f6c768d74bbe30c17fd07ee5f7079b71aec0f78e7ca039",
-                    "probe": "2165b8dd875be09a5631f612a683c32106b65f74398db6eec68e37839e471c77",
-                    "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
-                    "index": "56c451f754fda35c6f39c1ec4d698e596b580660ca08c6cf40f45114d15a7e1c",
+                    "analysis": "739628f62807a9267454596340da845715d6002e8e9db49b04a948ee1a1fde1d",
+                    "probe": "c65f5a36b64e5e2b00890fdb84650b7d6ef3f36fe0f5633cad710142d80fb10e",
+                    "alignment": "04a8dfb581214e976bfa011132006c819169f1ce3ca00176711801df84941464",
+                    "index": "097c1b9d605b9a303c4f0cffaca993e30280c1b2f55ededa677595492800c234",
                     "full": _RUNTIME_HASH,
                 },
             }
