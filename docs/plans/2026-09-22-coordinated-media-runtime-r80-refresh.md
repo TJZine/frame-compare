@@ -159,11 +159,14 @@ Document these R80 changes accurately:
 Acceptance: active docs describe only the selected R80/R22/August-FFmpeg profile;
 historical baseline language is clearly labeled and not presented as current.
 
-## Verification
+## Verification And Handoff
 
-Risk: high. Primary mode: native integration and packaging contract.
+Risk: high because the selected components cross runtime and packaging boundaries.
+The implementation session should still make the coordinated update and commit it;
+it does not need to prove final Windows release readiness before handing the branch
+back to the maintainer.
 
-Required local gates after integration:
+Run the available local gates after integration:
 
 ```bash
 uv sync --group dev --group docs --extra vsview --locked
@@ -177,25 +180,22 @@ uv run --no-sync zensical build --clean --strict
 bash tools/verify_docker_integration.sh --no-cache
 ```
 
-Also run the locked runtime dependency audit from the engineering runbook. Inspect
-all skips; the canonical Docker gate must finish with zero skips and must report R80,
-API R4.2, both source loaders, vs-placebo invocation, software Vulkan, native linkage,
-provenance, generated fixture coverage, non-root execution, and production-tooling
-absence.
+Also run the locked runtime dependency audit from the engineering runbook. If an
+environment-specific gate cannot run, record that fact in the handoff instead of
+blocking otherwise coherent commits. Diagnose and repair failures caused by the
+update; pre-existing or unavailable-platform checks may remain for maintainer
+follow-up.
 
-Required Windows proof:
+Before committing, run the focused manifest/schema, fingerprint, runtime-contract,
+doctor, Docker, and Windows-portable script tests that are available on the current
+host. Inspect the resulting diff and keep the runtime selection, generated lock or
+fingerprint data, tests, and documentation in coherent conventional commits.
 
-- manifest/schema and portable-script pytest coverage locally;
-- hosted Windows portable build at the exact candidate SHA;
-- extracted-bundle verification for R80, BestSource 22, VSView, Qt subset, plugin
-  layout, licenses/SBOM/provenance, FFmpeg/ffprobe versions, and code-only update refusal;
-- native generated-session and alignment-panel proof;
-- physical Windows validation for RTX/Vulkan, real HDR10 and Dolby Vision media,
-  timing/VFR/interlacing/repeated-field behavior, old/new indexes, perceptual output,
-  and complete-reinstall transition.
-
-Do not claim release readiness from macOS, source inspection, or offscreen Qt proof
-alone. Windows signing and protected release dispatch remain maintainer-only.
+Hosted or physical Windows validation is recommended follow-up, not a prerequisite
+for implementation completion. The maintainer will test the committed result on the
+available Windows/media setup and may revert the coordinated commits if runtime,
+GPU, HDR/Dolby Vision, timing, or portable-bundle issues appear. Windows signing and
+protected release dispatch remain maintainer-only.
 
 ## Commit And Review Shape
 
@@ -208,9 +208,9 @@ with their owning selection change. A reasonable sequence is:
 
 Adjust grouping if a smaller coherent boundary emerges, but do not mix unrelated
 alignment or product behavior. Before each commit, inspect the staged diff and stage
-only task-owned files. The final integrated diff requires an independent review
-focused on runtime identity, fingerprint scope, artifact provenance, packaging
-fail-closed behavior, and verification gaps.
+only task-owned files. Record any unrun platform checks and notable residual risks
+in the handoff so the maintainer can target manual testing efficiently. Independent
+review is useful but is not required before the implementation commits are created.
 
 ## Rollback
 
@@ -221,12 +221,10 @@ reuse code-only updates across either fingerprint.
 
 ## Stop Conditions
 
-Stop and return to planning if any of these occurs:
+Stop and return to planning only if implementation cannot safely produce a coherent,
+revertible commit, including when:
 
 - R80 changes API identity or breaks L-SMASH-Works 1310, FFMS2 5.0, or vs-placebo 2.0.4.
-- BestSource R22 cannot launch/render through VSView 0.11.0 in the supported bundle.
-- Vulkan 1.4 becomes mandatory for the existing CPU-frame path rather than optional
-  for upstream GPU-frame support.
 - the selected FFmpeg artifact changes the LGPL-only license posture or requires a
   new Windows runtime dependency.
 - compatibility requires a new public option, runtime profile, cache migration,
@@ -236,6 +234,8 @@ Stop and return to planning if any of these occurs:
 
 ## Completion
 
-When all required proof is recorded and no release blocker remains, change this
-plan to `Status: Historical` in the final implementation pass. Record unavailable
-physical-host or signing proof explicitly rather than treating the plan as complete.
+When the coordinated update, available local verification, authority documentation,
+and proper commits are complete, change this plan to `Status: Historical` and hand
+the branch back to the maintainer. Record checks that were unavailable or deferred;
+they do not keep the implementation plan active. Maintainer Windows/media testing
+and any resulting rollback or follow-up fixes happen after this handoff.
