@@ -481,8 +481,8 @@ at the next checkpoint. Pending rows are not proof.
 | Activation | Complete | `51ef0132fa89d8ed36c6114c63157e2c13630085` / `edb10ef6f3e0b7c413a414374e26c8e4959080f4` | Current orchestrator; GPT-6, effort not exposed | This plan only; `edb10ef6` | Not applicable | Baseline/ancestry/authority, preamble/package/link checks, API drift, strict Zensical (no issues), staged diff and hooks passed. Initial site-link failure repaired before commit. | User approved extra workflow commit; no product edits |
 | C0 | Accepted | `edb10ef6f3e0b7c413a414374e26c8e4959080f4` / same | `01a0c7bd-430a-7590-86da-f91ffb5699fc`; `gpt-5.6-sol`, medium | Read-only; no implementation commit | Complete structured callback received; 69/53 commits, 86/66 historical touched paths; four reproductions; 11 focused tests passed | Independent source/workflow/range audit; AA-01/02 reproduced; same 11 tests passed, no skips; clean status | `docs(plan): record post-activation review closure`; details below |
 | F1 | Accepted locally and in Docker; Windows remains W1 | `cdd0fce3643dd57b6307ef43ae725975e539f633` / `5e75900ca572038105dc9e700ec5ee3759ac98bd` | `01a0c7cd-4fe7-7232-a1ee-dd892721fbdb`; `gpt-5.6-sol`, medium | Six authorized phase/test/current-doc files; `5e75900c` | Red/green regression, focused/full/static/docs and targeted canonical Docker passed; ignored logs `task-evidence/f1` | Every changed line inspected; focused phase/cache/manual/native integration passed; image source/lock hashes match | `docs(plan): record raw offset composition acceptance`; Windows still required |
-| F2 | Implementation returned; documentation repair required before acceptance | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / `c5554ea784921d65fe9a748ba133854a3d67d956` | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Twelve planner/channel/policy/test/current-doc files; `c5554ea7` | Full/static/docs pass with documented skips; targeted Docker and opt-in channel proof reported | Focused planner/channel/cache/authority/native-contract tests passed, no skips; documentation overstates midpoint split above 60 seconds | F2-R documentation-only repair next; F3 remains pending |
-| F3 | Pending F2 | Pending | Pending | Channel lifetime | Pending | Pending | Resource proof required |
+| F2 | Accepted locally and in Docker after F2-R; Windows remains W1 | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / `c5554ea784921d65fe9a748ba133854a3d67d956` | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Twelve planner/channel/policy/test/current-doc files; `c5554ea7` | Full/static/docs pass with documented skips; targeted Docker and opt-in channel proof reported | Focused planner/channel/cache/authority/native-contract tests passed, no skips; documentation overstates midpoint split above 60 seconds | F2-R accepted at `8aa733aa`; F3 next |
+| F3 | Ready after F2 acceptance | Pending | Luna xhigh selected; task pending | Channel lifetime | Pending | Pending | Resource proof required |
 | F4 | Pending F3 | Pending | Pending | Current docs | Pending | Pending | Historical records unchanged |
 | F5 | Pending F4 | Pending | Pending | Narrow workflow filters/tests | Pending | Pending | Hosted CI pending push |
 | U1 | Pending F5 | Pending | Pending | Terminal presentation/progress | Pending | Pending | Frozen matrix above |
@@ -638,3 +638,30 @@ remaining limitations and user-only transfer/push follow-up, and commit only thi
 Report all implementation/evidence and plan-record commits, local/Docker/Windows
 proof, residual risks and whether user action remains. Do not claim completion before
 W1. Do not push, publish, release, sign, amend, rebase, or reset at closeout.
+
+
+### F2 and F2-R acceptance
+
+F2-R task `01a0c7f5-c9a3-74a2-a8de-3ac0e5849f5e` ran on Luna xhigh,
+from `0cf03a275edeac469102c2f99a52c98d7a453bcc` to
+`8aa733aa92c6eb2ba8d4f066bae3c30649e295e4`. Its three-doc-only commit
+`docs(alignment): clarify bounded endpoint planning` corrects the midpoint claim;
+no production or test behavior changed. Controller inspected every changed line and
+confirmed source geometry and configured-minimum behavior. Worker boundary tests,
+API check, copied-doc strict build, and commit hooks passed.
+
+Controller reran distributed planning and CLI contract-doc tests successfully without
+skips, plus API-doc validation. An independent strict build of a temporary copy of
+all tracked docs and the current Zensical config passed with no issues. This isolates
+the known unrelated untracked UX-plan link warning without altering user files.
+Both unrelated untracked UX plans remain preserved.
+
+Controller read the F2 full-suite and Docker logs, preserving their explicit skip
+limitations. Targeted production Docker runtime/application proof passed with zero
+skips, and opted-in channel tests passed. Controller independently compared the
+three F2 production owners plus pyproject/lock hashes against test image
+`sha256:d55f6f842cc7383666ee14979258e489fab522634e05ae752546b268b29ec0ae`;
+all match. Production image was
+`sha256:df6e0e4f0b3203ef889d6673dc5a5e1e4a52946af38d132ebfc494780e96c375`.
+F2/F2-R are accepted within these local/Docker bounds. Resource proof belongs to F3
+and A1; physical Windows remains W1; hosted CI is pending push. F3 is next.
