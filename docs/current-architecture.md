@@ -455,11 +455,14 @@ Computed alignment work is planned against typed timing for each selected audio 
 total FFT-work budgets, requested-rate PCM and scoring budgets, distributed window
 selection, exact rate conversion, verification halos, and the canonical FFmpeg recipe.
 Discovery runs at `min(requested rate, 8000)` with one 4 kHz admission retry when
-needed. For the default medium duration tier, the endpoint split is planned in integer
-sample coordinates as `[0, floor(N/2))` and `[floor(N/2), N)`, so odd totals neither
-overlap nor lose their final sample; requested-rate verification derives the same shared
-endpoint after exact rate conversion. Each source/rate/channel treatment is decoded once from origin, resampled,
-bounded by one final sample endpoint, and retained only at admitted logical intervals.
+needed. With the default window shape and `minimum_valid_windows <= 2`, sources longer
+than 30 and through 60 seconds use two disjoint integer endpoint intervals split at
+`floor(N/2)`, so odd totals neither overlap nor lose their final sample. Above 60 and
+below 90 seconds, the two endpoint intervals remain capped at 30 seconds and leave a
+gap; a larger configured minimum uses the existing distributed planning. Requested-rate
+verification derives the same shared endpoint after exact rate conversion. Each
+source/rate/channel treatment is decoded once from origin, resampled, bounded by one
+final sample endpoint, and retained only at admitted logical intervals.
 `alignment_streaming` is the adjacent, independently exercisable continuous-collection
 owner. It accepts a caller-prepared FFmpeg argument vector, scalar admitted intervals,
 the final sample horizon, an explicit retained-sample ceiling, hard deadline, and

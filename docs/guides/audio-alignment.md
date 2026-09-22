@@ -52,11 +52,13 @@ thresholds; the configured consensus ratio applies only to voting-qualified wind
 A base-credible estimate in another frame bin is a hard contradiction, even when it is
 excluded from voting by a stricter setting.
 
-With default window settings, sources up to 30 seconds use one full shared-duration
-interval, sources longer than 30 seconds and shorter than 90 seconds use two disjoint
-endpoint intervals split in integer sample coordinates at `floor(N/2)`, and sources of
-at least 90 seconds use five distributed 30-second intervals. Explicit window length
-and stride preserve their requested shape, but do not waive the duration tier's temporal
+With the default window shape and `minimum_valid_windows <= 2`, sources up to 30 seconds
+use one full shared-duration interval, sources longer than 30 and through 60 seconds use
+two disjoint endpoint intervals split in integer sample coordinates at `floor(N/2)`, and
+sources above 60 and below 90 seconds use two capped 30-second endpoint intervals with a
+gap. Sources of at least 90 seconds use five distributed 30-second intervals. A larger
+configured minimum uses the existing distributed planning. Explicit window length and
+stride preserve their requested shape, but do not waive the duration tier's temporal
 support requirement. Overlapping or duplicate useful intervals do not create independent
 support. Clean planned completion and observed early EOF are
 distinct successful collection outcomes; failed collection PCM is never usable.

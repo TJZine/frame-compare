@@ -1499,12 +1499,13 @@ this sign convention before consensus evidence, hints, caching, and trim applica
   across the complete shared selected-audio-stream timeline. When the window length
   is configured and the stride is zero, the window length is also used as the stride,
   producing a contiguous candidate grid before bounded sampling. With both values at
-  zero, inputs up to 30 seconds use one full shared-duration interval, inputs longer than
-  30 and shorter than 90 seconds use two disjoint endpoint intervals planned from the
-  integer sample split `[0, floor(N/2))` and `[floor(N/2), N)` (bounded by the same
-  duration tier),
-  and inputs at least 90 seconds use five distributed 30-second intervals. A larger
-  configured minimum is retained; overlap and duplicate intervals do not become independent
+  zero, inputs up to 30 seconds use one full shared-duration interval. With the default
+  window shape and `minimum_valid_windows <= 2`, inputs longer than 30 and through 60
+  seconds use two disjoint endpoint intervals planned from the integer sample split
+  `[0, floor(N/2))` and `[floor(N/2), N)`; inputs above 60 and below 90 seconds use
+  two capped 30-second endpoint intervals with a gap; and inputs at least 90 seconds
+  use five distributed 30-second intervals. A larger configured minimum uses the existing
+  distributed planning; overlap and duplicate intervals do not become independent
   support. Explicit length and stride preserve their requested shape, but do not waive the
   corresponding short full-source or medium/long endpoint support requirement.
 - `minimum_valid_windows` remains an integer greater than or equal to `1`,
