@@ -404,4 +404,33 @@ Mark this plan Historical only after its complete scope is accepted.
   `--seed`/`--tm-target` remain native Typer integers (pre-existing, out of scope).
   `ruff format --check` reports pre-existing drift in unrelated
   `tests/vsview/test_output.py`; left untouched.
-- P2–P6: pending.
+
+### P2 acceptance — wizard next steps and repeat use
+
+- Implementation `cf007a24` `feat(cli): guide wizard users to verified next
+  commands`. Worker: Claude `worker_luna` (configured Sonnet, max effort); controller
+  repairs before commit.
+- Owners: `cli/wizard_command.py` (stderr `Next steps` block after a successful write
+  or valid no-op; bare `frame-compare doctor`; both `run` suggestions pinned to the
+  resolved `--root` and selected `--config`, including the portable fallback; POSIX
+  `shlex.quote` or PowerShell single-quoted literals chosen by `os.name`), `cli/entry.py`
+  (`_is_windows_shell` seam), wizard tests, CLI contract, command reference,
+  first-comparison guide (accurate wizard scope, dry-run limits, route-tabbed
+  "Repeat comparisons" section, when to revisit wizard/doctor), README and
+  getting-started pointers, and the stale HDR-guide wizard claim.
+- Controller repairs: PowerShell quoting also doubles typographic single quotes;
+  "verified" wording softened to suggestions; Docker container-path note; README,
+  getting-started, and HDR guide updates (the worker had raised the HDR claim as a
+  separate task chip, which the controller withdrew and fixed here).
+- Proof (controller, after repairs): `pytest -q tests/cli
+  tests/workflows/test_onboarding_docs.py tests/test_cli_contract_docs.py` exit 0;
+  `ruff check .`, `pyright --warnings` 0/0/0, `bandit` no issues, `lint-imports`
+  2 kept, `git diff --check` clean. Tests prove argv meaning with `shlex.split` for a
+  root containing spaces, `$`, `;`, quotes, and backticks; alternate root/config;
+  portable fallback; PowerShell quoting against an independent oracle; no block after
+  cancellation, write failure, or invalid configuration. Worker manually observed the
+  POSIX and forced-PowerShell blocks through `CliRunner`; the Windows shim e2e tests
+  skipped on this macOS host (no `pwsh`).
+- Not yet run: full `pytest -q` and strict docs build (P6). Physical Windows display
+  of the PowerShell block is unverified on this host.
+- P3–P6: pending.
