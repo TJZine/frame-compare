@@ -13,6 +13,25 @@ on:
       - src/frame_compare/analysis/**
       - src/frame_compare/render/**
       - src/frame_compare/vs/**
+      - .github/workflows/docker-integration.yml
+      - src/frame_compare/services/alignment.py
+      - src/frame_compare/services/alignment_audio.py
+      - src/frame_compare/services/alignment_consensus.py
+      - src/frame_compare/services/alignment_correlation.py
+      - src/frame_compare/services/alignment_streaming.py
+      - src/frame_compare/services/errors.py
+      - src/frame_compare/services/types.py
+      - src/frame_compare/orchestration/phase_alignment.py
+      - src/frame_compare/orchestration/execution.py
+      - src/frame_compare/orchestration/execution_types.py
+      - src/frame_compare/orchestration/context.py
+      - src/frame_compare/utils/subproc.py
+      - src/frame_compare/utils/types.py
+      - tests/services/test_alignment*.py
+      - tests/services/alignment_request_test_support.py
+      - tests/orchestration/test_phase_alignment*.py
+      - tests/orchestration/test_phase_tasks_alignment.py
+      - tests/orchestration/phase_task_helpers.py
       - tests/integration/**
       - tests/vs/**
   workflow_dispatch:

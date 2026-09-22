@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from tests.workflow_helpers import load_workflow
@@ -11,6 +12,31 @@ from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
 from ._helpers import bash_executable_or_skip as _bash_executable_or_skip
 
 RESOURCE_TEST = "tests/integration/test_alignment_streaming_resources.py"
+
+ALIGNMENT_TRIGGER_PATHS = (
+    ".github/workflows/docker-integration.yml",
+    "src/frame_compare/services/alignment.py",
+    "src/frame_compare/services/alignment_audio.py",
+    "src/frame_compare/services/alignment_consensus.py",
+    "src/frame_compare/services/alignment_correlation.py",
+    "src/frame_compare/services/alignment_streaming.py",
+    "src/frame_compare/services/errors.py",
+    "src/frame_compare/services/types.py",
+    "src/frame_compare/orchestration/phase_alignment.py",
+    "src/frame_compare/orchestration/execution.py",
+    "src/frame_compare/orchestration/execution_types.py",
+    "src/frame_compare/orchestration/context.py",
+    "src/frame_compare/utils/subproc.py",
+    "src/frame_compare/utils/types.py",
+)
+
+ALIGNMENT_TEST_TRIGGER_PATTERNS = (
+    "tests/services/test_alignment*.py",
+    "tests/services/alignment_request_test_support.py",
+    "tests/orchestration/test_phase_alignment*.py",
+    "tests/orchestration/test_phase_tasks_alignment.py",
+    "tests/orchestration/phase_task_helpers.py",
+)
 
 
 def _write_fake_docker(path: Path) -> None:
@@ -67,6 +93,15 @@ def _run_verifier(
 def _docker_steps(repo_root: Path) -> list[dict[str, object]]:
     workflow = load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
     return workflow["jobs"]["docker-integration"]["steps"]
+
+
+def _pull_request_paths(repo_root: Path) -> list[str]:
+    workflow = load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
+    return workflow["on"]["pull_request"]["paths"]
+
+
+def _path_matches_workflow(path: str, workflow_paths: list[str]) -> bool:
+    return any(fnmatchcase(path, pattern) for pattern in workflow_paths)
 
 
 def test_default_verifier_excludes_only_opt_in_resource_module(
@@ -144,3 +179,44 @@ def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(
     ]
     assert "build" not in resource_command
     assert "--build" not in resource_command
+
+
+def test_workflow_triggers_alignment_resource_owners_and_tests(repo_root: Path) -> None:
+    workflow_paths = _pull_request_paths(repo_root)
+
+    assert set(ALIGNMENT_TRIGGER_PATHS) <= set(workflow_paths)
+    assert set(ALIGNMENT_TEST_TRIGGER_PATTERNS) <= set(workflow_paths)
+    assert "tests/integration/**" in workflow_paths
+    assert "tests/workflows/**" in workflow_paths
+    assert "src/frame_compare/services/**" not in workflow_paths
+    assert "src/frame_compare/orchestration/**" not in workflow_paths
+
+    matching_paths = (
+        ".github/workflows/docker-integration.yml",
+        "src/frame_compare/services/alignment_audio.py",
+        "src/frame_compare/orchestration/execution_types.py",
+        "src/frame_compare/utils/subproc.py",
+        "tests/services/test_alignment_streaming.py",
+        "tests/services/alignment_request_test_support.py",
+        "tests/orchestration/test_phase_alignment_contract.py",
+        "tests/orchestration/test_phase_tasks_alignment.py",
+        "tests/orchestration/phase_task_helpers.py",
+        RESOURCE_TEST,
+    )
+    assert all(_path_matches_workflow(path, workflow_paths) for path in matching_paths)
+
+
+def test_workflow_does_not_trigger_unrelated_service_orchestration_paths(
+    repo_root: Path,
+) -> None:
+    workflow_paths = _pull_request_paths(repo_root)
+
+    unrelated_paths = (
+        "src/frame_compare/services/release_identity.py",
+        "src/frame_compare/services/update.py",
+        "src/frame_compare/services/report/renderer.py",
+        "src/frame_compare/orchestration/phase_render.py",
+        "src/frame_compare/orchestration/selection_report.py",
+        "docs/current-architecture.md",
+    )
+    assert all(not _path_matches_workflow(path, workflow_paths) for path in unrelated_paths)
