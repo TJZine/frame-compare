@@ -1,6 +1,144 @@
 {
   "schema_version": 1,
   "purpose": "R6 production continuous-alignment runtime, resource, physical-Windows, and release-gate evidence",
+  "r7_windows_activation_acceptance": {
+    "schema_version": 1,
+    "observed_at_utc": "2026-09-21",
+    "purpose": "Sanitized physical-Windows acceptance for qualified mono activation and permanently provisional channel corroboration under v12",
+    "source": {
+      "checkout_commit": "89584237ec42f724a532b6919f1a87d4b44072a3",
+      "production_source_commit": "3739ac6d6292d6ea35d71156c35c6704fd8f5032",
+      "checkout_clean_before_build": true,
+      "controller_delta": ["docs/plans/2026-09-14-audio-alignment-trust-and-diagnostics.md"],
+      "packaged_commit": "89584237ec42f724a532b6919f1a87d4b44072a3",
+      "production_code_changed": false,
+      "automatic_authority_default": "qualified_mono_active",
+      "estimator_identity": "continuous-origin-qualified-channel-corroboration-2097152-v12"
+    },
+    "portable_bundle": {
+      "platform": "windows-x64",
+      "app_version": "0.6.0",
+      "zip_bytes": 377506749,
+      "zip_sha256": "7631cc363fa036e0ee653e7e2d76d9bad0e2e4ee3b18f2335e3562abeefddf6b",
+      "bundle_info_bytes": 792,
+      "bundle_info_sha256": "f990337c6d7e1d5bde51f0021bddd591b9f8c6d20984eaf3c2d98c038b2fcf1d",
+      "bundle_inventory_bytes": 88663,
+      "bundle_inventory_sha256": "ab7b641e896e5243651b8beb430575c0c238035c731d18d4345c4ab4a831e95f",
+      "requirements_lock_sha256": "6f0694471221f75bb0c55854e1e2ac2076e797b08829cb898af495f0d79af14e",
+      "media_runtime_fingerprint": "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7",
+      "alignment_runtime_fingerprint": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
+      "versions": {
+        "python": "3.13.15",
+        "frame_compare": "0.6.0",
+        "ffmpeg": "n8.1.2-34-g9b6c8969e0-20260731",
+        "ffprobe": "n8.1.2-34-g9b6c8969e0-20260731",
+        "vapoursynth": "R79 / API R4.2",
+        "vapoursynth_lsmas": "1310.0.0.0",
+        "vs_placebo": "2.0.4",
+        "vspackrgb": "1.4.0",
+        "vsview": "0.11.0",
+        "vsview_cli": "1.2.0",
+        "pyside6": "6.11.2"
+      },
+      "doctor": {"success": true, "slowpics_network_status": 520},
+      "extracted_verifier": {
+        "result": "pass",
+        "proofs": [
+          "zip_layout=ok",
+          "extraction_root_reserved=ok",
+          "extraction=ok",
+          "workspace_directories=ok",
+          "vsview_distributions=ok",
+          "qt_webengine_runtime=absent deployment=excluded",
+          "metadata_provenance=ok",
+          "license_inventory=ok count=101",
+          "candidate_launcher_--help exit_code=0",
+          "candidate_launcher_version exit_code=0",
+          "candidate_launcher_doctor_--json exit_code=0",
+          "candidate_install exit_code=0",
+          "installed_shim_version exit_code=0",
+          "installed_shim_--help exit_code=0"
+        ]
+      }
+    },
+    "retained_real_controls": {
+      "zero": {"decision": "trusted_automatic", "frame_offset": 0, "time_offset_seconds": 0.0, "applied": true, "authoritative_trim_input": 0, "cache_written": true},
+      "positive_five": {"decision": "trusted_automatic", "frame_offset": 5, "time_offset_seconds": 0.2085, "applied": true, "authoritative_trim_input": 5, "reference_trim_start": 5, "cache_written": true, "v12_cached_reuse": true},
+      "negative_five": {"decision": "trusted_automatic", "frame_offset": -5, "time_offset_seconds": -0.2085, "applied": true, "authoritative_trim_input": -5, "comparison_trim_start": 5, "cache_written": true, "v12_cached_reuse": true},
+      "different_segment": {"decision": "unavailable", "reason": "no_voting_windows", "frame_offset": null, "time_offset_seconds": null, "applied": false, "authoritative_trim_input": null, "cache_written": false},
+      "digital_silence": {"decision": "unavailable", "reason": "no_usable_windows", "frame_offset": null, "time_offset_seconds": null, "applied": false, "authoritative_trim_input": null, "cache_written": false},
+      "v11_computed_cache": "missed_and_recomputed_under_v12",
+      "v11_embedded_computed_result": "missed_and_recomputed_under_v12",
+      "retained_result_sha256": {
+        "zero": "35b17ed3de58c4ce02056e8c3810eff0b680160e695e56b18ff2289bb3768ef7",
+        "positive_five": "15c99dc1832c0ced6df2c786c50e812e22f2cc3841cd813998f67cfceee43207",
+        "negative_five": "78a546db95933fe1b2628af5213b8ee07c420f6dfa4c32b67bfbfe3e9326d5c3",
+        "different_segment": "a3f447b9cecfc80d8721732f50711a29f09b1ffdd9ce6febd7b3281f2d881e3a",
+        "digital_silence": "1682200e17b80263608151fd0608cd0acff83201951e12635ed628ffe33ad349"
+      }
+    },
+    "natural_private_three_file_case": {
+      "retained_result_sha256": "ae5a52afb153884b65f85496b9892e74a587f77fccb99e4b3019abe08a16283b",
+      "comparison_1": {"authority": "computed_mono", "decision": "trusted_automatic", "frame_offset": 0, "time_offset_seconds": 0.0, "applied": true, "authoritative_trim_input": 0},
+      "comparison_2": {"authority": "none", "decision": "provisional", "reason": "channel_corroboration_provisional", "channel_status": "corroborated", "channel_candidate_frame": 0, "channel_independent_windows": 3, "frame_offset": null, "time_offset_seconds": null, "applied": false, "authoritative_trim_input": null},
+      "trusted_peer_promoted_provisional_comparison": false,
+      "alignment_reuse_file_count": 0,
+      "manual_override_file_count": 0,
+      "alignment_result_authority_file_count": 0
+    },
+    "visible_windows_acceptance": {
+      "physical_desktop": true,
+      "sources_ready": "3/3",
+      "accepted_mono_copy": "Audio alignment accepted: +0f",
+      "provisional_panel_copy": "Provisional audio candidate: +0f — NOT APPLIED",
+      "provisional_reason": "channel_corroboration_provisional",
+      "video_marker": "Provisional +0f - NOT APPLIED",
+      "video_marker_ascii_hyphen": true,
+      "video_marker_mojibake": false,
+      "manual_authority_available": true,
+      "manual_source_frames": {"reference": 17000, "comparison_1": 17000, "comparison_2": 17000},
+      "provisional_candidate_prefilled_authority": false,
+      "close_without_save_result_file_count": 0,
+      "keep_current_result_sha256": "efa0ae3ab0ff2db70079257d2a776881bddfabf0ce5521a64a77dd26d7e15793",
+      "keep_current_decisions": ["comparison_1:keep_current", "comparison_2:keep_current"],
+      "keep_current_accepted_outcome": "accepted alignment +0f retained",
+      "keep_current_provisional_outcome": "no automatic correction applied; provisional +0f was not confirmed",
+      "post_review_alignment_reuse_file_count": 0,
+      "post_review_manual_override_file_count": 0,
+      "screenshot_sha256": [
+        "2c29c13315e4fc62dee7094e94abfbc6e78a667f7d89f6b4f271b1fa3beb9817",
+        "34d86056e7b598eea243859d526c247624f48033bad96996c28ae17aa3587963",
+        "52accf70737a4d6b1ab87ee20f4d8308456d3eb2e1d1c84b7960859194376e00",
+        "e0ac0ba92574e9067e4c035b1d8def9187e8aded8f0f9d721d3149809a0940b2"
+      ],
+      "screenshots_tracked": false
+    },
+    "verification": {
+      "focused_tests": {"passed": 324, "failed": 0, "skipped": 0},
+      "resource_tests": {"skipped": 5, "reason": "explicit opt-in resource suite; direct physical-Windows packaged proof used Win32 sampling"},
+      "public_key_validation": "pass",
+      "portable_build": "pass",
+      "json_parse": "pass",
+      "artifact_hash_validation": "pass",
+      "manual_keep_current_and_malformed_result_contracts": "pass",
+      "privacy_scan": "pass"
+    },
+    "acceptance": {
+      "r7_gate": "pass",
+      "qualified_mono_authority": "trusted_automatic_applied_and_cacheable",
+      "channel_corroboration_authority": "permanently_provisional_only",
+      "channel_cache_write": false,
+      "channel_trim_input": false,
+      "manual_authority_unchanged": true,
+      "malformed_or_contradictory_results": "fail_closed",
+      "release_authority_activated": true
+    },
+    "limitations": [
+      "The private original case is one retained media lineage, not general calibration.",
+      "Screenshots were inspected only for the visible acceptance facts recorded here and were not added to the repository.",
+      "The opt-in cross-platform resource suite has no Windows process sampler; the fresh portable build and prior R6E procedure provide the direct Win32 proof surface."
+    ]
+  },
   "r6e_windows_channel_acceptance": {
     "schema_version": 1,
     "observed_at_utc": "2026-09-20",
