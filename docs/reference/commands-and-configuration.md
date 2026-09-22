@@ -101,7 +101,8 @@ manually for Source frames or Known offsets; source-frame drafts say `{n}/{total
 frames entered`, known-offset drafts say `{n}/{total} offsets entered`, and both add
 ` — ready to confirm` only when valid and complete. Viewer guidance is `To confirm a new
 alignment, unlink the playheads and position each source on the same visible moment. Or
-keep the current alignment.` Closing VSView without saving writes no result. Generated
+keep the current alignment.` Valid source-frame drafts use `Entered source frame: N`.
+Closing VSView without saving writes no result. Generated
 session metadata uses v4 while the typed sibling result sidecar remains v1; strict
 session/result validation and authoritative raw frame bounds remain unchanged.
 

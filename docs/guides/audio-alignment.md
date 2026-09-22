@@ -228,7 +228,7 @@ non-negative untrimmed frame per source; **Known offsets** accepts one signed in
 comparison using `reference - comparison`. Both bases feed the same whole-set save
 action and explain the trim direction immediately. Source-frame entry reports
 `{n}/{total} source frames entered`, adding ` — ready to confirm` only when complete and
-valid; each valid draft is shown as `Entered source frame: frame N`. Invalid input is
+valid; each valid draft is shown as `Entered source frame: N`. Invalid input is
 shown as `Needs attention — {validation message}`. The known-offset guidance is
 `Enter the signed reference-minus-comparison offsets, then confirm. Or keep the current
 alignment.` With no configured base trims, positive offsets trim the reference and
@@ -254,7 +254,9 @@ attempt.
 
 After either whole-set action, the panel shows `Alignment choices saved` and
 `Close VSView to resume Frame Compare.` It disables the save actions, hides stale
-keep-current help, and focuses the saved status. Keep-current outcomes are
+keep-current help, hides the pre-save audio summaries, and focuses the saved status.
+Frozen captured or entered positions remain in the source lineup; the collapsed audio
+evidence details retain the original immutable classification. Keep-current outcomes are
 `Accepted alignment retained: +Nf`, `Current alignment retained: +Nf — manually
 confirmed`, `Current alignment retained. Provisional candidate +Nf not confirmed — NOT
 APPLIED. Comparison unresolved.`, or `Current alignment retained. Comparison unresolved

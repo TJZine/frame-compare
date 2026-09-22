@@ -1250,7 +1250,7 @@ positions each source on the same visible moment, and reports the active output 
 Inactive sources show only their last captured position. Before saving, viewer drafts
 use `{n}/{total} positions captured`, source-frame drafts use `{n}/{total} source frames
 entered`, and known-offset drafts use `{n}/{total} offsets entered`; complete valid
-drafts add ` — ready to confirm`. Manual source drafts use `Entered source frame: frame N`
+drafts add ` — ready to confirm`. Manual source drafts use `Entered source frame: N`
 and invalid drafts use `Needs attention — {validation message}`. Manual source-frame or
 known-offset entry and keep-current completion do not require viewer visits. Public
 current-output/current-frame callbacks update the live source lineup; the panel does not
@@ -1271,7 +1271,7 @@ initial `Content loaded successfully` INFO record because `[OK] VSView Ready` al
 owns that success confirmation; reload, clipboard, warning, error, and other native
 diagnostics remain unchanged.
 
-Each comparison has a persistent **Audio evidence** summary and collapsed **Audio
+Before saving, each comparison has an **Audio evidence** summary and a collapsed **Audio
 evidence details — Comparison N** independent of its manual draft. Current authority
 leads with `Accepted audio alignment: +Nf — APPLIED`, `Accepted audio alignment reused:
 +Nf — APPLIED`, or `Manually confirmed alignment: +Nf — APPLIED`, followed by `No
@@ -1282,7 +1282,8 @@ remains in its original classification, including provisional evidence after a m
 confirmation. A provisional marker is display-only: it never prefills a field, moves a
 playhead, marks an output visited, increases readiness, enables confirmation, writes an
 accepted marker, or authorizes trimming/cache reuse. Unavailable evidence has no marker.
-After either saved action, the prominent status is `Alignment choices saved`, the next
+After either saved action, the pre-save audio summaries are hidden while their collapsed
+details retain the original immutable evidence. The prominent status is `Alignment choices saved`, the next
 action is `Close VSView to resume Frame Compare.`, stale keep-current help is hidden,
 and actions stay disabled. Saved outcomes are `Accepted alignment retained: +Nf`,
 `Current alignment retained: +Nf — manually confirmed`, the explicit unresolved

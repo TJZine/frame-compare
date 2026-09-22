@@ -584,14 +584,15 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 strict=True,
             )
         ):
+            frame_error = draft.error if self._basis == "positions" else None
             offset_error = (
                 self._offset_drafts[index - 1].error
                 if self._basis == "offsets" and index > 0
                 else None
             )
-            if draft.error is not None:
-                status = f"Needs attention — {draft.error}"
-                first_error = first_error or draft.error
+            if frame_error is not None:
+                status = f"Needs attention — {frame_error}"
+                first_error = first_error or frame_error
             elif offset_error is not None:
                 status = f"Needs attention — {offset_error}"
                 first_error = first_error or offset_error
@@ -608,13 +609,18 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                     if manual_source_basis
                     else "Captured position: not captured"
                 )
-            elif draft.output_id == self._active_output_id and draft.origin == "Viewer":
+            elif (
+                not self._saved
+                and draft.output_id == self._active_output_id
+                and draft.origin == "Viewer"
+            ):
                 captured_label = (
                     "Entered source frame" if manual_source_basis else "Captured position"
                 )
-                status = f"Viewing: frame {draft.frame}\n{captured_label}: frame {draft.frame}"
+                captured_value = str(draft.frame) if manual_source_basis else f"frame {draft.frame}"
+                status = f"Viewing: frame {draft.frame}\n{captured_label}: {captured_value}"
             elif manual_source_basis or draft.origin == "Manual":
-                status = f"Entered source frame: frame {draft.frame}"
+                status = f"Entered source frame: {draft.frame}"
             else:
                 status = f"Captured position: frame {draft.frame}"
             status_label.setText(status)
@@ -722,6 +728,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             return
         self._saved = True
         self.error_label.clear()
+        for label in self.audio_summary_labels:
+            label.hide()
         self.use_positions_button.setEnabled(False)
         self.keep_button.setEnabled(False)
         self.manual_toggle.setEnabled(False)
