@@ -485,7 +485,7 @@ at the next checkpoint. Pending rows are not proof.
 | F3 | Accepted locally and in Docker; Windows remains W1 | `137267b1f3573c69d40c7d79b8d473b29b35cccb` / `b9919607c9395b168a79633c5a2234f83ea5b977` | `01a0c7fd-c427-7f42-9553-f2bb3690cb42`; Luna xhigh | Consensus lifetime and focused tests; `b9919607` | Full/static/docs, native and Docker resource/channel proof passed within recorded limits | Every changed line inspected; focused tests and five native resource tests passed; image hashes match | F4 next; no numerical or identity change |
 | F4 | Accepted | `1133b11fd2b4ec46fc9e6cb695d700cb883116de` / `c15d230c638a0c33299fbddf7321e148cd8c62f0` | `01a0c80b-bf75-72a0-88ae-72b374fe7074`; Luna xhigh | Current CLI contract and command reference; `c15d230c` | Contract-doc/API/isolated strict docs and hooks passed | Every changed line and source facts inspected; contract-doc/API checks passed; tracked strict docs passed | F5 next; unrelated untracked site-link warning preserved |
 | F5 | Accepted trigger coverage; hosted gate pending | `dff31ed101bc8f5b78dc72f62b7ff0495f49e870` / `d4b571db466156db6fa42929fe28378b7b1509bf` | `01a0c816-6b9e-7751-9a45-734b5be9a236`; Luna xhigh | Workflow path filter and contract tests; `d4b571db` | Full/static/docs, Docker resources passed; broad guard remains non-pass | Every changed line checked; 21 independent workflow tests passed | U1 next; no hosted pass claim |
-| U1 | Pending F5 | Pending | Pending | Terminal presentation/progress | Pending | Pending | Frozen matrix above |
+| U1 | Returned; U1-R required before acceptance | `e9e70d8891c7c65264d650b2fbd759ca808d86fe` / `e07699581cc3a171230d19f6c99e16539dbaeab3` | `01a0c828-7d7d-7270-9d9e-4fda3f1be796`; Luna xhigh | Alignment presentation/callback, tests and current docs; `e0769958` | Focused/full/static checks reported; normal/narrow render captured | Complete diff inspected; focused tests passed; two concrete contract gaps reproduced | U1-R next, U2 blocked on acceptance |
 | U2 | Pending U1 | Pending | Pending | VSView presentation | Pending | Pending | Physical visible proof in W1 |
 | A1 | Pending U2 | Pending | Controller | Integration proof and plan record | Not applicable | Pending | No monitor delegation |
 | W1 | Pending A1 and physical host | Pending | Pending | Canonical sanitized evidence only | Pending | Pending | Mandatory before closeout |
@@ -743,3 +743,28 @@ historical attempt state cannot override manual authority. Keep original evidenc
 truthful in verbose/details, including explicit NOT APPLIED for original provisional
 hints. Reuse existing normal/verbose formatting owners; move internal detail lines
 rather than discard diagnostic facts. The frozen terminal copy above is authoritative.
+
+
+### U1 controller checkpoint — structured events and reuse label repair
+
+Controller inspected all seven changed files and normal/narrow no-color Rich captures.
+Focused workflow, previous-offset, channel, native-review and cancellation tests passed.
+Two concrete gaps prevent acceptance:
+
+1. `_present_alignment_evidence` changed the predicate used by JSON structured warnings
+   from unapplied OR historical attempt not trusted to only unapplied. An applied manual
+   result with a provisional historical attempt now emits no event where the prior
+   contract emitted `audio_alignment_requires_review`. Preserve the prior JSON predicate
+   and fields exactly; use current-authority-first behavior for human output separately.
+2. `shared_previous_offsets` now prints the same manual heading as a new confirmation.
+   Restore the required reuse label using this frozen line:
+   `Manually confirmed alignment reused: {offset} - APPLIED`.
+   Keep `Manually confirmed alignment: {offset} - APPLIED` for current-run confirmation.
+
+U1-R is limited to alignment.py presentation predicates/copy, focused workflow/reuse
+regressions and the two directly governing current docs. Add explicit tests for the
+JSON historical-attempt case and current versus reused manual headings. Do not alter
+wire fields or the historical JSON event as an unsolicited cleanup. Complete the
+missing tracked-doc strict proof and relevant real production integration proof, then
+return a separate conventional repair commit. Existing hold-latch rollback behavior
+is unrelated to old-result compatibility and need not be redesigned.
