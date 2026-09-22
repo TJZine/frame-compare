@@ -713,9 +713,30 @@ model, a security or data-loss boundary, or irreconcilable authoritative guidanc
 Existing task authorization remains valid. Explicit release/production approval
 boundaries elsewhere in this runbook still apply.
 
+Skill guidance must not introduce an approval gate that its instructions do not
+require or request authorization already given for the same action. Honor explicit
+user limits, including proposal-only work and approval before editing. If an
+instruction requires a pause, link the exact file, quote the relevant instruction,
+and explain the unresolved decision. Distinguish an explicit requirement from an
+interpretation of guidance before escalating.
+
 Workers return decisions outside their assigned boundary to the main agent. The
 main agent resolves them within the user's authorization before escalating to the
 user. Continue independent work while a genuinely required decision is pending.
+
+Incorporate mid-task corrections into the ongoing objective and preserve completed
+work and still-applicable constraints. A status question does not cancel the task:
+answer it briefly and continue. Replace or stop the objective when the user
+explicitly redirects or cancels it. Continue independent authorized work while
+awaiting necessary input; elapsed time does not supply an answer or approval.
+
+### Task Communication
+
+Lead with outcomes and explain consequential decisions, verification evidence,
+and material limitations in plain language. Keep progress updates focused on new
+findings and decisions rather than routine process narration. Use concise prose
+and add lists, tables, or headings only when they make the information easier to
+understand.
 
 ## Discrepancy Handling
 
