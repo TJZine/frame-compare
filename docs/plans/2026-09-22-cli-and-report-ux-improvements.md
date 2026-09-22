@@ -369,5 +369,39 @@ Mark this plan Historical only after its complete scope is accepted.
 - Planning only: created September 22, 2026. No product implementation performed.
 - User clarification: remove **Fit width (↔)**; retain the **orientation switch** and
   every other floating control. This supersedes the review's proposed control hiding.
-- P1–P6: not started under this plan; upstream audio/screenshot work has independent
-  execution records and must be checked at implementation time.
+- Control plane: `3b0da8a0` replaced the Codex-specific dispatch paragraph and
+  handoff mechanics with the runtime-neutral controller wording and the Claude
+  subagent mapping. No product scope changed.
+- Upstream at implementation start (audio plan execution record): U1 and U2 accepted
+  after repairs, A1 local/Docker/package verification passed, W1 physical-Windows
+  acceptance pending. Screenshot plan remains Active and Windows-owned.
+
+### P1 acceptance — actionable CLI errors and help
+
+- Implementation `cdf77d70` `feat(cli): make run validation errors and help
+  actionable`. Worker: Claude `worker_luna` (configured Sonnet, max effort); controller
+  repairs before commit.
+- Owners: `cli/run_command.py` (`coerce_cli_choice` takes the public flag; enum-derived
+  `format_enum_choices`; echoed values bounded to 80 characters with control
+  characters escaped; frame/count errors keep their message and put a valid example
+  in the hint), `cli/entry.py` (metavariables `FRAME[,FRAME…]`, `COUNT`, `NITS`,
+  `MODE`/`PRESET`/`CURVE`; enum-derived choice lists; one persistence explanation in
+  `help=`; three description-plus-command examples), CLI contract, command reference,
+  and CLI tests (including a panel↔`CLI_OVERRIDE_MAP` persistence invariant).
+- Controller repairs: epilog examples reflow cleanly and state that configured frame
+  selection still applies; persistence prose now covers source and alignment flags;
+  generic "Check field types and constraints" hint replaced for frame/count errors;
+  control-character escaping; help text moved from docstring to `help=` so it reflows
+  at 60 columns.
+- Proof (controller, after repairs): `pytest -q tests/cli tests/config/test_overrides.py
+  tests/test_cli_contract_docs.py` exit 0; `pyright --warnings` 0/0/0; `ruff check .`
+  pass; `bandit` no issues; `lint-imports` 2 kept; `git diff --check` clean. Manual
+  `run --help` at `COLUMNS=60/80/120`, `run --overlay banana` (human and `--json`:
+  FC-1003, exit 2, JSON-only stdout, `validation_errors` shape unchanged), and
+  `run --frames 1,x` human/JSON inspected. Worker also ran the same focused suites
+  plus `generate_api_docs.py --check` (no-op; `cli` is not a locked API module).
+- Not yet run: full `pytest -q` and strict docs build (reserved for P6 integration).
+  `--seed`/`--tm-target` remain native Typer integers (pre-existing, out of scope).
+  `ruff format --check` reports pre-existing drift in unrelated
+  `tests/vsview/test_output.py`; left untouched.
+- P2–P6: pending.
