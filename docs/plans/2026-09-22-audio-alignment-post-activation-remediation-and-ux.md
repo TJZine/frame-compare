@@ -103,12 +103,16 @@ AA-02 and AA-03 under one fresh opaque cache-policy token:
 `continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922`.
 The dated suffix distinguishes evidence policy; it is not a user-facing release label
 and does not change any schema version. Do not add version badges to the UI.
-No other planned package changes identity. F2 must test current-policy computed/confirmed
-reuse and stale-v12 computed, embedded, and `interactive_confirmed` source-set misses.
-The policy participates in the entire shared source-set key: previously confirmed
-v12 entries also miss. This conservative clean miss is explicitly accepted; do not
-claim confirmed entries survive, migrate them, or split identity architecture.
-Run-local explicit manual overrides retain their existing precedence.
+The user's subsequent clarification supersedes the original historical-cache matrix:
+there is one user, old results need not be preserved, and backward compatibility is
+out of scope. Support only the current format and policy. Existing policy-key mismatch
+may ignore stale entries and recompute; no migration, compatibility reader, legacy
+preservation, special old-version handling, or cache-cleanup subsystem is required.
+No other planned package changes identity. Verify current-policy behavior/reuse and
+one focused stale-policy miss/rejection; do not build an exhaustive old computed,
+embedded, or confirmed-entry matrix. Existing meaningful tests may be reused.
+Old shared confirmations may be lost without migration. Current run-local explicit
+manual overrides retain their existing precedence. Do not delete unrelated user data.
 
 ## Frozen UX state and copy matrix
 
@@ -252,8 +256,8 @@ Test odd/even endpoint counts and one-sample boundaries around 30/60/90 seconds 
 direct and discovery/verification rates. Test credible named-channel dissent with
 both signs at every relevant temporal position, including internally agreeing windows;
 weak/noisy dissent does not veto. Channels remain provisional with fail-on-call or
-equivalent proof against application/trims/cache/promotion. Test the single policy refresh
-and every v12 cache consequence above, including embedded and confirmed records.
+equivalent proof against application/trims/cache/promotion. Test the single policy refresh,
+current-policy behavior/reuse, and one stale-policy rejection as specified above.
 Proof: focused planner/channel/cache/production integration, Full Verification,
 native alignment integration, current docs, and fresh Docker candidate proof.
 Commit: `fix(alignment): enforce temporal evidence invariants`.
@@ -272,7 +276,7 @@ Commit: `fix(alignment): release channel buffers between views`.
 
 Write current CLI contract, command reference, and current audio guide/architecture
 only for AA-05 and accepted F2 consequences. Confirm source truth for declined reuse,
-active mono authority, metadata v4, and prior-policy confirmed-cache misses. Historical plans
+active mono authority, metadata v4, and current-policy-only reuse. Historical plans
 and immutable evidence are read-only. Proof: CLI contract-doc tests, generated API
 check, strict documentation build, link/diff inspection; no product change.
 Commit: `docs(alignment): reconcile authority and metadata contracts`.
@@ -342,7 +346,7 @@ plan edits, signing, publishing, dependency refresh, or runtime redesign.
 | Raw composition | Unequal/equal base trims with raw zero/positive/negative, multi-comparison and mixed authority. Independently demonstrate final raw-source start differences equal raw `O`, not `Q`. |
 | Temporal policy | Odd-duration endpoints, direct/verification paths; cross-window credible channel dissent suppresses the hint, weak dissent preserves valid provisional evidence. |
 | Real controls | Retained-real zero/+5/-5 controls; natural three-file trusted mono zero plus provisional channel zero. Keep true different-segment/silence negatives. No forced remix tuning. |
-| Cache | Current v2-refinement policy write/reuse, stale v12 computed/embedded/confirmed source-set misses, explicit manual precedence and no channel authority/promotion. |
+| Cache | Current v2-refinement policy write/reuse and one stale-policy miss/rejection; explicit current manual precedence and no channel authority/promotion. Old results need not survive. |
 | Resources/lifetime | Same-timestamp combined RSS, bounds, handle plateau, one active child, reader/worker cleanup, cancellation and partial/nonzero failure. Run resource suite and report native Windows sampler skips honestly; direct Win32 evidence fills platform proof, not a false suite pass. |
 | Visible terminal | One actual channel activity transition, signed accepted/applied/provisional/unavailable decisions, manual/quiet/non-TTY/no-color behavior as applicable. |
 | Visible VSView | Captured versus viewing positions; accepted/provisional/unresolved states; collapsed details; confirm and keep-current; prominent truthful saved summaries; close-to-resume guidance without stale instructions; Unicode/ASCII overlay rendering; narrow view/enlarged fonts; keyboard/focus; both manual bases; close without saving. |
@@ -450,7 +454,7 @@ file-discovery and implementation choices are not user decision gates.
 | --- | --- |
 | Wrong coordinate or sign, especially zero and mixed siblings | F1 final-source invariant and production integration, repeated on Windows; AA-01 remains a release blocker until accepted. |
 | Credibility/support regression | F2 boundary and dissent-position/sign matrix; fixed floors and independent support remain unchanged. Sampling cannot detect every edit. |
-| Lost confirmed reuse | Explicit accepted prior-policy whole-set misses, no migration or identity split; users may reconfirm. |
+| Old results discarded | Accepted by the sole user; current-policy-only support, no backward compatibility, migration or identity split. |
 | Retained PCM/process resources | F3 lifetime assertions plus native/Docker/Win32 proof; sampled memory cannot exclude every between-sample transient. |
 | UI implies authority or confuses saved state | Frozen state matrix, strict schemas, fail-closed tests and physical visual acceptance. |
 | CI absent or skipped | Narrow filter contracts, explicit opt-in Docker run; hosted CI remains pending until user push. |
@@ -477,7 +481,7 @@ at the next checkpoint. Pending rows are not proof.
 | Activation | Complete | `51ef0132fa89d8ed36c6114c63157e2c13630085` / `edb10ef6f3e0b7c413a414374e26c8e4959080f4` | Current orchestrator; GPT-6, effort not exposed | This plan only; `edb10ef6` | Not applicable | Baseline/ancestry/authority, preamble/package/link checks, API drift, strict Zensical (no issues), staged diff and hooks passed. Initial site-link failure repaired before commit. | User approved extra workflow commit; no product edits |
 | C0 | Accepted | `edb10ef6f3e0b7c413a414374e26c8e4959080f4` / same | `01a0c7bd-430a-7590-86da-f91ffb5699fc`; `gpt-5.6-sol`, medium | Read-only; no implementation commit | Complete structured callback received; 69/53 commits, 86/66 historical touched paths; four reproductions; 11 focused tests passed | Independent source/workflow/range audit; AA-01/02 reproduced; same 11 tests passed, no skips; clean status | `docs(plan): record post-activation review closure`; details below |
 | F1 | Accepted locally and in Docker; Windows remains W1 | `cdd0fce3643dd57b6307ef43ae725975e539f633` / `5e75900ca572038105dc9e700ec5ee3759ac98bd` | `01a0c7cd-4fe7-7232-a1ee-dd892721fbdb`; `gpt-5.6-sol`, medium | Six authorized phase/test/current-doc files; `5e75900c` | Red/green regression, focused/full/static/docs and targeted canonical Docker passed; ignored logs `task-evidence/f1` | Every changed line inspected; focused phase/cache/manual/native integration passed; image source/lock hashes match | `docs(plan): record raw offset composition acceptance`; Windows still required |
-| F2 | Dispatched; user naming clarification delivered | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / pending | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Planner/channel/v2 policy refinement | Pending | Pending | v12 confirmed-cache misses accepted; controller plan-only naming update while worker runs |
+| F2 | Dispatched; user naming and no-compatibility clarifications delivered | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / pending | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Planner/channel/v2 policy refinement | Pending | Pending | Old results disposable; controller plan-only scope clarifications while worker runs |
 | F3 | Pending F2 | Pending | Pending | Channel lifetime | Pending | Pending | Resource proof required |
 | F4 | Pending F3 | Pending | Pending | Current docs | Pending | Pending | Historical records unchanged |
 | F5 | Pending F4 | Pending | Pending | Narrow workflow filters/tests | Pending | Pending | Hosted CI pending push |
