@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Coordinated VapourSynth R80, BestSource R22, and retained Windows FFmpeg 8.1 runtime refresh
 Owner: Next media-runtime refresh sessions
 
@@ -239,3 +239,34 @@ and proper commits are complete, change this plan to `Status: Historical` and ha
 the branch back to the maintainer. Record checks that were unavailable or deferred;
 they do not keep the implementation plan active. Maintainer Windows/media testing
 and any resulting rollback or follow-up fixes happen after this handoff.
+
+## Implementation Record
+
+Implemented on `dev/v0.6.0-review-remediation` on 2026-09-22.
+
+- Every selected artifact digest and size in this plan matched the downloaded upstream
+  bytes. The R80 tracked-tree SHA-256 is
+  `5d952607cfee17395d797f5c11d495366a9aa8a3ef6f40e2b0cf7ea2665861f2`. The Windows
+  FFmpeg source commit is `1a748fe2cd43e3ead22fafb1b5b7d77f153898a8`, and the BtbN build
+  source commit is `8267213e26c1031621e6e1210fe3aa4867214f6a`.
+- Observed R80 metadata reports core API R4.3 rather than R4.2. The API major version
+  is unchanged, the fingerprints record only the major version, and all three required
+  plugins build or load under R80, so this was not treated as a stop condition. The
+  Docker and portable proofs now assert R4.3.
+- R80 no longer ships the API 3 headers (`VapourSynth.h`, `VSHelper.h`). The Dockerfile
+  now copies only the API 4 headers, which are the only ones L-SMASH-Works 1310 and
+  FFMS2 5.0 include.
+- BestSource 21.0 has no upper VapourSynth bound, so it did not move on its own. It
+  was moved with `uv lock --upgrade-package vapoursynth-bestsource` and not with a new
+  direct dependency.
+- The August FFmpeg ZIP has the same layout, `LICENSE.txt`, configure license flags,
+  and PE import set as the July artifact. The BestSource R22 Windows DLL adds only
+  Windows system imports (`advapi32`, `iphlpapi`, `wldap32`).
+- Local gates passed: pyright, ruff check, bandit, the full pytest suite (86
+  platform skips), import-linter, the API docs check, the strict docs build, the locked
+  pip-audit run, and `tools/verify_docker_integration.sh --no-cache` on an arm64 Docker
+  host with zero skips. `ruff format --check` still reports
+  `tests/vsview/test_output.py`, which was already failing before this change.
+- Not run here: PowerShell and Windows portable build/e2e tests, the x86_64 Docker
+  build, the Linux GUI verifier, and physical Windows GPU/HDR/Dolby Vision validation.
+  These remain maintainer follow-up.
