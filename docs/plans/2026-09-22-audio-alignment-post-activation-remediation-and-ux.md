@@ -866,3 +866,22 @@ included tests to pass with zero skips, then run the exact opted-in resource sui
 Record source/image identities and complete logs. Separate repair commit:
 `ci(alignment): enable channel proof in canonical Docker gate`.
 Controller A1 full integration remains required after repair acceptance.
+
+
+### A1-R acceptance — canonical Docker gate
+
+Task `01a0c880-0382-77c3-9d28-52aa7d15b035` ran Luna xhigh from
+`dcfb7d7f55ded232968e22269ffba83dab24b622` to
+`3a25a3949091a6179b3117aa30ee330455b9e790`. Controller inspected the two-file
+diff: the test container receives the existing channel opt-in, and the fake-Docker
+regression proves it overrides a host value of zero exactly once. Zero-skip/failure
+handling and the separate resource exclusion remain unchanged. Worker log contains
+six contract tests (callback's five was a count typo), fresh canonical Docker340/0
+and resource5/0. Controller full pytest and canonical Docker independently passed.
+The previously recorded broad-gate blocker is resolved; old non-pass records above
+remain historical. Hosted execution is still pending user push.
+
+Test image `sha256:d1cd6c761d2089033e51ffa7dc96187dd28b8f8cb3227e2c954bb6c030ab4fb3`;
+production image `sha256:e69b4d2213f4a661468943d95ec0e28132974f26665e624759f6d9436f8b8e37`.
+Controller verified all209 tracked production/integration/dependency/verifier hashes
+against both images. Implementation is accepted. Final A1 record follows separately.
