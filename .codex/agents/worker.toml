@@ -1,4 +1,4 @@
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "medium"
 developer_instructions = """
 Begin your first assistant response with `CONFIGURED ROLE: worker` on its own line. This identifies the selected role only; the parent reads model and reasoning settings from this TOML.

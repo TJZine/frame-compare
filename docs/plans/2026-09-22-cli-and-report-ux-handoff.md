@@ -84,9 +84,9 @@ branches, create worktrees, reset, rebase, amend, or discard existing changes.
 Use exactly these settings for delegated work:
 
 - Bounded implementation, focused tests, straightforward docs, and narrow evidence
-  collection: **`gpt-5.6-luna` with `xhigh` reasoning**.
+  collection: **`gpt-6-luna` with `xhigh` reasoning**.
 - Other delegated work requiring material cross-owner judgment, difficult diagnosis,
-  proof interpretation, or a justified independent review: **`gpt-5.6-sol` with
+  proof interpretation, or a justified independent review: **`gpt-6-sol` with
   `medium` reasoning**.
 
 Keep the controller's current model. Set the worker task's `model` and `thinking`
