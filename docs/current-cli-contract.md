@@ -1270,9 +1270,10 @@ schema v4. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
 the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
 sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
-exact ordered whole-set decision shape. Metadata v1/v2, unknown, or mixed Frame Compare
-sessions are rejected with instructions to generate a new session; there is no
-trust-upgrade shim. Ordinary non-Frame-Compare sessions remain inert. Frame Compare
+exact ordered whole-set decision shape. Only metadata v4 is accepted; metadata
+v1, v2, or v3, unknown versions, and mixed Frame Compare sessions are rejected
+with instructions to generate a new session. There is no compatibility reader or
+trust-upgrade path. Ordinary non-Frame-Compare sessions remain inert. Frame Compare
 derives the sibling result path from the trusted generated script path, then rejects
 missing, malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds
 results. It never trusts panel-supplied paths or counts.
@@ -1445,8 +1446,9 @@ this sign convention before consensus evidence, hints, caching, and trim applica
   <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. If a confirmed cache entry also contains the computed audio alignment
-  result that produced the preview suggestion, declining the prompt retains that
-  computed evidence as non-applied instead of granting automatic authority.
+  result that produced the preview suggestion, declining the prompt rejects only
+  confirmed-offset reuse; that qualified-mono computed result retains its automatic
+  authority and remains applied.
   `always` reuses a
   complete valid confirmed set without prompting. Prompt mode writes no
   prompt/table to stdout.
@@ -1488,8 +1490,9 @@ this sign convention before consensus evidence, hints, caching, and trim applica
 - `channel_strategy = "mono_downmix" | "best_channel"` selects the audio channel
   handling used during extraction. `mono_downmix` is the default.
 - `confidence_threshold` remains a float from `0.0` through `1.0`, defaulting to
-  `0.0`. It contributes to computed acceptance, but the shipped automatic-authority
-  hold keeps every computed offset non-applied.
+  `0.0`. It contributes to computed acceptance. Under the current policy, a
+  qualified mono result may become automatic authority and be applied, trimmed,
+  and cached; channel-corroborated evidence remains provisional and non-applied.
 - `ambiguity_peak_ratio` remains a float greater than or equal to `1.0`,
   defaulting to `1.0`. It gates ambiguous correlation peaks.
 - `window_length_seconds` and `window_stride_seconds` remain floats greater than

@@ -96,7 +96,7 @@ one complete ordered result for the whole source set. **Keep current alignment**
 secondary whole-set action and preserves existing authority without confirming an
 unapplied candidate. Expand Enter alignment
 manually for Source frames or Known offsets; both use the same whole-set action. Closing
-VSView without saving writes no result. Generated session metadata uses v2 while the
+VSView without saving writes no result. Generated session metadata uses v4 while the
 typed sibling result sidecar remains v1; strict session/result validation
 and authoritative raw frame bounds remain unchanged.
 
