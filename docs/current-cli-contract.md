@@ -1245,16 +1245,26 @@ typed alignment request. Paths and stems remain the internal source, suggested
 offset, manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
 output per comparison. In the native panel, the default workflow unlinks playheads,
-visits every output, and positions each source on the same visible moment. Manual
-source-frame or known-offset entry and keep-current completion do not require viewer
-visits. Public current-output/current-frame callbacks update the live source lineup;
-the panel does not inspect or change hidden playheads or synchronization mode.
+positions each source on the same visible moment, and reports the active output as
+`Viewing: frame N` separately from its callback-derived `Captured position: frame N`.
+Inactive sources show only their last captured position. Before saving, viewer drafts
+use `{n}/{total} positions captured`, source-frame drafts use `{n}/{total} source frames
+entered`, and known-offset drafts use `{n}/{total} offsets entered`; complete valid
+drafts add ` — ready to confirm`. Manual source drafts use `Entered source frame: frame N`
+and invalid drafts use `Needs attention — {validation message}`. Manual source-frame or
+known-offset entry and keep-current completion do not require viewer visits. Public
+current-output/current-frame callbacks update the live source lineup; the panel does not
+inspect or change hidden playheads or synchronization mode.
 **Confirm these aligned positions** writes the complete ordered result once; the
 known-offset equivalent is **Confirm these known offsets**. **Keep current alignment**
 writes one `keep_current` decision for every comparison. The collapsed manual
 disclosure offers source-frame or known-offset input, and both use the same whole-set
 save action. The panel calculates `reference - comparison` and shows the trim meaning;
-closing without saving produces no result. Generated and parent no-color output retain
+closing without saving produces no result. The viewer guidance is `To confirm a new
+alignment, unlink the playheads and position each source on the same visible moment. Or
+keep the current alignment.` Known-offset guidance is `Enter the signed
+reference-minus-comparison offsets, then confirm. Or keep the current alignment.`
+Generated and parent no-color output retain
 the literal lifecycle markers. Native source/index diagnostics remain inherited
 without buffering. Generated Frame Compare sessions suppress only VSView's redundant
 initial `Content loaded successfully` INFO record because `[OK] VSView Ready` already
@@ -1262,12 +1272,22 @@ owns that success confirmation; reload, clipboard, warning, error, and other nat
 diagnostics remain unchanged.
 
 Each comparison has a persistent **Audio evidence** summary and collapsed **Audio
-details** independent of its manual draft. Accepted, provisional, unavailable,
-historically reused, and human-authoritative alignments use distinct text and marker
-labels. A provisional marker is display-only: it never prefills a field, moves a
-playhead, marks an output visited, increases readiness, enables confirmation, writes
-an accepted marker, or authorizes trimming/cache reuse. Unavailable evidence has no
-marker.
+evidence details — Comparison N** independent of its manual draft. Current authority
+leads with `Accepted audio alignment: +Nf — APPLIED`, `Accepted audio alignment reused:
++Nf — APPLIED`, or `Manually confirmed alignment: +Nf — APPLIED`, followed by `No
+additional confirmation needed.` Without current authority, the panel shows
+`Provisional audio candidate: +Nf — NOT APPLIED` with `Visual confirmation required to
+use this hint.` or `Unresolved comparison — no usable audio candidate`. Original evidence
+remains in its original classification, including provisional evidence after a manual
+confirmation. A provisional marker is display-only: it never prefills a field, moves a
+playhead, marks an output visited, increases readiness, enables confirmation, writes an
+accepted marker, or authorizes trimming/cache reuse. Unavailable evidence has no marker.
+After either saved action, the prominent status is `Alignment choices saved`, the next
+action is `Close VSView to resume Frame Compare.`, stale keep-current help is hidden,
+and actions stay disabled. Saved outcomes are `Accepted alignment retained: +Nf`,
+`Current alignment retained: +Nf — manually confirmed`, the explicit unresolved
+provisional outcome, the explicit unresolved unavailable outcome, or
+`Alignment confirmed: +Nf — manually confirmed` for a confirmation.
 
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.

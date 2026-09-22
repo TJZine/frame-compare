@@ -206,24 +206,33 @@ identity. Sufficient mono, ineligible fallback, quiet, and JSON runs do not emit
 activity, and repeated channel views/windows do not duplicate it.
 
 The terminal does not prompt for frames or read review input. Open **Frame Compare
-Alignment Review** from VSView's Tool Panel, unlink
-the playheads, and visit `Reference` and every `Comparison N` output. Leave each on the
-same visible moment. The live source lineup records one current untrimmed source frame
-per output, reports `ready / total`, and previews `reference - comparison` plus the
-plain-language trim direction.
+Alignment Review** from VSView's Tool Panel, unlink the playheads, and position
+`Reference` and every `Comparison N` output on the same visible moment. Before saving,
+the panel distinguishes `Viewing: frame N` from the callback-derived `Captured position:
+frame N` (inactive sources show only their last captured position). A complete viewer
+draft reports `{n}/{total} positions captured — ready to confirm`; incomplete drafts
+report `{n}/{total} positions captured`.
 
 Select **Confirm these aligned positions** once the complete lineup is ready. It writes one
 ordered result for the whole source set; the reference appears once and the decision is
-made for the full lineup in one action. Known-offset entry uses **Confirm these known
-offsets**. **Keep current alignment** is the secondary whole-set option. It retains each
-comparison's existing accepted or manually confirmed authority; provisional candidates
-are not applied or confirmed, and unresolved comparisons remain unresolved.
+made for the full lineup in one action. The viewer guidance is `To confirm a new
+alignment, unlink the playheads and position each source on the same visible moment. Or
+keep the current alignment.` Known-offset entry uses **Confirm these known offsets** and
+reports `{n}/{total} offsets entered`, adding ` — ready to confirm` only when complete
+and valid. **Keep current alignment** is the secondary whole-set option. Its help is
+`Keeps existing alignment. Provisional candidates are not confirmed; unresolved
+comparisons remain unresolved.`
 
 For a known value, expand **Enter alignment manually...**. **Source frames** accepts one
 non-negative untrimmed frame per source; **Known offsets** accepts one signed integer per
 comparison using `reference - comparison`. Both bases feed the same whole-set save
-action and explain the trim direction immediately. With no configured base trims,
-positive offsets trim the reference and negative offsets trim that comparison.
+action and explain the trim direction immediately. Source-frame entry reports
+`{n}/{total} source frames entered`, adding ` — ready to confirm` only when complete and
+valid; each valid draft is shown as `Entered source frame: frame N`. Invalid input is
+shown as `Needs attention — {validation message}`. The known-offset guidance is
+`Enter the signed reference-minus-comparison offsets, then confirm. Or keep the current
+alignment.` With no configured base trims, positive offsets trim the reference and
+negative offsets trim that comparison.
 Configured base trims do not change this raw source-frame value: Frame Compare converts
 it only at the trim-application boundary, then composes the calculated trims onto each
 base domain so the final reference source start minus the comparison source start still
@@ -232,13 +241,26 @@ fields are an escape hatch, not a second result workflow. Provisional values nev
 prefill those fields, move a playhead, mark a source visited, increase readiness, or
 enable confirmation.
 
-The persistent **Audio evidence** section distinguishes `Audio alignment accepted:
-+0f`, `Provisional audio candidate: +0f — NOT APPLIED`, and `No usable audio candidate`.
-Expandable **Audio details** shows the validated bounded attempt. Accepted,
-provisional, reused accepted, and manual markers have separate labels; unavailable
-evidence has no marker. After keep-current, each comparison reports whether an accepted
-alignment was retained, a provisional candidate was not confirmed, no accepted
-candidate existed, or a manually confirmed alignment was retained.
+The persistent **Audio evidence** section leads with the current authority: `Accepted
+audio alignment: +Nf — APPLIED`, `Accepted audio alignment reused: +Nf — APPLIED`, or
+`Manually confirmed alignment: +Nf — APPLIED`, each followed by `No additional
+confirmation needed.` Without current authority it shows either `Provisional audio
+candidate: +Nf — NOT APPLIED` with `Visual confirmation required to use this hint.` or
+`Unresolved comparison — no usable audio candidate`. A manual authority remains first
+when original provisional or unavailable evidence is retained; original evidence stays
+provisional/unresolved in its own line and in the details. Expandable **Audio evidence
+details — Comparison N** is collapsed by default and retains the validated bounded
+attempt.
+
+After either whole-set action, the panel shows `Alignment choices saved` and
+`Close VSView to resume Frame Compare.` It disables the save actions, hides stale
+keep-current help, and focuses the saved status. Keep-current outcomes are
+`Accepted alignment retained: +Nf`, `Current alignment retained: +Nf — manually
+confirmed`, `Current alignment retained. Provisional candidate +Nf not confirmed — NOT
+APPLIED. Comparison unresolved.`, or `Current alignment retained. Comparison unresolved
+— no accepted alignment.` Confirmed positions or offsets show `Alignment confirmed: +Nf
+— manually confirmed`. A raw `+0f` remains distinct from no candidate; trim previews do
+not claim that existing base trims are absent.
 
 The result sidecar is written atomically only by a complete whole-set action; closing
 VSView without saving writes no result. Missing, malformed, stale, mixed-session,

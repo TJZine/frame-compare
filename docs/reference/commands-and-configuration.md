@@ -89,16 +89,21 @@ contract. `--force-interactive-alignment` enables the same route and makes readi
 process, cancellation, or invalid-result failure fatal. The generated session
 continues to use Frame Compare's L-SMASH-Works source/index path; VSView's BestSource
 workspace is UI-only. Open Frame Compare Alignment Review from VSView's Tool Panel,
-unlink the playheads, and, when using viewer positions, visit Reference and every
-Comparison N output on the same visible moment. The live source lineup records the untrimmed source frames and previews
-the signed reference-to-comparison trim. Selecting **Confirm these aligned positions** writes
-one complete ordered result for the whole source set. **Keep current alignment** is the
-secondary whole-set action and preserves existing authority without confirming an
-unapplied candidate. Expand Enter alignment
-manually for Source frames or Known offsets; both use the same whole-set action. Closing
-VSView without saving writes no result. Generated session metadata uses v4 while the
-typed sibling result sidecar remains v1; strict session/result validation
-and authoritative raw frame bounds remain unchanged.
+unlink the playheads, and, when using viewer positions, position Reference and every
+Comparison N output on the same visible moment. The panel distinguishes `Viewing: frame
+N` from `Captured position: frame N`; complete viewer drafts say `{n}/{total} positions
+captured — ready to confirm`, while incomplete drafts omit the readiness suffix. The
+live source lineup previews the signed reference-to-comparison trim. Selecting
+**Confirm these aligned positions** writes one complete ordered result for the whole
+source set. **Keep current alignment** is the secondary whole-set action and preserves
+existing authority without confirming an unapplied candidate. Expand Enter alignment
+manually for Source frames or Known offsets; source-frame drafts say `{n}/{total} source
+frames entered`, known-offset drafts say `{n}/{total} offsets entered`, and both add
+` — ready to confirm` only when valid and complete. Viewer guidance is `To confirm a new
+alignment, unlink the playheads and position each source on the same visible moment. Or
+keep the current alignment.` Closing VSView without saving writes no result. Generated
+session metadata uses v4 while the typed sibling result sidecar remains v1; strict
+session/result validation and authoritative raw frame bounds remain unchanged.
 
 ## Environment variables and secrets
 
