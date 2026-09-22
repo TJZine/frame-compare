@@ -9,11 +9,12 @@ Owner: Maintainer-directed implementation controller.
 
 # Implementation handoff
 
-Paste the prompt below into the implementation controller task. This is an execution
-handoff, not a second active plan. It preserves the attached workflow's separate-task,
-completion-callback execution model. Simplification removes repetition, not task
-isolation, callback delivery, verification, or commit ownership. Its model settings
-are the user's explicit choices for this run and do not change shared agent defaults.
+Paste the prompt below into the implementation controller session. This is an
+execution handoff, not a second active plan. It preserves one authoritative
+controller, one implementation writer at a time, controller-owned integration and
+commits, risk-matched verification, and durable execution records. The runtime
+mechanics below are the current Claude Code mapping; they are execution details,
+not product requirements, and do not change shared agent defaults.
 
 ---
 
@@ -23,45 +24,35 @@ Act as the implementation controller for:
 
 Repository: `/Users/tristan/Software/frame-compare`
 
-Exact controller task title: `Implement CLI and report UX improvements`
+Controller session name: `Implement CLI and report UX improvements`
 
 Implement the complete active plan, verify the results, and maintain its execution
-record. Use the current local checkout and one implementation writer at a time.
-Create a separate Codex task for each implementation unit using the app's new-task
-tool (`create_thread`, also referred to as new_thread). Workers use the same saved
-project and explicitly select its local/current checkout, not the default Git
-worktree environment. Do not substitute in-turn collaboration subagents.
+record. Use the current local checkout and one implementation writer at a time. Do
+not create or switch branches or worktrees.
 
-After dispatch, **end the controller turn**. The worker runs independently and sends
-its result back through task messaging (`send_message_to_thread`). Resume on that
-message. Do not poll, repeatedly inspect the worker, run a sleep/wait loop, create a
-monitor, or keep the controller turn active waiting for completion. If callback
-delivery is unavailable, leave the result in the worker's final response for the
-user to forward; do not replace callbacks with monitoring.
+Dispatch each bounded implementation unit to the repository's configured Claude
+subagent (`.claude/agents/<role>.md`) through the Agent tool in the foreground so
+its structured result returns directly to the controller. The controller makes no
+competing writes while a writer runs. Do not use Agent Teams, parallel Desktop
+worktree sessions, polling, monitors, or callback messaging to wait for a worker.
+A same-checkout peer-session mechanism may substitute only if it provably shares
+this checkout, keeps one writer, returns results to the controller, keeps Git
+controller-owned, and costs no more; otherwise use subagents.
 
 ## Inspect once, then execute
 
 Read the full plan, applicable AGENTS.md instructions, the engineering runbook,
 relevant current CLI/report authority sections, and the smallest applicable skill
-set. Inspect `.codex/config.toml` and relevant agent configuration before dispatch.
-Inspect branch, HEAD, status, locally recorded upstream state, and relevant commits.
-Expand into adjacent code/configuration only when the unit needs it.
-
-Handoff snapshot, to investigate rather than enforce blindly:
-
-- Branch: `dev/v0.6.0-review-remediation`
-- HEAD: `c5554ea784921d65fe9a748ba133854a3d67d956`
-- Local tracking information: 11 commits ahead of origin; the live remote has not
-  been verified. No push is requested.
-- Before this handoff was written, the UX implementation plan was the only untracked
-  file and there were no tracked modifications. Expect this handoff file too.
-- The plan's older dirty audio-alignment baseline has since been committed. Inspect
-  current state rather than assuming those changes still need preservation as edits.
+set, including the manual-only `large-task-orchestration` skill. Inspect
+`.claude/agents/`, `.claude/settings.json`, and relevant `.claude/skills/` entries
+with their canonical `.agents/skills/` bodies before dispatch. Inspect branch,
+HEAD, status, staged state, tracking state, and relevant commits. Treat any recorded
+SHA as investigation context, not a required starting point.
 
 Preserve unrelated work. Investigate drift and continue when safe; do not require
 the user to reconfirm an explained commit advance or unrelated change. Pause only
 the affected unit if overlapping work cannot be safely separated. Do not change
-branches, create worktrees, reset, rebase, amend, or discard existing changes.
+branches, create worktrees, reset, rebase, amend, clean, or discard existing changes.
 
 ## Frozen product decisions
 
@@ -79,115 +70,74 @@ branches, create worktrees, reset, rebase, amend, or discard existing changes.
 - Coordinate published image recapture through the existing screenshot plan.
   Synthetic previews and historical images are not current visual acceptance proof.
 
-## Worker tasks and model selection
+## Worker roles and model selection
 
-Use exactly these settings for delegated work:
+Keep the controller on its current model and effort. Workers use the checked-in
+role definitions without overrides; inspect them before dispatch because they are
+authoritative. At the time of writing:
 
-- Bounded implementation, focused tests, straightforward docs, and narrow evidence
-  collection: **`gpt-6-luna` with `xhigh` reasoning**.
-- Other delegated work requiring material cross-owner judgment, difficult diagnosis,
-  proof interpretation, or a justified independent review: **`gpt-6-sol` with
-  `medium` reasoning**.
+- `worker_luna` (Sonnet, max effort): default for bounded P1–P4 implementation with
+  settled outcomes and contracts.
+- `worker` (Opus, medium effort): only when a unit needs material cross-owner
+  judgment, difficult diagnosis, or proof interpretation.
+- `reviewer` (Opus, high effort, read-only): only when independent review is
+  justified under the runbook or requested by the user.
 
-Keep the controller's current model. Set the worker task's `model` and `thinking`
-explicitly at creation: Luna/xhigh or Sol/medium as above. Use the same explicit
-settings for repair messages when needed; do not silently substitute another model
-or effort. The repository's `worker_luna` role defaults to max, so its defaults do
-not supply the requested task settings. Do not edit shared role files or switch to
-in-turn subagents to resolve this. If requested settings are unavailable, report it
-rather than silently changing them. Record each task's ID, role, model, and effort.
-
-P1–P4 can normally start with Luna once their boundaries are confirmed. Choose Sol
-only for a concrete need, not because a package spans several files. The controller
-can perform P5 reconciliation and P6 integration directly. Do not add a planner,
-monitor, reviewer, or further delegation without useful independent work to assign.
+If a configured role or model is unavailable, report the exact limitation rather
+than substituting silently. Do not edit shared role files for this run. Record each
+worker's role and configured model/effort in the execution record. The controller
+performs P5 reconciliation and P6 integration directly; add a read-only sidecar only
+for clearly bounded independent evidence.
 
 ## Execution loop
 
-1. Select the next dependency-ready unit: P1 → P2 → P3 → P4, P5 when its evidence is
-   available, then integrated P6. Use one worker per cohesive unit; split only when
-   a distinct outcome or proof boundary makes the work materially easier to verify.
-2. Prepare the compact packet below. Record starting HEAD and existing
-   task-owned/unrelated changes before dispatch so the worker can isolate its delta.
-3. Create the worker as a separate task in the same local checkout. Give it the
-   exact controller title and, when known, controller task ID for callback routing.
-   State the dispatched unit/task in the final response and end the controller turn;
-   defer further plan-file writes until its callback. Only the worker may write until
-   it finishes or explicitly stops and returns control; no nested workers.
-4. Resume on the worker's completion/blocker message. Confirm the returned unit,
-   start/end SHA, changed files, commit, and proof. Read further worker output only
-   when a concrete omission needs investigation after its response, not as polling.
-5. Inspect every changed line, relevant callers/contracts, and actual verification
-   output. A worker's success label is not acceptance. Reuse valid observed proof;
-   run missing or invalidated checks and order focused repairs for real findings.
-6. Resolve routine file-discovery and implementation questions locally. If a worker
-   needs another file within the approved outcome, the controller can expand its
-   boundary explicitly. Ask the user only for consequential decisions outside the
-   accepted plan.
-7. Workers create the exact requested conventional implementation commit only after
-   meeting their acceptance/proof requirements. The controller validates that commit,
-   records acceptance and evidence in the plan, and commits plan records separately.
-   Stage only owned changes and preserve pre-existing staged/unrelated work. Send
-   a focused repair to the worker task if needed, with a fresh baseline, boundary,
-   proof, commit instruction, and callback. End the turn after that dispatch too.
+1. Select the next dependency-ready unit: P1 → P2 → P3 → P4, P5 according to the
+   actual upstream audio-plan status, then integrated P6.
+2. Record HEAD, `git status --short`, staged files, and unrelated changes. Prepare
+   the compact packet below.
+3. Dispatch one foreground writer subagent. No nested agents.
+4. On return, verify its start state, inspect every changed line, relevant callers
+   and contracts, and actual proof output. A worker result is evidence, not
+   acceptance. Run missing or invalidated checks.
+5. Repair concrete findings by resuming the same subagent when the fix is adjacent
+   and its context is current, otherwise with a fresh same-role worker given only
+   the fresh baseline, finding, boundary, invariants, proof, and stop conditions.
+6. The controller chooses the conventional commit message before staging, stages
+   only task-owned files, and creates the implementation commit. Workers never
+   stage, commit, or otherwise mutate Git.
+7. Record acceptance and executed evidence in the plan and commit that record
+   separately as `docs(plan): ...`. Never record intended proof as executed.
 8. Continue through integration and closeout. Missing native/browser/upstream proof
-   remains pending; do not mark the full plan complete or Historical prematurely.
+   remains pending; do not mark the plan complete or Historical prematurely.
 
-The implementation invocation authorizes scoped local conventional commits under
-this loop. It does not authorize push, PR creation, release, publication, signing,
-new dependencies, or changes to shared agent settings. The planning session that
-prepared this handoff does not perform those implementation commits.
+The implementation invocation authorizes scoped local conventional commits by the
+controller. It does not authorize push, PR creation, release, publication, signing,
+new dependencies, or changes to shared agent settings.
 
 ## Compact worker packet
 
-Keep the original workflow's section names, with concise unit-specific contents:
-
-- **UNIT:** package ID/name and active plan path/section.
-- **STARTING SHA:** exact SHA and known worktree changes; verify before editing.
+- **UNIT / ROLE:** package ID/name, active plan section, and configured subagent.
+- **STARTING SHA / STATUS:** exact HEAD and known worktree/staged changes; verify
+  before editing.
 - **OBJECTIVE:** one complete implementation outcome.
 - **OWNER/WRITE BOUNDARY:** allowed production, test, and documentation owners;
-  read-only inspection elsewhere is allowed. Controller owns plan records.
-- **DEPENDENCIES:** accepted preceding commits and relevant settled decisions.
-- **INVARIANTS:** public contracts, preservation requirements, and non-goals.
-- **ACCEPTANCE:** concrete behavior and edge cases required to accept this unit.
-- **VERIFICATION:** exact commands, manual/browser proof, and controller-owned gates.
-- **EXPECTED RETURN:** structured result and mandatory callback instruction below.
-- **STOP CONDITIONS:** unsafe baseline/overlap, consequential boundary or contract
-  expansion, unmet acceptance, or required proof unavailable. Stop without committing
-  and send the blocker back. Repair ordinary task-caused failures within scope.
-- **CONVENTIONAL COMMIT:** exact message for the single completed implementation
-  commit; no amend. Read-only units explicitly say no commit.
+  read-only inspection elsewhere is allowed. Controller owns plan records and Git.
+- **DEPENDENCIES / INVARIANTS:** accepted commits, settled decisions, public
+  contracts, preservation requirements, and non-goals.
+- **SKILLS / AUTHORITIES:** smallest canonical skill set; the worker reads
+  `AGENTS.md` itself.
+- **ACCEPTANCE / VERIFICATION:** concrete behavior, edge cases, and focused proof
+  the worker must run; proof reserved for the controller or P6.
+- **STOP CONDITIONS:** unsafe baseline/overlap, consequential decision outside the
+  unit, unmet acceptance within the boundary, or materially blocking unavailable
+  proof. Repair ordinary task-caused failures within scope.
+- **INTENDED COMMIT:** the message the controller will use; the worker does not
+  commit.
 
-Tell every worker: read applicable instructions; preserve unrelated work; implement
-the smallest complete solution; reuse meaningful tests; inspect every changed line;
-run specified proof and diff/status checks; never claim unexecuted proof. Commit only
-the requested, verified, task-owned changes. Do not spawn agents, create tasks, push,
-rebase, reset, change branches, publish, release, sign, add dependencies, or broaden
-scope independently. Stop writes before sending a result or blocker to the controller.
-
-## Mandatory completion callback
-
-Include this instruction in every worker and repair prompt, with the actual
-controller task ID filled in when available:
-
-> At completion, use Codex task messaging to send your complete structured result
-> to the task titled exactly `Implement CLI and report UX improvements`. Use the
-> supplied controller task ID when available; otherwise resolve that exact title once
-> through the task list. Make one delivery attempt and report whether it succeeded.
-> Do not retry, poll, or monitor the controller. If direct delivery is unavailable or
-> the title is ambiguous, leave the complete structured result in your final response
-> so it can be forwarded manually. Send blockers through the same route after stopping
-> edits. After sending your result, perform no further writes; end your turn.
-
-Workers return these fields, including exact commands/results rather than only
-“tests passed”:
-
-`RESULT`, `CALLBACK_SENT`, `START SHA`, `END SHA`, `FILES CHANGED`, `COMMIT`,
-`PROOF EXECUTED`, `PROOF NOT EXECUTED`, `ASSUMPTIONS`, `BLOCKERS`, `REMAINING RISKS`.
-
-The worker's final response records the actual callback delivery result. The
-controller uses the returned evidence to resume integration and dispatch the next
-unit. Controller/worker back-and-forth stays in task messages, never a polling loop.
+Workers return `RESULT`, `ROLE`, `CONFIGURED MODEL / EFFORT`, `START SHA`,
+`END SHA`, `FILES CHANGED`, `DIFF SUMMARY`, `PROOF EXECUTED`, `PROOF NOT EXECUTED`,
+`SKIPS / LIMITATIONS`, `ASSUMPTIONS`, `BLOCKERS`, and `REMAINING RISKS`, with exact
+commands and observed results rather than only "tests passed".
 
 ## Verification and completion
 
@@ -204,7 +154,7 @@ Respect tool access denials; do not work around a rejected browser/security acti
 Complete independent work and give a precise compatible-host handoff for unavailable
 required proof. Do not wait indefinitely for another active workstream.
 
-Do not add an automatic review loop. Request one independent Sol/medium review only
+Do not add an automatic review loop. Request one fresh read-only `reviewer` only
 if a concrete consequential risk remains after direct inspection and proof. Adjudicate
 findings against current code, fix accepted issues, and rerun only affected proof.
 
@@ -214,5 +164,5 @@ the complete scope is accepted. Use conventional commits throughout.
 
 Return: completed units and user-visible changes; local commit SHAs; executed checks
 and inspected skips; browser/native evidence; upstream dependency status; actual
-worker task IDs/roles/models/efforts; and any outstanding blockers with an
+worker roles and configured models/efforts; and any outstanding blockers with an
 exact next step. Do not claim full completion while required acceptance is pending.

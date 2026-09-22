@@ -9,12 +9,14 @@ Owner: Maintainer-directed implementation session; one controller owns integrati
 
 # CLI and report UX implementation plan
 
-Implementation dispatch uses the [simplified controller handoff](2026-09-22-cli-and-report-ux-handoff.md),
-including the user's per-run Luna/xhigh and Sol/medium settings. Implementation
-workers run in separate Codex tasks and message completion back to the controller,
-which ends its turn after dispatch instead of polling or waiting. This document
-remains the product scope and acceptance authority; the handoff is not a second
-active plan.
+Implementation dispatch uses the [controller handoff](2026-09-22-cli-and-report-ux-handoff.md).
+The handoff selects the current agent runtime's isolated-worker mechanism and
+tool-specific role configuration while preserving one authoritative controller, one
+implementation writer at a time, controller-owned integration and commits,
+risk-matched verification, and durable execution records. Runtime-specific task,
+subagent, callback, model, and effort mechanics are execution details rather than
+product requirements. This document remains the product scope and acceptance
+authority; the handoff is not a second active plan.
 
 ## Objective and approved direction
 
