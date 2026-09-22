@@ -182,12 +182,26 @@ uses documented `from vsview import set_output` registration with explicit `Refe
 and `Comparison N` names, while preserving source order, multi-comparison behavior,
 Frame Compare overlays, and BT.709 preview defaults.
 
-Before review, normal terminal output identifies accepted, provisional, or unavailable
-evidence, support/reason, and selected audio ordinals. Verbose output adds bounded
-stream, gate, runtime/policy, work, and per-window facts. Quiet mode hides routine
-accepted/status evidence but leaves actionable rejection and write-failure warnings;
-JSON keeps its existing stdout schema and uses structured stderr for actionable
-rejection. No-color and redirected output stay plain and nonblocking.
+Before review, normal terminal output leads with the current decision and signed frame
+offset. Applied states are `Audio alignment accepted: +Nf - APPLIED`, `Accepted audio
+alignment reused: +Nf - APPLIED`, or `Manually confirmed alignment: +Nf - APPLIED`,
+followed by `No additional confirmation needed.` A provisional state is
+`Provisional audio candidate: +Nf - NOT APPLIED` with `Visual confirmation required to
+use this hint. Align manually or keep the current alignment.` An unavailable state is
+`No usable audio candidate - NOT APPLIED` with `Align manually or keep the current
+alignment.` The current manual authority leads even when an original provisional or
+unavailable attempt is retained as history. Verbose output adds bounded stream, gate,
+runtime/policy, work, per-window, and original-attempt facts; the original provisional
+state remains explicitly `NOT APPLIED` there. Quiet mode hides routine accepted/status
+evidence but leaves actionable rejection and write-failure warnings; JSON keeps its
+existing stdout schema and uses structured stderr for actionable rejection. No-color
+and redirected output stay plain and nonblocking.
+
+When an admitted named-channel fallback actually begins, normal human progress emits
+one transition per comparison by appending `Checking individual audio channels for a
+review hint. Any hint will need visual confirmation.` to the existing comparison
+identity. Sufficient mono, ineligible fallback, quiet, and JSON runs do not emit this
+activity, and repeated channel views/windows do not duplicate it.
 
 The terminal does not prompt for frames or read review input. Open **Frame Compare
 Alignment Review** from VSView's Tool Panel, unlink

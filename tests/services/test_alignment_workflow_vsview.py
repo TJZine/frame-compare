@@ -178,8 +178,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
 
     def launch(*args: object, **_kwargs: object):
         prelaunch = capsys.readouterr().err
-        assert "Provisional candidate: +0f (not applied)" in prelaunch
-        assert "Reason: insufficient_consensus" in prelaunch
+        assert "Provisional audio candidate: +0f - NOT APPLIED" in prelaunch
         native_request = cast(Any, _kwargs["request"])
         review = json.loads(native_request.audio_review_by_key["ref:comparison"])
         assert review["current_authority"] == {"origin": "none", "frame_offset": None}

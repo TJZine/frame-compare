@@ -52,6 +52,9 @@ from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 log = structlog.get_logger()
 
 _DIAGNOSTIC_POLICY = "retained-audio-evidence-v1"
+_CHANNEL_FALLBACK_ACTIVITY = (
+    "Checking individual audio channels for a review hint. Any hint will need visual confirmation."
+)
 
 __all__ = [
     "align_clips_from_request",
@@ -327,6 +330,7 @@ def _compute_missing_alignments(
     progress_descriptions: dict[Path, str] | None = None,
     comparison_ordinals: dict[Path, int] | None = None,
     on_comparison_started: Callable[[AlignmentClipRequest], None] | None = None,
+    on_channel_fallback_started: Callable[[AlignmentClipRequest], None] | None = None,
     cancellation: threading.Event | None = None,
 ) -> None:
     """Extract audio, perform cross-correlation, and populate results map."""
@@ -350,6 +354,12 @@ def _compute_missing_alignments(
         if on_comparison_started is not None:
             on_comparison_started(comp)
 
+        def report_channel_fallback_started(
+            comparison: AlignmentClipRequest = comp,
+        ) -> None:
+            if on_channel_fallback_started is not None:
+                on_channel_fallback_started(comparison)
+
         estimate = alignment_consensus.hold_automatic_consensus(
             _estimate_audio_pair(
                 reference.path,
@@ -361,6 +371,11 @@ def _compute_missing_alignments(
                 comparison_request=comp,
                 comparison_ordinal=comparison_ordinal,
                 cancellation=cancellation,
+                on_channel_fallback_started=(
+                    report_channel_fallback_started
+                    if on_channel_fallback_started is not None
+                    else None
+                ),
             )
         )
         raise_if_alignment_cancelled(cancellation)
@@ -405,6 +420,7 @@ def _estimate_audio_pair(
     reference_request: AlignmentClipRequest | None = None,
     comparison_request: AlignmentClipRequest | None = None,
     comparison_ordinal: int = 1,
+    on_channel_fallback_started: Callable[[], None] | None = None,
     cancellation: threading.Event | None = None,
 ) -> alignment_consensus.AlignmentConsensus:
     raise_if_alignment_cancelled(cancellation)
@@ -541,6 +557,8 @@ def _estimate_audio_pair(
             views=views,
         )
         if isinstance(channel_plan, alignment_audio.AudioChannelViewPlan):
+            if on_channel_fallback_started is not None:
+                on_channel_fallback_started()
 
             def load_channel_view(
                 view: alignment_audio.AudioChannelView,
@@ -601,6 +619,7 @@ def _compute_missing_alignments_with_provenance(
     progress_descriptions: dict[Path, str],
     comparison_ordinals: dict[Path, int],
     on_comparison_started: Callable[[AlignmentClipRequest], None] | None = None,
+    on_channel_fallback_started: Callable[[AlignmentClipRequest], None] | None = None,
     cancellation: threading.Event | None = None,
 ) -> None:
     _compute_missing_alignments(
@@ -613,6 +632,7 @@ def _compute_missing_alignments_with_provenance(
         progress_descriptions=progress_descriptions,
         comparison_ordinals=comparison_ordinals,
         on_comparison_started=on_comparison_started,
+        on_channel_fallback_started=on_channel_fallback_started,
         cancellation=cancellation,
     )
     raise_if_alignment_cancelled(cancellation)
@@ -640,6 +660,7 @@ def _compute_requested_alignments(
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
     on_comparison_started: Callable[[AlignmentClipRequest], None] | None,
+    on_channel_fallback_started: Callable[[AlignmentClipRequest], None] | None,
     cancellation: threading.Event,
 ) -> Fraction:
     """Run only blocking probe, collection, and numeric work in the owned worker."""
@@ -659,6 +680,7 @@ def _compute_requested_alignments(
             for ordinal, comparison in enumerate(request.comparisons, start=1)
         },
         on_comparison_started=on_comparison_started,
+        on_channel_fallback_started=on_channel_fallback_started,
         cancellation=cancellation,
     )
     raise_if_alignment_cancelled(cancellation)
@@ -674,6 +696,8 @@ async def _await_audio_computation(
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
     progress: ProgressReporter | None,
+    quiet: bool,
+    json_output: bool,
 ) -> Fraction:
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
@@ -686,6 +710,14 @@ async def _await_audio_computation(
                 analysis_descriptions[comparison.path],
             )
 
+    def report_channel_fallback_started(comparison: AlignmentClipRequest) -> None:
+        if progress is not None and not quiet and not json_output:
+            loop.call_soon_threadsafe(
+                progress.set_description,
+                f"{_request_progress_descriptions(request)[comparison.path]} | "
+                f"{_CHANNEL_FALLBACK_ACTIVITY}",
+            )
+
     worker = asyncio.create_task(
         asyncio.to_thread(
             _compute_requested_alignments,
@@ -696,6 +728,11 @@ async def _await_audio_computation(
             provenances=provenances,
             fps_reference=fps_reference,
             on_comparison_started=report_comparison_started,
+            on_channel_fallback_started=(
+                report_channel_fallback_started
+                if progress is not None and not quiet and not json_output
+                else None
+            ),
             cancellation=cancellation,
         ),
         name="alignment-audio-computation",
@@ -867,118 +904,87 @@ def _format_stream_summary(attempt: AudioAlignmentAttempt) -> str:
 def _normal_evidence_lines(
     *, ordinal: int, result: AlignmentResult, provenance: AlignmentProvenance
 ) -> list[str]:
-    if result.audio_attempt is None:
-        offset = result.frame_offset
-        if result.applied and offset is not None:
-            origin = provenance.provenance
-            human_authority = origin in {
-                "interactive_confirmed_this_run",
-                "shared_previous_offsets",
-                "preexisting_manual_override",
-            }
-            prefix = (
-                "Reused manually confirmed alignment"
-                if human_authority
-                else "Reused accepted audio alignment"
-            )
+    prefix = f"Comparison {ordinal} - "
+    offset = result.frame_offset
+    if result.applied and offset is not None:
+        if provenance.provenance == "shared_computed_offsets":
+            heading = "Accepted audio alignment reused"
             detail = (
-                "Historical audio details are unavailable."
-                if human_authority
-                else "Historical window and selected-stream details are unavailable; "
+                "Historical window and selected-stream details are unavailable; "
                 "no audio analysis ran this time."
             )
-            return [f"Comparison {ordinal} - {prefix}: {offset:+d}f.", detail]
-        if result.diagnostic == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON:
-            return [
-                "Audio alignment automatic application is temporarily disabled.",
-                f"Comparison {ordinal} - Audio evidence is available for manual review; "
-                "no computed correction was applied.",
-            ]
-        return [f"Comparison {ordinal} - Audio alignment was not computed. No usable candidate."]
+        elif result.source == "manual" or provenance.provenance in {
+            "interactive_confirmed_this_run",
+            "shared_previous_offsets",
+            "preexisting_manual_override",
+        }:
+            heading = "Manually confirmed alignment"
+            detail = (
+                "Historical audio details are unavailable."
+                if result.audio_attempt is None
+                else None
+            )
+        else:
+            heading = "Audio alignment accepted"
+            detail = None
+        lines = [
+            f"{prefix}{heading}: {offset:+d}f - APPLIED",
+            "No additional confirmation needed.",
+        ]
+        if detail is not None:
+            lines.append(detail)
+        return lines
 
     attempt = result.audio_attempt
-    decision = attempt.decision
-    candidate = decision.candidate
-    if decision.state == "trusted_automatic":
-        if candidate is None:
-            raise ValueError("trusted audio decision is missing its candidate")
-        lines = [f"Comparison {ordinal} - Audio alignment accepted: {candidate.frame_offset:+d}f."]
-        lines.append(
-            "No relative audio correction is required."
-            if candidate.frame_offset == 0
-            else _trim_explanation(candidate.frame_offset) + "."
-        )
-        lines[-1] += (
-            f" Policy: {attempt.estimator_policy}; {decision.consensus_windows}/"
-            f"{decision.raw_correlated_windows} correlated windows agree; evidence "
-            f"raw={decision.raw_correlated_windows}, credible={decision.credible_windows}, "
-            f"voting={decision.voting_windows}, winning={decision.winning_windows}, "
-            f"independent={decision.independent_windows}."
-        )
-    elif decision.state == "provisional":
-        if candidate is None:
-            raise ValueError("provisional audio decision is missing its candidate")
-        lines: list[str] = []
-        if decision.primary_reason == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON:
-            lines.extend(
-                [
-                    "Audio alignment automatic application is temporarily disabled.",
-                    "Audio evidence is available for manual review; no computed correction was applied.",
-                ]
-            )
-        lines.extend(
-            [
-                f"Comparison {ordinal} - Audio alignment requires review. "
-                f"Provisional candidate: {candidate.frame_offset:+d}f (not applied).",
-                (
-                    f"Mono evidence: {decision.consensus_windows}/"
-                    f"{decision.raw_correlated_windows} correlated windows agree; "
-                    f"raw={decision.raw_correlated_windows}, "
-                    f"credible={decision.credible_windows}, voting={decision.voting_windows}, "
-                    f"winning={decision.winning_windows}, independent={decision.independent_windows}; "
-                    f"configured consensus requires "
-                    f"{attempt.consensus_minimum_ratio:.0%}."
-                ),
-                f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
-            ]
-        )
-        if attempt.channel_corroboration is not None:
-            channel = attempt.channel_corroboration
-            lines.append(
-                "Channel-view evidence: "
-                f"{channel.independent_windows} independent temporal observations; "
-                f"status={channel.status}; reason={channel.reason}."
-            )
-    else:
+    decision = attempt.decision if attempt is not None else None
+    candidate = decision.candidate if decision is not None else None
+    if (
+        attempt is not None
+        and decision is not None
+        and decision.state == "provisional"
+        and candidate is not None
+    ):
         lines = [
-            f"Comparison {ordinal} - No usable audio candidate. No automatic correction applied.",
-            f"{attempt.planned_window_count} windows planned; "
-            f"{decision.raw_correlated_windows} usable estimates; evidence "
-            f"credible={decision.credible_windows}, voting={decision.voting_windows}, "
-            f"winning={decision.winning_windows}, independent={decision.independent_windows}. "
-            f"Reason: {_safe_alignment_diagnostic(decision.primary_reason)}.",
+            f"{prefix}Provisional audio candidate: {candidate.frame_offset:+d}f - NOT APPLIED",
+            "Visual confirmation required to use this hint. Align manually or keep the current alignment.",
         ]
-    stability_scope = _stability_scope_line(attempt)
-    if stability_scope is not None:
-        lines.append(stability_scope)
-    lines.append(_format_stream_summary(attempt))
-    _reference, comparison = attempt.selected_streams
-    mismatches: list[str] = []
-    if comparison.language_match == "mismatch":
-        mismatches.append("language")
-    if comparison.commentary_match == "mismatch":
-        mismatches.append("commentary")
-    if mismatches:
-        lines.append(
-            f"Selected audio metadata differs ({'/'.join(mismatches)}); matching content is not established."
-        )
+        if decision.primary_reason == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON:
+            lines[0:0] = [
+                "Audio alignment automatic application is temporarily disabled.",
+                "Audio evidence is available for manual review; no computed correction was applied.",
+            ]
+            stability_scope = _stability_scope_line(attempt)
+            if stability_scope is not None:
+                lines.append(stability_scope)
+        return lines
+
+    lines = [
+        f"{prefix}No usable audio candidate - NOT APPLIED",
+        "Align manually or keep the current alignment.",
+    ]
+    if (
+        attempt is not None
+        and decision is not None
+        and decision.primary_reason == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON
+    ):
+        lines[0:0] = [
+            "Audio alignment automatic application is temporarily disabled.",
+            "Audio evidence is available for manual review; no computed correction was applied.",
+        ]
+        stability_scope = _stability_scope_line(attempt)
+        if stability_scope is not None:
+            lines.append(stability_scope)
     return lines
 
 
-def _trim_explanation(offset: int) -> str:
-    if offset > 0:
-        return f"Trim {offset}f from the reference"
-    return f"Trim {abs(offset)}f from the comparison"
+def _original_audio_attempt_line(attempt: AudioAlignmentAttempt) -> str:
+    decision = attempt.decision
+    candidate = decision.candidate
+    if decision.state == "trusted_automatic" and candidate is not None:
+        return f"Original audio attempt: Audio alignment accepted: {candidate.frame_offset:+d}f - APPLIED"
+    if decision.state == "provisional" and candidate is not None:
+        return f"Original audio attempt: Provisional audio candidate: {candidate.frame_offset:+d}f - NOT APPLIED"
+    return "Original audio attempt: No usable audio candidate - NOT APPLIED"
 
 
 def _stability_scope_line(attempt: AudioAlignmentAttempt) -> str | None:
@@ -999,7 +1005,7 @@ def _alignment_evidence_row(line: str) -> tuple[str, str, str]:
     stripped = line.strip()
     if stripped.startswith("Comparison ") and " - " in stripped:
         _comparison, value = stripped.split(" - ", 1)
-        return "  status", value, "yellow" if "not applied" in value else "bright_white"
+        return "  status", value, "yellow" if "not applied" in value.lower() else "bright_white"
     prefixes = {
         "Reason: ": "  reason",
         "Streams: ": "  streams",
@@ -1072,6 +1078,7 @@ def _render_alignment_evidence_panel(
 def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
     decision = attempt.decision
     lines = [
+        _original_audio_attempt_line(attempt),
         f"  Runtime/policy: {attempt.media_runtime_fingerprint}; {attempt.estimator_policy}; "
         f"diagnostic={attempt.diagnostic_policy}",
         f"  Thresholds: score={attempt.confidence_threshold}; peak={attempt.ambiguity_peak_ratio}; "
@@ -1086,8 +1093,16 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
         f"  Work: planned={attempt.planned_window_count}; analysis rate={attempt.analysis_rate}; "
         f"FFT peak/total={attempt.peak_fft_points}/{attempt.total_fft_points}; "
         f"planning={attempt.planning_reason or 'complete'}",
-        "  Audio details:",
     ]
+    stability_scope = _stability_scope_line(attempt)
+    if stability_scope is not None:
+        lines.append(stability_scope)
+    lines.extend(
+        [
+            _format_stream_summary(attempt),
+            "  Audio details:",
+        ]
+    )
     for stream in attempt.selected_streams:
         lines.append(
             f"    {stream.role}: a:{stream.audio_stream_index} (absolute {stream.absolute_stream_index}), "
@@ -1113,8 +1128,20 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
             f"frame={window.requested_frame_candidate}, score={window.requested_score} "
             f"({window.score_stage}), peak={peak} ({window.peak_stage}@{window.peak_rate}), "
             f"quality={window.configured_quality}, vote={window.vote_disposition}, "
-            f"review={window.review_qualified}, result={window.terminal_stage}/{window.terminal_category}, "
-            f"relation={window.purpose}/{window.parent_id or 'root'}"
+            f"review={window.review_qualified}, result={window.terminal_stage}/"
+            f"{window.terminal_category}, relation={window.purpose}/"
+            f"{window.parent_id or 'root'}"
+        )
+    _reference, comparison = attempt.selected_streams
+    mismatches: list[str] = []
+    if comparison.language_match == "mismatch":
+        mismatches.append("language")
+    if comparison.commentary_match == "mismatch":
+        mismatches.append("commentary")
+    if mismatches:
+        lines.append(
+            f"Selected audio metadata differs ({'/'.join(mismatches)}); "
+            "matching content is not established."
         )
     channel = attempt.channel_corroboration
     if channel is not None:
@@ -1153,9 +1180,7 @@ def _present_alignment_evidence(
         result = results_map[key]
         provenance = provenances[key]
         decision = result.audio_attempt.decision if result.audio_attempt is not None else None
-        actionable = not result.applied or (
-            decision is not None and decision.state != "trusted_automatic"
-        )
+        actionable = not result.applied
         has_actionable_result = has_actionable_result or actionable
         if json_output:
             if actionable:
@@ -1191,10 +1216,6 @@ def _present_alignment_evidence(
                     "Opening VSView for manual review. No automatic candidate is available; "
                     "align the sources manually."
                 )
-        elif actionable:
-            comparison_lines.append(
-                "Continuing without an accepted audio correction; rendering remains best-effort."
-            )
         lines.extend(comparison_lines)
         entries.append(
             (
@@ -1342,6 +1363,8 @@ async def align_clips_from_request(
             provenances=provenances,
             fps_reference=fps_reference,
             progress=progress,
+            quiet=quiet,
+            json_output=json_output,
         )
         descriptions = _request_progress_descriptions(request)
         for comparison in requested_comparisons:

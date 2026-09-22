@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import frame_compare.services.alignment as alignment_service
 from frame_compare.services import alignment_audio, alignment_consensus
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_correlation import CorrelationEstimate
@@ -430,7 +431,14 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         generated_dir=tmp_path,
     )
 
-    result = asyncio.run(align_clips_from_request(request, config, reference_fps=Fraction(24)))
+    result = asyncio.run(
+        align_clips_from_request(
+            request,
+            config,
+            reference_fps=Fraction(24),
+            verbose=True,
+        )
+    )
     presented = capsys.readouterr().err
 
     assert decode_count == expected_decodes
@@ -453,6 +461,7 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
             assert attempt.decision.state == "provisional", attempt.channel_corroboration
             assert attempt.decision.primary_reason == expected_reason
             assert attempt.decision.candidate is not None
+
             assert attempt.decision.candidate.frame_offset == expected_frame
             assert attempt.channel_corroboration.independent_windows == 3
             if view_case.startswith("mixed_support"):
@@ -526,7 +535,7 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
                     )
                     == 0
                 )
-            assert "Mono evidence:" in presented
+            assert "Evidence:" in presented
             assert "Channel-view evidence:" in presented
             assert all(
                 not window.views[0].contradiction
@@ -549,6 +558,103 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         assert attempt.decision.primary_reason == expected_reason
         if view_case == "mixed_mono_conflict":
             assert "credible_contradiction" in attempt.decision.failed_gates
+
+
+@pytest.mark.parametrize("eligible", [True, False])
+def test_alignment_channel_fallback_callback_tracks_plan_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    eligible: bool,
+) -> None:
+    reference = tmp_path / "reference.mka"
+    comparison = tmp_path / "comparison.mka"
+    reference.touch()
+    comparison.touch()
+    stream = _stream()
+    config = AlignmentConfig(sample_rate=8_000, max_offset_seconds=1)
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=8_000,
+        requested_sample_rate=8_000,
+        windows=(alignment_audio.AudioWindowSpec(0, 100, 0, 100),),
+        peak_fft_points=256,
+        total_fft_points=256,
+    )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR"),
+        window_indices=(0,),
+        windows=plan.windows,
+        retained_samples_per_view=200,
+    )
+    consensus = alignment_consensus.AlignmentConsensus(
+        sample_offset=None,
+        score=0.0,
+        applied=False,
+        diagnostic="insufficient_independent_support",
+        valid_windows=0,
+        consensus_windows=0,
+        consensus_ratio=0.0,
+        ambiguity_ratio=None,
+    )
+    callback_calls: list[str] = []
+    loader_calls: list[str] = []
+
+    monkeypatch.setattr(alignment_audio, "select_reference_audio_stream", lambda *_a, **_k: stream)
+    monkeypatch.setattr(alignment_audio, "select_matching_audio_stream", lambda *_a, **_k: stream)
+    monkeypatch.setattr(alignment_audio, "plan_audio_analysis", lambda *_a, **_k: plan)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_staged_consensus_offset",
+        lambda *_a, **_k: consensus,
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "channel_corroboration_window_indices",
+        lambda _result: (0,) if eligible else (),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "common_named_channel_views",
+        lambda *_a, **_k: ("FL", "FR"),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "plan_channel_view_corroboration",
+        lambda *_a, **_k: (
+            channel_plan
+            if eligible
+            else alignment_audio.AudioAnalysisBudgetExceeded("channel_views_unavailable")
+        ),
+    )
+
+    def collect_channel_view(*args: object, **_kwargs: object):
+        view = args[5]
+        assert isinstance(view, str)
+        loader_calls.append(view)
+        return alignment_audio.CollectedAudioPhase(windows=(), summaries=())
+
+    monkeypatch.setattr(alignment_audio, "collect_channel_view_phase", collect_channel_view)
+
+    def corroborate(result: alignment_consensus.AlignmentConsensus, **kwargs: object):
+        assert callback_calls == (["started"] if eligible else [])
+        phase_loader = kwargs["phase_loader"]
+        assert callable(phase_loader)
+        for view in channel_plan.views:
+            phase_loader(view)  # type: ignore[operator]
+        return result
+
+    monkeypatch.setattr(alignment_consensus, "corroborate_channel_views", corroborate)
+
+    result = alignment_service._estimate_audio_pair(
+        reference,
+        comparison,
+        config=config,
+        fps_reference=Fraction(24),
+        on_channel_fallback_started=lambda: callback_calls.append("started"),
+    )
+
+    assert result is consensus
+    assert callback_calls == (["started"] if eligible else [])
+    assert loader_calls == (["FL", "FR"] if eligible else [])
 
 
 def _synthetic_mono_result(

@@ -507,26 +507,33 @@ unchanged.
   alignment uses a plain left-aligned activity line without a bar, count, ETA, or
   spinner: the comparison count is too small to make those indicators useful, while
   the changing description still identifies the active comparison. Structured JSON
-  progress keeps its measurable comparison milestones.
+  progress keeps its measurable comparison milestones. When an admitted named-channel
+  fallback begins, one human activity transition appends `Checking individual audio
+  channels for a review hint. Any hint will need visual confirmation.` to the existing
+  `ALIGN | Comparison N | <prepared presentation>` identity. It is omitted for
+  sufficient mono, ineligible fallback, quiet, and JSON runs; it is never emitted per
+  channel view or window.
 - Before an optional native review opens, each non-applied current audio attempt emits a
   compact, inset `Audio Alignment` panel naming its retained display-only provisional
-  candidate and `not applied` status, or stating that no usable candidate exists. The
-  panel uses the prepared comparison identity and aligned status, evidence, reason,
-  stream, review-action, and diagnostics rows. A qualified mono candidate is shown
-  as accepted and applied; channel-corroborated evidence remains a clearly
-  provisional, not-applied candidate. This does not
+  candidate as `Provisional audio candidate: +Nf - NOT APPLIED`, or stating
+  `No usable audio candidate - NOT APPLIED`. Applied states are decision-first:
+  `Audio alignment accepted: +Nf - APPLIED`, `Accepted audio alignment reused: +Nf -
+  APPLIED`, or `Manually confirmed alignment: +Nf - APPLIED`, followed by
+  `No additional confirmation needed.` Provisional candidates add
+  `Visual confirmation required to use this hint. Align manually or keep the current
+  alignment.`; unavailable results add `Align manually or keep the current alignment.`
+  The current applied result and provenance lead even when an original attempt is
+  retained as historical evidence. This does not
   add a successful JSON field or write human text to JSON stdout. The run-local
   diagnostic location is reported only after a successful write. The human Rich panel
   owns that success presentation; `alignment_diagnostics_written` remains a structured
   event for JSON/log output and is suppressed from interactive human output.
 - The pre-review evidence block keeps manual/human-authoritative `+0f`, applied
   qualified-mono `+0f`, channel-corroborated provisional `+0f`, and absence distinct.
-  Channel evidence is shown as `Provisional candidate: +Nf (not applied)` and never
-  authorizes a correction; rejected evidence without one reports `No usable audio candidate. No
-  automatic correction applied.` Selected stream rows name each audio ordinal as
-  `a:N` and distinguish automatic metadata selection from an explicit override.
-  Historical computed and human reuse are labeled separately and do not fabricate
-  current stream/window details.
+  Channel evidence never authorizes a correction. Verbose output retains the reason,
+  estimator policy, thresholds, counts, selected stream ordinals, temporal topology,
+  and original attempt state; historical computed and human reuse are labeled
+  separately and do not fabricate current stream/window details.
 - `--verbose` adds bounded selected-stream, threshold, gate, runtime/policy, work, and
   per-window evidence. `--quiet` suppresses routine accepted/status evidence but
   retains actionable rejection and diagnostic-write warnings. `--no-color` and

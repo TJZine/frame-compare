@@ -343,7 +343,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         "evidence_availability": "historical_details_unavailable",
     }
     terminal = capsys.readouterr().err
-    assert "Reused accepted audio alignment: +7f" in terminal
+    assert "Accepted audio alignment reused: +7f - APPLIED" in terminal
     assert "Historical window and selected-stream details are unavailable" in terminal
     mock_save_shared.assert_not_called()
 

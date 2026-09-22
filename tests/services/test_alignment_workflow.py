@@ -4,12 +4,14 @@ import asyncio
 import threading
 from dataclasses import replace
 from fractions import Fraction
+from io import StringIO
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, call, patch
 
 import numpy as np
 import pytest
 import tomli_w
+from rich.console import Console
 from structlog.testing import capture_logs
 
 from frame_compare.services import alignment as alignment_service
@@ -25,7 +27,12 @@ from frame_compare.services.alignment_audio import (
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_correlation import CorrelationEstimate
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AudioAlignmentCollectionRecord
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentProvenance,
+    AlignmentResult,
+    AudioAlignmentCollectionRecord,
+)
 from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from tests.services.alignment_request_test_support import alignment_request
@@ -151,6 +158,75 @@ def test_alignment_advances_each_computed_comparison_before_starting_next(
     assert descriptions.count("ALIGN | Analyzing audio | Comparison 2 | comp_b.mkv") == 1
     assert descriptions.count("ALIGN | Comparison 1 | comp_a.mkv") == 1
     assert descriptions.count("ALIGN | Comparison 2 | comp_b.mkv") == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("quiet", "json_output", "activity_expected"),
+    [(False, False, True), (True, False, False), (False, True, False)],
+)
+async def test_channel_fallback_activity_is_event_loop_owned_and_suppressed_for_machine_modes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    quiet: bool,
+    json_output: bool,
+    activity_expected: bool,
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comp.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    loop_thread = threading.get_ident()
+    descriptions: list[str] = []
+    description_threads: list[int] = []
+
+    class Reporter:
+        def set_description(self, description: str) -> None:
+            descriptions.append(description)
+            description_threads.append(threading.get_ident())
+
+        def advance(self, amount: int = 1) -> None:
+            del amount
+
+        def suspend(self) -> None:
+            return
+
+        def resume(self) -> None:
+            return
+
+    def estimate(*_args: object, **kwargs: object) -> AlignmentConsensus:
+        callback = kwargs["on_channel_fallback_started"]
+        assert (callback is not None) is activity_expected
+        if callback is not None:
+            callback()  # type: ignore[operator]
+        return AlignmentConsensus(0, 0.99, True, "accepted", 1, 1, 1.0, None)
+
+    monkeypatch.setattr(alignment_service, "_estimate_audio_pair", estimate)
+
+    await alignment_service.align_clips_from_request(
+        request,
+        config,
+        reference_fps=Fraction(24),
+        progress=Reporter(),  # type: ignore[arg-type]
+        quiet=quiet,
+        json_output=json_output,
+    )
+    await asyncio.sleep(0)
+
+    activity = (
+        "ALIGN | Comparison 1 | comp.mkv | Checking individual audio channels for a review hint. "
+        "Any hint will need visual confirmation."
+    )
+    assert (activity in descriptions) is activity_expected
+    if activity_expected:
+        assert description_threads[descriptions.index(activity)] == loop_thread
 
 
 @patch("frame_compare.services.alignment_audio.probe_fps")
@@ -293,7 +369,7 @@ def test_alignment_full_manual_hit_stays_in_parent_align_phase(
     reporter.advance.assert_not_called()
     descriptions = [args[0] for args, _kwargs in reporter.set_description.call_args_list]
     assert descriptions == ["ALIGN | Checking saved offsets"]
-    assert "Reused manually confirmed alignment: +3f" in capsys.readouterr().err
+    assert "Manually confirmed alignment: +3f - APPLIED" in capsys.readouterr().err
 
 
 @patch("frame_compare.services.alignment._estimate_audio_pair")
@@ -333,6 +409,7 @@ def test_alignment_passes_config_to_audio_pair_owner(
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
             comparison_ordinal=1,
+            on_channel_fallback_started=None,
             cancellation=ANY,
         ),
         call(
@@ -344,6 +421,7 @@ def test_alignment_passes_config_to_audio_pair_owner(
             reference_request=request.reference,
             comparison_request=request.comparisons[1],
             comparison_ordinal=2,
+            on_channel_fallback_started=None,
             cancellation=ANY,
         ),
     ]
@@ -864,9 +942,9 @@ def _presented_attempt_result(
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ("trusted_automatic", "Audio alignment accepted: +0f"),
-        ("provisional", "Provisional candidate: +0f (not applied)"),
-        ("unavailable", "No usable audio candidate"),
+        ("trusted_automatic", "Audio alignment accepted: +0f - APPLIED"),
+        ("provisional", "Provisional audio candidate: +0f - NOT APPLIED"),
+        ("unavailable", "No usable audio candidate - NOT APPLIED"),
     ],
 )
 def test_normal_terminal_distinguishes_audio_states(
@@ -881,8 +959,88 @@ def test_normal_terminal_distinguishes_audio_states(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert expected in captured.err
-    assert "Streams: Reference a:0 -> Comparison a:0" in captured.err
+    assert (
+        "No additional confirmation needed." in captured.err
+        if state == "trusted_automatic"
+        else ("Align manually or keep the current alignment." in captured.err)
+    )
     assert "\x1b[" not in captured.err
+
+
+@pytest.mark.parametrize("offset", [-5, 0, 5])
+def test_normal_terminal_formats_signed_applied_offsets(
+    offset: int,
+) -> None:
+    result = AlignmentResult(
+        reference_clip="ref.mkv",
+        comparison_clip="comp.mkv",
+        frame_offset=offset,
+        time_offset_seconds=offset / 24,
+        correlation_score=0.99,
+        algorithm="cross_correlation",
+        source="computed",
+    )
+    provenance = AlignmentProvenance(
+        result=result,
+        comparison_cache_key="ref:comp",
+        provenance="computed_this_run",
+    )
+
+    lines = alignment_service._normal_evidence_lines(
+        ordinal=1,
+        result=result,
+        provenance=provenance,
+    )
+
+    assert lines == [
+        f"Comparison 1 - Audio alignment accepted: {offset:+d}f - APPLIED",
+        "No additional confirmation needed.",
+    ]
+
+
+@pytest.mark.parametrize("original_state", ["provisional", "unavailable"])
+def test_manual_authority_leads_over_original_audio_attempt(
+    original_state: str,
+) -> None:
+    attempt = audio_attempt()
+    if original_state == "unavailable":
+        attempt = replace(
+            attempt,
+            decision=replace(attempt.decision, state="unavailable", candidate=None),
+        )
+    result = AlignmentResult(
+        reference_clip="ref.mkv",
+        comparison_clip="comp.mkv",
+        frame_offset=-3,
+        time_offset_seconds=-3 / 24,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+        audio_attempt=attempt,
+    )
+    provenance = AlignmentProvenance(
+        result=result,
+        comparison_cache_key="ref:comp",
+        provenance="interactive_confirmed_this_run",
+        evidence_availability="current_attempt",
+    )
+
+    lines = alignment_service._normal_evidence_lines(
+        ordinal=1,
+        result=result,
+        provenance=provenance,
+    )
+    verbose_lines = alignment_service._verbose_evidence_lines(attempt)
+
+    assert lines[:2] == [
+        "Comparison 1 - Manually confirmed alignment: -3f - APPLIED",
+        "No additional confirmation needed.",
+    ]
+    assert verbose_lines[0] == (
+        "Original audio attempt: Provisional audio candidate: +0f - NOT APPLIED"
+        if original_state == "provisional"
+        else "Original audio attempt: No usable audio candidate - NOT APPLIED"
+    )
 
 
 def test_rich_terminal_groups_audio_evidence_in_an_aligned_panel(
@@ -902,11 +1060,36 @@ def test_rich_terminal_groups_audio_evidence_in_an_aligned_panel(
     assert "[WARN] Audio Alignment" in captured.err
     assert "comparison" in captured.err
     assert "status" in captured.err
-    assert "Provisional candidate:" in captured.err
-    assert "+0f (not applied)" in captured.err
-    assert "evidence" in captured.err
-    assert "reason" in captured.err
-    assert "streams" in captured.err
+    assert "Provisional audio candidate:" in captured.err
+    assert "+0f - NOT APPLIED" in captured.err
+
+
+@pytest.mark.parametrize("width", [100, 36])
+def test_rich_terminal_narrow_no_color_render_keeps_decision_tokens(
+    width: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = StringIO()
+
+    def console_factory(*, stderr: bool, no_color: bool, height: int) -> Console:
+        del stderr, height
+        return Console(file=output, width=width, no_color=no_color, force_terminal=False)
+
+    monkeypatch.setattr(alignment_service, "Console", console_factory)
+    _presented_attempt_result(
+        tmp_path,
+        monkeypatch,
+        state="provisional",
+        progress=RichProgressReporter(no_color=True),
+    )
+
+    rendered = output.getvalue()
+    assert rendered
+    assert "comparison" in rendered
+    assert "+0f" in rendered
+    assert "NOT APPLIED" in rendered
+    assert "\x1b[" not in rendered
 
 
 def test_verbose_terminal_adds_bounded_stream_and_window_details(
@@ -935,7 +1118,7 @@ def test_quiet_suppresses_routine_acceptance_but_keeps_actionable_rejection(
 
     assert accepted.out == accepted.err == ""
     assert rejected.out == ""
-    assert "Provisional candidate: +0f (not applied)" in rejected.err
+    assert "Provisional audio candidate: +0f - NOT APPLIED" in rejected.err
 
 
 def test_json_mode_emits_no_human_alignment_block(
