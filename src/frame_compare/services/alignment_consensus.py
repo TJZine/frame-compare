@@ -51,7 +51,7 @@ _REVIEW_PEAK_RATIO_FLOOR = 1.50
 _STABILITY_COVERAGE_FLOOR = 0.90
 AUTOMATIC_AUTHORITY_HOLD_REASON = "automatic_authority_held"
 CHANNEL_CORROBORATION_REASON = "channel_corroboration_provisional"
-# Keep the latch as a conservative rollback seam; the verified v12 policy is active by default.
+# Keep the latch as a conservative rollback seam; the verified current policy is active by default.
 _AUTOMATIC_AUTHORITY_HELD = False
 
 
@@ -1242,7 +1242,15 @@ def corroborate_channel_views(
         sample_rate=config.sample_rate,
         config=config,
     )
-    global_contradiction = any(window.contradiction for window in channel_windows)
+    credible_frames = {
+        view.requested_frame_candidate
+        for window in channel_windows
+        for view in window.views
+        if view.base_credible and view.requested_frame_candidate is not None
+    }
+    global_contradiction = (
+        any(window.contradiction for window in channel_windows) or len(credible_frames) > 1
+    )
     if winner and independent_count >= required and not global_contradiction:
         candidate = AudioAlignmentCandidate(
             sample_offset=int(

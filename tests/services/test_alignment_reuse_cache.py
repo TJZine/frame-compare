@@ -343,33 +343,23 @@ def test_source_set_cache_key_changes_with_estimator_policy(
     assert source_set_cache_key(request) != original
 
 
-@pytest.mark.parametrize(
-    ("provenance", "source"),
-    [
-        ("computed_this_run", "computed"),
-        ("interactive_confirmed_this_run", "manual"),
-    ],
-)
-def test_previous_estimator_policy_shared_entries_miss_without_schema_change(
+def test_stale_estimator_policy_shared_entry_misses_without_schema_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    provenance: str,
-    source: str,
 ) -> None:
     request = _request(tmp_path)
     with monkeypatch.context() as patch:
         patch.setattr(
             reuse_cache,
             "ALIGNMENT_ESTIMATOR_POLICY",
-            "stream-timeline-distributed-2097152-v4",
+            "stale-alignment-policy",
         )
         save_reusable_offsets(
             request,
             [
                 _provenance(
                     request,
-                    result=_result(request, source=source),
-                    provenance=provenance,
+                    result=_result(request),
                 )
             ],
         )
@@ -424,6 +414,7 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     assert f'version = "{CACHE_VERSION}"' in content
     assert 'origin = "computed"' in content
     assert 'accepted_at = "2026-06-06T12:00:00Z"' in content
+    assert f'estimator_policy = "{reuse_cache.ALIGNMENT_ESTIMATOR_POLICY}"' in content
 
 
 def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(

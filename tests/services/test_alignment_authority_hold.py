@@ -224,7 +224,7 @@ def test_r7_qualified_mono_authority_reaches_application_and_cache(
     assert (tmp_path / "shared-alignment" / "alignment_reuse.toml").exists()
 
 
-def test_r7_current_v12_cache_hit_is_authoritative_without_recompute(
+def test_r7_current_policy_cache_hit_is_authoritative_without_recompute(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,7 +240,7 @@ def test_r7_current_v12_cache_hit_is_authoritative_without_recompute(
 
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
-        lambda *_args, **_kwargs: pytest.fail("current v12 cache hit must not recompute"),
+        lambda *_args, **_kwargs: pytest.fail("current policy cache hit must not recompute"),
     )
     second = align_clips_from_request(request, config, reference_fps=Fraction(24))[0]
 
@@ -285,7 +285,7 @@ def test_r7_v11_cache_identity_misses_and_fresh_mono_result_applies(
     monkeypatch.setattr(
         alignment_reuse_cache,
         "ALIGNMENT_ESTIMATOR_POLICY",
-        "continuous-origin-qualified-channel-corroboration-2097152-v12",
+        "continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922",
     )
     calls = 0
 
@@ -350,7 +350,7 @@ def test_r7_v11_embedded_computed_result_misses_before_mono_recompute(
     monkeypatch.setattr(
         alignment_reuse_cache,
         "ALIGNMENT_ESTIMATOR_POLICY",
-        "continuous-origin-qualified-channel-corroboration-2097152-v12",
+        "continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922",
     )
     calls = 0
 

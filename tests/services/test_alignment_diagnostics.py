@@ -104,7 +104,9 @@ def audio_attempt() -> AudioAlignmentAttempt:
         comparison_identity_digest="b" * 64,
         comparison_ordinal=1,
         status="complete",
-        estimator_policy="continuous-origin-qualified-channel-corroboration-2097152-v12",
+        estimator_policy=(
+            "continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922"
+        ),
         diagnostic_policy="retained-audio-evidence-v1",
         media_runtime_fingerprint="alignment-runtime",
         ffmpeg_version="not_observed",

@@ -1434,7 +1434,7 @@ this sign convention before consensus evidence, hints, caching, and trim applica
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
   is not present in the CLI override map. Under the shipped
-  `continuous-origin-qualified-channel-corroboration-2097152-v12` policy, qualified
+  `continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy, qualified
   mono computed cache hits and embedded computed fallbacks may remain authoritative
   regardless of `previous_offsets`; channel-corroborated evidence is never reused as
   computed authority. `disabled` is the default and
@@ -1500,7 +1500,9 @@ this sign convention before consensus evidence, hints, caching, and trim applica
   is configured and the stride is zero, the window length is also used as the stride,
   producing a contiguous candidate grid before bounded sampling. With both values at
   zero, inputs up to 30 seconds use one full shared-duration interval, inputs longer than
-  30 and shorter than 90 seconds use two disjoint endpoint intervals of `min(30s, D/2)`,
+  30 and shorter than 90 seconds use two disjoint endpoint intervals planned from the
+  integer sample split `[0, floor(N/2))` and `[floor(N/2), N)` (bounded by the same
+  duration tier),
   and inputs at least 90 seconds use five distributed 30-second intervals. A larger
   configured minimum is retained; overlap and duplicate intervals do not become independent
   support. Explicit length and stride preserve their requested shape, but do not waive the
@@ -1581,7 +1583,7 @@ Every fresh completed attempt also retains immutable selected-stream facts, one
 categorized outcome for every planned window, raw candidate/quality facts, aggregate
 qualified-policy evidence, and an explicit audio decision: `trusted_automatic`,
 `provisional`, or `unavailable` under the shipped
-`continuous-origin-qualified-channel-corroboration-2097152-v12` policy. An otherwise-qualified
+`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy. An otherwise-qualified
 mono attempt produces `trusted_automatic` and applied frame/time fields. Channel
 corroboration always produces `provisional` evidence, even when the qualified policy
 would otherwise pass. A provisional candidate uses fixed display-only floors (score at
@@ -1595,8 +1597,9 @@ For the default `mono_downmix` strategy only, a weak but extraction/coverage-val
 mono row may be corroborated by the fixed-order intersection of explicitly named
 `FL`, `FR`, and `FC` views when the mono policy lacks independent temporal support.
 At least two same-frame, peak-valid named views are required, at least one must meet
-the fixed waveform floor, and any base-credible cross-frame named view vetoes the
-hint. The resulting aggregate is labeled channel-view evidence and is permanently
+the fixed waveform floor, and any base-credible cross-frame named view in any relevant
+temporal window vetoes the aggregate hint, even when each individual window is internally
+consistent. The resulting aggregate is labeled channel-view evidence and is permanently
 provisional-only. Its duration-tier check combines unique same-frame, fixed-base-credible
 mono observations with corroborated channel windows, replacing rather than double-counting
 the weak mono row for a shared logical ID. Mono observations supply temporal coverage only;
@@ -1622,8 +1625,10 @@ cache reuse. Missing, edited, corrupt, or unsupported artifacts cannot authorize
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
 authority unchanged; a containment or symlink escape remains fail-closed. The shared
 alignment cache remains schema v2 and stores eligible authority only. Qualified mono
-computed results may be written and reused under v12; channel-provisional results are
-never written as computed authority. Historical cache hits do not fabricate current
+computed results may be written and reused under the current temporal-invariants policy;
+the policy token participates in the full shared source-set identity, so stale policy
+entries—including embedded computed results and interactive confirmations—miss cleanly.
+Channel-provisional results are never written as computed authority. Historical cache hits do not fabricate current
 stream or window evidence.
 
 `run --write-config` persists the effective config after applying the mapped overrides

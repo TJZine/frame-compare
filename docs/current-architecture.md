@@ -434,7 +434,7 @@ dependency or decode failures remain warning-only for optional alignment. The at
 retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
 and a separate display-only provisional candidate. The shipped
-`continuous-origin-qualified-channel-corroboration-2097152-v12` policy allows an otherwise
+`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy allows an otherwise
 qualified mono result to become trusted automatic authority after every existing
 integrity, quality, support, contradiction, boundary, search-edge, and configured
 gate passes. It reaches the existing trim and computed-cache paths. Channel
@@ -446,7 +446,7 @@ correlation lag into the signed `reference source frame - comparison source fram
 contract before consensus results reach hints, caches, or trim calculation. Immutable
 orchestration alignment state carries that summary to warning and human-report owners
 without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
-previous-offset reuse policy. Current v12 computed cache hits may reuse qualified
+previous-offset reuse policy. Current temporal-invariants computed cache hits may reuse qualified
 mono authority, while channel-only evidence remains non-applied; validated
 human-confirmed authority continues to reuse through the `previous_offsets` policy.
 
@@ -455,7 +455,10 @@ Computed alignment work is planned against typed timing for each selected audio 
 total FFT-work budgets, requested-rate PCM and scoring budgets, distributed window
 selection, exact rate conversion, verification halos, and the canonical FFmpeg recipe.
 Discovery runs at `min(requested rate, 8000)` with one 4 kHz admission retry when
-needed. Each source/rate/channel treatment is decoded once from origin, resampled,
+needed. For the default medium duration tier, the endpoint split is planned in integer
+sample coordinates as `[0, floor(N/2))` and `[floor(N/2), N)`, so odd totals neither
+overlap nor lose their final sample; requested-rate verification derives the same shared
+endpoint after exact rate conversion. Each source/rate/channel treatment is decoded once from origin, resampled,
 bounded by one final sample endpoint, and retained only at admitted logical intervals.
 `alignment_streaming` is the adjacent, independently exercisable continuous-collection
 owner. It accepts a caller-prepared FFmpeg argument vector, scalar admitted intervals,
@@ -501,7 +504,9 @@ independent-support, and automatic-authority gates. Base-credible evidence requi
 requested-rate score floor, meaningful finite signal/overlap, and peak floor; voting also
 requires 90% useful observed coverage and the configured thresholds. Any base-credible
 estimate in another applied frame bin is a hard veto, even when stricter configuration
-excludes it from voting. The default ratio is unanimity among voting-qualified windows.
+excludes it from voting. For named-channel corroboration this veto is global across
+relevant temporal windows, including windows whose channel views internally agree. The
+default ratio is unanimity among voting-qualified windows.
 Stability is classified only from extraction-integrity, fixed-credibility, and coverage-qualified
 observed windows; rejected or unobserved planned intervals remain diagnostic and unassessed.
 The duration-tier temporal-support requirement applies to actual useful intervals even
@@ -515,12 +520,13 @@ the requested search silently, or attempting unbounded work. The estimator-polic
 includes this strategy so older computed cache entries are not reused. The current
 fixed channel rule requires two activity/coverage/peak-valid named views in one
 frame bin and the existing correction neighborhood, including at least one view at the
-unchanged waveform floor. A base-credible named view in another frame bin vetoes the
-hint. Qualifying channel evidence creates only a distinctly labeled provisional manual-
+unchanged waveform floor. A base-credible named view in another frame bin, in any relevant
+temporal window, vetoes the aggregate hint even when that window's named views internally
+agree. Qualifying channel evidence creates only a distinctly labeled provisional manual-
 review candidate; it cannot set `review_qualified`, join mono authority voters, satisfy
 a mono trust gate, override a credible contradiction, write computed cache authority,
 or reach trims. The current
-`continuous-origin-qualified-channel-corroboration-2097152-v12` policy activates
+`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy activates
 qualified mono authority for trims and computed-cache writes while channel
 corroboration remains permanently provisional and cannot authorize either.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison

@@ -41,7 +41,7 @@ def automatic_authority_is_disabled_for_policy_mechanics(
     monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
 
 
-def _stream(duration: int, *, start: int = 0) -> AudioStreamInfo:
+def _stream(duration: Fraction | int, *, start: int = 0) -> AudioStreamInfo:
     return AudioStreamInfo(
         audio_stream_index=0,
         absolute_stream_index=1,
@@ -1639,6 +1639,84 @@ def test_default_duration_tiers_preserve_full_or_endpoint_distributed_shapes(
         assert plan.windows[-1].reference_start_sample + plan.windows[
             -1
         ].reference_sample_count == (duration * plan.sample_rate)
+
+
+@pytest.mark.parametrize(
+    ("sample_rate", "sample_count"),
+    [
+        (100, 2_999),
+        (100, 3_000),
+        (100, 3_001),
+        (100, 5_999),
+        (100, 6_000),
+        (100, 6_001),
+        (100, 8_999),
+        (100, 9_000),
+        (100, 9_001),
+        (8_000, 248_003),
+    ],
+)
+def test_default_duration_endpoint_geometry_uses_disjoint_integer_intervals(
+    sample_rate: int,
+    sample_count: int,
+) -> None:
+    duration = Fraction(sample_count, sample_rate)
+    plan = alignment_audio.plan_audio_analysis(
+        _stream(duration),
+        _stream(duration),
+        config=AlignmentConfig(sample_rate=sample_rate),
+    )
+
+    assert isinstance(plan, AudioAnalysisPlan)
+    intervals = tuple(
+        (
+            window.reference_start_sample,
+            window.reference_start_sample + window.reference_sample_count,
+        )
+        for window in plan.windows
+    )
+    assert intervals[0][0] == 0
+    assert intervals[-1][1] == sample_count
+    if 30 * sample_rate < sample_count < 90 * sample_rate:
+        assert len(intervals) == 2
+        assert intervals[0][1] <= intervals[1][0]
+        if sample_count <= 2 * 30 * sample_rate:
+            assert intervals[0][1] == intervals[1][0]
+
+
+@pytest.mark.parametrize("requested_rate", [8_000, 48_000])
+def test_odd_default_endpoint_geometry_survives_requested_rate_planning(
+    requested_rate: int,
+) -> None:
+    duration = Fraction(248_003, 8_000)
+    reference_stream = _stream(duration)
+    comparison_stream = _stream(duration)
+    plan = alignment_audio.plan_audio_analysis(
+        reference_stream,
+        comparison_stream,
+        config=AlignmentConfig(sample_rate=requested_rate),
+    )
+
+    assert isinstance(plan, AudioAnalysisPlan)
+    assert [
+        (
+            window.reference_start_sample,
+            window.reference_start_sample + window.reference_sample_count,
+        )
+        for window in plan.windows
+    ] == [(0, 124_001), (124_001, 248_003)]
+    if requested_rate == 48_000:
+        specs = alignment_audio.verification_specs(
+            plan,
+            tuple((index, Fraction(0)) for index in range(len(plan.windows))),
+            reference_stream=reference_stream,
+            comparison_stream=comparison_stream,
+            max_offset_seconds=30,
+        )
+        assert [
+            (spec.reference_start_sample, spec.reference_start_sample + spec.reference_sample_count)
+            for spec in specs
+        ] == [(0, 744_006), (744_006, 1_488_018)]
 
 
 def test_default_duration_tier_preserves_larger_configured_minimum_without_reducing_it() -> None:

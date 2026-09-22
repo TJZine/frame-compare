@@ -54,8 +54,8 @@ excluded from voting by a stricter setting.
 
 With default window settings, sources up to 30 seconds use one full shared-duration
 interval, sources longer than 30 seconds and shorter than 90 seconds use two disjoint
-endpoint intervals, and sources of at least 90 seconds use five distributed 30-second
-intervals. Explicit window length
+endpoint intervals split in integer sample coordinates at `floor(N/2)`, and sources of
+at least 90 seconds use five distributed 30-second intervals. Explicit window length
 and stride preserve their requested shape, but do not waive the duration tier's temporal
 support requirement. Overlapping or duplicate useful intervals do not create independent
 support. Clean planned completion and observed early EOF are
@@ -65,7 +65,7 @@ distinct successful collection outcomes; failed collection PCM is never usable.
 
 Interactively confirmed offsets can be stored in the shared alignment reuse cache.
 Qualified mono computed results may be written and reused as trim authority under the
-current v12 policy. Channel-provisional evidence is never written or reused as trim
+current temporal-invariants policy. Channel-provisional evidence is never written or reused as trim
 authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
 selected reference relationship, audio stream choices, alignment settings, and relevant
 runtime identity.
@@ -88,9 +88,10 @@ while preserving every original per-window sample estimate as evidence.
 Material non-stable evidence produces one concise warning and should be verified at
 multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
 schema v2 requires the compact summary and the reference-minus-comparison sign
-convention. The estimator policy is part of the shared source-set identity for both
-computed and interactively confirmed entries, so older-policy shared entries miss and
-are recomputed or reviewed normally. Schema-v1 entries are ignored and recomputed;
+convention. The internal estimator policy token
+`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922`
+is part of the full shared source-set identity for both computed and interactively confirmed
+entries. A stale-policy shared entry misses and is recomputed or reviewed normally. Schema-v1 entries are ignored and recomputed;
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
 remains a v1 file with the same path and offset semantics.
 
@@ -98,7 +99,7 @@ Fresh computation distinguishes three shipped audio-evidence states. `trusted_au
 means a qualified mono candidate passed every authority gate and is applied. `provisional`
 means a unique display-qualified candidate survived an attempt but remains a clearly
 unaccepted review hint, including every channel-corroborated candidate. Under the internal
-`continuous-origin-qualified-channel-corroboration-2097152-v12` policy, channel evidence is
+`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy, channel evidence is
 never applied or passed as authoritative integer/null fields. `unavailable`
 means no unique usable
 candidate exists, and Frame Compare does not invent zero. The
@@ -109,8 +110,9 @@ threshold and the policy floor; `consensus_minimum_ratio` applies to voting-qual
 windows. A base-credible estimate in another frame bin is a hard contradiction, even if
 a stricter setting excludes it from voting. Channel corroboration independently prevents
 computed application. Manual confirmation is a separate fact and does not rewrite the
-original audio attempt. The v12 identity invalidates v11-held computed cache entries and
-embedded computed results; cache schema v2 and the manual-override schema remain unchanged.
+original audio attempt. The temporal-invariants identity invalidates stale shared source-set
+entries, including embedded computed results and prior interactive confirmations; cache
+schema v2 and the manual-override schema remain unchanged.
 
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
@@ -142,7 +144,8 @@ valid row misses the fixed waveform floor, Frame Compare can inspect the exact c
 each view's PCM before collecting the next, and still counts one observation per temporal
 window. Two same-frame activity/coverage/peak-valid views are required and at least one
 must meet the unchanged waveform floor; any base-credible named view in another frame
-bin vetoes the hint. The retained score and peak aggregates are explicitly channel-view
+bin, from any relevant temporal window, vetoes the aggregate hint even if that window's
+named views internally agree. The retained score and peak aggregates are explicitly channel-view
 evidence. The duration-tier check combines each corroborated channel window with unique
 same-frame, fixed-base-credible mono observations; a shared logical window is counted once,
 with its channel evidence replacing the weak mono row. Mono observations contribute only

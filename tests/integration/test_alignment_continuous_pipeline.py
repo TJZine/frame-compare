@@ -122,7 +122,8 @@ def test_real_service_collects_distributed_windows_from_one_decode_per_source(
     assert result.audio_attempt is not None
     attempt = result.audio_attempt
     assert (
-        attempt.estimator_policy == "continuous-origin-qualified-channel-corroboration-2097152-v12"
+        attempt.estimator_policy
+        == "continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922"
     )
     assert attempt.collection_observation == "observed"
     assert len(attempt.collection_summaries) == 2

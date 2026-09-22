@@ -789,12 +789,17 @@ def _plan_at_discovery_rate(
     comparison_total = max(1, math.floor(comparison_duration * rate))
     shared_total = min(reference_total, comparison_total)
     default_shape = config.window_length_seconds <= 0
+    endpoint_counts: tuple[int, int] | None = None
     if default_shape:
         shared_seconds = min(reference_duration, comparison_duration)
         if shared_seconds <= 30:
             window_samples = shared_total
         elif shared_seconds < 90:
             window_samples = min(30 * rate, max(2, round(shared_seconds * rate / 2)))
+            if config.minimum_valid_windows <= 2 and shared_total <= 2 * 30 * rate:
+                midpoint = shared_total // 2
+                endpoint_counts = (midpoint, shared_total - midpoint)
+                window_samples = max(endpoint_counts)
         else:
             window_samples = min(shared_total, 30 * rate)
     else:
@@ -831,9 +836,10 @@ def _plan_at_discovery_rate(
     if default_shape and min(reference_duration, comparison_duration) <= 30:
         starts = (0,)
     elif default_shape and min(reference_duration, comparison_duration) < 90:
-        endpoint_starts = (0, max(0, shared_total - window_samples))
-        if config.minimum_valid_windows <= 2:
-            starts = endpoint_starts
+        if endpoint_counts is not None:
+            starts = (0, endpoint_counts[0])
+        elif config.minimum_valid_windows <= 2:
+            starts = (0, max(0, shared_total - window_samples))
         else:
             starts = _window_starts(
                 shared_total,
@@ -858,8 +864,11 @@ def _plan_at_discovery_rate(
     verification_samples = 0
     scored_positions = 0
     halo = math.ceil(config.sample_rate / rate)
-    for reference_start in starts:
-        reference_count = min(window_samples, reference_total - reference_start)
+    for index, reference_start in enumerate(starts):
+        planned_reference_count = (
+            endpoint_counts[index] if endpoint_counts is not None else window_samples
+        )
+        reference_count = min(planned_reference_count, reference_total - reference_start)
         comparison_start = max(0, reference_start - margin_samples)
         comparison_end = min(
             comparison_total,

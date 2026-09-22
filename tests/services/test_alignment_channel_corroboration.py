@@ -12,7 +12,13 @@ import pytest
 
 from frame_compare.services import alignment_audio, alignment_consensus
 from frame_compare.services.alignment import align_clips_from_request
-from frame_compare.services.types import AlignmentConfig, AudioAlignmentCollectionRecord
+from frame_compare.services.alignment_correlation import CorrelationEstimate
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AudioAlignmentCollectionRecord,
+    AudioAlignmentDecision,
+    AudioAlignmentWindowRecord,
+)
 from tests.services.alignment_request_test_support import alignment_request
 
 
@@ -539,3 +545,163 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         assert attempt.decision.primary_reason == expected_reason
         if view_case == "mixed_mono_conflict":
             assert "credible_contradiction" in attempt.decision.failed_gates
+
+
+def _synthetic_mono_result(
+    plan: alignment_audio.AudioAnalysisPlan,
+) -> alignment_consensus.AlignmentConsensus:
+    records = tuple(
+        AudioAlignmentWindowRecord(
+            logical_id=f"primary-{index + 1:02d}",
+            purpose="primary",
+            attempt_number=1,
+            parent_id=None,
+            planned_reference_start=spec.reference_start_sample,
+            planned_reference_count=spec.reference_sample_count,
+            planned_comparison_start=spec.comparison_start_sample,
+            planned_comparison_count=spec.comparison_sample_count,
+            analysis_rate=plan.sample_rate,
+            requested_rate=plan.requested_sample_rate,
+            actual_reference_count=spec.reference_sample_count,
+            actual_comparison_count=spec.comparison_sample_count,
+            actual_useful_reference_start=spec.reference_start_sample,
+            actual_useful_reference_end=spec.reference_start_sample + spec.reference_sample_count,
+            actual_coverage=1.0,
+            coverage_state="complete",
+            quality_disposition="rejected",
+            requested_sample_lag=0,
+            requested_frame_candidate=0,
+            requested_score=0.55,
+            score_stage="requested_rate",
+            peak_ratio=1.1,
+            peak_stage="requested_rate",
+            peak_rate=plan.requested_sample_rate,
+            terminal_stage="correlation",
+            terminal_category="correlated",
+        )
+        for index, spec in enumerate(plan.windows)
+    )
+    return alignment_consensus.AlignmentConsensus(
+        sample_offset=None,
+        score=0.55,
+        applied=False,
+        diagnostic="insufficient_independent_support",
+        valid_windows=len(records),
+        consensus_windows=0,
+        consensus_ratio=0.0,
+        ambiguity_ratio=1.1,
+        window_records=records,
+        decision=AudioAlignmentDecision(
+            state="unavailable",
+            candidate=None,
+            primary_reason="insufficient_independent_support",
+            raw_correlated_windows=len(records),
+            consensus_windows=0,
+            consensus_ratio=0.0,
+            aggregate_score=0.55,
+            minimum_peak_ratio=1.1,
+            failed_gates=("insufficient_independent_support",),
+        ),
+    )
+
+
+def _synthetic_channel_case(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    dissent_index: int,
+    dissent_offset: int,
+    weak_dissent: bool = False,
+) -> alignment_consensus.AlignmentConsensus:
+    specs = tuple(
+        alignment_audio.AudioWindowSpec(index * 10_000, 10_000, index * 10_000, 10_000)
+        for index in range(5)
+    )
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=1_000,
+        requested_sample_rate=1_000,
+        windows=specs,
+        peak_fft_points=1_024,
+        total_fft_points=5_120,
+        reference_duration_samples=50_000,
+        comparison_duration_samples=50_000,
+    )
+    mono_result = _synthetic_mono_result(plan)
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR", "FC"),
+        window_indices=tuple(range(len(specs))),
+        windows=specs,
+        retained_samples_per_view=100_000,
+    )
+    scores: list[float] = []
+    estimate_index = 0
+
+    def estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        nonlocal estimate_index
+        view_index, window_index = divmod(estimate_index, len(specs))
+        estimate_index += 1
+        is_dissent = window_index == dissent_index and (not weak_dissent or view_index == 2)
+        scores.append(0.5 if weak_dissent and is_dissent and view_index == 2 else 1.0)
+        return CorrelationEstimate(dissent_offset if is_dissent else 0, 1.0, 2.0)
+
+    def refine(*_args: object, **_kwargs: object) -> tuple[int, float]:
+        return 0, scores.pop(0)
+
+    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", refine)
+
+    def phase_loader(_view: str) -> alignment_audio.CollectedAudioPhase:
+        windows = tuple(
+            alignment_audio.AudioWindow(
+                np.ones(spec.reference_sample_count, dtype=np.float32),
+                np.ones(spec.comparison_sample_count, dtype=np.float32),
+                spec.reference_start_sample,
+                spec.comparison_start_sample,
+            )
+            for spec in specs
+        )
+        return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
+
+    return alignment_consensus.corroborate_channel_views(
+        mono_result,
+        plan=plan,
+        channel_plan=channel_plan,
+        config=AlignmentConfig(sample_rate=1_000, max_offset_seconds=10),
+        fps=Fraction(24),
+        phase_loader=phase_loader,
+    )
+
+
+@pytest.mark.parametrize("dissent_index", range(5))
+@pytest.mark.parametrize("dissent_offset", [-50, 50])
+def test_global_credible_channel_dissent_vetoes_provisional_hint(
+    monkeypatch: pytest.MonkeyPatch,
+    dissent_index: int,
+    dissent_offset: int,
+) -> None:
+    result = _synthetic_channel_case(
+        monkeypatch,
+        dissent_index=dissent_index,
+        dissent_offset=dissent_offset,
+    )
+
+    assert result.channel_corroboration is not None
+    assert result.channel_corroboration.status == "rejected"
+    assert result.channel_corroboration.reason == "credible_cross_frame_veto"
+    assert result.channel_corroboration.candidate is None
+    assert all(not window.contradiction for window in result.channel_corroboration.windows)
+
+
+def test_weak_named_channel_dissent_does_not_veto_provisional_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _synthetic_channel_case(
+        monkeypatch,
+        dissent_index=2,
+        dissent_offset=-50,
+        weak_dissent=True,
+    )
+
+    assert result.channel_corroboration is not None
+    assert result.channel_corroboration.status == "corroborated"
+    assert result.channel_corroboration.candidate is not None
+    assert result.channel_corroboration.candidate.frame_offset == 0
