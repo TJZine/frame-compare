@@ -483,7 +483,7 @@ at the next checkpoint. Pending rows are not proof.
 | F1 | Accepted locally and in Docker; Windows remains W1 | `cdd0fce3643dd57b6307ef43ae725975e539f633` / `5e75900ca572038105dc9e700ec5ee3759ac98bd` | `01a0c7cd-4fe7-7232-a1ee-dd892721fbdb`; `gpt-5.6-sol`, medium | Six authorized phase/test/current-doc files; `5e75900c` | Red/green regression, focused/full/static/docs and targeted canonical Docker passed; ignored logs `task-evidence/f1` | Every changed line inspected; focused phase/cache/manual/native integration passed; image source/lock hashes match | `docs(plan): record raw offset composition acceptance`; Windows still required |
 | F2 | Accepted locally and in Docker after F2-R; Windows remains W1 | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / `c5554ea784921d65fe9a748ba133854a3d67d956` | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Twelve planner/channel/policy/test/current-doc files; `c5554ea7` | Full/static/docs pass with documented skips; targeted Docker and opt-in channel proof reported | Focused planner/channel/cache/authority/native-contract tests passed, no skips; documentation overstates midpoint split above 60 seconds | F2-R accepted at `8aa733aa`; F3 next |
 | F3 | Accepted locally and in Docker; Windows remains W1 | `137267b1f3573c69d40c7d79b8d473b29b35cccb` / `b9919607c9395b168a79633c5a2234f83ea5b977` | `01a0c7fd-c427-7f42-9553-f2bb3690cb42`; Luna xhigh | Consensus lifetime and focused tests; `b9919607` | Full/static/docs, native and Docker resource/channel proof passed within recorded limits | Every changed line inspected; focused tests and five native resource tests passed; image hashes match | F4 next; no numerical or identity change |
-| F4 | Pending F3 | Pending | Pending | Current docs | Pending | Pending | Historical records unchanged |
+| F4 | Accepted | `1133b11fd2b4ec46fc9e6cb695d700cb883116de` / `c15d230c638a0c33299fbddf7321e148cd8c62f0` | `01a0c80b-bf75-72a0-88ae-72b374fe7074`; Luna xhigh | Current CLI contract and command reference; `c15d230c` | Contract-doc/API/isolated strict docs and hooks passed | Every changed line and source facts inspected; contract-doc/API checks passed; tracked strict docs passed | F5 next; unrelated untracked site-link warning preserved |
 | F5 | Pending F4 | Pending | Pending | Narrow workflow filters/tests | Pending | Pending | Hosted CI pending push |
 | U1 | Pending F5 | Pending | Pending | Terminal presentation/progress | Pending | Pending | Frozen matrix above |
 | U2 | Pending U1 | Pending | Pending | VSView presentation | Pending | Pending | Physical visible proof in W1 |
@@ -696,3 +696,17 @@ against test image `sha256:a011be25adb099b99d57ded3deb9f9c712db9c22267cf769a1bec
 Production image: `sha256:9ffc6ae4448ba59d87f5ab480be551021b59bd004cfc35ee384fe04366dbd9f2`.
 No package/schema/identity/authority change. Windows semantics remain W1 and hosted CI
 remains pending push. F4 current-documentation reconciliation is dependency-ready.
+
+
+### F4 acceptance — current authority and metadata documentation
+
+Commit `c15d230c` corrects four factual statements in two authorized current docs:
+qualified-mono fallback after declining confirmed reuse, active automatic authority,
+metadata v4, and explicit rejection of metadata v1/v2/v3. Controller inspected the
+complete diff and confirmed the inactive hold latch and current computed-reuse path.
+No runtime, cache policy, schema, historical plan or unrelated file changed.
+Controller independently passed five contract-doc tests and API-doc validation;
+strict tracked-doc validation passed. Worker complete logs are in
+`.codex/cache/task-evidence/f4`. Live strict docs still encounters the unrelated
+untracked UX-plan site link; copied tracked-doc proof isolates that known issue.
+F5 is next. Physical Windows and hosted CI remain pending as before.
