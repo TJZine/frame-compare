@@ -92,7 +92,7 @@ cleared if necessary; never remove persistent volumes or unrelated user data.
 | AA-02 | Medium. Default medium-duration planning rounds odd endpoint lengths into a one-sample overlap. `248003/8000` seconds currently produces `[0,124002)` and `[124001,248003)`. | Plan disjoint integer-domain endpoints for odd/even counts, retaining independence rules and direct/discovery/verification paths. |
 | AA-03 | Medium. Credible named-channel dissent in another temporal window can escape the aggregate veto: weak mono and internally corroborated channel frames `0,0,+1,0,0` can yield a misleading provisional zero. No automatic-authority breach was observed. | Veto the aggregate channel hint for any relevant base-credible named-channel observation supporting another frame, even if individual windows have no contradiction flag. Weak/non-credible noise must not veto. |
 | AA-04 | Low. The final `AudioWindow` loop local survives into the next channel loader. | Release each view's arrays before the next loader on normal and exceptional paths; prove lifetime with weak references or equivalent. No numeric/policy identity change. |
-| AA-05 | Low. Current docs describe declined confirmed reuse as non-applied computed fallback, retain a global-hold assertion, and label generated VSView metadata v2. | Document active mono authority/reuse, metadata v4, and F2 cache consequences. Preserve historical evidence. |
+| AA-05 | Low. Current docs describe declined confirmed reuse as non-applied computed fallback, retain a global-hold assertion, and label generated VSView metadata v2. The old-version rejection list also omits rejected v3. | Document active mono authority/reuse, metadata v4 with prior versions rejected, and F2 cache consequences. Preserve historical evidence. |
 | AA-06 | Medium-low, accepted with modification. Docker resource proof is opt-in but workflow filters omit narrow alignment service/orchestration owners. | Add concrete alignment/resource-affecting owner and test paths with workflow-contract tests, not broad `services/**` or `orchestration/**` globs. Ordinary pytest and opt-in resource proof stay distinct. Hosted execution remains pending until pushed. |
 
 ### Estimator/cache identity
@@ -470,9 +470,9 @@ at the next checkpoint. Pending rows are not proof.
 
 | Unit | State | Start / end SHA | Task / actual model / effort | Write scope and commit | Worker proof / evidence | Controller proof | Plan record / risks |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Activation | Prepared | `51ef0132fa89d8ed36c6114c63157e2c13630085` / activation commit | Current orchestrator; GPT-6, effort not exposed | This plan only; `docs(plan): activate audio alignment remediation and UX plan` | Not applicable | Baseline/ancestry/authority and structural checks; API drift check passed. First strict build caught a root-file site link; repaired to a literal repository path and rerun before commit. Final output recorded at C0 checkpoint. | User approved extra workflow commit; C0 next |
-| C0 | Pending dispatch after activation | Pending | Pending | Read-only; no implementation commit | Pending | Pending | `docs(plan): record post-activation review closure` |
-| F1 | Pending C0 | Pending | Pending | Raw application composition | Pending | Pending | AA-01 release blocker |
+| Activation | Complete | `51ef0132fa89d8ed36c6114c63157e2c13630085` / `edb10ef6f3e0b7c413a414374e26c8e4959080f4` | Current orchestrator; GPT-6, effort not exposed | This plan only; `edb10ef6` | Not applicable | Baseline/ancestry/authority, preamble/package/link checks, API drift, strict Zensical (no issues), staged diff and hooks passed. Initial site-link failure repaired before commit. | User approved extra workflow commit; no product edits |
+| C0 | Accepted | `edb10ef6f3e0b7c413a414374e26c8e4959080f4` / same | `01a0c7bd-430a-7590-86da-f91ffb5699fc`; `gpt-5.6-sol`, medium | Read-only; no implementation commit | Complete structured callback received; 69/53 commits, 86/66 historical touched paths; four reproductions; 11 focused tests passed | Independent source/workflow/range audit; AA-01/02 reproduced; same 11 tests passed, no skips; clean status | `docs(plan): record post-activation review closure`; details below |
+| F1 | Dependency-ready | Next plan-record HEAD | Selected at dispatch | Raw application composition | Pending | Pending | AA-01 release blocker |
 | F2 | Pending F1 | Pending | Pending | Planner/channel/v13 | Pending | Pending | v12 confirmed-cache misses accepted |
 | F3 | Pending F2 | Pending | Pending | Channel lifetime | Pending | Pending | Resource proof required |
 | F4 | Pending F3 | Pending | Pending | Current docs | Pending | Pending | Historical records unchanged |
@@ -482,6 +482,56 @@ at the next checkpoint. Pending rows are not proof.
 | A1 | Pending U2 | Pending | Controller | Integration proof and plan record | Not applicable | Pending | No monitor delegation |
 | W1 | Pending A1 and physical host | Pending | Pending | Canonical sanitized evidence only | Pending | Pending | Mandatory before closeout |
 | Closeout | Pending all acceptance | Pending | Controller | Plan only | Not applicable | Complete range audit pending | Hosted status and limitations required |
+
+### C0 acceptance — September 22, 2026
+
+The task delivered one complete callback to this orchestrator. No polling or secondary
+review was used. Start/end remained `edb10ef6`; the worker changed no files and made
+no commit. All AA-01–AA-06 findings are confirmed; no materially new consequential
+finding or architectural replan gate was found. The adjacent v3 omission is folded
+into AA-05/F4. External review text was not supplied, so closure checks the handoff's
+claims against the complete local history rather than inventing external attribution.
+
+Coverage inventories in the callback contain every historical touched path and all
+69 commits in `326da610..13330e31`, grouped into foundations, rejected experiments,
+R0–R5, release/CI evidence, channel support, and activation/closeout. The narrower
+`0df9c369..13330e31` contains 53 commits. Controller independently confirmed 86/66
+historical touched paths (not net-diff file counts) and that the only post-activation
+changes through `13330e31` are the old plan and canonical Windows evidence JSON.
+The approved `51ef0132` workflow-only commit and this new plan do not alter production.
+
+Worker evidence: inline AA-01 calculator/final-source reproduction, AA-02 planner
+reproduction, AA-03 production-service cross-window dissent reproduction, and AA-04
+weak-reference reproduction. AA-03 retained a provisional zero with all per-window
+contradiction flags false, while applied remained false and public authority absent.
+AA-04 retained the preceding final window array at each next loader, then released
+all on function return; this is not proof of concurrent processes or permanent leaks.
+These last two executions are worker-observed; controller directly reviewed the
+responsible nested-loop and aggregate-veto source but did not rerun those reproductions.
+
+Controller independently reproduced AA-01 with bases `3/[7,11,13]`: raw calculator
+inputs give final differences `[6,-13,-10]`, whereas `Q=[14,3,10]` gives `[10,-5,0]`.
+AA-02 directly produced `[0,124002)` and `[124001,248003)` at 8000 Hz. Source review
+confirmed AA-05's active latch/embedded reuse versus stale documentation and AA-06's
+missing narrow filters, ordinary-pytest opt-in skips, canonical default exclusion,
+and separate resource invocation in the same preceding-built test service.
+
+Both worker and controller ran:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest -p no:cacheprovider -o addopts='' \
+  tests/orchestration/test_phase_tasks_alignment.py::test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_with_base_trims \
+  tests/workflows/test_docker_integration_contract.py \
+  tests/services/test_alignment_authority_hold.py \
+  -k 'legacy_normalizes or docker or r7' -rsx
+```
+
+Complete controller output: 24 collected, 13 deselected, 11 selected; all 11 passed
+in 2.23 seconds with no skips. Worker reported 11 passed in 1.99 seconds. The passing
+legacy trim test currently asserts the wrong relationship; it does not negate AA-01.
+No new full product, Docker, resource, package, Windows, or visible-UI proof was
+claimed for this read-only unit. Hosted CI remains unobserved. C0 needs no further
+review; F1 is next and must replace the wrong test expectation with source-frame proof.
 
 Activation commit: `docs(plan): activate audio alignment remediation and UX plan`.
 After all implementation, controller, and Windows gates pass, inspect every commit
