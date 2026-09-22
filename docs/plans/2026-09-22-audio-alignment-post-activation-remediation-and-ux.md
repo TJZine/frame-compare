@@ -487,8 +487,8 @@ at the next checkpoint. Pending rows are not proof.
 | F5 | Accepted trigger coverage; hosted gate pending | `dff31ed101bc8f5b78dc72f62b7ff0495f49e870` / `d4b571db466156db6fa42929fe28378b7b1509bf` | `01a0c816-6b9e-7751-9a45-734b5be9a236`; Luna xhigh | Workflow path filter and contract tests; `d4b571db` | Full/static/docs, Docker resources passed; broad guard remains non-pass | Every changed line checked; 21 independent workflow tests passed | U1 next; no hosted pass claim |
 | U1 | Accepted after U1-R; Windows remains W1 | `e9e70d8891c7c65264d650b2fbd759ca808d86fe` / `e07699581cc3a171230d19f6c99e16539dbaeab3` | `01a0c828-7d7d-7270-9d9e-4fda3f1be796`; Luna xhigh | Alignment presentation/callback, tests and current docs; `e0769958` | Focused/full/static checks reported; normal/narrow render captured | Complete diff inspected; focused tests passed; two concrete contract gaps reproduced | U1-R `6ea7e67a` accepted; U2 next |
 | U2 | Accepted after U2-R; physical Windows remains W1 | `5afe857c788481073053f67f74a97e35b86d070b` / `ecfdc90d1f83e021d087e5941f06791d35137639` | `01a0c854-688e-74d1-ae5b-83257c98e199`; Luna xhigh | Panel/tests/current docs; `ecfdc90d` | Full/static/docs/package and offscreen screenshots reported | Code and screenshots inspected; three UI regressions reproduced in Qt | U2-R `c0fb947d` accepted; A1-R Docker gate repair next |
-| A1 | Pending U2 | Pending | Controller | Integration proof and plan record | Not applicable | Pending | No monitor delegation |
-| W1 | Pending A1 and physical host | Pending | Pending | Canonical sanitized evidence only | Pending | Pending | Mandatory before closeout |
+| A1 | Passed local/Docker/package; live docs external warning isolated | `3a25a3949091a6179b3117aa30ee330455b9e790` / same production tree | Controller | Full integrated candidate; no implementation edits | N/A | Full pytest/static/API/tracked-doc/distribution; canonical Docker340/0 and resource5/0 | W1 physical Windows handoff ready |
+| W1 | Ready; physical Windows evidence required | Final controller plan candidate / pending | New Windows task, Sol medium prescribed | Sanitized acceptance evidence only | Pending | Pending | Implementation stopped at this gate; no final closeout |
 | Closeout | Pending all acceptance | Pending | Controller | Plan only | Not applicable | Complete range audit pending | Hosted status and limitations required |
 
 ### C0 acceptance — September 22, 2026
@@ -885,3 +885,48 @@ Test image `sha256:d1cd6c761d2089033e51ffa7dc96187dd28b8f8cb3227e2c954bb6c030ab4
 production image `sha256:e69b4d2213f4a661468943d95ec0e28132974f26665e624759f6d9436f8b8e37`.
 Controller verified all209 tracked production/integration/dependency/verifier hashes
 against both images. Implementation is accepted. Final A1 record follows separately.
+
+
+### A1 controller verification and W1 handoff
+
+Controller independently verified production/script commit
+`3a25a3949091a6179b3117aa30ee330455b9e790`. Later commits in this controller
+checkpoint are plan-only. Complete local output lives under
+`.codex/cache/task-evidence/a1-controller`:
+
+- Full `uv run --no-sync pytest -q` passed; every reported platform/live/opt-in skip
+  inspected. Unsupported native plugins are covered in Docker; physical Windows
+  and live-network tests are not claimed.
+- Pyright0 errors/warnings, Ruff, Bandit0 medium/high, two import contracts, API-doc
+  drift check and strict tracked-doc build passed.
+- Live strict docs exits1 solely on the preserved unrelated untracked UX-plan link
+  to root AGENTS.md. A temporary copy of all tracked docs/current config passes.
+  This is bounded candidate documentation proof, not a claim the mixed live tree
+  builds cleanly.
+- Fresh wheel/sdist, distribution verifier, fresh Python3.13 install, version/help
+  passed. Artifact byte sizes/hashes are recorded in local artifact-hashes.json.
+  U2-R also independently proved installed VSView extra and shipped-panel import.
+- Fresh A1-R Docker images verified against all209 production/integration/dependency/
+  verifier files. Controller canonical `--no-build` verification reran all runtime
+  and application probes plus340 tests with zero skips. Separate exact workflow
+  resource command passed5 tests with zero skips, max one child, bounded combined
+  RSS and empty active-process sets after cancellation. The old skip blocker is fixed.
+- `git diff --check`, status and complete commit inventory inspected. All owned
+  changes were reviewed package by package, including focused repairs. The separate
+  user-owned workflow/dependency/R80-plan commits remain preserved; this program
+  does not claim the entire shared branch delta is solely its work. Screenshot-plan
+  blob remains `c2ea06026cc65d5fc7b089ac01e4cc5a83432ad6`.
+
+Tracked candidate is clean. Two unrelated untracked CLI/report UX plan files are
+preserved and excluded from candidate packaging/transfer. No push, release, signing,
+branch change, worktree, rebase, amend or reset was performed. Hosted CI is pending
+user push; offscreen/macOS/Docker proof does not substitute for W1.
+
+Implementation stops here for physical Windows acceptance. A complete copy-paste
+Sol-medium W1 handoff and Git bundle are prepared in ignored controller evidence
+storage; the handoff pins the final controller plan SHA and the production SHA above,
+all required ancestors, package/runtime identities, raw/temporal/retained-real/cache/
+resource matrix, visible terminal/VSView cases, evidence privacy and one-attempt
+callback. User transfers the exact candidate to Windows; no push is performed by this
+controller. Plan remains Active until returned Windows evidence is audited and final
+closeout checks pass.
