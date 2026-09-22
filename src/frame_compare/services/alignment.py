@@ -913,9 +913,15 @@ def _normal_evidence_lines(
                 "Historical window and selected-stream details are unavailable; "
                 "no audio analysis ran this time."
             )
+        elif provenance.provenance == "shared_previous_offsets":
+            heading = "Manually confirmed alignment reused"
+            detail = (
+                "Historical audio details are unavailable."
+                if result.audio_attempt is None
+                else None
+            )
         elif result.source == "manual" or provenance.provenance in {
             "interactive_confirmed_this_run",
-            "shared_previous_offsets",
             "preexisting_manual_override",
         }:
             heading = "Manually confirmed alignment"
@@ -1180,10 +1186,13 @@ def _present_alignment_evidence(
         result = results_map[key]
         provenance = provenances[key]
         decision = result.audio_attempt.decision if result.audio_attempt is not None else None
-        actionable = not result.applied
-        has_actionable_result = has_actionable_result or actionable
+        human_actionable = not result.applied
+        json_actionable = human_actionable or (
+            decision is not None and decision.state != "trusted_automatic"
+        )
+        has_actionable_result = has_actionable_result or human_actionable
         if json_output:
-            if actionable:
+            if json_actionable:
                 log.warning(
                     "audio_alignment_requires_review",
                     comparison_ordinal=ordinal,
@@ -1196,7 +1205,7 @@ def _present_alignment_evidence(
                     reason=(decision.primary_reason if decision is not None else result.diagnostic),
                 )
             continue
-        if quiet and not actionable:
+        if quiet and not human_actionable:
             continue
         comparison_lines = _normal_evidence_lines(
             ordinal=ordinal,
@@ -1205,7 +1214,7 @@ def _present_alignment_evidence(
         )
         if verbose and not quiet and result.audio_attempt is not None:
             comparison_lines.extend(_verbose_evidence_lines(result.audio_attempt))
-        if actionable and (config.use_vsview or config.force_interactive):
+        if human_actionable and (config.use_vsview or config.force_interactive):
             if decision is not None and decision.candidate is not None:
                 comparison_lines.append(
                     "Opening VSView for manual review. The candidate is a hint, not a "

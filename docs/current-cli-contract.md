@@ -519,7 +519,9 @@ unchanged.
   `No usable audio candidate - NOT APPLIED`. Applied states are decision-first:
   `Audio alignment accepted: +Nf - APPLIED`, `Accepted audio alignment reused: +Nf -
   APPLIED`, or `Manually confirmed alignment: +Nf - APPLIED`, followed by
-  `No additional confirmation needed.` Provisional candidates add
+  `No additional confirmation needed.` A previously shared manual result is labeled
+  `Manually confirmed alignment reused: +Nf - APPLIED`; current-run and preexisting
+  manual results keep the unqualified manual label. Provisional candidates add
   `Visual confirmation required to use this hint. Align manually or keep the current
   alignment.`; unavailable results add `Align manually or keep the current alignment.`
   The current applied result and provenance lead even when an original attempt is

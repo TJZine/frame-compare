@@ -1131,3 +1131,148 @@ def test_json_mode_emits_no_human_alignment_block(
     captured = capsys.readouterr()
     assert "Provisional candidate" not in captured.out + captured.err
     assert "audio_alignment_requires_review" in captured.out + captured.err
+
+
+@pytest.mark.parametrize("original_state", ["provisional", "unavailable"])
+def test_json_mode_preserves_review_warning_for_applied_manual_history(
+    original_state: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    attempt = audio_attempt()
+    decision = attempt.decision
+    expected_candidate: int | None = 0
+    if original_state == "unavailable":
+        expected_candidate = None
+        decision = replace(
+            decision,
+            state="unavailable",
+            candidate=None,
+            primary_reason="no_usable_windows",
+            raw_correlated_windows=0,
+            consensus_windows=0,
+            consensus_ratio=None,
+            aggregate_score=None,
+            minimum_peak_ratio=None,
+        )
+        attempt = replace(
+            attempt,
+            windows=tuple(
+                replace(window, terminal_category="insufficient_signal")
+                for window in attempt.windows
+            ),
+            decision=decision,
+        )
+    else:
+        decision = replace(decision, state="provisional")
+        attempt = replace(attempt, decision=decision)
+    result = AlignmentResult(
+        reference_clip="ref.mkv",
+        comparison_clip="comp.mkv",
+        frame_offset=-3,
+        time_offset_seconds=-3 / 24,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+        audio_attempt=attempt,
+    )
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comp.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    provenance = AlignmentProvenance(
+        result=result,
+        comparison_cache_key="ref:comp",
+        provenance="interactive_confirmed_this_run",
+        evidence_availability="current_attempt",
+    )
+
+    with capture_logs() as logs:
+        alignment_service._present_alignment_evidence(
+            request=request,
+            results_map={"ref:comp": result},
+            provenances={"ref:comp": provenance},
+            config=config,
+            progress=None,
+            verbose=False,
+            quiet=False,
+            json_output=True,
+            diagnostics_written=False,
+        )
+
+    events = [entry for entry in logs if entry["event"] == "audio_alignment_requires_review"]
+    assert events == [
+        {
+            "comparison_ordinal": 1,
+            "decision_state": original_state,
+            "candidate_frame": expected_candidate,
+            "reason": (
+                "insufficient_consensus" if original_state == "provisional" else "no_usable_windows"
+            ),
+            "event": "audio_alignment_requires_review",
+            "log_level": "warning",
+        }
+    ]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_json_mode_keeps_trusted_applied_result_silent(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    attempt = audio_attempt()
+    decision = replace(attempt.decision, state="trusted_automatic", primary_reason="accepted")
+    result = AlignmentResult(
+        reference_clip="ref.mkv",
+        comparison_clip="comp.mkv",
+        frame_offset=0,
+        time_offset_seconds=0.0,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+        audio_attempt=replace(attempt, decision=decision),
+    )
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comp.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    provenance = AlignmentProvenance(
+        result=result,
+        comparison_cache_key="ref:comp",
+        provenance="interactive_confirmed_this_run",
+        evidence_availability="current_attempt",
+    )
+
+    with capture_logs() as logs:
+        alignment_service._present_alignment_evidence(
+            request=request,
+            results_map={"ref:comp": result},
+            provenances={"ref:comp": provenance},
+            config=config,
+            progress=None,
+            verbose=False,
+            quiet=False,
+            json_output=True,
+            diagnostics_written=False,
+        )
+
+    assert not any(entry["event"] == "audio_alignment_requires_review" for entry in logs)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""

@@ -185,7 +185,9 @@ Frame Compare overlays, and BT.709 preview defaults.
 Before review, normal terminal output leads with the current decision and signed frame
 offset. Applied states are `Audio alignment accepted: +Nf - APPLIED`, `Accepted audio
 alignment reused: +Nf - APPLIED`, or `Manually confirmed alignment: +Nf - APPLIED`,
-followed by `No additional confirmation needed.` A provisional state is
+followed by `No additional confirmation needed.` A previously shared manual result is
+labeled `Manually confirmed alignment reused: +Nf - APPLIED`; current-run and
+preexisting manual results keep the unqualified manual label. A provisional state is
 `Provisional audio candidate: +Nf - NOT APPLIED` with `Visual confirmation required to
 use this hint. Align manually or keep the current alignment.` An unavailable state is
 `No usable audio candidate - NOT APPLIED` with `Align manually or keep the current

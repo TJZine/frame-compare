@@ -483,6 +483,7 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     policy: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -537,6 +538,9 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     mock_estimate.assert_not_called()
     mock_vs.assert_not_called()
     assert prompt.call_count == (1 if policy == "prompt" else 0)
+    terminal = capsys.readouterr().err
+    assert "Manually confirmed alignment reused: +9f - APPLIED" in terminal
+    assert "Manually confirmed alignment: +9f - APPLIED" not in terminal
 
 
 def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed_entry(
