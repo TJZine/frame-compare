@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import tomllib
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -42,6 +43,13 @@ def _invoke(root: Path, input_text: str, *extra: str, env: dict[str, str] | None
     )
 
 
+def _expected_powershell_quote(value: str) -> str:
+    """Independent oracle for PowerShell's literal single-quote escaping rule."""
+    for quote in ("'", "\u2018", "\u2019", "\u201a", "\u201b"):
+        value = value.replace(quote, quote * 2)
+    return f"'{value}'"
+
+
 def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
@@ -78,6 +86,87 @@ def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
             "slowpics": {"auto_upload": False},
         }
         assert load_config(config_path=config_path).slowpics.auto_upload is True
+
+
+def test_successful_write_prints_verified_next_steps_with_posix_quoting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("weird workspace $; \"quoted\" ; `echo hi` 'quote' name")
+        (root / "comparison_videos").mkdir(parents=True)
+        config_path = root / "config" / "config.toml"
+
+        result = _invoke(root, "\n\n\ny\n")
+
+        assert result.exit_code == 0
+        written_at = result.stderr.index("Configuration written:")
+        next_steps_at = result.stderr.index("Next steps:")
+        assert written_at < next_steps_at
+
+        lines = result.stderr.splitlines()
+        doctor_line = next(line for line in lines if "frame-compare doctor" in line)
+        assert doctor_line.strip() == "1. Diagnose the runtime: frame-compare doctor"
+        preview_line = next(line for line in lines if "Preview this configuration" in line)
+        run_line = next(line for line in lines if line.strip().startswith("3. Run it:"))
+
+        expected_root = root.resolve()
+        expected_config = config_path.resolve()
+        expected_run_argv = [
+            "frame-compare",
+            "run",
+            "--root",
+            str(expected_root),
+            "--config",
+            str(expected_config),
+        ]
+
+        preview_command = preview_line.split(": ", 1)[1]
+        run_command = run_line.split(": ", 1)[1]
+        assert shlex.split(preview_command) == [*expected_run_argv, "--dry-run"]
+        assert shlex.split(run_command) == expected_run_argv
+
+        assert "Suggestions only, never executed here" in result.stderr
+        assert "Quoted for POSIX shells (sh/bash/zsh)." in result.stderr
+        assert "PowerShell" not in result.stderr
+
+
+def test_next_steps_reflect_alternate_root_and_nested_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("alternate-root")
+        (root / "comparison_videos").mkdir(parents=True)
+        alternate_config = root / "custom" / "alt-config.toml"
+
+        result = _invoke(root, "\n\n\ny\n", "--config", str(alternate_config.relative_to(root)))
+
+        assert result.exit_code == 0
+        expected_root = root.resolve()
+        expected_config = alternate_config.resolve()
+        assert f"--root {shlex.quote(str(expected_root))}" in result.stderr
+        assert f"--config {shlex.quote(str(expected_config))}" in result.stderr
+        default_config = expected_root / "config" / "config.toml"
+        assert str(default_config) not in result.stderr
+        assert alternate_config.exists()
+
+
+def test_windows_shell_next_steps_use_powershell_quoting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("frame_compare.cli.entry._is_windows_shell", lambda: True)
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("it's a \u2019curly\u2019 workspace")
+        (root / "comparison_videos").mkdir(parents=True)
+
+        result = _invoke(root, "\n\n\ny\n")
+
+        assert result.exit_code == 0
+        expected_root = root.resolve()
+        expected_config = (root / "config" / "config.toml").resolve()
+        assert f"--root {_expected_powershell_quote(str(expected_root))}" in result.stderr
+        assert f"--config {_expected_powershell_quote(str(expected_config))}" in result.stderr
+        assert "Quoted for Windows PowerShell." in result.stderr
+        assert "POSIX" not in result.stderr
 
 
 def test_first_use_one_file_retries_menus_without_reporting_automatic_as_a_change(
@@ -423,6 +512,9 @@ def test_existing_keep_is_true_noop_without_confirmation_or_write(
         assert "Write these changes?" not in result.stdout
         assert "No configuration changes. Configuration was not written." in result.stderr
         assert config_path.read_bytes() == original
+        assert "Next steps:" in result.stderr
+        assert f"--root {shlex.quote(str(root.resolve()))}" in result.stderr
+        assert f"--config {shlex.quote(str(config_path.resolve()))}" in result.stderr
 
 
 def test_final_no_preserves_existing_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -459,6 +551,7 @@ def test_atomic_config_write_failure_preserves_existing_bytes(
         assert result.exit_code == int(ExitCode.CONFIG_ERROR)
         assert "FC-1007" in result.stderr
         assert config_path.read_bytes() == original
+        assert "Next steps" not in result.stderr
 
 
 @pytest.mark.parametrize("input_text", ["", "\n", "\n\n", "\n\n3\n", "\n\n3\n0,1\n"])
@@ -683,6 +776,7 @@ def test_generated_filesystem_roots_are_rejected_without_replacing_existing_conf
         assert "FC-1003" in result.stderr
         assert "dedicated directory" in result.stderr
         assert config_path.read_bytes() == original
+        assert "Next steps" not in result.stderr
 
 
 def test_automatic_reference_removes_existing_explicit_key(
@@ -722,6 +816,9 @@ def test_exact_windows_portable_config_exception_is_preserved(
         assert result.exit_code == 0
         assert portable_config.exists()
         assert "Configuration written" in result.stderr
+        assert f"--config {shlex.quote(str(portable_config))}" in result.stderr
+        assert f"--root {shlex.quote(str(root.resolve()))}" in result.stderr
+        assert str(root.resolve() / "config" / "config.toml") not in result.stderr
 
 
 def test_duplicate_stems_fail_before_reference_prompt(

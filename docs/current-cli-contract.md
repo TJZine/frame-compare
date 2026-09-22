@@ -1831,6 +1831,19 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   Serialization and atomic-write failures
   use `ConfigWriteError` / exit 2; pre-replacement failures preserve old bytes and
   temporary cleanup remains best effort.
+- After a successful write, or a true no-op, `wizard` prints a compact `Next steps`
+  block to stderr: diagnose with `frame-compare doctor`, preview with `run --dry-run`,
+  then `run`. Both suggested `run` commands always carry the exact resolved `--root`
+  and the exact selected `--config` path, which is the same file already named in the
+  no-op/write confirmation, including the Windows portable fallback file when that
+  exception applies, so a suggestion cannot silently target a different workspace or
+  config. `doctor` is suggested with no options, matching its actual supported
+  surface. These are suggestions only; the wizard never executes them. POSIX values
+  are quoted with `shlex.quote`; Windows values use PowerShell literal single-quoted
+  strings with every single-quote delimiter, including typographic ones, doubled; the
+  block names which shell its quoting targets. No
+  `Next steps` block is printed after cancellation, a write failure, or an invalid
+  configuration.
 - It rejects a selected config destination outside the workspace before prompting,
   except for the exact installed Windows portable state-config fallback described
   under Shared Path Resolution Rules. The prompted media input may be external.

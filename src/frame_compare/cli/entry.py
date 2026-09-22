@@ -3,6 +3,7 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -107,6 +108,11 @@ _prompt_generated_dir = prompt_generated_dir
 
 def _sys_stream_isatty(name: str) -> bool:
     return stream_is_tty(getattr(sys, name, None))
+
+
+def _is_windows_shell() -> bool:
+    """Return whether suggested commands should use Windows PowerShell quoting."""
+    return os.name == "nt"
 
 
 if TYPE_CHECKING:
@@ -414,6 +420,7 @@ def wizard(
         stdin_is_tty=_sys_stream_isatty("stdin"),
         stdout_is_tty=_sys_stream_isatty("stdout"),
         no_color=effective_no_color,
+        is_windows=_is_windows_shell(),
     )
 
 

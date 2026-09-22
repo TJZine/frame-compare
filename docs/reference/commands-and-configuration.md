@@ -42,6 +42,16 @@ When `--config` is omitted, the normal default is `config/config.toml` beneath t
 selected root. The installed Windows shim can inject its documented bundle-local or
 AppData fallback configuration.
 
+After a successful save, or a no-op with nothing to change, `wizard` prints suggested
+next commands to stderr: `frame-compare doctor` (its actual supported surface has
+no `--root`/`--config`), a `run --dry-run` preview, and a plain `run`. Both `run`
+suggestions always carry the exact resolved `--root` and the exact selected
+`--config`, including the Windows fallback file when that exception applies, so a
+suggestion cannot silently target a different workspace. They are suggestions only,
+never executed by the wizard, and are quoted for the current shell platform (POSIX
+or PowerShell). See [Your First Comparison](../guides/first-comparison.md#repeat-comparisons)
+for the same commands organized by installation route.
+
 ## Important run modes
 
 | Option or mode | Use |

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 from typing import Protocol
 
@@ -108,6 +109,7 @@ def handle_wizard(
     stdin_is_tty: bool,
     stdout_is_tty: bool,
     no_color: bool,
+    is_windows: bool,
 ) -> None:
     """Run the approved guided editor and persist only one confirmed candidate."""
     try:
@@ -161,6 +163,7 @@ def handle_wizard(
                 "No configuration changes. Configuration was not written.",
                 err=True,
             )
+            _print_next_steps(root=root, config_path=selected_path, is_windows=is_windows)
             return
 
         strip_nonpersistable_config_values(candidate)
@@ -185,6 +188,7 @@ def handle_wizard(
 
         write_payload(selected_path, candidate)
         typer.echo(f"Configuration written: {selected_path}", err=True)
+        _print_next_steps(root=root, config_path=selected_path, is_windows=is_windows)
     except (KeyboardInterrupt, EOFError, typer.Abort):
         typer.echo(_CANCELED, err=True)
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
@@ -433,6 +437,50 @@ def _print_review(
     )
     typer.echo(f"  Publishing settings: {publishing}; environment may override at run time")
     typer.echo("  Other settings: preserved")
+
+
+_POWERSHELL_SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+
+def _quote_powershell(value: str) -> str:
+    """Quote one literal value for PowerShell by doubling every single-quote delimiter.
+
+    PowerShell also treats typographic single quotes as string delimiters.
+    """
+    escaped = "".join(char * 2 if char in _POWERSHELL_SINGLE_QUOTES else char for char in value)
+    return f"'{escaped}'"
+
+
+def _format_suggested_run_command(
+    root: Path, config_path: Path, *, is_windows: bool, dry_run: bool
+) -> str:
+    """Build one never-executed ``run`` suggestion pinned to this exact workspace/config."""
+    quote = _quote_powershell if is_windows else shlex.quote
+    command = f"frame-compare run --root {quote(str(root))} --config {quote(str(config_path))}"
+    if dry_run:
+        command += " --dry-run"
+    return command
+
+
+def _print_next_steps(*, root: Path, config_path: Path, is_windows: bool) -> None:
+    """Suggest the verified diagnose/preview/execute commands for this exact selection."""
+    typer.echo("Next steps:", err=True)
+    typer.echo("  1. Diagnose the runtime: frame-compare doctor", err=True)
+    preview_command = _format_suggested_run_command(
+        root, config_path, is_windows=is_windows, dry_run=True
+    )
+    run_command = _format_suggested_run_command(
+        root, config_path, is_windows=is_windows, dry_run=False
+    )
+    typer.echo(f"  2. Preview this configuration (dry run): {preview_command}", err=True)
+    typer.echo(f"  3. Run it: {run_command}", err=True)
+    typer.echo(
+        "Suggestions only, never executed here; run them with the same installation, "
+        "launcher, and environment as this wizard.",
+        err=True,
+    )
+    shell_label = "Windows PowerShell" if is_windows else "POSIX shells (sh/bash/zsh)"
+    typer.echo(f"Quoted for {shell_label}.", err=True)
 
 
 def _relative_name(path: Path, input_dir: Path) -> str:
