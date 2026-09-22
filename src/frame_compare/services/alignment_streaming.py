@@ -326,14 +326,16 @@ def _cleanup(
             if process.poll() is None and not _wait_for_exit(process, _KILL_WAIT_SECONDS):
                 cleanup_failures.append("process remained live after kill")
 
-    stdout_closed = _close_pipe(stdout, cleanup_failures)
-    stderr_closed = _close_pipe(stderr, cleanup_failures)
-
+    # Let readers finish draining an exited child before closing their pipes.
+    # Closing first can manufacture a reader failure on otherwise valid output.
     join_deadline = time.monotonic() + _READER_JOIN_SECONDS
     if stdout_started and stdout_thread is not None:
         stdout_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
     if stderr_started and stderr_thread is not None:
         stderr_thread.join(timeout=max(0.0, join_deadline - time.monotonic()))
+
+    stdout_closed = _close_pipe(stdout, cleanup_failures)
+    stderr_closed = _close_pipe(stderr, cleanup_failures)
 
     stdout_joined = not stdout_started or (
         stdout_thread is not None and not stdout_thread.is_alive()
