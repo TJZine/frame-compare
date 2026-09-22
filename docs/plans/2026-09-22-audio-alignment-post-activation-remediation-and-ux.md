@@ -472,8 +472,8 @@ at the next checkpoint. Pending rows are not proof.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Activation | Complete | `51ef0132fa89d8ed36c6114c63157e2c13630085` / `edb10ef6f3e0b7c413a414374e26c8e4959080f4` | Current orchestrator; GPT-6, effort not exposed | This plan only; `edb10ef6` | Not applicable | Baseline/ancestry/authority, preamble/package/link checks, API drift, strict Zensical (no issues), staged diff and hooks passed. Initial site-link failure repaired before commit. | User approved extra workflow commit; no product edits |
 | C0 | Accepted | `edb10ef6f3e0b7c413a414374e26c8e4959080f4` / same | `01a0c7bd-430a-7590-86da-f91ffb5699fc`; `gpt-5.6-sol`, medium | Read-only; no implementation commit | Complete structured callback received; 69/53 commits, 86/66 historical touched paths; four reproductions; 11 focused tests passed | Independent source/workflow/range audit; AA-01/02 reproduced; same 11 tests passed, no skips; clean status | `docs(plan): record post-activation review closure`; details below |
-| F1 | Dependency-ready | Next plan-record HEAD | Selected at dispatch | Raw application composition | Pending | Pending | AA-01 release blocker |
-| F2 | Pending F1 | Pending | Pending | Planner/channel/v13 | Pending | Pending | v12 confirmed-cache misses accepted |
+| F1 | Accepted locally and in Docker; Windows remains W1 | `cdd0fce3643dd57b6307ef43ae725975e539f633` / `5e75900ca572038105dc9e700ec5ee3759ac98bd` | `01a0c7cd-4fe7-7232-a1ee-dd892721fbdb`; `gpt-5.6-sol`, medium | Six authorized phase/test/current-doc files; `5e75900c` | Red/green regression, focused/full/static/docs and targeted canonical Docker passed; ignored logs `task-evidence/f1` | Every changed line inspected; focused phase/cache/manual/native integration passed; image source/lock hashes match | `docs(plan): record raw offset composition acceptance`; Windows still required |
+| F2 | Dependency-ready | Next plan-record HEAD | Selected at dispatch | Planner/channel/v13 | Pending | Pending | v12 confirmed-cache misses accepted |
 | F3 | Pending F2 | Pending | Pending | Channel lifetime | Pending | Pending | Resource proof required |
 | F4 | Pending F3 | Pending | Pending | Current docs | Pending | Pending | Historical records unchanged |
 | F5 | Pending F4 | Pending | Pending | Narrow workflow filters/tests | Pending | Pending | Hosted CI pending push |
@@ -532,6 +532,65 @@ legacy trim test currently asserts the wrong relationship; it does not negate AA
 No new full product, Docker, resource, package, Windows, or visible-UI proof was
 claimed for this read-only unit. Hosted CI remains unobserved. C0 needs no further
 review; F1 is next and must replace the wrong test expectation with source-frame proof.
+
+### F1 acceptance — September 22, 2026
+
+Implementation commit `5e75900ca572038105dc9e700ec5ee3759ac98bd` converts only
+authorized raw offsets to calculator coordinates in `orchestration/phase_alignment.py`.
+Stored raw values and `None` authority remain unchanged. Existing trim composition
+retains bounds and common-domain handling. The corrected signed multi-comparison
+regression proves raw differences `[10,-5,0]` with bases `3/[7,11,13]`; mixed siblings
+retain provisional non-authority. Real FFmpeg plus production service/orchestration
+proves raw zero with bases 3/7 becomes final starts 7/7 and correct selected frames.
+No estimator/schema/authority change; v12 remains current until F2.
+
+The task initially stopped without committing because user-owned tooling edits changed
+workflow expectations during full pytest. The user explicitly identified those edits
+as theirs and instructed F1 to ignore that issue and continue. They landed separately
+as `6e5e47cd6f1ef701a3b80c7d2270df56147dc022`; verification was rerun afterward.
+The separately staged R80 handoff became `7a661bed05aed2d10746780820626c97f04def32`
+after F1. Both commits are unrelated user-owned work, preserved and excluded from
+this workstream's implementation diff. No rebase/reset was needed or performed.
+The original interrupted/mixed-state full-suite failure is not acceptance evidence.
+
+Worker logs are ignored local files under `.codex/cache/task-evidence/f1/`.
+Logs 01–19 retain red/green tests, fixture corrections and the interrupted run;
+20–31 record final verification. The controller read final full pytest and all gate
+outputs, reviewed all six committed files, and confirmed commit scope/ancestry.
+Final worker proof: focused 38-test acceptance, full pytest, changed-file formatting,
+Pyright (zero errors/warnings), Ruff, Bandit (zero medium/high), both import contracts,
+API drift, five CLI-doc tests and strict Zensical passed. Ordinary-suite opt-in,
+unavailable native plugin, live-service and Windows/PowerShell skips remain explicit.
+
+Broad canonical Docker built fresh source images and ran 339 passing tests with one
+intentional channel-calibration opt-in skip; its zero-skip guard correctly failed.
+The subsequent supported targeted verifier ran the new production integration with
+zero skips and the complete runtime/application probes, including non-root execution,
+VapourSynth R79/API 4.2, L-SMASH/FFMS2, RGB48 placebo, Debian FFmpeg/ffprobe
+`7:7.1.5-0+deb13u1`, software Vulkan, linkage/provenance/doctor, generated fixtures,
+real rendering and generated application artifacts. Only this targeted route is
+accepted as the completed F1 Docker gate; the broad invocation is not called passed.
+Images: test `sha256:eab17d4e70955b540d6460b004ec952e26024bf2db1c58fa7b56cf3b0d76d0e7`,
+runtime `sha256:9a9e14b582cad5eb3a5543fe8dd96a5ce690e20b9993020933d7247cf1b22e58`.
+Controller confirmed both tags and exact image/local SHA-256 matches for the changed
+production owner, new integration test, `pyproject.toml`, and `uv.lock`.
+
+Independent controller command passed without skips:
+
+```bash
+uv run --no-sync pytest -q \
+  tests/orchestration/test_phase_tasks_alignment.py \
+  tests/orchestration/test_phase_alignment_contract.py \
+  tests/integration/test_alignment_continuous_pipeline.py::test_real_audio_alignment_preserves_raw_zero_offset_through_unequal_base_trims \
+  tests/services/test_alignment_previous_offsets.py \
+  tests/services/test_alignment_manual_overrides.py -rsx
+```
+
+`git show --check`, clean status, screenshot-plan hash, and the plan-record diff were
+checked. Reuse the inspected full/static/Docker evidence because no subsequent product
+change invalidated it; the later R80 handoff is plan-only. Physical Windows remains W1.
+At A1 the broad Docker opt-in skip still needs explicit handling through the supported
+test selection/opt-in route; do not weaken zero-skip enforcement. F2 is next.
 
 Activation commit: `docs(plan): activate audio alignment remediation and UX plan`.
 After all implementation, controller, and Windows gates pass, inspect every commit
