@@ -33,6 +33,7 @@ from frame_compare.cli.run_command import (
     RunCliRawArgs,
     RunCommandDeps,
     confirm_full_window_retry_on_stderr,
+    format_enum_choices,
     handle_run,
 )
 from frame_compare.cli.wizard_command import (
@@ -43,6 +44,7 @@ from frame_compare.cli.wizard_command import (
 )
 from frame_compare.config.loader import TomlPayload, load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
+from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
@@ -148,7 +150,25 @@ def version() -> None:
     typer.echo(f"frame-compare {__version__}")
 
 
-@app.command()
+@app.command(
+    help=(
+        "Compare video sources and generate screenshots and an optional report.\n\n"
+        "Overrides apply to this run only. Add --write-config to save the effective "
+        "configuration, including the source, frame-selection, rendering, alignment, "
+        "and publishing overrides below, to the selected config file and exit without "
+        "running. Other options, such as --root or --quiet, are run-only and never persist."
+    ),
+    epilog=(
+        "Examples:\n\n"
+        "Preview the configured comparison:\n"
+        "frame-compare run --dry-run\n\n"
+        "Add exact frames and a diagnostic overlay to one local run "
+        "(configured frame selection still applies):\n"
+        "frame-compare run --frames 120,1200,2400 --overlay diagnostic --no-upload\n\n"
+        "Save an override without running:\n"
+        "frame-compare run --overlay diagnostic --write-config"
+    ),
+)
 def run(
     root: Path = _path_option(
         ".",
@@ -168,79 +188,88 @@ def run(
         None,
         "--input",
         "-i",
-        help="Use this source-video directory; persists with --write-config.",
+        help="Use this source-video directory.",
         rich_help_panel="Sources and frame selection",
     ),
     frames: str | None = _option(
         None,
         "--frames",
-        help="Select comma-separated reference source-frame numbers; persists with --write-config.",
+        metavar="FRAME[,FRAME…]",
+        help="Select reference source-frame numbers to render.",
         rich_help_panel="Sources and frame selection",
     ),
     random_frame_count: str | None = _option(
         None,
         "--random-frame-count",
-        help="Set the random frame count; persists with --write-config.",
+        metavar="COUNT",
+        help="Set the random frame count.",
         rich_help_panel="Sources and frame selection",
     ),
     dark_frame_count: str | None = _option(
         None,
         "--dark-frame-count",
-        help="Set the dark-frame count; requires analysis and persists.",
+        metavar="COUNT",
+        help="Set the dark-frame count; requires analysis.",
         rich_help_panel="Sources and frame selection",
     ),
     bright_frame_count: str | None = _option(
         None,
         "--bright-frame-count",
-        help="Set the bright-frame count; requires analysis and persists.",
+        metavar="COUNT",
+        help="Set the bright-frame count; requires analysis.",
         rich_help_panel="Sources and frame selection",
     ),
     motion_frame_count: str | None = _option(
         None,
         "--motion-frame-count",
-        help="Set the motion-frame count; requires analysis and persists.",
+        metavar="COUNT",
+        help="Set the motion-frame count; requires analysis.",
         rich_help_panel="Sources and frame selection",
     ),
     seed: int | None = _option(
         None,
         "--seed",
-        help="Set the frame-selection seed; persists with --write-config.",
+        help="Set the frame-selection seed.",
         rich_help_panel="Sources and frame selection",
     ),
     tm_preset: str | None = _option(
         None,
         "--tm-preset",
-        help="Override the tonemap preset; persists with --write-config.",
+        metavar="PRESET",
+        help=f"Override the tonemap preset. Choose one of: {format_enum_choices(TonemapPreset)}.",
         rich_help_panel="Rendering and alignment",
     ),
     tm_target: int | None = _option(
         None,
         "--tm-target",
-        help="Override tonemap target nits; persists with --write-config.",
+        metavar="NITS",
+        help="Override tonemap target nits.",
         rich_help_panel="Rendering and alignment",
     ),
     tm_curve: str | None = _option(
         None,
         "--tm-curve",
-        help="Override the tonemap curve; persists with --write-config.",
+        metavar="CURVE",
+        help=f"Override the tonemap curve. Choose one of: {format_enum_choices(ToneCurve)}.",
         rich_help_panel="Rendering and alignment",
     ),
     overlay: str | None = _option(
         None,
         "--overlay",
-        help="Override screenshot overlay mode; persists with --write-config.",
+        metavar="MODE",
+        help=f"Override screenshot overlay mode. Choose one of: {format_enum_choices(OverlayMode)}.",
         rich_help_panel="Rendering and alignment",
     ),
     force_interactive_alignment: bool = _option(
         False,
         "--force-interactive-alignment",
-        help="Force VSView alignment; persists with --write-config.",
+        help="Force VSView alignment.",
         rich_help_panel="Rendering and alignment",
     ),
     no_upload: bool = _option(
         False,
         "--no-upload",
-        help="Do not publish to slow.pics; persists with --write-config.",
+        help="Do not publish to slow.pics.",
         rich_help_panel="Reports and publishing",
     ),
     skip_analysis: bool = _option(

@@ -10,6 +10,7 @@ from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import (
     RunCliOptions,
     build_run_request_from_cli,
+    coerce_cli_choice,
     handle_diagnose_paths,
     handle_json_output,
     handle_run,
@@ -90,6 +91,70 @@ def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
         verbose=True,
         json_output=True,
     )
+
+
+@pytest.mark.parametrize(
+    ("enum_type", "flag", "loc"),
+    [
+        (OverlayMode, "--overlay", ("screenshots", "overlay_mode")),
+        (TonemapPreset, "--tm-preset", ("color", "preset")),
+        (ToneCurve, "--tm-curve", ("color", "tone_curve")),
+    ],
+)
+def test_coerce_cli_choice_invalid_value_names_flag_and_enum_choices(
+    enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve],
+    flag: str,
+    loc: tuple[str, str],
+) -> None:
+    with pytest.raises(ConfigValidationError) as exc_info:
+        coerce_cli_choice("banana", enum_type, loc, flag=flag)
+
+    error = exc_info.value
+    expected_choices = ", ".join(member.value for member in enum_type)
+    assert error.context.message == f"Invalid value for {flag}: banana"
+    assert error.context.hint == f"Choose one of: {expected_choices}."
+    assert error.validation_errors[0]["loc"] == list(loc)
+    assert error.validation_errors[0]["input"] == "banana"
+
+
+def test_coerce_cli_choice_returns_none_for_missing_value() -> None:
+    assert (
+        coerce_cli_choice(None, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay")
+        is None
+    )
+
+
+def test_coerce_cli_choice_returns_enum_member_for_valid_value() -> None:
+    assert (
+        coerce_cli_choice(
+            "diagnostic", OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+        )
+        == OverlayMode.DIAGNOSTIC
+    )
+
+
+def test_coerce_cli_choice_bounds_long_echoed_value() -> None:
+    huge_value = "x" * 500
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        coerce_cli_choice(
+            huge_value, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+        )
+
+    message = exc_info.value.context.message
+    assert "--overlay" in message
+    assert "truncated" in message
+    assert len(message) < len(huge_value)
+
+
+def test_coerce_cli_choice_escapes_control_characters_in_echoed_value() -> None:
+    with pytest.raises(ConfigValidationError) as exc_info:
+        coerce_cli_choice(
+            "bad\n\x1b[31mred", OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+        )
+
+    message = exc_info.value.context.message
+    assert message == "Invalid value for --overlay: bad\\n\\x1b[31mred"
 
 
 def test_handle_diagnose_paths_outputs_pinned_json(capsys: pytest.CaptureFixture[str]) -> None:

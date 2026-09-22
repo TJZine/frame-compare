@@ -55,7 +55,12 @@ AppData fallback configuration.
 | `--overlay MODE` | Override the screenshot overlay for one run |
 | `--write-config` | Persist supported CLI-to-config overrides after validation |
 
-Always confirm the installed help text before scripting an option.
+Always confirm the installed help text before scripting an option. An invalid
+`--overlay`, `--tm-preset`, or `--tm-curve` value names the flag and lists its
+allowed choices (for example `Choose one of: minimal, standard, diagnostic,
+none.`) before any run starts; `run --help` lists the same choices and explains
+which options `--write-config` saves versus which stay run-only for this
+invocation.
 
 ## Configuration ownership
 

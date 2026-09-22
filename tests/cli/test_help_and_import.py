@@ -4,6 +4,8 @@ from pytest import MonkeyPatch
 from typer.main import get_command
 
 from frame_compare.cli.entry import _stabilize_typer_help_width, app
+from frame_compare.config.overrides import CLI_OVERRIDE_MAP
+from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
 
 from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
@@ -143,7 +145,8 @@ def test_run_rejects_retired_frame_count_options(
             [
                 "Compare video sources and generate screenshots and an optional report.",
                 "Workspace root containing configuration, input, and generated output.",
-                "persists with --write-config",
+                "apply to this run only",
+                "Add --write-config to save the effective configuration",
                 "Require valid cached analysis",
                 "Preview what a run would use and create without probing or side effects.",
                 "Write the effective config, then exit without running.",
@@ -256,6 +259,124 @@ def test_run_help_groups_options_by_task() -> None:
     assert result.exit_code == 0
     positions = [output.index(panel) for panel in panels]
     assert positions == sorted(positions)
+
+
+_PERSISTENT_HELP_PANELS = frozenset(
+    {"Sources and frame selection", "Rendering and alignment", "Reports and publishing"}
+)
+
+
+def test_run_help_panel_persistence_matches_cli_override_map() -> None:
+    """Options grouped under the three "persists" panels are exactly the CLI_OVERRIDE_MAP flags.
+
+    The run command's docstring states the persistence rule once, by panel name,
+    instead of repeating it on every option. This locks that claim to the actual
+    override map so the two cannot silently drift apart.
+    """
+    command = get_command(app)
+    run_command = command.commands["run"]
+    persistent_flags = {f"--{name.replace('_', '-')}" for name in CLI_OVERRIDE_MAP}
+
+    for param in run_command.params:
+        long_opts = {opt for opt in getattr(param, "opts", ()) if opt.startswith("--")}
+        if not long_opts:
+            continue
+        panel = getattr(param, "rich_help_panel", None)
+        flags_that_persist = long_opts & persistent_flags
+        if panel in _PERSISTENT_HELP_PANELS:
+            assert flags_that_persist == long_opts, (
+                f"{long_opts} is shown in persistent panel {panel!r} "
+                "but is missing from CLI_OVERRIDE_MAP"
+            )
+        else:
+            assert not flags_that_persist, (
+                f"{long_opts} persists through CLI_OVERRIDE_MAP but its panel "
+                f"{panel!r} is not one of the documented persistent panels"
+            )
+
+
+def test_run_help_does_not_repeat_persistence_clause_per_option() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert "persists with --write-config" not in output
+    assert "requires analysis and persists" not in output
+    # The unified explanation still appears exactly once, near the top.
+    assert output.count("apply to this run only") == 1
+
+
+@pytest.mark.parametrize(
+    ("flag", "enum_type"),
+    [
+        ("--overlay", OverlayMode),
+        ("--tm-preset", TonemapPreset),
+        ("--tm-curve", ToneCurve),
+    ],
+)
+def test_run_help_lists_enum_choices_without_drift(
+    flag: str, enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve]
+) -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert flag in output
+    for member in enum_type:
+        assert member.value in output
+
+
+def test_run_help_uses_improved_metavariables() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert "COUNT" in output
+    assert "FRAME[,FRAME…]" in output
+    assert "NITS" in output
+
+
+def test_run_help_shows_three_examples() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert "Examples:" in output
+    assert "Preview the configured comparison: frame-compare run --dry-run" in output
+    assert (
+        "(configured frame selection still applies): frame-compare run "
+        "--frames 120,1200,2400 --overlay diagnostic --no-upload"
+    ) in output
+    assert (
+        "Save an override without running: frame-compare run --overlay diagnostic --write-config"
+    ) in output
+    # The frames example must not claim to disable other selection categories.
+    assert "only these frames" not in output
+    assert "disables" not in output
 
 
 def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> None:

@@ -129,12 +129,39 @@ def confirm_full_window_retry_on_stderr(text: str) -> bool:
     return response.strip().lower() in {"y", "yes"}
 
 
+def format_enum_choices(enum_type: type[Enum]) -> str:
+    """Unquoted comma-separated enum values for user-facing choice lists.
+
+    Shared by the invalid-choice hint below and by ``entry.py``'s per-option
+    help text, so the CLI's displayed choices cannot drift from the enum.
+    """
+    return ", ".join(member.value for member in enum_type)
+
+
+_MAX_ECHOED_CLI_VALUE = 80
+
+
+def _echo_cli_value(value: str) -> str:
+    """Bound a raw CLI value and escape control characters before echoing it in an error."""
+    printable = "".join(
+        char if char.isprintable() else repr(char)[1:-1] for char in value[:_MAX_ECHOED_CLI_VALUE]
+    )
+    return printable if len(value) <= _MAX_ECHOED_CLI_VALUE else f"{printable}... (truncated)"
+
+
 def coerce_cli_choice[CliChoiceT: Enum](
     value: str | None,
     enum_type: type[CliChoiceT],
     loc: tuple[str, ...],
+    *,
+    flag: str,
 ) -> CliChoiceT | None:
-    """Convert a CLI string choice after Typer parsing so JSON errors stay structured."""
+    """Convert a CLI string choice after Typer parsing so JSON errors stay structured.
+
+    ``flag`` is the public option name (for example ``--overlay``) so the
+    resulting error names the flag the user actually passed, not just the
+    config path it maps to.
+    """
     if value is None:
         return None
     try:
@@ -150,7 +177,9 @@ def coerce_cli_choice[CliChoiceT: Enum](
                     "input": value,
                     "ctx": {"expected": expected},
                 }
-            ]
+            ],
+            message=f"Invalid value for {flag}: {_echo_cli_value(value)}",
+            hint=f"Choose one of: {format_enum_choices(enum_type)}.",
         ) from exc
 
 
@@ -464,9 +493,15 @@ def build_confirm_slowpics_upload_callback(
 
 
 def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
-    parsed_tm_preset = coerce_cli_choice(args.tm_preset, TonemapPreset, ("color", "preset"))
-    parsed_tm_curve = coerce_cli_choice(args.tm_curve, ToneCurve, ("color", "tone_curve"))
-    parsed_overlay = coerce_cli_choice(args.overlay, OverlayMode, ("screenshots", "overlay_mode"))
+    parsed_tm_preset = coerce_cli_choice(
+        args.tm_preset, TonemapPreset, ("color", "preset"), flag="--tm-preset"
+    )
+    parsed_tm_curve = coerce_cli_choice(
+        args.tm_curve, ToneCurve, ("color", "tone_curve"), flag="--tm-curve"
+    )
+    parsed_overlay = coerce_cli_choice(
+        args.overlay, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+    )
 
     return RunCliOptions(
         root=args.resolved_root,
@@ -511,6 +546,9 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     )
 
 
+_FRAMES_EXAMPLE = "Example: --frames 12,48,100"
+
+
 def parse_frame_list(value: str | None) -> list[int] | None:
     if value is None:
         return None
@@ -518,6 +556,7 @@ def parse_frame_list(value: str | None) -> list[int] | None:
         raise _frame_selection_cli_error(
             loc=("analysis", "user_frames"),
             msg="--frames must be a comma-separated list of non-negative integers",
+            hint=_FRAMES_EXAMPLE,
             input_value=value,
         )
     frames: list[int] = []
@@ -527,6 +566,7 @@ def parse_frame_list(value: str | None) -> list[int] | None:
             raise _frame_selection_cli_error(
                 loc=("analysis", "user_frames"),
                 msg="--frames must not contain empty entries",
+                hint=_FRAMES_EXAMPLE,
                 input_value=value,
             )
         try:
@@ -535,12 +575,14 @@ def parse_frame_list(value: str | None) -> list[int] | None:
             raise _frame_selection_cli_error(
                 loc=("analysis", "user_frames"),
                 msg="--frames must contain only non-negative integers",
+                hint=_FRAMES_EXAMPLE,
                 input_value=value,
             ) from exc
         if frame < 0:
             raise _frame_selection_cli_error(
                 loc=("analysis", "user_frames"),
                 msg="--frames must contain only non-negative integers",
+                hint=_FRAMES_EXAMPLE,
                 input_value=value,
             )
         frames.append(frame)
@@ -561,12 +603,14 @@ def parse_non_negative_int_option(
         raise _frame_selection_cli_error(
             loc=loc,
             msg=f"{option_name} must be a non-negative integer",
+            hint=f"Example: {option_name} 3",
             input_value=value,
         ) from exc
     if parsed < 0:
         raise _frame_selection_cli_error(
             loc=loc,
             msg=f"{option_name} must be a non-negative integer",
+            hint=f"Example: {option_name} 3",
             input_value=value,
         )
     return parsed
@@ -577,6 +621,7 @@ def _frame_selection_cli_error(
     loc: tuple[str, ...],
     msg: str,
     input_value: str,
+    hint: str,
 ) -> ConfigValidationError:
     return ConfigValidationError(
         [
@@ -588,6 +633,7 @@ def _frame_selection_cli_error(
             }
         ],
         message=msg,
+        hint=hint,
     )
 
 

@@ -574,6 +574,65 @@ unchanged.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
+### CLI Choice, Frame, And Count Validation
+
+- `--overlay`, `--tm-preset`, and `--tm-curve` are parsed as raw strings, not Typer
+  enums, so an invalid value stays on the typed `FC-1003`/`CONFIG_VALIDATION_ERROR`
+  path with exit code 2 instead of a Click usage error. Normal (non-verbose) output
+  names the actual flag and the allowed values without requiring `--verbose`:
+  `Invalid value for --overlay: banana` followed by
+  `Choose one of: minimal, standard, diagnostic, none.` The allowed-value list is
+  read from `OverlayMode`/`TonemapPreset`/`ToneCurve` at the point of the error, so
+  it cannot drift from the schema enums. JSON mode keeps the existing structured
+  `validation_errors` entry (`type`, `loc`, `msg`, `input`, `ctx.expected`) with
+  `loc` pointing at the mapped config path (for example
+  `["screenshots", "overlay_mode"]`); only the human-readable top-level `message`
+  and `hint` name the CLI flag. Config values supplied through TOML or environment
+  variables are validated by the schema directly and never produce flag-named
+  messages, so a file-sourced enum failure is never mislabeled as a flag error.
+- `--frames` and the `--random-frame-count`/`--dark-frame-count`/
+  `--bright-frame-count`/`--motion-frame-count` options are also parsed as raw
+  strings on this same typed path. A parsing failure names the option, the
+  violated grammar or range (a comma-separated list of non-negative integers, or a
+  single non-negative integer), and gives a valid example as the hint, for example
+  `--frames must contain only non-negative integers` with
+  `Hint: Example: --frames 12,48,100`, or `--motion-frame-count must be a
+  non-negative integer` with `Hint: Example: --motion-frame-count 3`. Run parsing keeps its own grammar; it does not adopt
+  the wizard's separate frame-list input format.
+- A CLI value echoed into a human-facing message is bounded to 80 characters
+  (longer values end in `... (truncated)`), has control characters shown as
+  escapes such as `\n`, and is passed through the existing Rich markup escaping;
+  the JSON `input` field is unaffected.
+
+### Run Help Presentation
+
+- `frame-compare run --help` uses task-scoped metavariables instead of generic
+  placeholders: `FRAME[,FRAME…]` for `--frames`, `COUNT` for the four frame-count
+  options, `NITS` for `--tm-target`, and a short choice metavar (`MODE`, `PRESET`,
+  `CURVE`) for `--overlay`, `--tm-preset`, and `--tm-curve` respectively. Each
+  choice option's help text also lists its allowed values (`Choose one of: ...`),
+  read from the same schema enums as the validation error above, so help and
+  errors cannot disagree.
+- The `run` command states its persistence rule once, in the command description
+  above the options panels, instead of repeating a clause on every eligible
+  option: overrides apply to this invocation only, and `--write-config` saves the
+  effective configuration, including overrides from the Sources and frame
+  selection, Rendering and alignment, and Reports and publishing help panels
+  (exactly the flags listed in
+  [CLI Flag To Config Mapping](#cli-flag-to-config-mapping)), to the selected
+  config file and exits without running. `--write-config` keeps its own
+  explicit one-line description. Every other option, including workspace
+  selection (`--root`, `--config`), planning/diagnostics, and output-mode flags,
+  is run-only and never persists; see [Persistence Rules](#persistence-rules) for
+  the authoritative runtime-only flag list.
+- The help epilog gives three examples, each a description line followed by the
+  command on its own line: previewing the configured comparison (`--dry-run`),
+  adding exact frames and a diagnostic overlay to one local run without
+  publishing (`--frames ... --overlay ... --no-upload`), and saving an overlay
+  override without running (`--overlay ... --write-config`). The frames example
+  states that configured frame selection still applies; it does not claim
+  `--frames` disables `--random-frame-count` or the metric-count options.
+
 ### Run-Only Full-Window Selection Recovery
 
 - Recovery is eligible only when effective `analysis.ignore_lead_seconds` or
@@ -1698,7 +1757,9 @@ The following `run` flags are runtime-only and do not persist through `--write-c
 
 If a future change makes a runtime-only flag persistent, or adds a new persistent flag,
 update this document, `src/frame_compare/config/overrides.py`, and the relevant CLI
-tests in the same pass.
+tests in the same pass. `frame-compare run --help` states this same rule once, in the
+command description, instead of repeating a persistence clause on every eligible
+option; see [Run Help Presentation](#run-help-presentation).
 
 ### Tonemap Preset And Target Resolution
 
