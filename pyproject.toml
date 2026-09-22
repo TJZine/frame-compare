@@ -51,7 +51,7 @@ frame-compare = "frame_compare.cli.entry:app"
 frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"
 
 [build-system]
-requires = ["hatchling==1.32.0"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -60,7 +60,7 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.62",
+    "zensical==0.0.63",
 ]
 docker-test = [
     "pytest==9.1.1",
