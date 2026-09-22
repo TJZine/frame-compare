@@ -167,12 +167,19 @@ async def run_align_phase(
                 audio_attempt=result.audio_attempt,
             )
         )
+    calculator_offsets = [
+        None
+        if comp.alignment is None
+        else (
+            comp.alignment.relative_offset_frames
+            - ctx.reference.trim.trim_start_frames
+            + comp.trim.trim_start_frames
+        )
+        for comp in updated_comparisons
+    ]
     ref_trim, comp_trims = calculate_alignment_trims(
         ref_num_frames=ctx.reference.effective_num_frames(),
-        comp_offsets=[
-            comp.alignment.relative_offset_frames if comp.alignment is not None else None
-            for comp in updated_comparisons
-        ],
+        comp_offsets=calculator_offsets,
         comp_num_frames=[comp.effective_num_frames() for comp in updated_comparisons],
     )
     reference = _compose_alignment_trim(ctx.reference, ref_trim)

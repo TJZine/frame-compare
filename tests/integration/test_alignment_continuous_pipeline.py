@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from frame_compare.config.schema import AudioAlignmentConfig
+from frame_compare.orchestration import phase_alignment
+from frame_compare.orchestration.context import ClipState
 from frame_compare.services import alignment_audio
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_streaming import ContinuousAudioCollection
@@ -20,6 +24,7 @@ from tests.integration.alignment_oracle import (
     mux_audio,
     write_pcm_wave,
 )
+from tests.orchestration.phase_task_helpers import _clip, _context
 from tests.services.alignment_request_test_support import alignment_request
 
 
@@ -127,6 +132,70 @@ def test_real_service_collects_distributed_windows_from_one_decode_per_source(
     assert all(window.actual_coverage == pytest.approx(1.0) for window in attempt.windows)
     assert attempt.decision.candidate is not None
     assert attempt.decision.candidate.sample_offset == 0
+
+
+@pytest.mark.integration
+def test_real_audio_alignment_preserves_raw_zero_offset_through_unequal_base_trims(
+    tmp_path: Path,
+    require_ffmpeg: None,
+) -> None:
+    sample_rate = 4000
+    signal = deterministic_signal(seed=9301, sample_rate=sample_rate, duration_seconds=95)
+    reference_wave = tmp_path / "reference.wav"
+    comparison_wave = tmp_path / "comparison.wav"
+    reference_path = tmp_path / "reference.mka"
+    comparison_path = tmp_path / "comparison.mka"
+    write_pcm_wave(reference_wave, signal, sample_rate=sample_rate)
+    write_pcm_wave(comparison_wave, signal, sample_rate=sample_rate)
+    _audio_only_fixture(reference_path, reference_wave)
+    _audio_only_fixture(comparison_path, comparison_wave)
+
+    def real_clip(path: Path, *, label: str) -> ClipState:
+        clip = _clip(path, label=label, num_frames=2400)
+        stat = path.stat()
+        return replace(
+            clip,
+            probe=replace(
+                clip.probe,
+                fingerprint=replace(
+                    clip.probe.fingerprint,
+                    size_bytes=stat.st_size,
+                    mtime_ns=stat.st_mtime_ns,
+                ),
+            ),
+        )
+
+    comparison = real_clip(comparison_path, label="Comparison")
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.workspace = replace(ctx.workspace, run_dir=ctx.workspace.generated_root / "run")
+    ctx.reference = real_clip(reference_path, label="Reference").with_trim(
+        trim_start_frames=3,
+        trim_end_frame_inclusive=2399,
+    )
+    ctx.comparisons = [comparison.with_trim(trim_start_frames=7, trim_end_frame_inclusive=2399)]
+    ctx.config = ctx.config.model_copy(
+        update={
+            "audio_alignment": AudioAlignmentConfig(
+                sample_rate=sample_rate,
+                max_offset_seconds=1,
+                cache_results=False,
+            )
+        }
+    )
+
+    output = asyncio.run(phase_alignment.run_align_phase(ctx, selected_frames=[20, 50, 80]))
+
+    applied = output.comparisons[0].alignment
+    assert applied is not None
+    assert applied.source == "computed"
+    assert applied.relative_offset_frames == 0
+    assert output.reference.trim.trim_start_frames == 7
+    assert output.comparisons[0].trim.trim_start_frames == 7
+    assert (
+        output.reference.trim.trim_start_frames - output.comparisons[0].trim.trim_start_frames
+        == applied.relative_offset_frames
+    )
+    assert output.selected_frames == [16, 46, 76]
 
 
 @pytest.mark.integration

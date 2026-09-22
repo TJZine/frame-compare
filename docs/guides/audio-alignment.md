@@ -201,10 +201,15 @@ are not applied or confirmed, and unresolved comparisons remain unresolved.
 For a known value, expand **Enter alignment manually...**. **Source frames** accepts one
 non-negative untrimmed frame per source; **Known offsets** accepts one signed integer per
 comparison using `reference - comparison`. Both bases feed the same whole-set save
-action and explain the trim direction immediately. Positive offsets trim the reference;
-negative offsets trim that comparison. Manual fields are an escape hatch, not a second
-result workflow. Provisional values never prefill those fields, move a playhead, mark a
-source visited, increase readiness, or enable confirmation.
+action and explain the trim direction immediately. With no configured base trims,
+positive offsets trim the reference and negative offsets trim that comparison.
+Configured base trims do not change this raw source-frame value: Frame Compare converts
+it only at the trim-application boundary, then composes the calculated trims onto each
+base domain so the final reference source start minus the comparison source start still
+equals the entered offset. This also preserves a raw zero when base trims differ. Manual
+fields are an escape hatch, not a second result workflow. Provisional values never
+prefill those fields, move a playhead, mark a source visited, increase readiness, or
+enable confirmation.
 
 The persistent **Audio evidence** section distinguishes `Audio alignment accepted:
 +0f`, `Provisional audio candidate: +0f — NOT APPLIED`, and `No usable audio candidate`.

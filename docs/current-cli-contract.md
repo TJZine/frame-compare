@@ -1415,9 +1415,15 @@ These fields affect current computed alignment behavior when audio alignment is
 enabled.
 
 All computed, confirmed, and reused signed offsets use `reference source frame -
-comparison source frame`. A positive offset trims that many frames from the reference;
-a negative offset trims the absolute value from the comparison. Correlation lag is
-converted to this sign convention before consensus evidence, hints, caching, and trims.
+comparison source frame`. With no configured base trims, a positive offset trims that
+many frames from the reference and a negative offset trims the absolute value from the
+comparison. Configured base trims do not change the public value: results, caches,
+manual input, diagnostics, and review continue to store the raw offset. When applying
+it, orchestration passes `raw offset - reference base trim + comparison base trim` to
+the relative-trim calculator, then composes its output onto each base domain. The final
+reference raw-source start minus the comparison raw-source start therefore equals the
+public offset, including zero for unequal base trims. Correlation lag is converted to
+this sign convention before consensus evidence, hints, caching, and trim application.
 
 - `use_vsview` is a boolean, defaulting to `false`, that enables optional native VSView
   panel review after computed alignment. `force_interactive` is a boolean, defaulting

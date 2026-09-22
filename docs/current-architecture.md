@@ -488,6 +488,13 @@ a weak mono row with the same logical ID. Mono evidence contributes only its ret
 interval and lag to that temporal check and cannot alter channel confidence or authority.
 `alignment_correlation.estimate_alignment_offset` converts the raw correlation lag to the
 public `reference source frame - comparison source frame` sign.
+That raw offset remains unchanged in results, diagnostics, manual review, and caches.
+At the orchestration application boundary, base trim starts are converted into the
+calculator coordinate with `calculator offset = raw offset - reference base trim +
+comparison base trim`; the calculator's relative trims are then composed onto the base
+domains. Consequently, the final reference raw-source start minus each authorized
+comparison raw-source start equals the stored raw offset, including zero when the two
+base trims differ. A missing offset remains missing and never becomes zero authority.
 `alignment_consensus` translates that signed local offset through the reference and
 comparison stream origins before applying extraction-integrity, base-credible, voting,
 independent-support, and automatic-authority gates. Base-credible evidence requires the
