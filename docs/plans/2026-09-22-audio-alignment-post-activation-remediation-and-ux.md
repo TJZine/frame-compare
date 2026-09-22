@@ -484,7 +484,7 @@ at the next checkpoint. Pending rows are not proof.
 | F2 | Accepted locally and in Docker after F2-R; Windows remains W1 | `e55615b6ea3f73f6e4e4c9e7ac5075a802bc240d` / `c5554ea784921d65fe9a748ba133854a3d67d956` | `01a0c7dd-8e98-7230-9c66-2f22bd822e02`; `gpt-5.6-luna`, xhigh | Twelve planner/channel/policy/test/current-doc files; `c5554ea7` | Full/static/docs pass with documented skips; targeted Docker and opt-in channel proof reported | Focused planner/channel/cache/authority/native-contract tests passed, no skips; documentation overstates midpoint split above 60 seconds | F2-R accepted at `8aa733aa`; F3 next |
 | F3 | Accepted locally and in Docker; Windows remains W1 | `137267b1f3573c69d40c7d79b8d473b29b35cccb` / `b9919607c9395b168a79633c5a2234f83ea5b977` | `01a0c7fd-c427-7f42-9553-f2bb3690cb42`; Luna xhigh | Consensus lifetime and focused tests; `b9919607` | Full/static/docs, native and Docker resource/channel proof passed within recorded limits | Every changed line inspected; focused tests and five native resource tests passed; image hashes match | F4 next; no numerical or identity change |
 | F4 | Accepted | `1133b11fd2b4ec46fc9e6cb695d700cb883116de` / `c15d230c638a0c33299fbddf7321e148cd8c62f0` | `01a0c80b-bf75-72a0-88ae-72b374fe7074`; Luna xhigh | Current CLI contract and command reference; `c15d230c` | Contract-doc/API/isolated strict docs and hooks passed | Every changed line and source facts inspected; contract-doc/API checks passed; tracked strict docs passed | F5 next; unrelated untracked site-link warning preserved |
-| F5 | Pending F4 | Pending | Pending | Narrow workflow filters/tests | Pending | Pending | Hosted CI pending push |
+| F5 | Accepted trigger coverage; hosted gate pending | `dff31ed101bc8f5b78dc72f62b7ff0495f49e870` / `d4b571db466156db6fa42929fe28378b7b1509bf` | `01a0c816-6b9e-7751-9a45-734b5be9a236`; Luna xhigh | Workflow path filter and contract tests; `d4b571db` | Full/static/docs, Docker resources passed; broad guard remains non-pass | Every changed line checked; 21 independent workflow tests passed | U1 next; no hosted pass claim |
 | U1 | Pending F5 | Pending | Pending | Terminal presentation/progress | Pending | Pending | Frozen matrix above |
 | U2 | Pending U1 | Pending | Pending | VSView presentation | Pending | Pending | Physical visible proof in W1 |
 | A1 | Pending U2 | Pending | Controller | Integration proof and plan record | Not applicable | Pending | No monitor delegation |
@@ -710,3 +710,36 @@ strict tracked-doc validation passed. Worker complete logs are in
 `.codex/cache/task-evidence/f4`. Live strict docs still encounters the unrelated
 untracked UX-plan site link; copied tracked-doc proof isolates that known issue.
 F5 is next. Physical Windows and hosted CI remain pending as before.
+
+
+### F5 acceptance — resource workflow trigger coverage
+
+Commit `d4b571db` adds only the controller-selected narrow owner paths and alignment
+test patterns plus workflow self-trigger. Contract coverage checks exact inclusion,
+representative matches, unrelated negative cases, unchanged resource command ordering,
+and the zero-skip guard. Controller inspected every changed line and independently
+passed all 21 Docker/workflow contract tests. No runtime, job command, permission,
+branch filter or dependency changed.
+
+Complete worker logs in `.codex/cache/task-evidence/f5` show full/static/API/tracked-doc
+checks passing with stated platform/opt-in skips. Reused F3 image hashes match resource
+owners/test/dependencies; five opted-in Docker resource tests passed. Broad canonical
+Docker returned exit 3 with 339 passing and one channel opt-in skip. This acceptance
+covers triggers only: the pre-existing skip still blocks the sequential hosted job
+before its resource step and must be resolved or explicitly gated during A1. It is
+not a hosted resource pass. User files remain preserved; Windows remains W1.
+
+### U1 controller implementation decisions
+
+Use a private optional channel-fallback callback through the existing computation
+call chain in `services/alignment.py`. Invoke it once when the channel plan is admitted,
+before the first channel loader, not per window/view. Marshal human progress through
+the existing `loop.call_soon_threadsafe` seam. Suppress this new human activity in
+quiet/JSON modes; retain existing machine events unchanged. No new progress protocol,
+wire field, enum, worker UI access, task nesting or event framework.
+
+Choose the normal heading from current applied result and its provenance first;
+historical attempt state cannot override manual authority. Keep original evidence
+truthful in verbose/details, including explicit NOT APPLIED for original provisional
+hints. Reuse existing normal/verbose formatting owners; move internal detail lines
+rather than discard diagnostic facts. The frozen terminal copy above is authoritative.
