@@ -14,11 +14,7 @@ on:
       - src/frame_compare/render/**
       - src/frame_compare/vs/**
       - .github/workflows/docker-integration.yml
-      - src/frame_compare/services/alignment.py
-      - src/frame_compare/services/alignment_audio.py
-      - src/frame_compare/services/alignment_consensus.py
-      - src/frame_compare/services/alignment_correlation.py
-      - src/frame_compare/services/alignment_streaming.py
+      - src/frame_compare/services/alignment*.py
       - src/frame_compare/services/errors.py
       - src/frame_compare/services/types.py
       - src/frame_compare/orchestration/phase_alignment.py

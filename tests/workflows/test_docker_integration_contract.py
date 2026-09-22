@@ -15,11 +15,7 @@ RESOURCE_TEST = "tests/integration/test_alignment_streaming_resources.py"
 
 ALIGNMENT_TRIGGER_PATHS = (
     ".github/workflows/docker-integration.yml",
-    "src/frame_compare/services/alignment.py",
-    "src/frame_compare/services/alignment_audio.py",
-    "src/frame_compare/services/alignment_consensus.py",
-    "src/frame_compare/services/alignment_correlation.py",
-    "src/frame_compare/services/alignment_streaming.py",
+    "src/frame_compare/services/alignment*.py",
     "src/frame_compare/services/errors.py",
     "src/frame_compare/services/types.py",
     "src/frame_compare/orchestration/phase_alignment.py",
@@ -212,6 +208,13 @@ def test_workflow_triggers_alignment_resource_owners_and_tests(repo_root: Path) 
         RESOURCE_TEST,
     )
     assert all(_path_matches_workflow(path, workflow_paths) for path in matching_paths)
+
+    alignment_modules = [
+        path.relative_to(repo_root).as_posix()
+        for path in (repo_root / "src/frame_compare/services").glob("alignment*.py")
+    ]
+    assert alignment_modules
+    assert all(_path_matches_workflow(path, workflow_paths) for path in alignment_modules)
 
 
 def test_workflow_does_not_trigger_unrelated_service_orchestration_paths(

@@ -297,9 +297,9 @@ bash tools/verify_docker_integration.sh
 
 If this path cannot be run locally, record it as documented-only until an observed
 matching-SHA run of `.github/workflows/docker-integration.yml` supplies the proof.
-Inspect its event/path filters: a PR need not trigger it for every relevant owner
-(including alignment services or the workflow file itself). Obtain an authorized
-manual run when required; an absent or skipped CI job is not successful proof.
+Inspect its event/path filters: a PR need not trigger it for every relevant owner.
+Obtain an authorized manual run when required; an absent or skipped CI job is not
+successful proof.
 
 `src/frame_compare/vsview/**` also owns an external plugin/process/UI boundary.
 Pure metadata/result validation uses focused Python proof and the applicable full
