@@ -107,8 +107,11 @@ and selection category centered together over a shallow bottom gradient at every
 thumbnail size, leaving the full thumbnail area available to the image. Categories use
 text labels instead of colored stripes or filter dots; filter counts and the brass
 selection border remain.
-Keyboard focus uses a light neutral outline. The header shows only the generation
-date; hover over it or open Report Information for the exact timestamp.
+Keyboard focus uses a light neutral outline. The header shows the generation
+timestamp localized to the browser locale; hover over it or open Report Information
+for the exact ISO timestamp. Frame rates round to three decimals (`23.976 fps`),
+file sizes use two decimals (`10.83 GiB`), and runtimes use `H:MM:SS` floored to
+whole seconds.
 
 Source selectors, the optional source labels, and baked overlays serve different
 contexts. Selectors identify the source at the point of selection. Source labels stay

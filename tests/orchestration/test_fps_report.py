@@ -13,6 +13,8 @@ from rich.style import Style
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
     FpsReportClip,
+    _format_file_size,
+    _format_fps_value,
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
@@ -39,6 +41,31 @@ def _assert_ansi_text_is_bold_cyan(output: str, label: str) -> None:
             assert span.style.color.number == cyan_number
             return
     pytest.fail(f"{label!r} was not rendered in bold cyan")
+
+
+@pytest.mark.parametrize(
+    ("size_bytes", "expected"),
+    [
+        (round(10.83 * 1024**3), "10.83 GiB"),
+        (17 * 1024**3, "17.00 GiB"),
+        (1024**3, "1.00 GiB"),
+        (0, ""),
+    ],
+)
+def test_format_file_size_uses_two_decimals(size_bytes: int, expected: str) -> None:
+    assert _format_file_size(size_bytes) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (Fraction(24000, 1001), "23.976 fps (24000/1001)"),
+        (Fraction(25, 1), "25 fps (25/1)"),
+        (Fraction(30000, 1001), "29.97 fps (30000/1001)"),
+    ],
+)
+def test_format_fps_value_keeps_rational_in_parentheses(value: Fraction, expected: str) -> None:
+    assert _format_fps_value(value) == expected
 
 
 def _make_clip_state(
@@ -351,13 +378,13 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "3840x2160" in captured.err
     assert "1920x1080" in captured.err
     assert "24000/1001" in captured.err
-    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "2,400 frames" in captured.err
     assert "1,200 frames" in captured.err
     assert "HDR" in captured.err
     assert "SDR" in captured.err
-    assert "17.0 GiB" in captured.err
-    assert "6.0 GiB" in captured.err
+    assert "17.00 GiB" in captured.err
+    assert "6.00 GiB" in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
     assert "Analysis source: Comparison 1 | selected by configured policy" in captured.err
@@ -462,7 +489,7 @@ def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
     captured = capsys.readouterr()
     assert "Frame rates" in captured.err
     assert "After Alignment" in captured.err
-    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "adjusted" in captured.err
     assert "assumed" in captured.err
     assert "\x1b[" not in captured.err
@@ -514,7 +541,7 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "  [OK] Frame rates match: 24/1\n"
+    assert captured.err == "  [OK] Frame rates match: 24 fps (24/1)\n"
     assert str(reference_path) not in captured.err
 
 
@@ -597,7 +624,7 @@ def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_p
     )
 
     captured = capsys.readouterr()
-    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "adjusted" in captured.err
     assert str(comparison_path) not in captured.err
 
@@ -618,7 +645,7 @@ def test_emit_consolidated_fps_report_prioritizes_effective_fps_divergence(
     )
 
     captured = capsys.readouterr()
-    assert "30/1 -> 25/1" in captured.err
+    assert "30 fps (30/1) -> 25 fps (25/1)" in captured.err
     assert "divergent" in captured.err
     assert "adjusted" not in captured.err
 

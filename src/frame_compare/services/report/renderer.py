@@ -268,7 +268,8 @@ def _render_resolution(resolution: tuple[int, int]) -> str:
 
 
 def _render_fps(fps: float) -> str:
-    return f"{fps:g} fps"
+    text = f"{round(float(fps), 3):.3f}".rstrip("0").rstrip(".")
+    return f"{text} fps"
 
 
 def _render_tonemap_summary(rendering: object) -> str:
@@ -290,6 +291,34 @@ def _render_tonemap_summary(rendering: object) -> str:
     return summary or "Applied"
 
 
+_GAMUT_MAPPING_LABELS = {
+    0: "Clip",
+    1: "Perceptual",
+    2: "Soft clip",
+    3: "Relative",
+    4: "Saturation",
+    5: "Absolute",
+    6: "Desaturate",
+    7: "Darken",
+    8: "Highlight",
+    9: "Linear",
+}
+
+_METADATA_MODE_LABELS = {
+    0: "Automatic selection",
+    1: "None",
+    2: "HDR10 (static)",
+    3: "HDR10+ (MaxRGB)",
+    4: "Luminance (CIE Y)",
+}
+
+
+def _render_tonemap_number(value: object) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _render_tonemap_details(rendering: object) -> str:
     """Render raw effective tonemap settings into an accessible details list."""
     rendering_map = _object_mapping(rendering)
@@ -306,17 +335,35 @@ def _render_tonemap_details(rendering: object) -> str:
         ("knee_offset", "Knee offset"),
         ("smoothing_period", "Smoothing period"),
         ("percentile", "Percentile"),
-        ("scene_threshold_low", "Scene threshold low"),
-        ("scene_threshold_high", "Scene threshold high"),
+        ("scene_threshold_low", "Scene thresholds"),
         ("gamut_mapping", "Gamut mapping"),
         ("metadata", "Metadata mode"),
         ("use_dovi", "Dolby Vision metadata use"),
     )
     rows: list[str] = []
     for key, label in labels:
+        if key == "scene_threshold_low":
+            low = settings_map.get("scene_threshold_low")
+            high = settings_map.get("scene_threshold_high")
+            parts: list[str] = []
+            if low is not None:
+                parts.append(f"{_render_tonemap_number(low)} low")
+            if high is not None:
+                parts.append(f"{_render_tonemap_number(high)} high")
+            if parts:
+                rows.append(
+                    f"<div><dt>{_esc_text(label)}</dt><dd>{_esc_text(' · '.join(parts))}</dd></div>"
+                )
+            continue
         value = settings_map.get(key)
         if value is None:
-            value_text = "Auto" if key == "source_peak" else None
+            value_text = "Automatic" if key == "source_peak" else None
+        elif key == "gamut_mapping" and isinstance(value, int) and not isinstance(value, bool):
+            value_text = _GAMUT_MAPPING_LABELS.get(value, str(value))
+        elif key == "metadata" and isinstance(value, int) and not isinstance(value, bool):
+            value_text = _METADATA_MODE_LABELS.get(value, str(value))
+        elif key == "smoothing_period":
+            value_text = f"{_render_tonemap_number(value)} frames"
         elif isinstance(value, bool):
             value_text = "On" if value else "Off"
         else:
@@ -421,7 +468,7 @@ def _render_info_modal(
                     <dl class="rv-metadata-list">
                         <div><dt>Title</dt><dd>{_esc_text(title)}</dd></div>
                         <div><dt>Report ID</dt><dd>{_esc_text(report_id)}</dd></div>
-                        <div><dt>Generated</dt><dd>{_esc_text(generated_at)}</dd></div>
+                        <div><dt>Generated</dt><dd><time datetime="{_esc_attr(generated_at)}" title="{_esc_attr(generated_at)}">{_esc_text(generated_at)}</time></dd></div>
                         <div><dt>Frames</dt><dd>{stats["frame_count"]}</dd></div>
                         <div><dt>Clips</dt><dd>{stats["clip_count"]}</dd></div>
                         <div><dt>Default Mode</dt><dd>{_esc_text(default_mode_label)}</dd></div>
@@ -457,10 +504,20 @@ def _render_header(
     info_button = f'<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report information">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M10 9v4 M10 6.5v.1")}</button>'
     help_button = f'<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M8 7a2 2 0 0 1 4 0c0 2-2 2-2 4 M10 13.5v.1")}</button>'
     slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
+    try:
+        datetime.fromisoformat(generated_at)
+        generated_time = (
+            f'<time datetime="{_esc_attr(generated_at)}" '
+            f'title="{_esc_attr(generated_at)}">{_esc_text(generated_at)}</time>'
+        )
+    except ValueError:
+        generated_time = (
+            f'<span title="{_esc_attr(generated_at)}">{_esc_text(generated_date)}</span>'
+        )
     return f"""        <header class="rv-header">
             <div>
                 <div class="rv-title">{_esc_text(title)}</div>
-                <div class="rv-meta">Generated <span title="{_esc_attr(generated_at)}">{_esc_text(generated_date)}</span> • {frame_count} frames • {clip_count} clips</div>
+                <div class="rv-meta">Generated {generated_time} • {frame_count} frames • {clip_count} clips</div>
             </div>
             <div class="rv-header-right">
                 {slowpics_block}{inspector_button} {info_button} {help_button}

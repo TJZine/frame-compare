@@ -80,6 +80,15 @@ def _format_fraction(value: Fraction) -> str:
     return f"{value.numerator}/{value.denominator}"
 
 
+def _format_fps_decimal(value: Fraction) -> str:
+    text = f"{round(float(value), 3):.3f}".rstrip("0").rstrip(".")
+    return f"{text} fps"
+
+
+def _format_fps_value(value: Fraction) -> str:
+    return f"{_format_fps_decimal(value)} ({_format_fraction(value)})"
+
+
 def _fraction_parts(value: Fraction) -> tuple[int, int]:
     return value.numerator, value.denominator
 
@@ -112,8 +121,8 @@ def _stage_label(stage: str) -> str:
 
 
 def _format_fps_transition(clip: FpsReportClip) -> str:
-    source_fps = _format_fraction(clip.source_fps)
-    effective_fps = _format_fraction(clip.effective_fps)
+    source_fps = _format_fps_value(clip.source_fps)
+    effective_fps = _format_fps_value(clip.effective_fps)
     if clip.fps_divergent:
         return f"{escape(source_fps)} -> {escape(effective_fps)}"
     return escape(effective_fps)
@@ -132,9 +141,11 @@ def _format_dynamic_range(is_hdr: bool) -> str:
 
 def _format_file_size(size_bytes: int) -> str:
     value = float(size_bytes)
+    if value <= 0:
+        return ""
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if value < 1024.0 or unit == "TiB":
-            return f"{value:.1f} {unit}"
+            return f"{value:.2f} {unit}"
         value /= 1024.0
     raise AssertionError("unreachable")
 
@@ -324,7 +335,7 @@ def _render_human_fps_report(
         )
     else:
         if not verbose and _can_summarize_matching_fps(clips):
-            effective_fps = _format_fraction(clips[0].effective_fps)
+            effective_fps = _format_fps_value(clips[0].effective_fps)
             console.print(f"  [bold green][OK][/] Frame rates match: {escape(effective_fps)}")
             return
         title = "Frame rates"

@@ -27,7 +27,23 @@ const clip = {
 
 assert.equal(format.clipDisplay(clip), 'Control identity');
 assert.equal(format.clipAccessibleName(clip), 'Primary identity — exact.release.name.mkv');
-assert.equal(format.formatFps(24000 / 1001), `${24000 / 1001} fps`);
+assert.equal(format.formatFps(24000 / 1001), '23.976 fps');
+assert.equal(format.formatFps(23.976023976023978), '23.976 fps');
+assert.equal(format.formatFps(25), '25 fps');
+assert.equal(format.formatFps(29.97), '29.97 fps');
+assert.equal(format.formatFps(Number.NaN), '');
+assert.equal(format.formatRuntime(100, 24), '0:00:04');
+assert.equal(format.formatRuntime(2400, 24), '0:01:40');
+assert.equal(format.formatRuntime(46656, 24), '0:32:24');
+assert.equal(format.formatRuntime(0, 24), '0:00:00');
+assert.equal(format.formatRuntime(100, 0), '');
+assert.equal(format.signalCodeLabel('transfer', 999), null);
+assert.equal(typeof format.formatTimestamp('2026-05-22T12:00:00+00:00'), 'string');
+assert.notEqual(format.formatTimestamp('2026-05-22T12:00:00+00:00'), '');
+assert.notEqual(format.formatTimestamp('2026-05-22T12:00:00+00:00'), '2026-05-22T12:00:00+00:00');
+assert.ok(format.formatTimestamp('2026-05-22T12:00:00+00:00').includes('2026'));
+assert.equal(format.formatTimestamp('not a date'), '');
+assert.equal(format.formatTimestamp(''), '');
 assert.equal(format.formatFileSize(1024 ** 3), '1.00 GiB');
 assert.equal(format.formatResolution([1920, 1080]), '1920×1080');
 assert.equal(format.formatResolution(undefined), '');
@@ -37,7 +53,16 @@ assert.equal(format.formatResolution([0, 1080]), '');
 assert.equal(format.sourceHudLabel(clip), 'Control identity • HDR');
 assert.equal(format.formatSignal({ is_hdr: true, transfer: 16, range: 'limited' }), 'HDR · PQ · Limited');
 assert.equal(format.formatPresentation(clip), 'Tonemapped · BT.2390 → 203 nits');
-assert.equal(format.formatActivePicture({ width: 1920, height: 800, x: 0, y: 140, provenance: 'dolby_vision_l5' }), '1920×800 @ 0,140 · DV L5');
+assert.equal(format.formatActivePicture(null, [1920, 1080]), '1920×1080 · full frame');
+assert.equal(
+    format.formatActivePicture({ width: 1920, height: 800, x: 0, y: 140, provenance: 'dolby_vision_l5' }, [3840, 2160]),
+    '3840×2160 · active 1920×800, 140 px top',
+);
+assert.equal(
+    format.formatActivePicture({ width: 1920, height: 804, x: 10, y: 138 }, [3840, 2160]),
+    '3840×2160 · active 1920×804, 138 px top, 10 px left',
+);
+assert.equal(format.formatActivePicture(null, undefined), '');
 assert.equal(format.modeLabel('overlay'), 'Single');
 assert.equal(format.stableClipRole(0, 0), 'Reference');
 assert.equal(format.stableClipRole(2, 0), 'Comparison 2');

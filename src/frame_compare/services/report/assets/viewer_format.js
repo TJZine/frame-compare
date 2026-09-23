@@ -16,7 +16,25 @@ const ViewerFormat = {
     formatFps(value) {
         const fps = Number(value);
         if (!Number.isFinite(fps)) return '';
-        return `${Number.isInteger(fps) ? fps : fps.toString()} fps`;
+        return `${Math.round(fps * 1000) / 1000} fps`;
+    },
+
+    formatRuntime(frameCount, fps) {
+        const frames = Number(frameCount);
+        const rate = Number(fps);
+        if (!Number.isFinite(frames) || !Number.isFinite(rate) || frames < 0 || rate <= 0) return '';
+        const totalSeconds = Math.floor(frames / rate);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    },
+
+    formatTimestamp(value) {
+        if (typeof value !== 'string' || !value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
     },
 
     formatFileSize(value) {
@@ -99,10 +117,12 @@ const ViewerFormat = {
         return 'SDR';
     },
 
-    formatActivePicture(active) {
-        if (!active || active.is_full_frame) return '';
-        const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
-        return `${active.width}×${active.height} @ ${active.x},${active.y}${provenance}`;
+    formatActivePicture(active, resolution) {
+        const frame = this.formatResolution(resolution);
+        if (!frame) return '';
+        if (!active) return `${frame} · full frame`;
+        const left = Number(active.x) ? `, ${active.x} px left` : '';
+        return `${frame} · active ${active.width}×${active.height}, ${active.y} px top${left}`;
     },
 
     formatTonemapSummary(tonemap) {

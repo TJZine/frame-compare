@@ -49,6 +49,8 @@ const ReportViewer = {
             return;
         }
 
+        this.localizeTimestamps();
+
         try {
             this.state.data = this.normalizePayload(this.readPayload());
             this.state.mode = this.validPayloadMode(this.state.data.default_mode)
@@ -347,6 +349,15 @@ const ReportViewer = {
         delete this.dom.status.dataset.tone;
         this.dom.status.setAttribute('role', 'status');
         this.dom.status.hidden = true;
+    },
+
+    localizeTimestamps(root) {
+        const scope = root || (typeof document !== 'undefined' ? document : null);
+        const elements = scope?.querySelectorAll?.('time[datetime]') || [];
+        elements.forEach?.(element => {
+            const text = ViewerFormat.formatTimestamp(element.getAttribute('datetime'));
+            if (text) element.textContent = text;
+        });
     },
 
     showStageMessage(message) {

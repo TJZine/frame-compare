@@ -8,7 +8,7 @@ import re
 import pytest
 
 from frame_compare.services.report.payload import ReportPayload
-from frame_compare.services.report.renderer import build_html
+from frame_compare.services.report.renderer import _render_fps, build_html
 from frame_compare.services.report.viewer import get_js
 from tests.services.report_viewer_contracts import (
     SelectParser,
@@ -270,26 +270,52 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
 
 
 @pytest.mark.parametrize(
-    ("timestamp", "date_label"),
+    "timestamp",
     [
-        ("2026-09-04T14:29:22.256990+00:00", "2026-09-04"),
-        ("2026-09-04T23:59:59.123456-04:00", "2026-09-04"),
-        ("2026-09-04T00:00:00Z", "2026-09-04"),
-        ('unknown "<date>"', 'unknown "<date>"'),
+        "2026-09-04T14:29:22.256990+00:00",
+        "2026-09-04T23:59:59.123456-04:00",
+        "2026-09-04T00:00:00Z",
     ],
 )
-def test_build_html_shortens_header_date_and_preserves_exact_timestamp(
-    report_payload: ReportPayload, timestamp: str, date_label: str
+def test_build_html_emits_generated_time_element_and_preserves_exact_timestamp(
+    report_payload: ReportPayload, timestamp: str
 ) -> None:
     payload: ReportPayload = {**report_payload, "generated_at": timestamp}
     html = build_html(payload)
     metadata = require_first(parse_elements(html), class_name="rv-meta")
-    date = require_first(metadata, tag="span")
+    date = require_first(metadata, tag="time")
 
-    assert date.text == date_label
+    assert date.attrs["datetime"] == timestamp
     assert date.attrs["title"] == timestamp
     assert parse_info_modal(html).general["Generated"] == timestamp
     assert script_payload(html)["generated_at"] == timestamp
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (24000 / 1001, "23.976 fps"),
+        (23.976023976023978, "23.976 fps"),
+        (25.0, "25 fps"),
+        (29.97, "29.97 fps"),
+        (24.0, "24 fps"),
+    ],
+)
+def test_render_fps_rounds_to_three_decimals(value: float, expected: str) -> None:
+    assert _render_fps(value) == expected
+
+
+def test_build_html_falls_back_to_plain_span_for_unparseable_timestamp(
+    report_payload: ReportPayload,
+) -> None:
+    payload: ReportPayload = {**report_payload, "generated_at": 'unknown "<date>"'}
+    html = build_html(payload)
+    metadata = require_first(parse_elements(html), class_name="rv-meta")
+    date = require_first(metadata, tag="span")
+
+    assert date.text == 'unknown "<date>"'
+    assert date.attrs["title"] == 'unknown "<date>"'
+    assert script_payload(html)["generated_at"] == 'unknown "<date>"'
 
 
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
@@ -306,7 +332,9 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
 
     metadata = require_first(elements, class_name="rv-meta")
     assert "• 2 frames • 2 clips" in metadata.text
-    assert require_first(metadata, tag="span").text == "2026-05-22"
+    generated = require_first(metadata, tag="time")
+    assert generated.attrs["datetime"] == "2026-05-22T12:00:00+00:00"
+    assert generated.attrs["title"] == "2026-05-22T12:00:00+00:00"
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report information"
@@ -407,8 +435,71 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     pairs = parse_definition_pairs(details)
     assert pairs["Dynamic peak detection"] == "On"
     assert pairs["Gamma lift"] == "Off"
-    assert pairs["Source peak"] == "Auto"
+    assert pairs["Source peak"] == "Automatic"
+    assert pairs["Smoothing period"] == "45 frames"
+    assert pairs["Scene thresholds"] == "0.8 low · 2.4 high"
+    assert pairs["Gamut mapping"] == "Perceptual"
+    assert pairs["Metadata mode"] == "Automatic selection"
+    assert "Scene threshold low" not in pairs
+    assert "Scene threshold high" not in pairs
     assert pairs["Dolby Vision metadata use"] == "Off"
+
+
+@pytest.mark.parametrize(
+    ("gamut", "expected"),
+    [
+        (0, "Clip"),
+        (1, "Perceptual"),
+        (2, "Soft clip"),
+        (3, "Relative"),
+        (4, "Saturation"),
+        (5, "Absolute"),
+        (6, "Desaturate"),
+        (7, "Darken"),
+        (8, "Highlight"),
+        (9, "Linear"),
+        (42, "42"),
+    ],
+)
+def test_build_html_labels_gamut_mapping_values(
+    report_payload: ReportPayload, gamut: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": {"gamut_mapping": gamut}},
+        },
+    }
+    html = build_html(payload)
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert parse_definition_pairs(details)["Gamut mapping"] == expected
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (0, "Automatic selection"),
+        (1, "None"),
+        (2, "HDR10 (static)"),
+        (3, "HDR10+ (MaxRGB)"),
+        (4, "Luminance (CIE Y)"),
+        (9, "9"),
+    ],
+)
+def test_build_html_labels_metadata_modes(
+    report_payload: ReportPayload, metadata: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": {"metadata": metadata}},
+        },
+    }
+    html = build_html(payload)
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert parse_definition_pairs(details)["Metadata mode"] == expected
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:

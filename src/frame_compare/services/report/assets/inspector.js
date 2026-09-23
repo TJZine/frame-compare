@@ -242,7 +242,7 @@ const Inspector = {
                         values[4].textContent = ViewerFormat.formatFileSize(clip.size_bytes);
                         values[5].textContent = ViewerFormat.formatSignal(clip.signal);
                         values[6].textContent = ViewerFormat.formatPresentation(clip);
-                        const activePicture = ViewerFormat.formatActivePicture(clip.active_picture);
+                        const activePicture = ViewerFormat.formatActivePicture(clip.active_picture, clip.resolution);
                         const clipList = item.querySelector('dl');
                         if (activePicture && clipList?.appendChild) {
                             const row = document.createElement('div');
