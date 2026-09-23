@@ -18,7 +18,9 @@ independent benchmarks justify a change:
 - `worker`: Sol escalation implementation for a bounded unit with settled product,
   ownership, contracts, and proof that still needs material local design judgment,
   cross-boundary comprehension, complex diagnosis, or proof interpretation;
-- `reviewer`: independent read-only review.
+- `reviewer`: independent read-only review at standard depth (the default);
+- `deep_reviewer`: the same review with more reasoning depth, for high-risk, broad,
+  or hard-to-prove changes.
 
 Resolve the role's `config_file` through `.codex/config.toml` (role keys and file
 names can differ, such as `worker_luna` and `agents/worker-luna.toml`). Treat that

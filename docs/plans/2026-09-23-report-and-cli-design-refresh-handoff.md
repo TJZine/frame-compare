@@ -24,6 +24,13 @@ maintainer/controller review before the next track starts.
 Paste one prompt per session. Every prompt requires the session to read the
 [Common rules](#common-rules) first.
 
+**Checkpoint reviews (controller side).** When a track's final report comes back,
+the controller reviews it with the repository's `reviewer` subagent
+(`.claude/agents/reviewer.md`), not `deep_reviewer`. Give it the track's plan
+sections, Invariants, Test scope, the final report, and `git diff <track start
+SHA>..<track end SHA>`; the controller verifies its findings, re-runs the gate, and
+performs the review checks by eye before accepting the track.
+
 ## Common rules
 
 These apply to every session. The prompts refer to them by name.
