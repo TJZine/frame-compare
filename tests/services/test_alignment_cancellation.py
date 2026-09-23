@@ -251,6 +251,66 @@ async def test_worker_error_racing_outer_cancellation_does_not_replace_cancellat
         await task
 
 
+@pytest.mark.anyio
+async def test_cleanup_failure_after_cancellation_replaces_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    started = threading.Event()
+    cleanup_release = threading.Event()
+
+    def fail_cleanup_after_cancel(
+        *_args: Any, cancellation: threading.Event, **_kwargs: Any
+    ) -> Any:
+        started.set()
+        while not cancellation.is_set():
+            time.sleep(0.001)
+        cleanup_release.wait(timeout=2)
+        raise AudioAlignmentCleanupError(
+            "collector child was not reaped",
+            category="cancelled",
+            stage="discovery",
+        )
+
+    monkeypatch.setattr(alignment, "_estimate_audio_pair", fail_cleanup_after_cancel)
+    diagnostics = MagicMock()
+    review = MagicMock()
+    cache_write = MagicMock()
+    monkeypatch.setattr(alignment, "_write_run_diagnostics", diagnostics)
+    monkeypatch.setattr(alignment, "maybe_launch_alignment_vsview", review)
+    monkeypatch.setattr(alignment, "save_reusable_offsets", cache_write)
+    task = asyncio.create_task(
+        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
+    )
+    await _wait_until(started)
+    task.cancel()
+    await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.sleep(0.01)
+    assert not task.done()
+    cleanup_release.set()
+
+    with pytest.raises(AudioAlignmentCleanupError) as caught:
+        await task
+
+    assert caught.value.category == "cancelled"
+    assert isinstance(caught.value.__cause__, asyncio.CancelledError)
+    diagnostics.assert_not_called()
+    review.assert_not_called()
+    cache_write.assert_not_called()
+
+
 def test_maximum_admitted_scoring_stops_between_hypotheses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

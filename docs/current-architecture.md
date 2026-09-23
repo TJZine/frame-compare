@@ -427,10 +427,11 @@ diagnostic publication, native review, cache persistence, and presentation stay 
 the application execution context, while one owned worker thread performs only the
 blocking probe, collection, correlation, and bounded scoring work. Outer task
 cancellation sets one thread-safe event, waits through repeated cancellation for the
-worker and collector cleanup to finish, and then re-raises the original cancellation;
-no partial worker result reaches phase-output application. Incomplete child, reader,
-pipe, or handle cleanup is a distinct fatal alignment error even when ordinary
-dependency or decode failures remain warning-only for optional alignment. The attempt
+worker and collector cleanup to finish, and then re-raises the original cancellation
+unless that cleanup failed; no partial worker result reaches phase-output application.
+Incomplete child, reader, pipe, or handle cleanup is a distinct fatal alignment error,
+including after cancellation, even when ordinary dependency or decode failures remain
+warning-only for optional alignment. The attempt
 retains resolved pathless stream facts, one bounded result for
 every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
 and a separate display-only provisional candidate. The shipped

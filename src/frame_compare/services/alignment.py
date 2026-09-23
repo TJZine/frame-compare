@@ -37,7 +37,11 @@ from frame_compare.services.alignment_previous_offsets import (
 )
 from frame_compare.services.alignment_reuse_cache import comparison_cache_key, save_reusable_offsets
 from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
-from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
+from frame_compare.services.errors import (
+    AudioAlignmentCleanupError,
+    AudioAlignmentError,
+    raise_if_alignment_cancelled,
+)
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
@@ -739,18 +743,16 @@ async def _await_audio_computation(
     )
     try:
         return await asyncio.shield(worker)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as cancelled:
         cancellation.set()
         while not worker.done():
-            try:
-                await asyncio.shield(worker)
-            except asyncio.CancelledError:
-                continue
-            except BaseException:
-                break
-        if worker.done() and not worker.cancelled():
-            with suppress(BaseException):
-                worker.result()
+            with suppress(asyncio.CancelledError):
+                await asyncio.wait((worker,))
+        # Cancellation outranks ordinary worker failures, but never hides a failed
+        # release of an owned child, reader, pipe, or handle.
+        error = None if worker.cancelled() else worker.exception()
+        if isinstance(error, AudioAlignmentCleanupError):
+            raise error from cancelled
         raise
 
 
