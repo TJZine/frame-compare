@@ -583,6 +583,21 @@ smoke, Claude in-app browser (Chromium) for interactive review, local HTTP.
   concrete defects were repaired with red/green proof, and no consequential open
   correctness, security, or contract risk remained to justify one.
 
+### Rebase SHA mapping and Windows test repair — September 23, 2026
+
+The branch was later rebased onto `1c99e4b4` and published. Every commit is
+patch-identical (`git range-diff`); SHAs cited above map as follows: `3b0da8a0` →
+`5bb8dab5`, `cdf77d70` → `e4342501`, `0d9194b3` → `065083c4`, `cf007a24` →
+`837b5e4a`, `a63222df` → `4fa36685`, `fac74744` → `e9958270`, `f31e8a45` →
+`c3d1b7ca`, `6eb970c5` → `1baf8100`, `fa788a3c` → `ad66c120`, `7202c4b9` →
+`37972e80`, `9242f198` → `2381fd3c`, `e3b84225` → `d279865c`.
+
+Hosted Windows portable on `d279865c` failed on the P2 test
+`test_successful_write_prints_verified_next_steps_with_posix_quoting`: its workspace
+name contained `"`, which is illegal on Windows. `f631a257` repairs only the test
+(Windows omits that character; POSIX-asserting wizard tests pin POSIX quoting). A
+hosted Windows rerun needs a push, which has not been performed.
+
 ### Closeout status
 
 P1–P4 are accepted. P6 browser, terminal, documentation, and full-gate evidence on

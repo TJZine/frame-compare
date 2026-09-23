@@ -488,7 +488,7 @@ at the next checkpoint. Pending rows are not proof.
 | U1 | Accepted after U1-R; Windows remains W1 | `e9e70d8891c7c65264d650b2fbd759ca808d86fe` / `e07699581cc3a171230d19f6c99e16539dbaeab3` | `01a0c828-7d7d-7270-9d9e-4fda3f1be796`; Luna xhigh | Alignment presentation/callback, tests and current docs; `e0769958` | Focused/full/static checks reported; normal/narrow render captured | Complete diff inspected; focused tests passed; two concrete contract gaps reproduced | U1-R `6ea7e67a` accepted; U2 next |
 | U2 | Accepted after U2-R; physical Windows remains W1 | `5afe857c788481073053f67f74a97e35b86d070b` / `ecfdc90d1f83e021d087e5941f06791d35137639` | `01a0c854-688e-74d1-ae5b-83257c98e199`; Luna xhigh | Panel/tests/current docs; `ecfdc90d` | Full/static/docs/package and offscreen screenshots reported | Code and screenshots inspected; three UI regressions reproduced in Qt | U2-R `c0fb947d` accepted; A1-R Docker gate repair next |
 | A1 | Passed local/Docker/package; live docs external warning isolated | `3a25a3949091a6179b3117aa30ee330455b9e790` / same production tree | Controller | Full integrated candidate; no implementation edits | N/A | Full pytest/static/API/tracked-doc/distribution; canonical Docker340/0 and resource5/0 | W1 physical Windows handoff ready |
-| W1 | Ready; physical Windows evidence required | Final controller plan candidate / pending | New Windows task, Sol medium prescribed | Sanitized acceptance evidence only | Pending | Pending | Implementation stopped at this gate; no final closeout |
+| W1 | Ready on refreshed candidate; physical Windows evidence required | `f631a257` (plan-only descendants allowed) / pending | New Windows agent session; strong reasoning model | Sanitized acceptance evidence only | Pending | Refreshed local, Docker, resource and distribution proof below | Supersedes the `c994975d` handoff; no final closeout |
 | Closeout | Pending all acceptance | Pending | Controller | Plan only | Not applicable | Complete range audit pending | Hosted status and limitations required |
 
 ### C0 acceptance — September 22, 2026
@@ -930,3 +930,50 @@ resource matrix, visible terminal/VSView cases, evidence privacy and one-attempt
 callback. User transfers the exact candidate to Windows; no push is performed by this
 controller. Plan remains Active until returned Windows evidence is audited and final
 closeout checks pass.
+
+### A1 refresh and W1 candidate refresh — September 23, 2026
+
+Later production commits invalidated the `3a25a394` A1 candidate: `80598c86`,
+`4f34981e`, `06d1e6de`, `2bbbb403`, the VapourSynth R80 runtime `8921a2c7`,
+`1c99e4b4` (collection readers drained before pipes close, whose message states full,
+Docker, and physical Windows proof were still required), and the CLI/report UX
+commits `e4342501`, `837b5e4a`, `e9958270`, `1baf8100`. The branch was rebased onto
+`1c99e4b4` and published at `d279865c`. All earlier W1 ancestors remain ancestors, and
+the policy token is unchanged.
+
+Controller proof on `d279865c` (macOS arm64 plus local Docker; complete output in
+ignored `.codex/cache/task-evidence/w1-refresh`):
+
+- Full `pytest -q -rs` exit 0. The 48 skips were inspected: Windows/PowerShell
+  semantics, local `lsmas`/`libplacebo`, opt-in resource/channel suites, and live
+  network. Pyright 0/0/0, Ruff, Bandit 0 medium/high, import contracts 2 kept, API-doc
+  drift check, and strict docs build passed.
+- Native opt-in `FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1` resources 5 passed and
+  `FRAME_COMPARE_CHANNEL_CORROBORATION=1` channel suite 1 passed, with no skips.
+- `bash tools/verify_docker_integration.sh` rebuilt the images and passed: VapourSynth
+  R80/API 4.3, 340 tests, zero skips, runtime proof OK. The exact workflow resource
+  command on test image `sha256:7ce9090a…` passed 5 with zero skips, at most one
+  active child, and bounded combined RSS.
+- Fresh distribution build: verifier passed; clean Python 3.13 install ran `version`
+  and `--help`; the installed wheel carries the report-viewer changes. Wheel SHA-256
+  `39b31f62…`, sdist `f3c5ef25…`.
+- Hosted runs on `d279865c`: CI, Docker Integration, and Documentation succeeded.
+  Windows portable ([run 35825280084](https://github.com/TJZine/frame-compare/actions/runs/35825280084))
+  failed in its Windows pytest step on one CLI UX wizard test that created a
+  directory name containing `"`, which is illegal on Windows. `f631a257`
+  (`test(cli): keep wizard next-step tests host-independent`) repairs the test only:
+  it omits that character on Windows and pins POSIX quoting for POSIX-asserting
+  tests. Production files are identical to `d279865c`, so the proof above stays
+  valid; the changed file passed 52/52 locally. `f631a257` is unpublished, and no
+  hosted Windows result exists for it yet.
+
+The refreshed copy-paste handoff (`windows-handoff.md`), candidate identity
+(`windows-candidate.json`), and fallback Git bundle (`windows-candidate.bundle`,
+which needs `13330e31`) are in `.codex/cache/task-evidence/w1-refresh`. The handoff
+keeps the W1 matrix and evidence boundary and adds: the R80 identities to record,
+with a stop rule if the R80 bundle fails to build, verify, launch, or run doctor
+(separate media-runtime physical acceptance stays out of scope); a
+nonzero-exit/late-stderr cleanup case for `1c99e4b4`; the two macOS VSView
+observations; and read-only PowerShell observations for the CLI/report UX plan. The
+Codex callback text remains for Codex hosts; Claude hosts return the structured
+result for the user to paste back. No push was performed.
