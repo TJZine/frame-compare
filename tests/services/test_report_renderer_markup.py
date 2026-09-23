@@ -631,8 +631,8 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     tab_names = [
         child.attrs.get("data-inspector-tab") for child in tablist.children if child.tag == "button"
     ]
-    assert tab_names == ["frame", "clips", "align", "review", "export"]
-    for tab in ("frame", "clips", "align", "review", "export"):
+    assert tab_names == ["frame", "clips", "align", "review"]
+    for tab in ("frame", "clips", "align", "review"):
         tab_button = require_first(
             tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
         )
@@ -654,7 +654,13 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     ):
         button = require_first(inspector, tag="button", element_id=button_id)
         assert button.attrs["tabindex"] == "-1"
-    assert "data-inspector-export-summary" in html
+    assert "inspector-tab-export" not in html
+    assert "inspector-panel-export" not in html
+    assert "data-inspector-export-title" not in html
+    assert "data-inspector-export-id" not in html
+    assert "data-inspector-export-generated" not in html
+    assert "data-inspector-export-slowpics" not in html
+    assert "data-inspector-export-summary" not in html
     review_panel = require_first(inspector, element_id="inspector-panel-review")
     review_note = require_first(review_panel, tag="textarea", attr_name="data-review-note")
     review_note_count = require_first(review_panel, tag="span", attr_name="data-review-note-count")
@@ -667,6 +673,16 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     review_status = require_first(review_panel, attr_name="data-review-status")
     assert "role" not in review_status.attrs
     assert "aria-live" not in review_status.attrs
+    static_note = require_first(review_panel, tag="p", class_name="rv-inspector-note")
+    assert static_note.text == (
+        "Notes are not stored in the report file. Export review JSON to keep or transfer them."
+    )
+    export_button = require_first(review_panel, tag="button", attr_name="data-review-export")
+    assert export_button.text == "Export review JSON"
+    import_button = require_first(
+        review_panel, tag="button", attr_name="data-review-import-trigger"
+    )
+    assert import_button.text == "Import review JSON"
     assert html.count('id="viewer-live"') == 1
     assert "inspector-panel-pixel" not in html
     assert "Pixel value unavailable" not in html

@@ -82,9 +82,7 @@ const frameTab = element();
 frameTab.dataset.inspectorTab = 'frame';
 const framePanel = element();
 framePanel.id = 'inspector-panel-frame';
-const slowpics = element();
-slowpics.replaceChildren({ textContent: 'sentinel' });
-const textTargets = Array.from({ length: 10 }, element);
+const textTargets = Array.from({ length: 9 }, element);
 let renderingSummaryCalls = 0;
 const viewer = {
     state: {
@@ -94,14 +92,7 @@ const viewer = {
         alignX: 0,
         alignY: 0,
         mode: 'overlay',
-        data: {
-            title: 'Example report',
-            report_id: 'report-1',
-            generated_at: '2026-08-22T00:00:00Z',
-            slowpics_url: 'https://slow.pics/c/example',
-            stats: { frame_count: 1, clip_count: 2 },
-            clips: [],
-        },
+        data: {},
     },
     dom: {
         inspector: inspectorElement,
@@ -119,11 +110,6 @@ const viewer = {
         inspectorAlignPreset: textTargets[6],
         inspectorAlignX: textTargets[7],
         inspectorAlignY: textTargets[8],
-        inspectorExportTitle: textTargets[9],
-        inspectorExportId: element(),
-        inspectorExportGenerated: element(),
-        inspectorExportSlowpics: slowpics,
-        inspectorExportSummary: element(),
     },
     updateRenderingSummary() { renderingSummaryCalls += 1; },
     currentFrame() { return null; },
@@ -148,35 +134,27 @@ inspector.setFocusable = enabled => {
 assert.equal(inspector.viewer, viewer);
 assert.equal(inspector.validTab('review'), true);
 assert.equal(inspector.validTab('unknown'), false);
-assert.equal(inspector.safeHttpUrl('https://slow.pics/c/example'), 'https://slow.pics/c/example');
-assert.equal(inspector.safeHttpUrl('javascript:alert(1)'), null);
+assert.equal(inspector.validTab('export'), false);
 
 inspector.render();
 inspector.render();
 assert.equal(renderingSummaryCalls, 0);
 assert.equal(focusabilityUpdates, 1);
-assert.equal(slowpics.children[0].textContent, 'sentinel');
 assert.equal(inspectorElement.getAttribute('aria-hidden'), 'true');
 
 inspector.setOpen(true, { focus: false, save: false });
 assert.equal(renderingSummaryCalls, 1);
 inspector.updateVisibility();
 assert.equal(focusabilityUpdates, 2);
-assert.equal(slowpics.children[0].tagName, 'A');
-assert.equal(slowpics.children[0].href, 'https://slow.pics/c/example');
 assert.equal(inspectorElement.getAttribute('aria-hidden'), 'false');
 
 inspector.setOpen(false, { focus: false, save: false });
 assert.equal(focusabilityUpdates, 3);
-viewer.state.data.slowpics_url = 'javascript:alert(1)';
 inspector.setOpen(true, { focus: false, save: false });
 assert.equal(focusabilityUpdates, 4);
 assert.equal(renderingSummaryCalls, 2);
-assert.equal(slowpics.children[0].textContent, 'javascript:alert(1)');
-assert.equal(slowpics.children[0].tagName, undefined);
 
 console.log(JSON.stringify({
     pureFormattingOwner: true,
     focusedInspectorOwner: renderingSummaryCalls === 2,
-    safeSlowpicsBoundary: slowpics.children[0].tagName === undefined,
 }));

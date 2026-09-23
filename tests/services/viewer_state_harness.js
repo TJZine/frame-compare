@@ -318,11 +318,11 @@ function loadViewer({ clipCount, savedState = null }) {
         btnInspector: fakeElement(),
         inspector: fakeElement(),
         btnInspectorClose: fakeElement(),
-        inspectorTabs: ['frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
+        inspectorTabs: ['frame', 'clips', 'align', 'review'].map((tab) => ({
             ...fakeElement(),
             dataset: { inspectorTab: tab },
         })),
-        inspectorPanels: ['frame', 'clips', 'align', 'review', 'export'].map((tab) => ({
+        inspectorPanels: ['frame', 'clips', 'align', 'review'].map((tab) => ({
             ...fakeElement(),
             id: `inspector-panel-${tab}`,
         })),
@@ -339,11 +339,6 @@ function loadViewer({ clipCount, savedState = null }) {
         inspectorAlignY: fakeElement(),
         btnInspectorResetCurrentAlign: fakeElement(),
         btnInspectorResetAllAlign: fakeElement(),
-        inspectorExportTitle: fakeElement(),
-        inspectorExportId: fakeElement(),
-        inspectorExportGenerated: fakeElement(),
-        inspectorExportSlowpics: fakeElement(),
-        inspectorExportSummary: fakeElement(),
         modal: fakeElement(),
         infoModal: fakeElement(),
         btnHelp: fakeElement(),
@@ -621,7 +616,7 @@ const summary = {};
             filmstripCollapsed: 'yes',
             filmstripSize: 'huge',
             inspectorOpen: 'yes',
-            inspectorTab: 'bad',
+            inspectorTab: 'export',
             blinkIntervalMs: '700',
         },
     });
@@ -629,6 +624,8 @@ const summary = {};
     assert.equal(viewer.state.filmstripCollapsed, false);
     assert.equal(viewer.state.filmstripSize, 'normal');
     assert.equal(viewer.state.inspectorOpen, false);
+    // A persisted 'export' tab is the removed Inspector Export tab; it must fall
+    // back to Frame through the same invalid-tab handling as any unknown value.
     assert.equal(viewer.state.inspectorTab, 'frame');
     assert.equal(viewer.state.blinkIntervalMs, 700);
     assert.equal(typeof viewer.state.blinkIntervalMs, 'number');
@@ -663,23 +660,24 @@ const summary = {};
     viewer.inspector.setTab('review');
     assert.equal(viewer.state.inspectorTab, 'review');
     assert.deepEqual(reviewMetrics, { creates: 0, binds: 0, renders: 0 });
-    viewer.inspector.setTab('export');
+    viewer.inspector.setTab('clips');
     viewer.inspector.setTab('review');
     assert.equal(reviewMetrics.creates, 0);
-    viewer.inspector.setTab('export');
+    viewer.inspector.setTab('clips');
     const focusables = viewer.dom.inspectorFocusables;
     const initiatingControl = fakeElement();
     document.activeElement = initiatingControl;
     const infoLabel = viewer.dom.btnInfo.getAttribute('aria-label');
     const infoTitle = viewer.dom.btnInfo.getAttribute('title');
     viewer.inspector.setOpen(true);
-    assert.equal(document.activeElement, viewer.dom.inspectorTabs[4]);
+    assert.equal(document.activeElement, viewer.dom.inspectorTabs[1]);
     const wrapEvent = keyboardEvent('ArrowRight');
-    wrapEvent.currentTarget = viewer.dom.inspectorTabs[4];
+    // Last tab (Review, index 3 in the 4-tab list) is the roving-tabindex wrap boundary.
+    wrapEvent.currentTarget = viewer.dom.inspectorTabs[3];
     viewer.inspector.handleTabKey(wrapEvent);
     assert.equal(viewer.state.inspectorTab, 'frame');
     assert.equal(document.activeElement, viewer.dom.inspectorTabs[0]);
-    viewer.inspector.setTab('export');
+    viewer.inspector.setTab('clips');
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     assert.equal(viewer.dom.btnInspector.getAttribute('aria-expanded'), 'true');
@@ -701,7 +699,7 @@ const summary = {};
     assert.equal(viewer.dom.inspector.inert, false);
     assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '0');
     viewer.dom.inspectorTabs.forEach((element, index) => {
-        assert.equal(element.tabIndex, index === 4 ? 0 : -1);
+        assert.equal(element.tabIndex, index === 1 ? 0 : -1);
     });
     viewer.inspector.setOpen(false);
     document.activeElement = document.body;
@@ -713,7 +711,7 @@ const summary = {};
     const saved = persisted(storage, storageKey);
     assert.equal(saved.currentFrameIdx, 1);
     assert.equal(saved.inspectorOpen, false);
-    assert.equal(saved.inspectorTab, 'export');
+    assert.equal(saved.inspectorTab, 'clips');
     assert.equal(saved.pixelLensEnabled, undefined);
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
@@ -877,36 +875,6 @@ const summary = {};
         alignmentClosedBeforeInspector: true,
         legacyInfoModalWins: true,
         inspectorStillOpenAfterAlignmentEscape: true,
-    };
-}
-
-{
-    const { viewer } = loadViewer({ clipCount: 4 });
-
-    viewer.state.data.slowpics_url = 'https://slow.pics/c/abc?x=1&y=2';
-    viewer.inspector.renderSlowpics();
-    assert.equal(viewer.dom.inspectorExportSlowpics.children.length, 1);
-    const link = viewer.dom.inspectorExportSlowpics.children[0];
-    assert.equal(link.tagName, 'A');
-    assert.equal(link.href, 'https://slow.pics/c/abc?x=1&y=2');
-    assert.equal(link.rel, 'noopener noreferrer');
-    assert.equal(link.target, '_blank');
-    assert.equal(link.textContent, 'https://slow.pics/c/abc?x=1&y=2');
-
-    viewer.state.data.slowpics_url = 'javascript:alert(1)';
-    viewer.inspector.renderSlowpics();
-    assert.equal(viewer.dom.inspectorExportSlowpics.children.length, 1);
-    assert.equal(viewer.dom.inspectorExportSlowpics.children[0].nodeType, 3);
-    assert.equal(viewer.dom.inspectorExportSlowpics.children[0].textContent, 'javascript:alert(1)');
-
-    viewer.state.data.slowpics_url = null;
-    viewer.inspector.renderSlowpics();
-    assert.equal(viewer.dom.inspectorExportSlowpics.children[0].textContent, 'Not uploaded');
-
-    summary.inspectorSlowpics = {
-        safeLinkTag: 'A',
-        unsafeAsText: true,
-        missingStatus: 'Not uploaded',
     };
 }
 

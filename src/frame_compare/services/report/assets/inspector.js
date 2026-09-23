@@ -24,11 +24,6 @@ const Inspector = {
                     inspectorAlignY: document.querySelector('[data-inspector-align-y]'),
                     btnInspectorResetCurrentAlign: document.getElementById('btn-inspector-reset-current-align'),
                     btnInspectorResetAllAlign: document.getElementById('btn-inspector-reset-all-align'),
-                    inspectorExportTitle: document.querySelector('[data-inspector-export-title]'),
-                    inspectorExportId: document.querySelector('[data-inspector-export-id]'),
-                    inspectorExportGenerated: document.querySelector('[data-inspector-export-generated]'),
-                    inspectorExportSlowpics: document.querySelector('[data-inspector-export-slowpics]'),
-                    inspectorExportSummary: document.querySelector('[data-inspector-export-summary]'),
                 };
             },
 
@@ -51,7 +46,7 @@ const Inspector = {
             },
 
             validTab(tab) {
-                return ['frame', 'clips', 'align', 'review', 'export'].includes(tab);
+                return ['frame', 'clips', 'align', 'review'].includes(tab);
             },
 
             setOpen(open, options = {}) {
@@ -168,33 +163,6 @@ const Inspector = {
                 });
             },
 
-            safeHttpUrl(url) {
-                if (typeof url !== 'string' || url.length === 0) return null;
-                try {
-                    const parsed = new URL(url);
-                    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
-                } catch {
-                    return null;
-                }
-            },
-
-            renderSlowpics() {
-                if (!viewer.dom.inspectorExportSlowpics) return;
-                const slowpicsUrl = viewer.state.data.slowpics_url;
-                const safeUrl = this.safeHttpUrl(slowpicsUrl);
-                if (!safeUrl) {
-                    viewer.dom.inspectorExportSlowpics.replaceChildren(document.createTextNode(slowpicsUrl || 'Not uploaded'));
-                    return;
-                }
-                const link = document.createElement('a');
-                link.href = safeUrl;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.className = 'rv-link';
-                link.textContent = slowpicsUrl;
-                viewer.dom.inspectorExportSlowpics.replaceChildren(link);
-            },
-
             currentClipRole(index) {
                 const roles = [];
                 if (viewer.state.mode === 'grid' && viewer.gridView?.indexes().includes(index)) {
@@ -290,12 +258,6 @@ const Inspector = {
                 viewer.setText(viewer.dom.inspectorAlignPreset, viewer.viewport.alignmentPresetLabel(viewer.state.alignmentPreset));
                 viewer.setText(viewer.dom.inspectorAlignX, viewer.viewport.formatSignedPixels(viewer.state.alignX, 'x'));
                 viewer.setText(viewer.dom.inspectorAlignY, viewer.viewport.formatSignedPixels(viewer.state.alignY, 'y'));
-                viewer.setText(viewer.dom.inspectorExportTitle, viewer.state.data.title || '');
-                viewer.setText(viewer.dom.inspectorExportId, viewer.state.data.report_id || '');
-                viewer.setText(viewer.dom.inspectorExportGenerated, viewer.state.data.generated_at || '');
-                this.renderSlowpics();
-                viewer.setText(viewer.dom.inspectorExportSummary,
-                    `${viewer.state.data.title || 'Report'} • ${viewer.state.data.stats.frame_count} frames • ${viewer.state.data.stats.clip_count} clips • ${ViewerFormat.modeLabel(viewer.state.mode)}`);
                 viewer.reviewController?.render();
             },
         };

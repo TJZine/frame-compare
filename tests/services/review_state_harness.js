@@ -116,7 +116,7 @@ quota.mutate(5, { note: 'kept in memory' });
 assert.equal(quota.get(5).note, 'kept in memory');
 assert.equal(quotaStorage.value, quotaBytes);
 assert.equal(quota.status().unsaved, true);
-assert.match(quota.status().warning, /could not be saved/);
+assert.equal(quota.status().warning, R.constants.PERSISTENCE_WARNING);
 
 const memory = R.create({ ...context, storage: null });
 assert.equal(memory.apply(memory.preview([record(8)], 'replace')), true);

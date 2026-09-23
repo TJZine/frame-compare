@@ -54,7 +54,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
 
     inspector_state = summary["inspectorBlinkKeyboardState"]
     assert inspector_state["inspectorOpen"] is False
-    assert inspector_state["inspectorTab"] == "export"
+    assert inspector_state["inspectorTab"] == "clips"
     assert inspector_state["lensExcludedFromViewport"] is True
     assert inspector_state["rovingTabWrapped"] is True
     assert inspector_state["blinkPausedPersisted"] is False
@@ -73,9 +73,6 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "helpFocusTrappedAndRestored": True,
         "infoFocusTrappedAndRestored": True,
     }
-    assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
-    assert summary["inspectorSlowpics"]["unsafeAsText"] is True
-    assert summary["inspectorSlowpics"]["missingStatus"] == "Not uploaded"
     assert summary["inspectorFrameSources"] == [
         "Clip 1 — 10 / 100 · B-frame · DV RPU",
         "Clip 2 — 10 / 100 · B-frame",

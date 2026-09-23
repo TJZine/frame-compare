@@ -81,8 +81,10 @@ desktop it uses a wider responsive drawer; on narrower screens it overlays the s
 Source names, filenames, and long signal/presentation values wrap without requiring a
 document or Inspector horizontal scrollbar. Open Report Information for the Rendering
 section. It always states whether tonemapping was applied and, when applied, provides
-the full resolved settings in a closed-by-default advanced disclosure. No additional
-report tab or permanent metadata panel is created.
+the full resolved settings in a closed-by-default advanced disclosure. Report Information
+is also the single place for report metadata: title, report ID, generated timestamp,
+frame/clip counts, and the slow.pics link when uploaded. No additional report tab or
+permanent metadata panel duplicates it.
 
 Visible source HUD labels in Single, Slider, Diff, Blink, and Grid views append that
 same complete file size when available. File size is decision context only: it is not
@@ -120,6 +122,16 @@ URL can remove that local state. Existing v1.1 reports remain self-contained and
 migrated. Regenerated v1.2 reports start with fresh browser-local viewer and review state.
 Review JSON is scoped to the exact report ID and payload version; it is not a migration
 format.
+
+The Review tab holds the bookmark, tag, note, and preferred-clip fields alongside
+**Export review JSON** and **Import review JSON**, the only ways to keep or transfer
+notes outside the browser that made them. A persistent line states how many review
+records are saved in this browser, and a fixed note beside it reminds that notes are
+not stored in the report file. When browser storage is unavailable or a save fails, the
+viewer says changes are kept only for that session instead of claiming a save that did
+not happen; export review JSON while that message is showing to keep the notes. Import
+previews additions, changes, and removals before merge or replace is applied, and an
+import that cannot be validated or saved leaves existing records untouched.
 
 ## Screenshot overlays
 

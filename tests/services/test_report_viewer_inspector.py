@@ -20,7 +20,6 @@ def test_inspector_harness_owns_formatting_and_inspector_policy() -> None:
     assert json.loads(result.stdout.strip().splitlines()[-1]) == {
         "pureFormattingOwner": True,
         "focusedInspectorOwner": True,
-        "safeSlowpicsBoundary": True,
     }
 
 

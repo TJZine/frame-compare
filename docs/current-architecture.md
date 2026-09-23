@@ -776,7 +776,7 @@ users as Single where appropriate, diff, and pair-based blink modes; frame/categ
 navigation; a HUD toggle for stage labels and current-frame metadata; a primary
 toolbar plus floating viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Align,
-Review, and Export tabs; fullscreen support; viewport pan, zoom,
+and Review tabs; fullscreen support; viewport pan, zoom,
 actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
 CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
@@ -801,6 +801,9 @@ to distinguish image translation from temporal source-frame alignment.
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
 shadow. The renderer shortens the header generation timestamp to its recorded ISO date;
 the exact timestamp remains available in the tooltip, Report Information, and payload.
+Report Information is the single place for report metadata: title, report ID, generated
+timestamp, frame/clip counts, and the slow.pics link. The renderer alone builds that
+link's safe http(s) href; no viewer script re-derives it.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
@@ -876,9 +879,9 @@ exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
 active-picture labels, mode names, and stable clip roles. It does not read the DOM,
 storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
-Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
-activation through the root viewer. Hidden Inspectors update only visibility and tab
-semantics; opening refreshes their content before focus moves into the drawer.
+Clips, and Align rendering, and lazy Review activation through the root viewer. Hidden
+Inspectors update only visibility and tab semantics; opening refreshes their content
+before focus moves into the drawer.
 
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
@@ -896,7 +899,11 @@ V1 JSON export, strict import validation and preview, atomic merge/replace apply
 the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
 created on first visible Review use, keeps form rendering stable across unrelated viewer
 refreshes, and routes transition announcements through the existing shared polite live
-region. Its storage is
+region. A persistent status line states how many review records are saved in this
+browser (singular/plural and the zero count are each phrased truthfully) beside a static
+reminder that notes live in browser storage, not the report file; a storage-unavailable
+or failed-write state instead says changes are kept only for the session, and never
+claims persistence it did not achieve. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state

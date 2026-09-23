@@ -686,6 +686,9 @@ document.addEventListener('DOMContentLoaded', () => {
             && inspector?.getAttribute('aria-hidden') === 'true'
             && inspectorButton?.getAttribute('aria-expanded') === 'false'
             && document.activeElement === inspectorButton
+            && document.getElementById('inspector-tab-export') === null
+            && document.getElementById('inspector-panel-export') === null
+            && document.querySelectorAll('[data-inspector-tab]').length === 4
         );
 
         const filmstripAnchored = [false, true].every(collapsed => {
@@ -789,7 +792,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 && bookmark.checked
                 && note.value === 'Browser integration proof'
                 && document.querySelector('[data-review-status]')?.textContent.includes(
-                    'saved locally'
+                    'saved in this browser'
                 )
             );
         } catch (error) {

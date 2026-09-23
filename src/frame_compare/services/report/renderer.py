@@ -700,7 +700,6 @@ def _render_inspector() -> str:
             <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
             <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
             <button id="inspector-tab-review" type="button" role="tab" data-inspector-tab="review" aria-selected="false" aria-controls="inspector-panel-review" tabindex="-1">Review</button>
-            <button id="inspector-tab-export" type="button" role="tab" data-inspector-tab="export" aria-selected="false" aria-controls="inspector-panel-export" tabindex="-1">Export</button>
         </div>
         <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
             <dl class="rv-inspector-list">
@@ -746,6 +745,7 @@ def _render_inspector() -> str:
                 <select data-review-preferred tabindex="-1"></select>
             </label>
             <p class="rv-review-status" data-review-status></p>
+            <p class="rv-inspector-note">Notes are not stored in the report file. Export review JSON to keep or transfer them.</p>
             <div class="rv-inspector-actions rv-review-transfer">
                 <button type="button" data-review-export tabindex="-1">Export review JSON</button>
                 <button type="button" data-review-import-trigger tabindex="-1">Import review JSON</button>
@@ -766,15 +766,6 @@ def _render_inspector() -> str:
                     <button type="button" data-review-import-cancel>Cancel</button>
                 </div>
             </div>
-        </section>
-        <section id="inspector-panel-export" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-export" tabindex="-1" hidden>
-            <dl class="rv-inspector-list">
-                <div><dt>Title</dt><dd data-inspector-export-title></dd></div>
-                <div><dt>Report ID</dt><dd data-inspector-export-id></dd></div>
-                <div><dt>Generated</dt><dd data-inspector-export-generated></dd></div>
-                <div><dt>slow.pics</dt><dd data-inspector-export-slowpics></dd></div>
-                <div><dt>Summary</dt><dd data-inspector-export-summary></dd></div>
-            </dl>
         </section>
     </aside>"""
 
