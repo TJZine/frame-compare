@@ -65,6 +65,13 @@ label = "Encode A — AV1"
 Duplicate explicit labels fail. Derived collisions are qualified deterministically so
 presentation remains unambiguous.
 
+Streaming services are identified from release filename tokens using the TRaSH
+Guides *Streaming Services General* and *Streaming Services Anime* sets. Apple TV+
+displays as `ATVP`, HBO Max displays as `HMAX`, and `MAX` alone stays `MAX`. The
+services `CC`, `PLAY`, `HBO`, `HMAX`, `iT`, `MAX`, `SHO`, and `STAN` are only
+recognized when the token immediately after the service is `WEB`, `WEBDL`, or
+`WEBRIP`, so `IT` without a following web token yields no service.
+
 For live render progress, automatic labels become unique role-prefixed compact release
 descriptors. For slow.pics, automatic labels become unique full release descriptors.
 Report v1.2 similarly derives collision-safe control and constrained labels from the

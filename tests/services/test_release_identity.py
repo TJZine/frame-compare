@@ -58,7 +58,7 @@ from frame_compare.services.release_identity import (
         ("Film.2020.2160p.DSNP.WEB-DL.HYBRID.IMAX-GROUP.mkv", ("DSNP", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.HULU.WEB-DL-GROUP.mkv", ("HULU", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.PCOK.WEB-DL-GROUP.mkv", ("PCOK", "WEB-DL", (), (), "GROUP")),
-        ("Film.2020.1080p.HMAX.WEB-DL-GROUP.mkv", ("MAX", "WEB-DL", (), (), "GROUP")),
+        ("Film.2020.1080p.HMAX.WEB-DL-GROUP.mkv", ("HMAX", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.MA.BluRay-GROUP.mkv", ("MA", "BluRay", (), (), "GROUP")),
         ("Film.2020.1080p.AppleTV.WEB-DL-GROUP.mkv", ("ATV", "WEB-DL", (), (), "GROUP")),
     ],
@@ -93,6 +93,164 @@ def test_title_tokens_are_not_release_false_positives(filename: str) -> None:
     assert identity.service is None
     assert not identity.dynamic_range_claims
     assert not identity.revision_tags
+
+
+@pytest.mark.parametrize(
+    ("code_token", "expected"),
+    [
+        ("AMZN", "AMZN"),
+        ("ATV", "ATV"),
+        ("ATVP", "ATVP"),
+        ("APTV", "ATVP"),
+        ("CC", "CC"),
+        ("DCU", "DCU"),
+        ("DSNP", "DSNP"),
+        ("PLAY", "PLAY"),
+        ("HBO", "HBO"),
+        ("HMAX", "HMAX"),
+        ("HULU", "HULU"),
+        ("iT", "iT"),
+        ("MAX", "MAX"),
+        ("MA", "MA"),
+        ("NF", "NF"),
+        ("PMTP", "PMTP"),
+        ("PCOK", "PCOK"),
+        ("ROKU", "ROKU"),
+        ("SHO", "SHO"),
+        ("STAN", "STAN"),
+        ("SYFY", "SYFY"),
+        ("ABEMA", "ABEMA"),
+        ("ADN", "ADN"),
+        ("B-Global", "B-Global"),
+        ("Bilibili", "Bilibili"),
+        ("CR", "CR"),
+        ("FUNI", "FUNI"),
+        ("HIDIVE", "HIDIVE"),
+        ("VRV", "VRV"),
+        ("WKN", "WKN"),
+    ],
+)
+def test_streaming_service_codes_from_realistic_filenames(code_token: str, expected: str) -> None:
+    identity = parse_release_identity(f"Show.S01E01.1080p.{code_token}.WEB-DL.DDP5.1.H.264-GRP.mkv")
+    assert identity.service == expected
+
+
+@pytest.mark.parametrize(
+    ("alias_tokens", "expected"),
+    [
+        ("AMAZON", "AMZN"),
+        ("AMAZONHD", "AMZN"),
+        ("AMAZON.PRIME", "AMZN"),
+        ("APPLETV", "ATV"),
+        ("APPLE.TV", "ATV"),
+        ("APPLE.TV+", "ATVP"),
+        ("DC.UNIVERSE", "DCU"),
+        ("DSNY", "DSNP"),
+        ("DISNEY", "DSNP"),
+        ("DISNEY+", "DSNP"),
+        ("HBOM", "HMAX"),
+        ("HBOMAX", "HMAX"),
+        ("ITUNES", "iT"),
+        ("MOVIES.ANYWHERE", "MA"),
+        ("NETFLIX", "NF"),
+        ("NETFLIXHD", "NF"),
+        ("NETFLIXUHD", "NF"),
+        ("PARAMOUNT", "PMTP"),
+        ("PARAMOUNT+", "PMTP"),
+        ("PEACOCK", "PCOK"),
+        ("PEACOCK.TV", "PCOK"),
+        ("SHOWTIME", "SHO"),
+        ("ABEMATV", "ABEMA"),
+        ("ABEMA.TV", "ABEMA"),
+        ("BGLOBAL", "B-Global"),
+        ("B.GLOBAL", "B-Global"),
+        ("BILI", "Bilibili"),
+        ("CRUNCHYROLL", "CR"),
+        ("CRUNCHY.ROLL", "CR"),
+        ("FUNIMATION", "FUNI"),
+        ("HIDI", "HIDIVE"),
+        ("WAKA", "WKN"),
+        ("WAKANIM", "WKN"),
+    ],
+)
+def test_streaming_service_alias_spellings_from_realistic_filenames(
+    alias_tokens: str, expected: str
+) -> None:
+    identity = parse_release_identity(
+        f"Show.S01E01.1080p.{alias_tokens}.WEB-DL.DDP5.1.H.264-GRP.mkv"
+    )
+    assert identity.service == expected
+
+
+@pytest.mark.parametrize("code_token", ["CC", "PLAY", "HBO", "HMAX", "iT", "MAX", "SHO", "STAN"])
+def test_needs_web_services_without_web_next_give_no_service(code_token: str) -> None:
+    identity = parse_release_identity(f"Show.S01E01.1080p.{code_token}.DDP5.1.H.264-GRP.mkv")
+    assert identity.service is None
+
+
+def test_hbo_max_without_web_next_gives_no_service() -> None:
+    identity = parse_release_identity("Show.S01E01.1080p.HBO.MAX.DDP5.1.H.264-GRP.mkv")
+    assert identity.service is None
+
+
+def test_it_title_and_service_from_realistic_filename() -> None:
+    identity = parse_release_identity("It.2017.2160p.iT.WEB-DL.DDP5.1.H.264-GRP.mkv")
+    assert identity.content.title == "It"
+    assert identity.service == "iT"
+
+
+def test_it_without_web_next_gives_no_service() -> None:
+    identity = parse_release_identity("Show.S01E01.1080p.IT.DDP5.1.H.264-GRP.mkv")
+    assert identity.service is None
+
+
+def test_hbo_max_gives_hmax_and_hbo_alone_gives_hbo() -> None:
+    combined = parse_release_identity("Show.S01E01.1080p.HBO.MAX.WEB-DL.DDP5.1.H.264-GRP.mkv")
+    assert combined.service == "HMAX"
+    alone = parse_release_identity("Show.S01E01.1080p.HBO.WEB-DL.DDP5.1.H.264-GRP.mkv")
+    assert alone.service == "HBO"
+
+
+def test_screenshots_it_file_descriptor() -> None:
+    identity = parse_release_identity(
+        "Show.2024.2160p.iT.WEB-DL.DV.HDR.H.265-ThisBlockHasProblems.mkv"
+    )
+    assert (
+        format_release_descriptor(identity) == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
+    )
+
+
+@pytest.mark.parametrize(
+    ("guessit_name", "expected"),
+    [
+        ("Apple TV+", "ATVP"),
+        ("HBO Max", "HMAX"),
+        ("iTunes", "iT"),
+        ("Comedy Central", "CC"),
+        ("DC Universe", "DCU"),
+        ("Disney", "DSNP"),
+        ("HBO Go", "HBO"),
+        ("The Roku Channel", "ROKU"),
+        ("Showtime", "SHO"),
+        ("Stan", "STAN"),
+        ("Syfy", "SYFY"),
+        ("Crunchy Roll", "CR"),
+        ("Anime Digital Network", "ADN"),
+        ("Peacock", "PCOK"),
+    ],
+)
+def test_guessit_streaming_service_names_map_to_display_codes(
+    monkeypatch: pytest.MonkeyPatch, guessit_name: str, expected: str
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.services.metadata_parsing.guessit",
+        lambda _name: {"title": "Show", "streaming_service": guessit_name},
+    )
+    monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: {})
+
+    identity = parse_release_identity("Show.mkv")
+
+    assert identity.service == expected
 
 
 def test_embedded_source_text_does_not_start_the_release_suffix() -> None:

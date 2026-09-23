@@ -236,26 +236,69 @@ _SERVICE_ALIASES = {
     "amazon prime": "AMZN",
     "paramount+": "PMTP",
     "disney+": "DSNP",
-    "hbo max": "MAX",
+    "hbo max": "HMAX",
     "max": "MAX",
     "hulu": "HULU",
     "peacock": "PCOK",
     "movies anywhere": "MA",
     "apple tv": "ATV",
-    "apple tv+": "ATV",
+    "apple tv+": "ATVP",
+    "itunes": "iT",
+    "appletv": "ATVP",
+    "comedy central": "CC",
+    "dc universe": "DCU",
+    "disney": "DSNP",
+    "hbo go": "HBO",
+    "the roku channel": "ROKU",
+    "showtime": "SHO",
+    "stan": "STAN",
+    "syfy": "SYFY",
+    "crunchy roll": "CR",
+    "anime digital network": "ADN",
 }
 
-_SERVICE_TOKEN_ALIASES = {
-    "ATV": (("ATV",), ("APPLETV",), ("APPLE", "TV"), ("APPLE", "TV+")),
-    "PMTP": (("PMTP",), ("PARAMOUNT",), ("PARAMOUNT+",)),
-    "DSNP": (("DSNP",), ("DISNEY",), ("DISNEY+",)),
+_SERVICE_TOKEN_ALIASES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "AMZN": (("AMZN",), ("AMAZON",), ("AMAZONHD",), ("AMAZON", "PRIME")),
+    "ATV": (("ATV",), ("APPLETV",), ("APPLE", "TV")),
+    "ATVP": (("ATVP",), ("APTV",), ("APPLE", "TV+")),
+    "CC": (("CC",),),
+    "DCU": (("DCU",), ("DC", "UNIVERSE")),
+    "DSNP": (("DSNP",), ("DSNY",), ("DISNEY",), ("DISNEY+",)),
+    "PLAY": (("PLAY",),),
+    "HBO": (("HBO",),),
+    "HMAX": (("HMAX",), ("HBOM",), ("HBOMAX",), ("HBO", "MAX")),
     "HULU": (("HULU",),),
-    "PCOK": (("PCOK",), ("PEACOCK",)),
-    "MAX": (("HMAX",), ("MAX",), ("HBO", "MAX")),
-    "AMZN": (("AMZN",), ("AMAZON",), ("AMAZON", "PRIME")),
-    "NF": (("NF",), ("NETFLIX",)),
+    "iT": (("IT",), ("ITUNES",)),
+    "MAX": (("MAX",),),
     "MA": (("MA",), ("MOVIES", "ANYWHERE")),
+    "NF": (("NF",), ("NETFLIX",), ("NETFLIXHD",), ("NETFLIXUHD",)),
+    "PMTP": (("PMTP",), ("PARAMOUNT",), ("PARAMOUNT+",)),
+    "PCOK": (("PCOK",), ("PEACOCK",), ("PEACOCK", "TV")),
+    "ROKU": (("ROKU",),),
+    "SHO": (("SHO",), ("SHOWTIME",)),
+    "STAN": (("STAN",),),
+    "SYFY": (("SYFY",),),
+    "ABEMA": (("ABEMA",), ("ABEMATV",), ("ABEMA", "TV")),
+    "ADN": (("ADN",),),
+    "B-Global": (("BGLOBAL",), ("B", "GLOBAL")),
+    "Bilibili": (("BILI",), ("BILIBILI",)),
+    "CR": (("CR",), ("CRUNCHYROLL",), ("CRUNCHY", "ROLL")),
+    "FUNI": (("FUNI",), ("FUNIMATION",)),
+    "HIDIVE": (("HIDI",), ("HIDIVE",)),
+    "VRV": (("VRV",),),
+    "WKN": (("WKN",), ("WAKA",), ("WAKANIM",)),
 }
+
+_WEB_NEXT_TOKENS = frozenset({"WEB", "WEBDL", "WEBRIP"})
+
+_NEEDS_WEB_NEXT = frozenset({"CC", "PLAY", "HBO", "HMAX", "iT", "MAX", "SHO", "STAN"})
+
+_ORDERED_SERVICE_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
+    sorted(
+        ((code, alias) for code, aliases in _SERVICE_TOKEN_ALIASES.items() for alias in aliases),
+        key=lambda pair: (-len(pair[1]), -sum(len(token) for token in pair[1])),
+    )
+)
 
 _SOURCE_PATTERNS = (
     (r"UHD[. _-]*BluRay[. _-]*REMUX", "UHD BluRay REMUX"),
@@ -363,18 +406,31 @@ def _contains_tokens(tokens: tuple[str, ...], expected: tuple[str, ...]) -> bool
     return any(tokens[index : index + size] == expected for index in range(len(tokens) - size + 1))
 
 
+def _service_alias_hit(tokens: tuple[str, ...], code: str, alias: tuple[str, ...]) -> bool:
+    size = len(alias)
+    for index in range(len(tokens) - size + 1):
+        if tokens[index : index + size] != alias:
+            continue
+        if code == "HBO" and index + size < len(tokens) and tokens[index + size] == "MAX":
+            continue
+        if code == "MAX" and index > 0 and tokens[index - 1] == "HBO":
+            continue
+        if code in _NEEDS_WEB_NEXT and (
+            index + size >= len(tokens) or tokens[index + size] not in _WEB_NEXT_TOKENS
+        ):
+            continue
+        return True
+    return False
+
+
 def _service(parsed_service: str | None, tokens: tuple[str, ...]) -> str | None:
+    for code, alias in _ORDERED_SERVICE_ALIASES:
+        if _service_alias_hit(tokens, code, alias):
+            return code
     parsed = _SERVICE_ALIASES.get((parsed_service or "").strip().casefold())
     if parsed is not None:
         return parsed
-    return next(
-        (
-            code
-            for code, aliases in _SERVICE_TOKEN_ALIASES.items()
-            if any(_contains_tokens(tokens, alias) for alias in aliases)
-        ),
-        None,
-    )
+    return None
 
 
 def _dynamic_range_claims(tokens: tuple[str, ...]) -> tuple[str, ...]:
