@@ -715,7 +715,19 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert overlays_button.attrs["aria-label"] == "Hide source labels"
     assert overlays_button.attrs["title"] == "Hide source labels (H)"
     assert overlays_button.text == "Source labels"
+    assert find_all(overlays_button, tag="svg") != []
     assert "HUD" not in html
+    zoom_out = require_first(palette, tag="button", element_id="btn-zoom-out")
+    assert zoom_out.text == ""
+    assert find_all(zoom_out, tag="svg") != []
+    zoom_in = require_first(palette, tag="button", element_id="btn-zoom-in")
+    assert zoom_in.text == ""
+    assert find_all(zoom_in, tag="svg") != []
+    lens_button = require_first(palette, tag="button", element_id="btn-lens")
+    assert lens_button.text == "Lens"
+    assert lens_button.attrs["aria-label"] == "Turn lens on"
+    assert lens_button.attrs["title"] == "Toggle lens (L)"
+    assert find_all(lens_button, tag="svg") != []
     blink_controls = require_first(
         palette, tag="div", attr_name="data-control-scope", attr_value="blink"
     )
@@ -838,8 +850,8 @@ def test_build_html_renders_lens_stage_controls(
     lens = require_first(stage, tag="aside", element_id="rv-lens")
     assert lens.attrs["aria-label"] == "Image magnification lens"
     assert lens.attrs["data-size"] == "medium"
-    assert lens.attrs["data-comparison"] == "false"
-    for image_role in ("active", "difference", "comparison"):
+    assert "data-comparison" not in lens.attrs
+    for image_role in ("active", "difference"):
         assert (
             len(
                 find_all(
@@ -851,20 +863,15 @@ def test_build_html_renders_lens_stage_controls(
             )
             == 1
         )
-    active_role = require_first(lens, tag="span", attr_name="data-lens-role", attr_value="active")
-    assert active_role.text == "ACTIVE"
+    assert find_all(lens, tag="img", attr_name="data-lens-image", attr_value="comparison") == []
+    assert find_all(lens, tag="span", attr_name="data-lens-role") == []
+    assert find_all(lens, tag="span", class_name="rv-lens-fixed-status") == []
+    assert "COMPARE" not in html
+    assert ">Fixed<" not in html
     assert require_first(lens, tag="span", attr_name="data-lens-status", attr_value="active")
     assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="active")
-    comparison_role = require_first(
-        lens, tag="span", attr_name="data-lens-role", attr_value="comparison"
-    )
-    assert comparison_role.text == "COMPARE"
-    comparison_status = require_first(
-        lens, tag="span", attr_name="data-lens-status", attr_value="comparison"
-    )
-    assert "hidden" in comparison_status.attrs
-    assert comparison_status.text == ""
-    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="comparison")
+    caption = require_first(lens, tag="div", class_name="rv-lens-caption")
+    assert "hidden" in caption.attrs
     grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
     assert grip.attrs["aria-label"] == "Move lens window"
     assert not find_all(lens, tag="div", class_name="rv-lens-titlebar")
@@ -877,11 +884,43 @@ def test_build_html_renders_lens_stage_controls(
     assert settings_trigger.attrs["aria-controls"] == "lens-settings-popover"
     assert not find_all(palette, tag="div", element_id="lens-settings-popover")
     assert not find_all(lens, tag="div", element_id="lens-settings-popover")
-    assert require_first(settings, tag="input", element_id="lens-comparison-enabled")
-    assert require_first(settings, tag="button", attr_name="data-lens-marker", attr_value="off")
-    current_source = require_first(settings, tag="output", attr_name="data-lens-current-source")
-    assert current_source.text == "Lens is off."
-    assert current_source.attrs["aria-live"] == "off"
+    assert find_all(settings, tag="input", element_id="lens-comparison-enabled") == []
+    assert find_all(settings, attr_name="data-lens-current-source") == []
+    assert find_all(settings, attr_name="data-lens-comparison-settings") == []
+    size_options = find_all(settings, attr_name="data-lens-size")
+    assert [button.text for button in size_options] == ["Small", "Medium", "Large"]
+    marker_options = find_all(settings, attr_name="data-lens-marker")
+    assert [button.text for button in marker_options] == ["Off", "Ring", "Brackets"]
+    assert (
+        require_first(
+            settings, tag="button", attr_name="data-lens-marker", attr_value="ring"
+        ).attrs["aria-checked"]
+        == "true"
+    )
+    caption_options = find_all(settings, attr_name="data-lens-caption")
+    assert [button.text for button in caption_options] == ["Off", "On"]
+    assert (
+        require_first(
+            settings, tag="button", attr_name="data-lens-caption", attr_value="off"
+        ).attrs["aria-checked"]
+        == "true"
+    )
+    assert (
+        require_first(settings, tag="button", attr_name="data-lens-caption", attr_value="on").attrs[
+            "aria-checked"
+        ]
+        == "false"
+    )
+    assert (
+        require_first(settings, tag="button", attr_name="data-lens-caption", attr_value="on").attrs[
+            "tabindex"
+        ]
+        == "-1"
+    )
+    assert (
+        "drag its grip to move it"
+        in require_first(settings, tag="p", class_name="rv-lens-note").text
+    )
     assert not find_all(stage, attr_name="data-lens-behavior")
     assert not find_all(lens, tag="canvas")
     assert 'id="btn-inspect"' not in html

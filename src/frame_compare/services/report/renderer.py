@@ -595,36 +595,44 @@ def _render_lens_settings() -> str:
             <fieldset>
                 <legend>Sample marker</legend>
                 <div class="rv-lens-setting-options" role="radiogroup" aria-label="Sample marker style">
-                    <button type="button" role="radio" data-lens-marker="off" aria-checked="true">Off</button>
-                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="false" tabindex="-1">Ring</button>
+                    <button type="button" role="radio" data-lens-marker="off" aria-checked="false" tabindex="-1">Off</button>
+                    <button type="button" role="radio" data-lens-marker="ring" aria-checked="true">Ring</button>
                     <button type="button" role="radio" data-lens-marker="brackets" aria-checked="false" tabindex="-1">Brackets</button>
                 </div>
             </fieldset>
-            <div data-lens-comparison-settings hidden>
-                <label class="rv-lens-check"><input id="lens-comparison-enabled" type="checkbox"> Compare inside lens</label>
-                <label class="rv-lens-select">Comparison source
-                    <select id="lens-comparison-target"></select>
-                </label>
-            </div>
-            <label class="rv-lens-current-source">Current source
-                <output data-lens-current-source aria-live="off">Lens is off.</output>
-            </label>
+            <fieldset>
+                <legend>Caption</legend>
+                <div class="rv-lens-setting-options" role="radiogroup" aria-label="Lens caption">
+                    <button type="button" role="radio" data-lens-caption="off" aria-checked="true">Off</button>
+                    <button type="button" role="radio" data-lens-caption="on" aria-checked="false" tabindex="-1">On</button>
+                </div>
+            </fieldset>
             <button id="btn-lens-reset" type="button">Reset lens settings and position</button>
-            <p class="rv-lens-persistence" data-lens-persistence></p>
+            <p class="rv-lens-note">The lens window stays where you put it; drag its grip to move it. Settings are saved in this browser.</p>
+            <p class="rv-lens-persistence" data-lens-persistence hidden></p>
         </div>"""
 
 
 def _render_viewport_palette() -> str:
-    settings_icon = _render_icon("M4 5h12 M4 10h12 M4 15h12 M7 3v4 M13 8v4 M9 13v4")
+    move_icon = _render_icon("M10 3v14M3 10h14M10 3l-2 2M10 3l2 2M17 10l-2-2M17 10l-2 2")
+    gear_icon = _render_icon(
+        "M7.5 10a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0"
+        "M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2"
+        "M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"
+    )
+    zoom_out_icon = _render_icon("M5 10h10")
+    zoom_in_icon = _render_icon("M5 10h10M10 5v10")
+    tag_icon = _render_icon("M3 4h8l6 6-6 6H3zM6 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0")
+    lens_icon = _render_icon("M3.5 8.5a5 5 0 1 0 10 0a5 5 0 1 0-10 0M12.5 12.5L17 17")
     return f"""        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal">
         <div class="rv-palette-group">
             <button id="btn-palette-orientation" aria-label="Toggle palette orientation" title="Toggle palette orientation">{_render_icon("M3 6h14v8H3z M7 6v8 M13 6v8")}</button>
         </div>
 
         <div class="rv-palette-group rv-palette-group--zoom">
-            <button id="btn-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+            <button id="btn-zoom-out" aria-label="Zoom out" title="Zoom out (−)">{zoom_out_icon}</button>
             <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
-            <button id="btn-zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+            <button id="btn-zoom-in" aria-label="Zoom in" title="Zoom in (+)">{zoom_in_icon}</button>
             <button id="btn-zoom-reset" aria-label="Reset zoom" title="Reset viewport (R)">{_render_icon("M4 8a6 6 0 1 1 0 5 M4 3v5h5")}</button>
             <span id="zoom-val" class="rv-zoom-value">100%</span>
         </div>
@@ -635,7 +643,7 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
-            <button id="btn-align-toggle" aria-label="Image offset settings" title="Spatial image offset settings" aria-expanded="false" aria-haspopup="true">{settings_icon}</button>
+            <button id="btn-align-toggle" aria-label="Image offset settings" title="Spatial image offset settings" aria-expanded="false" aria-haspopup="true">{move_icon}</button>
             <div id="align-popover" class="rv-align-popover" aria-hidden="true" hidden>
                 <div class="rv-popover-row">
                     <label for="alignment-preset">Preset</label>
@@ -666,17 +674,16 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group">
-            <button id="btn-overlays" class="active" aria-label="Hide source labels" aria-pressed="true" title="Hide source labels (H)">Source labels</button>
+            <button id="btn-overlays" class="active" aria-label="Hide source labels" aria-pressed="true" title="Hide source labels (H)">{tag_icon}<span>Source labels</span></button>
         </div>
 
         <div class="rv-palette-group rv-lens-palette-group" data-lens-palette-group>
-            <button id="btn-lens" type="button" aria-label="Turn lens on" aria-pressed="false" title="Toggle lens (L)">Lens</button>
+            <button id="btn-lens" type="button" aria-label="Turn lens on" aria-pressed="false" title="Toggle lens (L)">{lens_icon}<span>Lens</span></button>
             <div class="rv-lens-palette-controls" data-lens-active-controls hidden>
-                <button id="btn-lens-zoom-out" type="button" aria-label="Decrease lens magnification">−</button>
+                <button id="btn-lens-zoom-out" type="button" aria-label="Decrease lens magnification">{zoom_out_icon}</button>
                 <output data-lens-zoom aria-label="Lens magnification">4×</output>
-                <button id="btn-lens-zoom-in" type="button" aria-label="Increase lens magnification">+</button>
-                <span class="rv-lens-fixed-status" aria-label="Lens window behavior">Fixed</span>
-                <button id="btn-lens-settings" type="button" aria-label="Lens settings" title="Lens settings" aria-haspopup="dialog" aria-controls="lens-settings-popover" aria-expanded="false">{settings_icon}</button>
+                <button id="btn-lens-zoom-in" type="button" aria-label="Increase lens magnification">{zoom_in_icon}</button>
+                <button id="btn-lens-settings" type="button" aria-label="Lens settings" title="Lens settings" aria-haspopup="dialog" aria-controls="lens-settings-popover" aria-expanded="false">{gear_icon}</button>
             </div>
         </div>
 
@@ -714,26 +721,15 @@ def _render_stage() -> str:
             <div class="rv-grid-frame-error" data-grid-frame-error hidden></div>
             <div class="rv-grid-cells" data-grid-cells></div>
         </section>
-        <aside id="rv-lens" class="rv-lens" aria-label="Image magnification lens" data-size="medium" data-comparison="false" hidden>
+        <aside id="rv-lens" class="rv-lens" aria-label="Image magnification lens" data-size="medium" hidden>
             <div class="rv-lens-view" aria-hidden="true">
                 <div class="rv-lens-pane rv-lens-pane--active">
                     <img class="rv-lens-image rv-lens-image--active" data-lens-image="active" src="" alt="">
                     <img class="rv-lens-image rv-lens-image--difference" data-lens-image="difference" src="" alt="">
-                    <div class="rv-lens-caption">
-                        <span class="rv-lens-role" data-lens-role="active">ACTIVE</span>
-                    </div>
                     <span class="rv-lens-status" data-lens-status="active" hidden></span>
-                    <span class="rv-lens-identity" data-lens-identity="active"></span>
-                </div>
-                <div class="rv-lens-pane rv-lens-pane--comparison">
-                    <img class="rv-lens-image rv-lens-image--comparison" data-lens-image="comparison" src="" alt="">
-                    <div class="rv-lens-caption">
-                        <span class="rv-lens-role" data-lens-role="comparison">COMPARE</span>
-                    </div>
-                    <span class="rv-lens-status" data-lens-status="comparison" hidden></span>
-                    <span class="rv-lens-identity" data-lens-identity="comparison"></span>
                 </div>
             </div>
+            <div class="rv-lens-caption" data-lens-caption-row hidden><span data-lens-identity="active"></span></div>
             <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>
         </aside>
         <div class="rv-stage-overlay-info">

@@ -61,6 +61,15 @@ The viewer supports:
 - a lens for close inspection;
 - browser-local review state and notes.
 
+The lens is a plain magnifier: it enlarges the source under the pointer with a
+sample marker (Ring by default) and an optional caption naming the magnified
+source. The caption shows the compact source name, or the left and right names
+in Diff mode, and stays hidden until turned on in lens settings; a loading or
+unavailable notice covers the lens image when it cannot be shown. The lens
+window stays where you put it; drag its grip to move it. In the vertical
+palette orientation the Source labels and Lens buttons show icons instead of
+text.
+
 Report payload version 1.2 adds release-aware source presentation without changing
 canonical source identity. Ordinary controls use compact, collision-safe release
 descriptors; constrained grid and lens labels use shorter variants. Explicit source

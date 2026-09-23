@@ -846,18 +846,26 @@ separately approved invocation, delivery, reveal, and publishing contract.
 `assets/lens.js` is the focused owner for the optional
 floating image lens: normalized per-source mapping, fixed-window placement, dedicated
 edge-grip dragging, pending touch tap-versus-viewport-gesture ownership,
-160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, Off/Ring/Brackets sample
-marking, and an optional Single-mode active/comparison split. The sample follows
+160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, and an Off/Ring/Brackets
+sample marker that defaults to Ring. The sample follows
 pointer movement across the displayed source while the lens window stays fixed;
-only its grip can move the window. Diff uses separate aligned base and difference DOM
-images with CSS difference blending, while the viewer exposes one palette/lens chrome
-event boundary so bubbled pointer, wheel, and double-click input cannot mutate the
-viewport. Activation seeds a transient center point and retains the stable palette
-Lens group, which owns zoom, fixed status, and stage-clamped settings. The display-only
-lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
-DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
-preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
-current-source label. Direct image-inspection markers share one Projection Brass signal
+only its grip can move the window. There is no split comparison view: the lens
+is a plain magnifier over the sampled source. Diff uses separate aligned base
+and difference DOM images with CSS difference blending, while the viewer exposes
+one palette/lens chrome event boundary so bubbled pointer, wheel, and
+double-click input cannot mutate the viewport. Activation seeds a transient
+center point and retains the stable palette Lens group, which owns zoom and
+stage-clamped settings. The display-only lens body has no titlebar or controls.
+It carries a single caption row under the magnified image showing the compact
+source name end-truncated to the stage size (the left and right names joined
+with `↔` in Diff mode, the cell source under the pointer in Grid mode); the
+caption stays hidden until the Caption preference is turned on, while a
+loading/unavailable status notice covers the lens image when it cannot be
+shown. The lens keeps its full-name accessible description for assistive
+technology. Stored lens state containing `comparisonEnabled` or
+`comparisonTarget` keys loads without error, and those keys are dropped on the
+next write. Lens Settings order is Size, Sample marker, Caption, then the reset
+button and the grip/persistence note. Direct image-inspection markers share one Projection Brass signal
 token family; utility controls and lens labels use neutral states, while semantic status
 colors remain separate. Frame categories use text labels. Grip pointer dragging uses
 capture, while its arrow-key operation supports a larger Shift step, clamps to the stage, persists the
