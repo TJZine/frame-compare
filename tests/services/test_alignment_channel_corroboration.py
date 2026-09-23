@@ -6,6 +6,7 @@ import asyncio
 import gc
 import threading
 import weakref
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from frame_compare.services.alignment_correlation import CorrelationEstimate
 from frame_compare.services.errors import AudioAlignmentCancellationError, AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
+    AudioAlignmentCandidate,
     AudioAlignmentCollectionRecord,
     AudioAlignmentDecision,
     AudioAlignmentWindowRecord,
@@ -269,6 +271,28 @@ def _offset_timeline(signal: np.ndarray, offset: int) -> np.ndarray:
             0,
             0,
         ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "source_identity_changed",
+            "identity_changed_last_view",
+            "rejected",
+            0,
+            None,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "source_identity_changed",
+            "identity_removed_last_view",
+            "rejected",
+            0,
+            None,
+        ),
         (1.0, "mono_downmix", 2, False, "accepted", "positive", None, 0, 0),
         (0.55, "best_channel", 2, False, "no_voting_windows", "positive", None, 0, None),
     ],
@@ -404,6 +428,10 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
     ) -> alignment_audio.CollectedAudioPhase:
         nonlocal decode_count
         decode_count += 2
+        if view == "FC" and view_case == "identity_changed_last_view":
+            comparison.write_bytes(b"replaced")
+        elif view == "FC" and view_case == "identity_removed_last_view":
+            comparison.unlink()
         return _phase(
             channel_plan.windows,
             sources[view],
@@ -493,6 +521,12 @@ def test_channel_corroboration_is_provisional_only_and_mono_first(
         else:
             assert attempt.channel_corroboration.candidate is None
             assert attempt.decision.primary_reason == expected_reason
+            if expected_reason == "source_identity_changed":
+                assert result[0].diagnostic == expected_reason
+                assert attempt.decision.state == "unavailable"
+                assert attempt.decision.candidate is None
+                assert attempt.channel_corroboration.reason == expected_reason
+                assert attempt.channel_corroboration.windows == ()
             if view_case == "conflicting":
                 assert attempt.channel_corroboration.reason == "credible_cross_frame_veto"
                 assert all(
@@ -673,9 +707,11 @@ def _synthetic_mono_result(
 def _synthetic_channel_case(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    dissent_index: int,
-    dissent_offset: int,
+    dissent_index: int | None = None,
+    dissent_offset: int = 0,
     weak_dissent: bool = False,
+    mono_candidate: bool = False,
+    identity_change_view: str | None = None,
 ) -> alignment_consensus.AlignmentConsensus:
     specs = tuple(
         alignment_audio.AudioWindowSpec(index * 10_000, 10_000, index * 10_000, 10_000)
@@ -691,6 +727,23 @@ def _synthetic_channel_case(
         comparison_duration_samples=50_000,
     )
     mono_result = _synthetic_mono_result(plan)
+    if mono_candidate:
+        assert mono_result.decision is not None
+        mono_result = replace(
+            mono_result,
+            decision=replace(
+                mono_result.decision,
+                state="provisional",
+                candidate=AudioAlignmentCandidate(
+                    sample_offset=0,
+                    sample_rate=1_000,
+                    frame_offset=0,
+                    supporting_window_ids=("primary-01",),
+                    median_score=0.55,
+                    minimum_peak_ratio=1.1,
+                ),
+            ),
+        )
     channel_plan = alignment_audio.AudioChannelViewPlan(
         views=("FL", "FR", "FC"),
         window_indices=tuple(range(len(specs))),
@@ -714,7 +767,7 @@ def _synthetic_channel_case(
     monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
     monkeypatch.setattr(alignment_consensus, "refine_aligned_score", refine)
 
-    def phase_loader(_view: str) -> alignment_audio.CollectedAudioPhase:
+    def phase_loader(view: str) -> alignment_audio.CollectedAudioPhase:
         windows = tuple(
             alignment_audio.AudioWindow(
                 np.ones(spec.reference_sample_count, dtype=np.float32),
@@ -724,6 +777,13 @@ def _synthetic_channel_case(
             )
             for spec in specs
         )
+        if view == identity_change_view:
+            raise AudioAlignmentError(
+                "source identity changed during staged audio collection",
+                category="source_identity_changed",
+                stage="collection",
+                collection_summaries=(_summary("comparison", windows, phase="discovery"),),
+            )
         return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
 
     return alignment_consensus.corroborate_channel_views(
@@ -770,6 +830,48 @@ def test_weak_named_channel_dissent_does_not_veto_provisional_hint(
     assert result.channel_corroboration.status == "corroborated"
     assert result.channel_corroboration.candidate is not None
     assert result.channel_corroboration.candidate.frame_offset == 0
+
+
+@pytest.mark.parametrize("identity_change_view", ["FL", "FR", "FC"])
+def test_source_identity_change_withdraws_every_pair_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    identity_change_view: str,
+) -> None:
+    result = _synthetic_channel_case(
+        monkeypatch,
+        mono_candidate=True,
+        identity_change_view=identity_change_view,
+    )
+
+    assert result.applied is False
+    assert result.sample_offset is None
+    assert result.diagnostic == "source_identity_changed"
+    assert result.decision is not None
+    assert result.decision.state == "unavailable"
+    assert result.decision.candidate is None
+    assert result.decision.primary_reason == "source_identity_changed"
+    assert "source_identity_changed" in result.decision.failed_gates
+    channel = result.channel_corroboration
+    assert channel is not None
+    assert channel.status == "rejected"
+    assert channel.reason == "source_identity_changed"
+    assert channel.candidate is None
+    assert channel.windows == ()
+    assert [(item.view, item.summary.role) for item in channel.collections] == [
+        (identity_change_view, "comparison")
+    ]
+
+
+def test_unchanged_sources_keep_provisional_channel_corroboration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _synthetic_channel_case(monkeypatch, mono_candidate=True)
+
+    assert result.decision is not None
+    assert result.decision.state == "provisional"
+    assert result.decision.primary_reason == alignment_consensus.CHANNEL_CORROBORATION_REASON
+    assert result.channel_corroboration is not None
+    assert result.channel_corroboration.status == "corroborated"
 
 
 @pytest.mark.parametrize("first_view_failure", [False, True])

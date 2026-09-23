@@ -903,6 +903,38 @@ def _combined_channel_independent_support(
     return independent_count
 
 
+def _source_identity_invalidated(
+    mono_result: AlignmentConsensus,
+    collections: list[AudioChannelCollectionRecord],
+) -> AlignmentConsensus:
+    """Withdraw every candidate once the pair no longer describes its requested sources."""
+    reason = "source_identity_changed"
+    decision = mono_result.decision
+    if decision is None:
+        raise ValueError("channel corroboration requires a mono decision")
+    return replace(
+        mono_result,
+        sample_offset=None,
+        applied=False,
+        diagnostic=reason,
+        decision=replace(
+            decision,
+            state="unavailable",
+            candidate=None,
+            primary_reason=reason,
+            failed_gates=tuple(dict.fromkeys((*decision.failed_gates, reason))),
+        ),
+        channel_corroboration=AudioChannelCorroboration(
+            status="rejected",
+            reason=reason,
+            candidate=None,
+            independent_windows=0,
+            windows=(),
+            collections=tuple(collections),
+        ),
+    )
+
+
 def corroborate_channel_views(
     mono_result: AlignmentConsensus,
     *,
@@ -930,6 +962,8 @@ def corroborate_channel_views(
                 AudioChannelCollectionRecord(view=view, summary=summary)
                 for summary in exc.collection_summaries
             )
+            if exc.category == "source_identity_changed":
+                return _source_identity_invalidated(mono_result, collections)
             collection_failure = exc.category
             break
         collections.extend(
