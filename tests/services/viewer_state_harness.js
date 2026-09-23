@@ -1562,4 +1562,25 @@ const summary = {};
     };
 }
 
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+    viewer.dom.modal.classList.remove('open');
+    viewer.dom.infoModal.classList.remove('open');
+    const keyEvent = key => ({
+        key,
+        target: { tagName: 'DIV', isContentEditable: false, closest() { return null; } },
+        preventDefault() {},
+    });
+    viewer.setMode('slider');
+    viewer.handleKey(keyEvent('g'));
+    const lowerSelectsGrid = viewer.state.mode === 'grid';
+    viewer.setMode('slider');
+    viewer.handleKey(keyEvent('G'));
+    const upperSelectsGrid = viewer.state.mode === 'grid';
+    summary.gridShortcut = {
+        lowerSelectsGrid,
+        upperSelectsGrid,
+    };
+}
+
 console.log(JSON.stringify(summary));

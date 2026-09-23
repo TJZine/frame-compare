@@ -994,6 +994,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.dataset.hShortcutTogglesSourceLabels = String(
         firstPressHidLabels && secondPressRestoredLabels
     );
+
+    ReportViewer.setMode('slider');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }));
+    const lowerSelectsGrid = ReportViewer.state.mode === 'grid';
+    ReportViewer.setMode('slider');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', bubbles: true }));
+    const upperSelectsGrid = ReportViewer.state.mode === 'grid';
+    const gridButtonTitle = document.querySelector('[data-mode="grid"]')?.getAttribute('title');
+    document.documentElement.dataset.gShortcutSelectsGrid = String(
+        lowerSelectsGrid && upperSelectsGrid
+    );
+    document.documentElement.dataset.gridButtonTitle = String(
+        gridButtonTitle === 'Grid (G) — scan sources together'
+    );
 });
 </script>
 """
@@ -1063,6 +1077,8 @@ def test_report_omits_fit_width_keeps_restored_state_reachable_and_h_toggles_lab
     assert parser.document_attributes["data-fit-width-button-absent"] == "true"
     assert parser.document_attributes["data-restored-width-fit-state"] == "true"
     assert parser.document_attributes["data-h-shortcut-toggles-source-labels"] == "true"
+    assert parser.document_attributes["data-g-shortcut-selects-grid"] == "true"
+    assert parser.document_attributes["data-grid-button-title"] == "true"
 
 
 @pytest.mark.integration

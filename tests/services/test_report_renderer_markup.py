@@ -129,7 +129,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         "overlay": "Single clip view (O) — inspect one source",
         "diff": "Difference (D) — locate changed pixels",
         "blink": "Blink (B) — alternate the selected pair",
-        "grid": "Grid comparison — scan sources together",
+        "grid": "Grid (G) — scan sources together",
     }
     for button in mode_buttons:
         assert button.attrs["title"] == mode_purpose_titles[button.attrs["data-mode"]]
@@ -264,6 +264,9 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
 
     assert 'id="help-modal"' in html
     assert "Viewer Shortcuts" in html
+    assert 'title="Grid (G) — scan sources together"' in html
+    assert "Modes (Slider/Single/Diff/Blink/Grid)" in html
+    assert "S / O / D / B / G" in html
     assert 'class="rv-footer"' not in html
     assert "Use arrow keys to navigate" not in html
     assert html.count('id="report-data"') == 1

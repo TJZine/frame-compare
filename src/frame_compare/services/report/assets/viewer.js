@@ -1606,6 +1606,7 @@ const ReportViewer = {
             case 'o': case 'O': this.setMode('overlay'); break;
             case 'd': case 'D': this.setMode('diff'); break;
             case 'b': case 'B': this.setMode('blink'); break;
+            case 'g': case 'G': this.setMode('grid'); break;
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
             case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;

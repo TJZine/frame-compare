@@ -547,7 +547,7 @@ def _render_controls(
             <button data-mode="overlay" role="radio" aria-checked="false" tabindex="-1" aria-label="Single clip view" title="Single clip view (O) — inspect one source">Single</button>
             <button data-mode="diff" role="radio" aria-checked="false" tabindex="-1" aria-label="Difference mode" title="Difference (D) — locate changed pixels">Diff</button>
             <button data-mode="blink" role="radio" aria-checked="false" tabindex="-1" aria-label="Blink mode" title="Blink (B) — alternate the selected pair">Blink</button>
-            <button data-mode="grid" role="radio" aria-checked="false" tabindex="-1" aria-label="Grid mode" title="Grid comparison — scan sources together">Grid</button>
+            <button data-mode="grid" role="radio" aria-checked="false" tabindex="-1" aria-label="Grid mode" title="Grid (G) — scan sources together">Grid</button>
         </div>
 
         <div class="rv-context-zone">
@@ -838,7 +838,7 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Cycle Clip</span><span class="rv-key">↑ / ↓</span></div>
                 <div class="rv-shortcut-row"><span>Direct Clip Select</span><span class="rv-key">1 - 9</span></div>
                 <div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>
-                <div class="rv-shortcut-row"><span>Modes (Slider/Single/Diff/Blink)</span><span class="rv-key">S / O / D / B</span></div>
+                <div class="rv-shortcut-row"><span>Modes (Slider/Single/Diff/Blink/Grid)</span><span class="rv-key">S / O / D / B / G</span></div>
                 <div class="rv-shortcut-row"><span>Toggle source labels</span><span class="rv-key">H</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>

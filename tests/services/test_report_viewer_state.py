@@ -159,3 +159,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "noRadioChecked": True,
         "exactlyOneKeyboardReachable": True,
     }
+    assert summary["gridShortcut"] == {
+        "lowerSelectsGrid": True,
+        "upperSelectsGrid": True,
+    }
