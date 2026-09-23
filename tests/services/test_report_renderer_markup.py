@@ -124,6 +124,15 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         "blink",
         "grid",
     ]
+    mode_purpose_titles = {
+        "slider": "Slider (S) — reveal spatial differences",
+        "overlay": "Single clip view (O) — inspect one source",
+        "diff": "Difference (D) — locate changed pixels",
+        "blink": "Blink (B) — alternate the selected pair",
+        "grid": "Grid comparison — scan sources together",
+    }
+    for button in mode_buttons:
+        assert button.attrs["title"] == mode_purpose_titles[button.attrs["data-mode"]]
     assert "rv-context-controls" in pair_controls.classes
     assert "rv-context-controls" in active_controls.classes
     assert pair_controls in context_zone.children
@@ -583,21 +592,36 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
         for child in group.children
         if child.tag == "button" and "data-fit" in child.attrs
     }
-    assert set(fit_buttons) == {"actual", "width", "height"}
+    # Fit width (data-fit="width") is a removed control: only actual size and fit
+    # height remain, and no orphan button/separator is left in its place.
+    assert set(fit_buttons) == {"actual", "height"}
     assert fit_buttons["actual"].attrs["aria-label"] == "Actual size"
-    assert fit_buttons["width"].attrs["aria-label"] == "Fit width"
     assert fit_buttons["height"].attrs["aria-label"] == "Fit height"
+    assert 'data-fit="width"' not in html
+    assert "Fit width" not in html
 
     tags = parse_start_tags(html)
-    assert tags.by_id["alignment-preset"][1]["aria-label"] == "Alignment preset"
-    assert tags.by_id["align-x"][1]["aria-label"] == "Manual horizontal alignment offset"
-    assert tags.by_id["align-y"][1]["aria-label"] == "Manual vertical alignment offset"
+    btn_align_toggle = tags.by_id["btn-align-toggle"][1]
+    assert btn_align_toggle["aria-label"] == "Image offset settings"
+    assert btn_align_toggle["title"] == "Spatial image offset settings"
+    assert tags.by_id["alignment-preset"][1]["aria-label"] == "Image offset preset"
+    assert tags.by_id["align-x"][1]["aria-label"] == "Manual horizontal image offset"
+    assert tags.by_id["align-y"][1]["aria-label"] == "Manual vertical image offset"
+    btn_alignment_reset = tags.by_id["btn-alignment-reset"][1]
+    assert btn_alignment_reset["aria-label"] == "Reset image offset"
+    assert btn_alignment_reset["title"] == "Reset image offset"
+    align_popover = require_first(palette, tag="div", element_id="align-popover")
+    offset_note = require_first(align_popover, tag="p", class_name="rv-inspector-note")
+    assert offset_note.text == "Spatial adjustment only; does not change source-frame timing."
     fullscreen_button = require_first(palette, tag="button", element_id="btn-fullscreen")
     assert fullscreen_button.attrs["aria-label"] == "Enter fullscreen"
     assert fullscreen_button.attrs["aria-pressed"] == "false"
     assert 'id="btn-focus-mode"' not in html
     overlays_button = require_first(palette, tag="button", element_id="btn-overlays")
-    assert overlays_button.attrs["aria-label"] == "Hide HUD"
+    assert overlays_button.attrs["aria-label"] == "Hide source labels"
+    assert overlays_button.attrs["title"] == "Hide source labels (H)"
+    assert overlays_button.text == "Source labels"
+    assert "HUD" not in html
     blink_controls = require_first(
         palette, tag="div", attr_name="data-control-scope", attr_value="blink"
     )
@@ -632,11 +656,18 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         child.attrs.get("data-inspector-tab") for child in tablist.children if child.tag == "button"
     ]
     assert tab_names == ["frame", "clips", "align", "review"]
+    tab_labels = {
+        "frame": "Frame",
+        "clips": "Clips",
+        "align": "Image offset",
+        "review": "Review",
+    }
     for tab in ("frame", "clips", "align", "review"):
         tab_button = require_first(
             tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
         )
         assert tab_button.attrs["tabindex"] == "-1"
+        assert tab_button.text == tab_labels[tab]
         panel = require_first(inspector, element_id=f"inspector-panel-{tab}")
         assert panel.attrs["tabindex"] == "-1"
 
@@ -683,6 +714,11 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         review_panel, tag="button", attr_name="data-review-import-trigger"
     )
     assert import_button.text == "Import review JSON"
+    assert "Reset all image offsets</button>" in html
+    assert "Reset this pair&#x27;s offset</button>" in html or (
+        "Reset this pair's offset</button>" in html
+    )
+    assert html.count("Spatial adjustment only; does not change source-frame timing.") == 2
     assert html.count('id="viewer-live"') == 1
     assert "inspector-panel-pixel" not in html
     assert "Pixel value unavailable" not in html
@@ -773,6 +809,35 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
     shortcut_rows = find_all(modal, tag="div", class_name="rv-shortcut-row")
     assert len(shortcut_rows) >= 6
     assert "Toggle Focus" not in modal.text
+    assert "HUD" not in modal.text
+    shortcut_labels = {require_first(row, tag="span").text for row in shortcut_rows}
+    assert "Toggle source labels" in shortcut_labels
+
+    baked_text_note = require_first(modal, tag="p", class_name="rv-inspector-note")
+    assert baked_text_note.text == (
+        "Hiding source labels changes only this viewer; baked screenshot text is unaffected."
+    )
+
+    legend_grids = find_all(modal, tag="div", class_name="rv-legend-grid")
+    assert len(legend_grids) == 2
+    fit_legend_rows = find_all(legend_grids[0], tag="div", class_name="rv-legend-row")
+    assert [
+        (require_first(row, tag="span", class_name="rv-key").text, row.children[1].text)
+        for row in fit_legend_rows
+    ] == [("1:1", "Actual size"), ("↕", "Fit height")]
+    assert "Fit width" not in modal.text
+
+    mode_legend_rows = find_all(legend_grids[1], tag="div", class_name="rv-legend-row")
+    assert [
+        (require_first(row, tag="span", class_name="rv-key").text, row.children[1].text)
+        for row in mode_legend_rows
+    ] == [
+        ("Slider", "Reveal spatial differences"),
+        ("Single", "Inspect one source"),
+        ("Diff", "Locate changed pixels"),
+        ("Blink", "Alternate the selected pair"),
+        ("Grid", "Scan sources together"),
+    ]
 
 
 def test_build_html_embeds_json_without_raw_script_terminators(

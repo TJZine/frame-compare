@@ -86,11 +86,10 @@ is also the single place for report metadata: title, report ID, generated timest
 frame/clip counts, and the slow.pics link when uploaded. No additional report tab or
 permanent metadata panel duplicates it.
 
-Visible source HUD labels in Single, Slider, Diff, Blink, and Grid views append that
+Visible source labels in Single, Slider, Diff, Blink, and Grid views append that
 same complete file size when available. File size is decision context only: it is not
-bitrate or evidence of visual quality, efficiency, or a comparison winner. Hiding the
-HUD hides the size together with the source labels, including from Grid cell accessible
-names.
+bitrate or evidence of visual quality, efficiency, or a comparison winner. Hiding
+source labels also hides the size, including from Grid cell accessible names.
 
 The primary toolbar keeps frame navigation, view modes, and mode-specific context in
 stable zones at desktop widths. It reflows to two rows and then a narrow stack as space
@@ -99,9 +98,11 @@ decreases, without changing keyboard order or replacing native controls.
 The viewer uses neutral charcoal surfaces and reserves its brass accent for the current
 comparison mode, selected frame, and direct image-inspection markers. Utility toggles
 use neutral selected states. The compact viewport palette floats over the stage without
-reserving another toolbar row; its orientation, zoom, alignment, and fullscreen buttons
-have tooltips. `Offset: none` means no spatial image offset is applied to the pair, not
-that temporal frame alignment failed. The filmstrip keeps the comparison frame number
+reserving another toolbar row; its orientation, zoom, image offset, and fullscreen
+buttons have tooltips. `Offset: none` means no spatial image offset is applied to the
+pair, not that temporal frame alignment failed; the Inspector's Image offset tab and
+the palette's image offset settings both state that this adjustment is spatial only
+and does not change source-frame timing. The filmstrip keeps the comparison frame number
 and selection category centered together over a shallow bottom gradient at every
 thumbnail size, leaving the full thumbnail area available to the image. Categories use
 text labels instead of colored stripes or filter dots; filter counts and the brass
@@ -109,11 +110,14 @@ selection border remain.
 Keyboard focus uses a light neutral outline. The header shows only the generation
 date; hover over it or open Report Information for the exact timestamp.
 
-Source selectors, the optional HUD, and baked overlays serve different contexts. Selectors
-identify the source at the point of selection. The HUD stays anchored to the viewport
-while zooming and panning, and is useful when baked text is outside the visible area.
-Baked text stays with screenshots uploaded to slow.pics. When baked text already provides
-enough context, use the HUD toggle to reduce overlapping labels.
+Source selectors, the optional source labels, and baked overlays serve different
+contexts. Selectors identify the source at the point of selection. Source labels stay
+anchored to the viewport while zooming and panning, and are useful when baked text is
+outside the visible area. Baked text stays with screenshots uploaded to slow.pics and is
+unaffected by the source-labels toggle. When baked text already provides enough context,
+hide source labels to reduce overlapping text; hiding them does not make the report blind
+or anonymous, since source identity can remain in baked overlays, filenames, and report
+metadata.
 
 Viewer state such as the current frame, mode, selected clips, reveal position, viewport,
 and review notes can persist in the browser for that report. It does not rewrite the

@@ -773,12 +773,13 @@ replacement remains owned by `frame_compare.utils.atomic_write`.
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
-navigation; a HUD toggle for stage labels and current-frame metadata; a primary
-toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Align,
-and Review tabs; fullscreen support; viewport pan, zoom,
-actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
-CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
+navigation; a source-labels toggle for stage labels and current-frame metadata; a
+primary toolbar plus floating viewport palette; a collapsible, compact/normal/large
+filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Image offset,
+and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit height
+controls (plus continued support for a restored width-fit preference without a visible
+control), reveal, and adjacent-frame preloading. The toolbar owner uses
+CSS Grid to keep frame, mode, and context/offset zones stable at wide widths, then
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
 reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
@@ -796,8 +797,15 @@ caption overlay shared by all filmstrip sizes. Thumbnails use the full card inte
 frame numbers and categories sit over a shallow bottom gradient. Category filters
 retain text and counts without colored dots or thumbnail stripes. Palette orientation
 rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
-palette does not reserve stage height. Spatial alignment status is labeled `Offset`
-to distinguish image translation from temporal source-frame alignment.
+palette omits a fit-width control; actual size and fit height remain, and a restored
+width-fit preference still computes zoom and keeps the fit radio group keyboard
+reachable when neither visible radio matches. The floating palette does not reserve
+stage height. Spatial alignment status is labeled `Offset`, and its Inspector tab and
+palette settings are labeled Image offset, both stating the adjustment is spatial only
+and does not affect source-frame timing, to distinguish image translation from temporal
+source-frame alignment. View-mode controls and the Help dialog state each mode's purpose
+(reveal spatial differences, inspect one source, locate changed pixels, alternate the
+selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
 shadow. The renderer shortens the header generation timestamp to its recorded ISO date;
 the exact timestamp remains available in the tooltip, Report Information, and payload.
@@ -817,11 +825,12 @@ The Clips inspector composes those profiles into stable Reference/Comparison car
 Primary and informative release identities wrap normally, exact filenames and long
 technical values may wrap anywhere, and drawer/panel overflow is constrained locally
 rather than masked at the document boundary.
-Visible Single, Slider, Diff, Blink, and Grid HUD labels reuse the payload's canonical
-container byte size through the shared IEC formatter; hiding the HUD hides that size
-with the source label, and no report payload or probing owner is duplicated.
+Visible Single, Slider, Diff, Blink, and Grid source labels reuse the payload's canonical
+container byte size through the shared IEC formatter; hiding source labels hides that
+size too, and no report payload or probing owner is duplicated.
 Stage labels participate directly in accessible text, while Grid cell names retain
-primary identity and exact filename and append the same size only while the HUD is shown.
+primary identity and exact filename and append the same size only while source labels
+are shown.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report
@@ -879,7 +888,7 @@ exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
 active-picture labels, mode names, and stable clip roles. It does not read the DOM,
 storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
-Clips, and Align rendering, and lazy Review activation through the root viewer. Hidden
+Clips, and Image offset rendering, and lazy Review activation through the root viewer. Hidden
 Inspectors update only visibility and tab semantics; opening refreshes their content
 before focus moves into the drawer.
 
@@ -919,7 +928,7 @@ paused.
 
 Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
-clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
+clip selection, viewport/zoom/reveal, pair alignments, source-labels visibility, filmstrip
 collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
 best-effort browser-global v2 key for magnification, size, and sample-marker style,
 whose default is Off. Report-scoped lens state stores enabled state, fixed normalized

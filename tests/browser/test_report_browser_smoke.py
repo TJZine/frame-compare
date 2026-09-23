@@ -939,6 +939,132 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
         )
 
 
+def _append_width_fit_restore_probe(report_path: Path) -> None:
+    """Prove the removed Fit width control, its restored-state fallback, and H.
+
+    The floating palette exposes only actual-size and fit-height radios, but a
+    returning viewer's saved `fitMode: 'width'` must still compute a real zoom
+    and leave the fit radio group keyboard reachable even though neither
+    visible radio is checked. The H shortcut must still toggle the renamed
+    source-labels control in both directions.
+    """
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fitButtons = Array.from(document.querySelectorAll('[data-fit]'));
+    document.documentElement.dataset.fitWidthButtonAbsent = String(
+        fitButtons.length === 2
+        && fitButtons.every(btn => btn.dataset.fit !== 'width')
+        && Boolean(document.getElementById('btn-palette-orientation'))
+    );
+
+    localStorage.setItem(
+        ReportViewer.viewerStorageKey(),
+        JSON.stringify({ fitMode: 'width' }),
+    );
+    ReportViewer.restorePersistedState();
+    ReportViewer.viewport.applyFitMode({ resetPan: true });
+    ReportViewer.viewport.updateFitButtons();
+
+    const zoomAfterRestore = ReportViewer.state.zoom;
+    const checkedStates = fitButtons.map(btn => btn.getAttribute('aria-checked'));
+    const tabIndexes = fitButtons.map(btn => btn.tabIndex);
+    const reachableButton = fitButtons[tabIndexes.indexOf(0)];
+    reachableButton?.focus();
+    document.documentElement.dataset.restoredWidthFitState = String(
+        ReportViewer.state.fitMode === 'width'
+        && Number.isFinite(zoomAfterRestore)
+        && zoomAfterRestore > 0
+        && checkedStates.every(state => state === 'false')
+        && tabIndexes.filter(value => value === 0).length === 1
+        && document.activeElement === reachableButton
+    );
+
+    const btnOverlays = document.getElementById('btn-overlays');
+    const startedHidden = ReportViewer.state.overlaysHidden;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+    const firstPressHidLabels = ReportViewer.state.overlaysHidden === !startedHidden
+        && btnOverlays?.getAttribute('aria-label') === 'Show source labels'
+        && btnOverlays?.getAttribute('title') === 'Show source labels (H)';
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'H', bubbles: true }));
+    const secondPressRestoredLabels = ReportViewer.state.overlaysHidden === startedHidden
+        && btnOverlays?.getAttribute('aria-label') === 'Hide source labels'
+        && btnOverlays?.getAttribute('title') === 'Hide source labels (H)';
+    document.documentElement.dataset.hShortcutTogglesSourceLabels = String(
+        firstPressHidLabels && secondPressRestoredLabels
+    );
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+def _append_saved_fit_mode_init_probe(report_path: Path, fit_mode: str) -> None:
+    """Seed a saved fit mode before initialization and record the fit radios after it."""
+    html = report_path.read_text(encoding="utf-8")
+    probe = f"""
+<script>
+const savedFitReportId = JSON.parse(document.getElementById('report-data').textContent).report_id;
+localStorage.setItem(
+    `frame-compare:report-viewer:${{savedFitReportId}}:viewport`,
+    JSON.stringify({{ fitMode: '{fit_mode}' }}),
+);
+document.addEventListener('DOMContentLoaded', () => {{
+    const fitButtons = Array.from(document.querySelectorAll('[data-fit]'));
+    document.documentElement.dataset.savedFitState = JSON.stringify({{
+        fitMode: ReportViewer.state.fitMode,
+        checked: fitButtons.map(btn => [btn.dataset.fit, btn.getAttribute('aria-checked')]),
+        tabStops: fitButtons.filter(btn => btn.tabIndex === 0).length,
+    }});
+}});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("fit_mode", "expected_checked"),
+    [
+        ("height", [["actual", "false"], ["height", "true"]]),
+        ("width", [["actual", "false"], ["height", "false"]]),
+    ],
+)
+def test_saved_fit_mode_is_reflected_by_fit_radios_on_page_load(
+    tmp_path: Path, fit_mode: str, expected_checked: list[list[str]]
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_saved_fit_mode_init_probe(report_path, fit_mode)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    state = json.loads(parser.document_attributes["data-saved-fit-state"])
+    assert state == {"fitMode": fit_mode, "checked": expected_checked, "tabStops": 1}
+
+
+@pytest.mark.integration
+def test_report_omits_fit_width_keeps_restored_state_reachable_and_h_toggles_labels(
+    tmp_path: Path,
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_width_fit_restore_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-fit-width-button-absent"] == "true"
+    assert parser.document_attributes["data-restored-width-fit-state"] == "true"
+    assert parser.document_attributes["data-h-shortcut-toggles-source-labels"] == "true"
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("width", "height", "scale"),

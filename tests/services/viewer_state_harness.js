@@ -304,7 +304,7 @@ function loadViewer({ clipCount, savedState = null }) {
         rightSelect: fakeElement(),
         activeSelect: fakeElement(),
         btnSwapClips: fakeElement(),
-        fitBtns: ['actual', 'width', 'height'].map((fit) => ({
+        fitBtns: ['actual', 'height'].map((fit) => ({
             ...fakeElement(),
             dataset: { fit },
         })),
@@ -1535,6 +1535,31 @@ const summary = {};
     viewer.inspector.setOpen(true, { focus: false, save: false });
     assert.deepEqual(reviewMetrics, { creates: 1, binds: 1, renders: 1 });
     summary.lazyReviewController = { opensOnFirstVisibleUse: true, createsOnce: true };
+}
+
+{
+    const { viewer } = loadViewer({
+        clipCount: 2,
+        savedState: { fitMode: 'width' },
+    });
+    assert.equal(viewer.dom.fitBtns.length, 2);
+    assert.deepEqual(viewer.dom.fitBtns.map((btn) => btn.dataset.fit), ['actual', 'height']);
+    assert.equal(viewer.state.fitMode, 'width');
+
+    viewer.dom.stage.getBoundingClientRect = () => ({ width: 800, height: 1080 });
+    viewer.dom.sizerImg.getBoundingClientRect = () => ({ width: 1600, height: 1080 });
+    viewer.viewport.applyFitMode({ resetPan: true });
+    const zoomUsedWidthMath = viewer.state.zoom === 0.5;
+
+    viewer.viewport.updateFitButtons();
+    const checkedStates = viewer.dom.fitBtns.map((btn) => btn.getAttribute('aria-checked'));
+    const tabIndexes = viewer.dom.fitBtns.map((btn) => btn.tabIndex);
+    summary.restoredWidthFitNoVisibleRadio = {
+        fitModeRestored: viewer.state.fitMode === 'width',
+        zoomUsedWidthMath,
+        noRadioChecked: checkedStates.every((state) => state === 'false'),
+        exactlyOneKeyboardReachable: tabIndexes.filter((value) => value === 0).length === 1,
+    };
 }
 
 console.log(JSON.stringify(summary));

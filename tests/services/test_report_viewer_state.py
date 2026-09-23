@@ -153,3 +153,9 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "opensOnFirstVisibleUse": True,
         "createsOnce": True,
     }
+    assert summary["restoredWidthFitNoVisibleRadio"] == {
+        "fitModeRestored": True,
+        "zoomUsedWidthMath": True,
+        "noRadioChecked": True,
+        "exactlyOneKeyboardReachable": True,
+    }

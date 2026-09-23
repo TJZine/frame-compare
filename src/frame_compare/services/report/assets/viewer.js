@@ -66,6 +66,7 @@ const ReportViewer = {
             }
             this.bindHelpEvents();
             this.updateOverlayVisibility();
+            this.viewport.updateFitButtons();
             this.inspector.updateTabs();
             this.inspector.updateVisibility();
 
@@ -1298,11 +1299,11 @@ const ReportViewer = {
         this.dom.btnOverlays.setAttribute('aria-pressed', overlaysVisible ? 'true' : 'false');
         this.dom.btnOverlays.setAttribute(
             'aria-label',
-            overlaysVisible ? 'Hide HUD' : 'Show HUD'
+            overlaysVisible ? 'Hide source labels' : 'Show source labels'
         );
         this.dom.btnOverlays.setAttribute(
             'title',
-            `${overlaysVisible ? 'Hide' : 'Show'} HUD (H)`
+            `${overlaysVisible ? 'Hide' : 'Show'} source labels (H)`
         );
         this.gridView?.updateCellRoles();
     },

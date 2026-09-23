@@ -486,11 +486,11 @@ def _render_controls(
         </div>
 
         <div class="rv-control-group rv-mode-controls" role="radiogroup" aria-label="View mode">
-            <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S)">Slider</button>
-            <button data-mode="overlay" role="radio" aria-checked="false" tabindex="-1" aria-label="Single clip view" title="Single clip view (O)">Single</button>
-            <button data-mode="diff" role="radio" aria-checked="false" tabindex="-1" aria-label="Difference mode" title="Difference (D)">Diff</button>
-            <button data-mode="blink" role="radio" aria-checked="false" tabindex="-1" aria-label="Blink mode" title="Blink (B)">Blink</button>
-            <button data-mode="grid" role="radio" aria-checked="false" tabindex="-1" aria-label="Grid mode" title="Grid comparison">Grid</button>
+            <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S) — reveal spatial differences">Slider</button>
+            <button data-mode="overlay" role="radio" aria-checked="false" tabindex="-1" aria-label="Single clip view" title="Single clip view (O) — inspect one source">Single</button>
+            <button data-mode="diff" role="radio" aria-checked="false" tabindex="-1" aria-label="Difference mode" title="Difference (D) — locate changed pixels">Diff</button>
+            <button data-mode="blink" role="radio" aria-checked="false" tabindex="-1" aria-label="Blink mode" title="Blink (B) — alternate the selected pair">Blink</button>
+            <button data-mode="grid" role="radio" aria-checked="false" tabindex="-1" aria-label="Grid mode" title="Grid comparison — scan sources together">Grid</button>
         </div>
 
         <div class="rv-context-zone">
@@ -574,16 +574,15 @@ def _render_viewport_palette() -> str:
 
         <div class="rv-palette-group" role="radiogroup" aria-label="Fit mode">
             <button data-fit="actual" class="active" role="radio" aria-checked="true" aria-label="Actual size" title="Actual size (1:1)">1:1</button>
-            <button data-fit="width" role="radio" aria-checked="false" tabindex="-1" aria-label="Fit width" title="Fit width (↔)">↔</button>
             <button data-fit="height" role="radio" aria-checked="false" tabindex="-1" aria-label="Fit height" title="Fit height (↕)">↕</button>
         </div>
 
         <div class="rv-palette-group rv-alignment-group">
-            <button id="btn-align-toggle" aria-label="Alignment settings" title="Spatial alignment settings" aria-expanded="false" aria-haspopup="true">{settings_icon}</button>
+            <button id="btn-align-toggle" aria-label="Image offset settings" title="Spatial image offset settings" aria-expanded="false" aria-haspopup="true">{settings_icon}</button>
             <div id="align-popover" class="rv-align-popover" aria-hidden="true" hidden>
                 <div class="rv-popover-row">
                     <label for="alignment-preset">Preset</label>
-                    <select id="alignment-preset" aria-label="Alignment preset">
+                    <select id="alignment-preset" aria-label="Image offset preset">
                         <option value="none">No offset</option>
                         <option value="left-1">Left 1px</option>
                         <option value="right-1">Right 1px</option>
@@ -594,13 +593,14 @@ def _render_viewport_palette() -> str:
                 </div>
                 <div class="rv-popover-row">
                     <label for="align-x">X</label>
-                    <input id="align-x" class="rv-number-input" type="number" value="0" step="1" aria-label="Manual horizontal alignment offset">
+                    <input id="align-x" class="rv-number-input" type="number" value="0" step="1" aria-label="Manual horizontal image offset">
                     <label for="align-y">Y</label>
-                    <input id="align-y" class="rv-number-input" type="number" value="0" step="1" aria-label="Manual vertical alignment offset">
+                    <input id="align-y" class="rv-number-input" type="number" value="0" step="1" aria-label="Manual vertical image offset">
                 </div>
                 <div class="rv-popover-row">
-                    <button id="btn-alignment-reset" aria-label="Reset alignment" title="Reset alignment">Reset</button>
+                    <button id="btn-alignment-reset" aria-label="Reset image offset" title="Reset image offset">Reset</button>
                 </div>
+                <p class="rv-inspector-note">Spatial adjustment only; does not change source-frame timing.</p>
             </div>
         </div>
 
@@ -609,7 +609,7 @@ def _render_viewport_palette() -> str:
         </div>
 
         <div class="rv-palette-group">
-            <button id="btn-overlays" class="active" aria-label="Hide HUD" aria-pressed="true" title="Hide HUD (H)">HUD</button>
+            <button id="btn-overlays" class="active" aria-label="Hide source labels" aria-pressed="true" title="Hide source labels (H)">Source labels</button>
         </div>
 
         <div class="rv-palette-group rv-lens-palette-group" data-lens-palette-group>
@@ -698,7 +698,7 @@ def _render_inspector() -> str:
         <div class="rv-inspector-tabs" role="tablist" aria-label="Inspector tabs">
             <button id="inspector-tab-frame" type="button" role="tab" data-inspector-tab="frame" aria-selected="true" aria-controls="inspector-panel-frame" tabindex="-1">Frame</button>
             <button id="inspector-tab-clips" type="button" role="tab" data-inspector-tab="clips" aria-selected="false" aria-controls="inspector-panel-clips" tabindex="-1">Clips</button>
-            <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Align</button>
+            <button id="inspector-tab-align" type="button" role="tab" data-inspector-tab="align" aria-selected="false" aria-controls="inspector-panel-align" tabindex="-1">Image offset</button>
             <button id="inspector-tab-review" type="button" role="tab" data-inspector-tab="review" aria-selected="false" aria-controls="inspector-panel-review" tabindex="-1">Review</button>
         </div>
         <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
@@ -725,10 +725,10 @@ def _render_inspector() -> str:
                 <div><dt>Y</dt><dd data-inspector-align-y></dd></div>
             </dl>
             <div class="rv-inspector-actions">
-                <button id="btn-inspector-reset-current-align" type="button" tabindex="-1">Reset current pair</button>
-                <button id="btn-inspector-reset-all-align" type="button" tabindex="-1">Reset all pairs</button>
+                <button id="btn-inspector-reset-current-align" type="button" tabindex="-1">Reset this pair's offset</button>
+                <button id="btn-inspector-reset-all-align" type="button" tabindex="-1">Reset all image offsets</button>
             </div>
-            <p class="rv-inspector-note">Offsets are scoped to the selected pair.</p>
+            <p class="rv-inspector-note">Offsets are scoped to the selected pair. Spatial adjustment only; does not change source-frame timing.</p>
         </section>
         <section id="inspector-panel-review" class="rv-inspector-panel rv-review-panel" role="tabpanel" aria-labelledby="inspector-tab-review" tabindex="-1" hidden>
             <p class="rv-review-frame" data-review-frame>Frame 1</p>
@@ -782,7 +782,7 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Direct Clip Select</span><span class="rv-key">1 - 9</span></div>
                 <div class="rv-shortcut-row"><span>Swap Clips</span><span class="rv-key">X</span></div>
                 <div class="rv-shortcut-row"><span>Modes (Slider/Single/Diff/Blink)</span><span class="rv-key">S / O / D / B</span></div>
-                <div class="rv-shortcut-row"><span>Toggle HUD</span><span class="rv-key">H</span></div>
+                <div class="rv-shortcut-row"><span>Toggle source labels</span><span class="rv-key">H</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Filmstrip</span><span class="rv-key">F</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Inspector</span><span class="rv-key">I</span></div>
                 <div class="rv-shortcut-row"><span>Toggle Lens</span><span class="rv-key">L</span></div>
@@ -792,11 +792,19 @@ def _render_help_modal() -> str:
                 <div class="rv-shortcut-row"><span>Open Help</span><span class="rv-key">?</span></div>
                 <div class="rv-shortcut-row"><span>Close Panel / Exit Fullscreen</span><span class="rv-key">Esc</span></div>
             </div>
+            <p class="rv-inspector-note">Hiding source labels changes only this viewer; baked screenshot text is unaffected.</p>
             <div class="rv-modal-subtitle">Viewport Fit Modes</div>
             <div class="rv-legend-grid">
                 <div class="rv-legend-row"><span class="rv-key">1:1</span><span>Actual size</span></div>
-                <div class="rv-legend-row"><span class="rv-key">↔</span><span>Fit width</span></div>
                 <div class="rv-legend-row"><span class="rv-key">↕</span><span>Fit height</span></div>
+            </div>
+            <div class="rv-modal-subtitle">View Modes</div>
+            <div class="rv-legend-grid">
+                <div class="rv-legend-row"><span class="rv-key">Slider</span><span>Reveal spatial differences</span></div>
+                <div class="rv-legend-row"><span class="rv-key">Single</span><span>Inspect one source</span></div>
+                <div class="rv-legend-row"><span class="rv-key">Diff</span><span>Locate changed pixels</span></div>
+                <div class="rv-legend-row"><span class="rv-key">Blink</span><span>Alternate the selected pair</span></div>
+                <div class="rv-legend-row"><span class="rv-key">Grid</span><span>Scan sources together</span></div>
             </div>
             <div class="rv-modal-actions">
                 <button id="btn-close-help">Close</button>

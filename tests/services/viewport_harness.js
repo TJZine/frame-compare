@@ -44,7 +44,7 @@ function makeViewer() {
     const sizer = element({ left: 0, top: 0, width: 200, height: 100, right: 200 });
     const refresh = { grid: 0, lens: 0 };
     const persistence = { calls: 0 };
-    const fitButtons = ['actual', 'width', 'height'].map(fit => {
+    const fitButtons = ['actual', 'height'].map(fit => {
         const button = element();
         button.dataset.fit = fit;
         return button;
