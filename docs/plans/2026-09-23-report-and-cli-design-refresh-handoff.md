@@ -17,6 +17,7 @@ maintainer/controller review before the next track starts.
 | Session | Units | Starts from | Ends at |
 | --- | --- | --- | --- |
 | 1. Track A | A1 → A2 → A3 → A4 | branch tip after the plan commit | Checkpoint A report |
+| 1b. Track A test-scope correction | Track A tests only | Track A commits | Correction report (joins the Checkpoint A review) |
 | 2. Track B viewer | B1 → B2 → B3 | branch tip after Checkpoint A review and fixes | Checkpoint B-viewer report |
 | 3. Track B terminal | B4 → B5 → B6 → B7 | branch tip after Checkpoint B-viewer review and fixes | Checkpoint B-terminal report |
 
@@ -67,6 +68,16 @@ These apply to every session. The prompts refer to them by name.
   slow.pics names keep the `|` separator, frozen audio strings verbatim, plain and
   log reporters unchanged.
 
+### Test scope
+
+Follow the plan's **Test scope** section (under Verification) exactly. In short:
+test logic, behaviour, saved state, accessibility semantics, and invariants; do not
+test positions, sizes, spacing, colours, fonts, icon markup, CSS values, exact
+tooltip/Help/note wording, option label lists, or terminal layout and wrapping.
+Keep the browser smoke test to "loads and core interactions work"; put viewer logic
+in the Node harnesses; test each rule in one place. Visual checks are still done,
+by looking, and recorded in the report's **Review checks** section.
+
 ### Subagents
 
 Use subagents where they help. Keep one writer at a time: only the main session
@@ -79,8 +90,8 @@ Good uses:
   string or behaviour appears before changing it;
 - running long verification (full pytest, browser smoke, docs build) and
   summarizing failures;
-- rendering and inspecting output (browser screenshots at the plan's widths,
-  terminal output at 60/80/120 columns);
+- performing the review checks by looking (a generated report in a browser,
+  terminal output at 80 and 120 columns) and reporting what was seen;
 - the adversarial reviews below (always read-only, fresh context).
 
 ### Adversarial review before every commit
@@ -96,7 +107,9 @@ After a unit's implementation and focused tests pass, and before committing it:
      the plan. For every bullet and value in the unit's plan section, find the
      code and test that implement it, or report it missing or different. Report
      anything in the diff that the plan did not ask for. Report every invariant
-     the diff could break."
+     the diff could break. Report every test assertion that breaks the plan's
+     Test scope section (presentation checks, duplicate checks, debug output in
+     tests) as a finding."
    - **Regression and contract reviewer** (units A1, A4, B1, B4, B5, B6, B7, and any
      unit touching Python production code): "Find behaviour this diff breaks or
      changes outside the plan: public CLI/JSON/report/persistence contracts,
@@ -153,13 +166,16 @@ on it. Do not summarize problems away.
 6. **Adversarial review log:** each round per unit and the track-level review:
    findings, severity, and disposition (fixed in `sha` / rejected with evidence /
    open).
-7. **Verification:** commands, exit codes, counts, skips with reasons, browser and
-   terminal checks performed (viewport sizes, columns, modes), and anything not
-   verified and why.
-8. **Possible issues and risks:** suspected regressions, fragile code, weak tests,
+7. **Verification:** commands, exit codes, counts, skips with reasons, and anything
+   not verified and why.
+8. **Review checks:** for each "review" item in the track's Proof lines and the
+   plan's Test scope review checks, what you looked at (viewport size, mode,
+   columns) and what you saw, including any difference from the reference assets.
+   Keep screenshots untracked and give their paths.
+9. **Possible issues and risks:** suspected regressions, fragile code, weak tests,
    platform concerns (Windows, encodings, light terminal themes), performance.
-9. **Files changed:** grouped by unit; flag any file outside the unit's owner list.
-10. **Documentation:** which docs were updated for which unit, and the strict docs
+10. **Files changed:** grouped by unit; flag any file outside the unit's owner list.
+11. **Documentation:** which docs were updated for which unit, and the strict docs
     build result.
 
 ## Prompt 1 — Track A
@@ -209,6 +225,96 @@ Docs to update in the units that change them: docs/guides/sources-and-labels.md
 the architecture's viewer sections if they describe the lens comparison.
 ```
 
+## Prompt 1b — Track A test-scope correction
+
+Give this to the Track A implementer after Track A's units are committed. If the
+Track A session is still open, send it there; otherwise start a new session.
+
+```text
+You are applying a test-scope correction to Track A of the Frame Compare design
+refresh plan. This changes tests only; do not change product code except to fix a
+real bug found by step 2.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules".
+
+The maintainer added a "Test scope" section to the plan (under Verification) and
+moved presentation checks from the Proof lists to review. Read that section, the
+updated A1–A4 Proof lines, and the Common rules "Test scope" section first. Track A
+added assertions that now break those rules. Remove them as listed below. Only
+remove assertions that Track A added: compare against the plan commit with
+`git diff 8a177276 HEAD -- tests/`. Pre-existing assertions stay, including
+existing assertions Track A updated for new expected values.
+
+1. Working tree. `tests/browser/test_report_browser_smoke.py` has uncommitted
+   changes that restructure and extend the lens-caption browser checks. Before
+   discarding them, write down why they were being made (see step 2).
+
+2. Lens caption in Single mode. The uncommitted changes suggest the browser caption
+   check failed in Single (overlay) mode while the Node harness passes. Do not
+   delete a failing check to hide a bug. Open a generated report in a real
+   browser, turn the lens on, set Caption to On, and check Single, Slider, and Diff
+   by looking. If the caption does not show in any of those modes, that is a
+   product bug: fix it in lens.js, add the missing case to the lens Node harness
+   (tests/services/lens_harness.js and its pytest wrapper), and record it in the
+   report. If it works, record that and continue.
+
+3. tests/browser/test_report_browser_smoke.py: restore the file to HEAD
+   (discarding the uncommitted edits after step 1), then remove every Track A
+   addition except the updated advanced-tonemap label list ('Scene thresholds'):
+   - the vertical palette checks: verticalZoomOrder, verticalIconButtons,
+     verticalIconWidths, the rectangle and width measurements behind them, and
+     their assertions;
+   - the lens-caption block (lensCaption* attributes and any debug attributes) and
+     its assertions (covered by the lens harness);
+   - the G-shortcut and Grid-title block (gShortcutSelectsGrid, gridButtonTitle)
+     and its assertions (the shortcut is covered by the viewer-state harness;
+     title wording is a review item).
+
+4. tests/services/test_report_renderer_markup.py: remove Track A-added assertions
+   on:
+   - the Grid title and Help wording ('title="Grid (G) — scan sources together"'
+     in the HTML, "Modes (Slider/Single/Diff/Blink/Grid)", "S / O / D / B / G");
+   - icon markup: svg presence on the zoom, Source labels, and Lens buttons, and
+     empty button text for the zoom buttons;
+   - exact visible text or title of the Lens button, option label lists for Size,
+     Sample marker, and Caption, tabindex of a non-selected option, and the lens
+     note text ("drag its grip to move it").
+   Keep: absence of the removed features (Fixed text, comparison controls,
+   data-lens-current-source, COMPARE, comparison image slot, role badges);
+   Ring checked by default; Caption Off checked and On unchecked by default;
+   aria-label present on the lens and palette buttons; the timestamp <time>
+   element and its datetime; the FPS, runtime, active-picture, and tonemap label
+   tests; and any pre-existing assertion.
+
+5. Leave unchanged: A1 parser tests, A2 formatting tests (Python and harness), the
+   viewer-state harness G test, the lens-state harness and its summary keys,
+   test_fps_report.py.
+
+6. Check the remaining Track A tests against the plan's Test scope one more time
+   and remove any other presentation-only assertion Track A added; list each one
+   in the report.
+
+7. Run: the focused suites you touched, then the full gate from the plan's
+   Verification section (including the browser smoke test with -rs). Record exit
+   codes, counts, and skips.
+
+8. Adversarial review before committing, as the Common rules describe, with one
+   plan-conformance reviewer given the plan's Test scope section, the A1–A4 Proof
+   lines, and the staged diff: "Find any removed assertion that tested logic,
+   behaviour, saved state, accessibility semantics, or an invariant (it must be
+   restored), and any remaining assertion that breaks the Test scope."
+
+9. Commit as `test(report): Track A test-scope correction` (plus a separate
+   `fix(report): …` commit first if step 2 found a bug), append a short entry to the
+   plan's Execution record, and report: what was removed (file and assertion),
+   what was kept and why, the step 2 finding, verification results, and the
+   review log.
+```
+
 ## Prompt 2 — Track B viewer
 
 ```text
@@ -246,11 +352,12 @@ Unit notes (in addition to the plan text, not instead of it):
   the shared line with omission rule, placement text, and the Report Information
   rows (Opens in / Default pair).
 
-Visual verification: generate a report from the same fixtures the browser smoke
-test uses (or an equivalent synthetic fixture with three sources and the three long
-names from the plan), and compare it in a real browser against the reference images
-at 1440, 1280, 768, and 375 px and at 200% zoom. Record differences in the
-Deviations section. Keep screenshots untracked.
+Review checks (by looking, not by tests): generate a report from the same fixtures
+the browser smoke test uses (or an equivalent synthetic fixture with three sources
+and the three long names from the plan), and compare it in a real browser against
+the reference images at 1440 and 375 px. Record what you saw in Review checks and
+any difference in Deviations. Keep screenshots untracked. Do not add presentation
+assertions to the browser smoke test (plan Test scope).
 
 Suggested subagent use: read-only explorers to map every consumer of the display
 profiles and of the stage-label and Inspector rendering before edits; a browser
@@ -302,11 +409,13 @@ Unit notes (in addition to the plan text, not instead of it):
   preset, and errors without changing their text, streams, JSON, or history list's
   tab-separated rows.
 
-Terminal verification: render each changed surface at 60, 80, and 120 columns, with
-NO_COLOR, with an ASCII-only encoding, with --quiet, --verbose, --json, and non-TTY,
-and compare the 104-column renders against the cli-*.svg references. Record
-differences in the Deviations section. If a real media run is possible on this host,
-run one and include its output; otherwise say so.
+Tests (behaviour and invariants): NO_COLOR, ASCII-only encoding, --quiet, --json,
+and non-TTY output, frozen strings verbatim. Do not assert colours, spacing, or
+wrapping (plan Test scope).
+Review checks (by looking): render each changed surface at 80 and 120 columns and
+compare with the cli-*.svg references; record what you saw in Review checks and
+any difference in Deviations. If a real media run is possible on this host, run one
+and include its output; otherwise say so.
 
 Suggested subagent use: read-only explorers to map every printer of the affected
 panels and every test asserting their text before edits; a render subagent for the

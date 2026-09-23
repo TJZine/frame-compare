@@ -306,8 +306,8 @@ terminal formatter in `orchestration/fps_report.py`.
   offset is non-zero, `, {left} px left`.
 
 Proof: `viewer_format` harness cases for each rule (including `23.976023976023978`,
-`25`, unknown enum, zero and non-zero left offsets); renderer/Inspector tests;
-terminal size formatting test.
+`25`, unknown enum, zero and non-zero left offsets); tonemap label mapping; terminal
+size formatting test.
 
 ### A3 Grid shortcut
 
@@ -319,7 +319,7 @@ Owners: `viewer.js`, `renderer.py` (Grid button title, Help modal markup).
 - Do not show shortcut letters in the mode control, and do not add a frame-position
   counter to the toolbar (D9). The frame select keeps today's order and text.
 
-Proof: viewer-state harness for `G`; browser smoke asserts the Grid shortcut.
+Proof: viewer-state harness for `G` and `g`. Title and Help wording: review.
 
 ### A4 Lens and palette details
 
@@ -362,12 +362,10 @@ Reference: `viewer-lens.webp`, `viewer-popovers.webp`.
 
 Proof: lens-state harness (Ring default without saved prefs; saved `off` kept;
 Caption default off and persisted; caption text rule including a DV name and an
-explicit label; stored `comparisonEnabled` ignored); renderer tests (no `Fixed`
-element, no comparison controls or `data-lens-current-source`; radiogroup markup
-and roles); browser smoke for
-vertical order, vertical icon buttons (accessible names unchanged, palette width no
-wider than its widest icon group), and the caption off/on in Single, Slider, and
-Diff.
+explicit label, Diff pair text; stored `comparisonEnabled` ignored); renderer test
+that the removed controls are absent (`Fixed`, comparison controls,
+`data-lens-current-source`) and that the new radiogroups default to Ring and Caption
+Off. Icons, vertical order, palette width, and caption appearance per mode: review.
 
 ## Track B — agreed design
 
@@ -396,10 +394,8 @@ Owners: `services/release_identity.py` (separator parameter only),
 
 Proof: display-profile test asserting `·` in the report payload and `|` in burned-in
 text and slow.pics names for the same fixture; viewer-format harness for the
-HDR-word rule and explicit labels; renderer/state tests that
-no stage label contains `LEFT`, `RIGHT`, or `#`; browser checks at 1440, 1280, 768, 375 px and
-200% zoom with the three long names from the screenshots: no document overflow,
-toolbar fits or wraps within the existing responsive rules, names end-truncate.
+HDR-word rule and explicit labels. Toolbar and stage-label appearance, truncation,
+and the viewport/zoom matrix: review.
 
 ### B2 Proximity fade for the viewport palette
 
@@ -422,9 +418,8 @@ Reference: `viewer-viewer.webp` (ghost), `viewer-lens.webp` (shown).
 - Pointer events stay enabled in both states.
 
 Proof: viewer/viewport harness for the state machine (thresholds, hysteresis,
-drag override, popover and load overrides, coarse pointer); browser check with a
-real pointer, keyboard Tab into the palette (full opacity), reduced motion, touch
-emulation.
+drag override, popover and load overrides, coarse pointer). Feel of the fade,
+opacity, reduced motion, and touch: review.
 
 ### B3 Inspector and Report Information
 
@@ -465,7 +460,7 @@ Owners: `renderer.py`, `inspector.js`, `viewer.css`. Reference:
 
 Proof: Inspector harness for the table (all sources, visibility marks, missing
 values), placement text, shared-line omission when values differ, and Detail
-visibility; renderer tests; browser visual comparison against the reference images.
+visibility. Layout and match to the reference images: review.
 
 ### B4 `run` terminal output
 
@@ -583,9 +578,11 @@ matching border:
 Proof: extend `tests/cli/test_run_output.py`, `test_cli_output.py`, progress,
 alignment, and fps-report tests with semantic assertions; exact-match tests for the
 frozen audio strings; `NO_COLOR`, ASCII-encoding fallback, `--quiet`, `--verbose`,
-`--json`, and non-TTY (plain reporter unchanged) runs; renders at 60, 80, and 120
-columns inspected for mid-item wrapping. Update `docs/current-cli-contract.md`
-(Run plan rows, Rich phase labels, summary) in this unit.
+`--json`, and non-TTY (plain reporter unchanged) runs; `short_source_names` rule;
+length-difference computation; publish-state selection of summary rows. Colours,
+spacing, and wrapping at 60/80/120 columns: review. Update
+`docs/current-cli-contract.md` (Run plan rows, Rich phase labels, summary) in this
+unit.
 
 ### B5 Machine versus user time
 
@@ -646,7 +643,8 @@ helpers.
   metadata contract.
 
 Proof: `tests/vsview/test_session_script.py` (determinism; each colour tier; `NO_COLOR`;
-ASCII fallback; ready block content); one real VSView launch where the host allows.
+ASCII fallback; ready block contains the steps, every output, and every hint
+verbatim). Appearance and one real VSView launch where the host allows: review.
 
 ### B7 Other commands
 
@@ -670,8 +668,9 @@ and `error_formatting.py`. Reference: `cli-doctor.svg`.
   `highlight=False`.
 
 Proof: extend `test_doctor_command.py`, `test_wizard_command.py`,
-`test_history_command.py`, `test_preset_command.py` for glyph presence, unchanged
-streams/JSON, ASCII fallback, and hint wrapping at 80 columns.
+`test_history_command.py`, `test_preset_command.py` for unchanged streams, JSON,
+and history's tab-separated rows; doctor verdict counts; ASCII fallback. Layout and
+hint wrapping: review.
 
 ## Sequencing and review checkpoints
 
@@ -702,6 +701,34 @@ uv run --no-sync pytest -q -rs tests/browser/test_report_browser_smoke.py
 Inspect skips; a green run with a skipped browser suite is not browser proof.
 Use the locked Node harnesses through pytest. Assert semantic fragments and stream
 separation, not whole-terminal snapshots.
+
+### Test scope
+
+Automated tests cover what can break silently. Visual presentation is obvious to a
+person and is checked at each review checkpoint, not by tests.
+
+- **Test:** parsing and formatting rules; state machines and saved-state handling
+  (including old saved values); keyboard and interaction behaviour; data shown
+  (which sources, which values, which rows are omitted); removed features staying
+  removed; accessibility semantics (roles, `aria-checked`/`aria-pressed`, an
+  accessible name exists); and the invariants (payload keys, `|` in burned-in text
+  and slow.pics names, frozen strings verbatim, JSON/quiet/non-TTY output, run
+  record, VSView script determinism).
+- **Do not test:** element positions, sizes, widths, spacing, order on screen,
+  colours, fonts, icon markup (`svg` presence), CSS `display` values, truncation,
+  exact tooltip/Help/note wording, option label lists, or terminal layout and
+  wrapping. Do not add debug attributes or diagnostic output to tests.
+- **Browser smoke test:** only "the report loads without errors and core
+  interactions work". Prefer the Node harnesses for viewer logic. Do not extend the
+  smoke test with presentation checks; existing smoke coverage stays.
+- **One place per rule:** do not re-test in the browser what a harness already
+  covers.
+- **Existing tests:** update existing assertions whose expected text or values the
+  plan changes; do not delete existing coverage.
+- **Review checks** (performed and recorded at each checkpoint, not automated):
+  each unit's "review" items, a generated report compared with the reference
+  images at 1440 and 375 px, and terminal output at 80 and 120 columns compared
+  with the `cli-*.svg` references.
 
 Documentation, in the unit that changes the behaviour: `docs/current-cli-contract.md`
 (Run plan, phase labels, summary, doctor), `docs/guides/reports-and-overlays.md`
@@ -749,3 +776,7 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   terminal `#n` with release-group short names (S1); made the lens a plain
   magnifier with an opt-in caption showing service, source type, and group (D10).
   Mockups regenerated to match.
+- Test-scope correction (September 23, after Track A): added the Test scope rules
+  and moved presentation checks from Proof lists to review. Track A's
+  presentation-only assertions are removed in a follow-up pass (handoff
+  "Track A test-scope correction").
