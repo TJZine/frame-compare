@@ -100,6 +100,7 @@ assert.equal(format.sourceHudLabel(explicitClip), 'My Explicit · 1920×1080 · 
 assert.equal(format.stageLabelNeedsRangeWord('2160p · MA WEB-DL · DV HDR10+ · GRP'), false);
 assert.equal(format.stageLabelNeedsRangeWord('2160p · HLG · GRP'), false);
 assert.equal(format.stageLabelNeedsRangeWord('My Explicit'), true);
+assert.equal(format.stageLabelNeedsRangeWord('Cut (HDR) · GRP'), false);
 assert.equal(format.formatSignal({ is_hdr: true, transfer: 16, range: 'limited' }), 'HDR · PQ · Limited');
 assert.equal(format.formatPresentation(clip), 'Tonemapped · BT.2390 → 203 nits');
 assert.equal(format.formatActivePicture(null, [1920, 1080]), '1920×1080 · full frame');

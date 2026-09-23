@@ -63,7 +63,7 @@ const ViewerFormat = {
 
     stageLabelNeedsRangeWord(name) {
         const words = new Set(
-            String(name ?? '').split(/[\s·]+/).filter(Boolean),
+            String(name ?? '').split(/[^A-Za-z0-9+]+/).filter(Boolean),
         );
         return !this.stageDynamicRangeWords().some(word => words.has(word));
     },

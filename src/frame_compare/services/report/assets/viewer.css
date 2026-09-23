@@ -764,7 +764,7 @@ select optgroup {
     border-top: 1px solid var(--border);
     background: var(--bg-surface);
     color: var(--text-secondary);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
     line-height: 1.4;
     white-space: nowrap;

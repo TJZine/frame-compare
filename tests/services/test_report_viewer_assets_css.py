@@ -82,3 +82,10 @@ def test_viewer_css_scopes_metadata_row_flattening_to_direct_children() -> None:
     rows = css_block(css, ".rv-metadata-list > div")
     assert "display: contents;" in rows
     assert ".rv-metadata-list div {" not in css
+
+
+def test_viewer_css_renders_grid_source_labels_in_ui_face() -> None:
+    css = get_css()
+
+    grid_label = css_block(css, ".rv-grid-label")
+    assert "font-family: var(--font-sans);" in grid_label
