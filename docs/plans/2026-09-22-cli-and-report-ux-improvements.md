@@ -517,4 +517,89 @@ Mark this plan Historical only after its complete scope is accepted.
   readability of those captions is unproven by this method.
 - Remaining: physical-Windows visible terminal/VSView acceptance (W1) and natural
   desktop usability. The P5 acceptance claim depends on W1 and stays open.
-- P6: pending.
+
+### P6 integrated acceptance — September 22, 2026
+
+Candidate: product tree at `6eb970c5` (P1–P4); later commits `7202c4b9` and
+`9242f198` are plan/docs only. Host: macOS, native Google Chrome through pytest
+smoke, Claude in-app browser (Chromium) for interactive review, local HTTP.
+
+- Full gate on the candidate: `uv run --no-sync pytest -q -rs` exit 0. The 48 skips
+  were inspected: Windows/PowerShell process semantics (portable scripts, shims,
+  install/update), native `lsmas`/`libplacebo` plugins unavailable locally (Docker
+  gate owns them), opt-in channel-corroboration and streaming-resource suites, and
+  live slow.pics/webhook probes. No browser or VSView test skipped. Per-unit
+  `pyright --warnings` 0/0/0, `ruff check .`, bandit (no medium/high), and
+  `lint-imports` (2 kept) remain current for the unchanged product tree.
+- Docs: `uv sync --group dev --group docs --locked` (then re-synced with
+  `--extra vsview` to restore the local VSView runtime it removed; VSView suite
+  re-passed 155/0 skipped), `generate_api_docs.py --check` exit 0,
+  `zensical build --clean --strict` "No issues found". A current-facing docs sweep
+  for HUD, Fit width, Export tab, and Align tab terms left only the temporal
+  alignment config setting, one backlog line (fixed in `9242f198`), and
+  screenshot-provenance history in `docs/images/README.md` (owned by the
+  screenshot plan; left unchanged).
+- Browser evidence (untracked scratch reports generated from candidate code; natural
+  images are variants of the CC BY 4.0 EBU harbour crop already used by the docs;
+  2-source and 4-source reports with long source names):
+  - 1440×900 and 1280×800: Inspector open/closed × horizontal/vertical palette:
+    every retained control visible and unclipped, no document overflow, Fit width
+    absent, four Inspector tabs unclipped. Vertical palette holds "Source labels".
+  - 768 and 375 px: no horizontal overflow; all retained controls reachable (palette
+    wraps to two rows at 375). The orientation switch is hidden at ≤768 px by the
+    pre-existing responsive rule (CSS unchanged by this plan).
+  - 200% zoom, emulated as a 720×450 CSS viewport: no horizontal overflow; palette,
+    filmstrip, Inspector tabs, and Review controls unclipped (page scrolls
+    vertically).
+  - Modes: Slider, Single, Diff, Blink, and Grid (4 sources); Lens toggle shows its
+    controls; zoom in, reset, fit height; a real drag pans in Single; fit height
+    recalculates after resize (0.893 → 0.641).
+  - Keyboard (real key events): Enter opens Help with focus inside, Escape restores
+    focus to the Help button; H toggles Source labels both ways; D switches mode;
+    arrows move and wrap within the fit radios with one tab stop; Tab/Shift-Tab leave
+    and re-enter the group; `i` opens the Inspector on the remembered tab;
+    ArrowLeft/End move across the tabs; the offset popover opens to its preset and
+    Escape restores focus to its toggle. Help shows the source-labels note, two fit
+    modes, and View Modes.
+  - Feedback: typed notes move status from "0 review records saved in this browser."
+    to "1 review record saved…"; a forced `setItem` failure shows the session-only
+    warning once in the polite live region with focus kept in the note; malformed,
+    unknown-key, and different-report imports are rejected with storage unchanged;
+    a genuine export previews merge/replace; a missing Grid image shows an announced
+    unavailable state with Retry, which recovers after the file returns.
+  - Reduced motion: headless Chrome with `--force-prefers-reduced-motion` starts
+    Blink paused ("Resume blink"); without the flag it runs.
+  - Coarse pointer (375 px touch emulation): retained palette targets are separate
+    with ≥4 px gaps; buttons are ≥28 px (Lens, Inspector tabs, Grid, and Review
+    controls 44 px). The zoom range is 76×20. Both are pre-existing sizes, above
+    the 24 px WCAG 2.5.8 minimum except the range's height; no change was made.
+  - Real-page-load smoke (17 passed) covers the absent width button, restored
+    width/height fit radio state, and H.
+- Terminal: `run --overlay <160-char value>` at `COLUMNS=60/80/120` wraps with the
+  bounded value, hint, and exit 2; `NO_COLOR` plus `--quiet` keeps the actionable
+  error; `--verbose` adds validation details; `--json` stdout is JSON only and stderr
+  is empty. Wizard next steps were proven in P2 tests.
+- No independent reviewer was requested: every unit diff was inspected line by line,
+  concrete defects were repaired with red/green proof, and no consequential open
+  correctness, security, or contract risk remained to justify one.
+
+### Closeout status
+
+P1–P4 are accepted. P6 browser, terminal, documentation, and full-gate evidence on
+this host is accepted. The plan stays **Active** because these acceptance items
+depend on work outside this host or plan:
+
+- **W1 physical-Windows acceptance** (audio plan): visible terminal/VSView UX,
+  enlarged-text readability, and PowerShell display of the wizard block. Next step:
+  the audio-plan owner refreshes the W1 candidate to include post-A1 production
+  commits and runs the existing W1 handoff on the physical Windows host.
+- **Documentation imagery**: `report-viewer-overview`, `report-slider`,
+  `report-grid`, and `report-inspector` show the pre-P3/P4 viewer (Export tab,
+  Align tab, HUD, Fit width). Next step: recapture them through the Active
+  screenshot plan on its Windows host with this candidate, with provenance.
+- **Fullscreen**: the Claude browser pane refused the fullscreen request, so
+  fullscreen was not exercised here (the control is unchanged by this plan). Next
+  step: check it in a standalone desktop browser during the screenshot recapture.
+- **U2 observations**: the empty bordered box under collapsed evidence details on
+  cocoa, and enlarged-caption scaling. Next step: the audio-plan U2 owner assesses
+  them during W1.
