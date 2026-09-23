@@ -459,4 +459,32 @@ Mark this plan Historical only after its complete scope is accepted.
   status, blocked storage, failed write after successful load, and import paths.
 - Pending for P6: real-browser visual inspection of the Review panel and full
   `pytest -q`.
-- P4–P6: pending.
+
+### P4 acceptance — viewer language and Fit width removal
+
+- Implementation `6eb970c5` `feat(report): clarify viewer labels and remove the
+  fit-width control`. Worker: Claude `worker_luna` (configured Sonnet, max effort);
+  controller repairs before commit.
+- Owners: `renderer.py` (only `data-fit="width"` and its help-legend row removed;
+  orientation switch and every other palette control retained; Image offset naming
+  for the Inspector tab, settings button, preset/X/Y inputs, and reset actions;
+  spatial-only note in the palette popover and Inspector tab; Source labels button,
+  shortcut row, and baked-text note; mode purpose in tooltips and a Help "View Modes"
+  section), `viewer.js` (dynamic Source labels names; fit radios synced at init),
+  harnesses, markup/state tests, browser smoke, architecture, report guide, and one
+  stale HUD line in the CLI contract. Internal keys (`align`, `alignX`, `fitMode`)
+  and width-fit math are unchanged; no CSS change was needed.
+- Controller repairs: palette button text restored from the worker's shortened
+  "Labels" to the approved "Source labels"; Inspector reset actions renamed to
+  "Reset this pair's offset" / "Reset all image offsets" and the spatial-only note
+  added there; fixed a pre-existing init gap where a restored `fitMode` of `height`
+  or `width` still showed Actual size checked (new real-page-load browser test fails
+  before the fix and passes after); CLI contract HUD wording.
+- Proof (controller): `pytest tests/services -k report` 95 passed; `pytest -rs
+  tests/browser/test_report_browser_smoke.py` 17 passed, 0 skipped (native macOS
+  Chrome); `ruff format --check`, `ruff check .`, `pyright --warnings` 0/0/0, bandit
+  no medium/high, `lint-imports` 2 kept, `git diff --check` clean. Worker inspected a
+  generated report in a real Chrome tab at 1024×768 and 375×812 with the shorter label.
+- Pending for P6: visual layout with the full "Source labels" text across the P6
+  viewport/zoom matrix, and full `pytest -q`.
+- P5–P6: pending.
