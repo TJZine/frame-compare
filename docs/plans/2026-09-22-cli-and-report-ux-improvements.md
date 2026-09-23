@@ -433,4 +433,30 @@ Mark this plan Historical only after its complete scope is accepted.
   skipped on this macOS host (no `pwsh`).
 - Not yet run: full `pytest -q` and strict docs build (P6). Physical Windows display
   of the PowerShell block is unverified on this host.
-- P3–P6: pending.
+
+### P3 acceptance — Inspector organization and note storage
+
+- Implementation `fac74744` `feat(report): fold Inspector export into Review and
+  clarify note storage`. Worker: Claude `worker_luna` (configured Sonnet, max effort);
+  a first dispatch ended on an account usage limit before any edit, and the unit was
+  re-dispatched from the same clean baseline. No controller repair was needed; the
+  commit hook reformatted one test line.
+- Owners: `renderer.py` (Export tab/panel removed; static Review note "Notes are not
+  stored in the report file. Export review JSON to keep or transfer them."),
+  `inspector.js` (Export lookups/rendering and the duplicate JS slow.pics link
+  builder removed; `validTab` now frame/clips/align/review, so saved `export`
+  falls back to Frame), `review_state.js` (status "{n} review record(s) saved in this
+  browser."; one session-only warning for unavailable storage, memory-only fallback,
+  and failed writes), Node harnesses, markup/inspector/state tests, browser smoke,
+  architecture Inspector/review-state prose, and the report guide.
+- Report Information already held title, report ID, generated time, frame/clip
+  counts, and the uploaded slow.pics link; no modal change was needed.
+- Proof (controller): `pytest tests/services -k report` 95 passed; `pytest -rs
+  tests/browser/test_report_browser_smoke.py` 14 passed, 0 skipped (real
+  Chrome; asserts four tabs and no Export ids); `ruff check .`, `pyright --warnings`
+  0/0/0, `git diff --check` clean. Worker also ran bandit (no issues) and
+  lint-imports (2 kept). Harnesses cover old `export` tab fallback, zero/singular
+  status, blocked storage, failed write after successful load, and import paths.
+- Pending for P6: real-browser visual inspection of the Review panel and full
+  `pytest -q`.
+- P4–P6: pending.
