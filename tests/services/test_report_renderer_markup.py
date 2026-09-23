@@ -663,6 +663,25 @@ def test_build_html_uses_payload_default_selection_for_clip_controls(
     assert active_selected == ["Encode control"]
 
 
+def test_build_html_labels_info_modal_roles_from_default_left_clip(
+    report_payload: ReportPayload,
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "default_selection": {
+            "left_clip_index": 1,
+            "right_clip_index": 0,
+        },
+    }
+
+    info_modal = parse_info_modal(build_html(payload))
+
+    assert [clip.label for clip in info_modal.clips] == [
+        "Comparison 1",
+        "Reference",
+    ]
+
+
 def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     document = parse_elements(html)

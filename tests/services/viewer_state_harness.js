@@ -96,7 +96,6 @@ function fakeElement() {
     const listeners = new Map();
     let definitionValues = null;
     const inspectorPrimary = { value: null };
-    const inspectorRelease = { value: null };
     return {
         value: '',
         textContent: '',
@@ -165,10 +164,6 @@ function fakeElement() {
             if (selector === '.rv-inspector-clip-primary') {
                 if (!inspectorPrimary.value) inspectorPrimary.value = fakeElement();
                 return inspectorPrimary.value;
-            }
-            if (selector === '.rv-inspector-clip-release') {
-                if (!inspectorRelease.value) inspectorRelease.value = fakeElement();
-                return inspectorRelease.value;
             }
             return null;
         },

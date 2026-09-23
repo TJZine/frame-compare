@@ -434,8 +434,11 @@ def _render_tonemap_details(rendering: object) -> str:
     return "".join(rows)
 
 
-def _info_clip_role(index: int) -> str:
-    return "Reference" if index == 0 else f"Comparison {index}"
+def _info_clip_role(index: int, reference_index: int) -> str:
+    # Mirrors ViewerFormat.stableClipRole: the reference is the default left clip.
+    if index == reference_index:
+        return "Reference"
+    return f"Comparison {index + 1 if index < reference_index else index}"
 
 
 def _render_info_modal(
@@ -495,7 +498,7 @@ def _render_info_modal(
         clip_items.append(
             f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
             f'<div class="rv-clip-meta-heading">'
-            f"<span>{_esc_text(_info_clip_role(i))}</span>"
+            f"<span>{_esc_text(_info_clip_role(i, left_clip_index))}</span>"
             f'<span class="rv-badge">{_esc_text(_render_clip_badge(signal))}</span>'
             f"</div>"
             f'<div class="rv-clip-meta-primary">{_esc_text(_clip_display(clip, "control"))}</div>'
