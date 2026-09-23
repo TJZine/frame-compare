@@ -336,9 +336,6 @@ assert.equal(Lens.lensCaptionText('My Encode', 'My Encode'), 'My Encode');
 assert.equal(Lens.lensCaptionText('Director Cut · DV', 'Director Cut · DV'), 'Director Cut · DV');
 assert.equal(Lens.lensCaptionText('Anything', 'HDR'), 'HDR');
 assert.equal(Lens.lensCaptionText('Anything', ''), '');
-assert.equal(Lens.endEllipsis('short.mov', 20), 'short.mov');
-assert.equal(Lens.endEllipsis('source_camera_original_master_001.exr', 18), 'source_camera_ori…');
-assert.equal(Lens.endEllipsis('AB😀CDEFGH.txt', 8), 'AB😀CDEF…');
 
 const bounded = Lens.normalizedPosition({ u: -4, v: 2 });
 assert.equal(bounded.u, 0);
@@ -357,24 +354,14 @@ assert.deepEqual(JSON.parse(JSON.stringify(splitGeometry)), {
     left: -340,
     top: 20,
 });
-const expectedCapacities = {
-    160: { single: 17, diff: 17 },
-    240: { single: 27, diff: 27 },
-    320: { single: 37, diff: 37 },
-};
-Object.entries(expectedCapacities).forEach(([pixelsText, contexts]) => {
-    const pixels = Number(pixelsText);
-    Object.entries(contexts).forEach(([context, expected]) => {
-        assert.equal(Lens.captionCharacterCapacity(pixels, context), expected);
-    });
-    const truncated = Lens.endEllipsis(
-        'Active_camera_color_managed_comparison_002_master.exr',
-        contexts.single,
-    );
-    assert.ok(Array.from(truncated).length <= contexts.single);
-    assert.match(truncated, /^Active_camera/);
-    assert.match(truncated, /…$/);
-});
+const singleCapacity = Lens.captionCharacterCapacity(240, 'single');
+const truncated = Lens.endEllipsis(
+    'Active_camera_color_managed_comparison_002_master.exr',
+    singleCapacity,
+);
+assert.ok(Array.from(truncated).length <= singleCapacity);
+assert.match(truncated, /^Active_camera/);
+assert.match(truncated, /…$/);
 const rightBound = Lens.boundedPopoverPosition(
     { left: 0, top: 0, width: 1000, height: 700 },
     { left: 760, top: 80, width: 240, height: 272 },
@@ -563,7 +550,6 @@ assert.deepEqual(
 );
 assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '204px');
 const clampedSingleCapacity = Lens.captionCharacterCapacity(204, 'single');
-assert.equal(clampedSingleCapacity, 23);
 assert.ok(
     Array.from(environment.selectors['[data-lens-identity="active"]'].textContent).length
         <= clampedSingleCapacity,

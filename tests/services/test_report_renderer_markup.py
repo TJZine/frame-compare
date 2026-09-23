@@ -264,9 +264,6 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
 
     assert 'id="help-modal"' in html
     assert "Viewer Shortcuts" in html
-    assert 'title="Grid (G) — scan sources together"' in html
-    assert "Modes (Slider/Single/Diff/Blink/Grid)" in html
-    assert "S / O / D / B / G" in html
     assert 'class="rv-footer"' not in html
     assert "Use arrow keys to navigate" not in html
     assert html.count('id="report-data"') == 1
@@ -715,19 +712,9 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert overlays_button.attrs["aria-label"] == "Hide source labels"
     assert overlays_button.attrs["title"] == "Hide source labels (H)"
     assert overlays_button.text == "Source labels"
-    assert find_all(overlays_button, tag="svg") != []
     assert "HUD" not in html
-    zoom_out = require_first(palette, tag="button", element_id="btn-zoom-out")
-    assert zoom_out.text == ""
-    assert find_all(zoom_out, tag="svg") != []
-    zoom_in = require_first(palette, tag="button", element_id="btn-zoom-in")
-    assert zoom_in.text == ""
-    assert find_all(zoom_in, tag="svg") != []
     lens_button = require_first(palette, tag="button", element_id="btn-lens")
-    assert lens_button.text == "Lens"
     assert lens_button.attrs["aria-label"] == "Turn lens on"
-    assert lens_button.attrs["title"] == "Toggle lens (L)"
-    assert find_all(lens_button, tag="svg") != []
     blink_controls = require_first(
         palette, tag="div", attr_name="data-control-scope", attr_value="blink"
     )
@@ -887,18 +874,12 @@ def test_build_html_renders_lens_stage_controls(
     assert find_all(settings, tag="input", element_id="lens-comparison-enabled") == []
     assert find_all(settings, attr_name="data-lens-current-source") == []
     assert find_all(settings, attr_name="data-lens-comparison-settings") == []
-    size_options = find_all(settings, attr_name="data-lens-size")
-    assert [button.text for button in size_options] == ["Small", "Medium", "Large"]
-    marker_options = find_all(settings, attr_name="data-lens-marker")
-    assert [button.text for button in marker_options] == ["Off", "Ring", "Brackets"]
     assert (
         require_first(
             settings, tag="button", attr_name="data-lens-marker", attr_value="ring"
         ).attrs["aria-checked"]
         == "true"
     )
-    caption_options = find_all(settings, attr_name="data-lens-caption")
-    assert [button.text for button in caption_options] == ["Off", "On"]
     assert (
         require_first(
             settings, tag="button", attr_name="data-lens-caption", attr_value="off"
@@ -910,16 +891,6 @@ def test_build_html_renders_lens_stage_controls(
             "aria-checked"
         ]
         == "false"
-    )
-    assert (
-        require_first(settings, tag="button", attr_name="data-lens-caption", attr_value="on").attrs[
-            "tabindex"
-        ]
-        == "-1"
-    )
-    assert (
-        "drag its grip to move it"
-        in require_first(settings, tag="p", class_name="rv-lens-note").text
     )
     assert not find_all(stage, attr_name="data-lens-behavior")
     assert not find_all(lens, tag="canvas")

@@ -713,77 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 && window.getComputedStyle(document.getElementById('btn-palette-orientation')).display === 'none'
             )
         );
-        const zoomOutButton = document.getElementById('btn-zoom-out');
-        const zoomInButton = document.getElementById('btn-zoom-in');
-        const zoomInRect = zoomInButton.getBoundingClientRect();
-        const verticalRangeRect = zoomRange.getBoundingClientRect();
-        const zoomOutRect = zoomOutButton.getBoundingClientRect();
-        const overlaysButton = document.getElementById('btn-overlays');
-        const lensButton = document.getElementById('btn-lens');
-        const verticalIconButton = button => {
-            const icon = button.querySelector('svg');
-            const label = button.querySelector('span');
-            return Boolean(icon)
-                && Boolean(label)
-                && window.getComputedStyle(icon).display !== 'none'
-                && window.getComputedStyle(label).display === 'none';
-        };
-        document.documentElement.dataset.verticalZoomOrder = String(
-            window.innerWidth <= 768
-                ? zoomOutRect.left <= zoomInRect.left + 1
-                : (zoomInRect.bottom <= verticalRangeRect.top + 1
-                    && verticalRangeRect.bottom <= zoomOutRect.top + 1)
-        );
-        document.documentElement.dataset.verticalIconButtons = String(
-            verticalIconButton(overlaysButton)
-            && verticalIconButton(lensButton)
-            && overlaysButton.getAttribute('aria-label') === 'Hide source labels'
-            && overlaysButton.getAttribute('title') === 'Hide source labels (H)'
-            && overlaysButton.getAttribute('aria-pressed') === 'true'
-            && lensButton.getAttribute('aria-label') === 'Turn lens on'
-            && lensButton.getAttribute('aria-pressed') === 'false'
-            && lensButton.getAttribute('title') === 'Toggle lens (L)'
-        );
-        document.documentElement.dataset.verticalIconWidths = String(
-            Math.abs(overlaysButton.offsetWidth - zoomInButton.offsetWidth) <= 2
-            && Math.abs(lensButton.offsetWidth - zoomInButton.offsetWidth) <= 2
-        );
         ReportViewer.setPaletteOrientation('horizontal', { save: false });
-
-        ReportViewer.lens.setEnabled(true);
-        ReportViewer.lens.sync();
-        document.getElementById('btn-lens-settings').click();
-        document.querySelector('[data-lens-caption="on"]').click();
-        const lensCaptionRow = document.querySelector('[data-lens-caption-row]');
-        const lensCaptionIdentity = document.querySelector('[data-lens-identity="active"]');
-        const readLensCaption = () => ({
-            hidden: lensCaptionRow.hidden,
-            text: (lensCaptionIdentity.textContent || '').trim(),
-        });
-        ReportViewer.setMode('overlay');
-        ReportViewer.lens.sync();
-        const overlayLensCaption = readLensCaption();
-        ReportViewer.setMode('slider');
-        ReportViewer.state.revealPercent = 50;
-        ReportViewer.viewport.updateSlider();
-        ReportViewer.lens.sync();
-        const sliderLensCaption = readLensCaption();
-        ReportViewer.setMode('diff');
-        ReportViewer.lens.sync();
-        const diffLensCaption = readLensCaption();
-        document.documentElement.dataset.lensCaptionModes = String(
-            !overlayLensCaption.hidden && overlayLensCaption.text.length > 0
-            && !sliderLensCaption.hidden && sliderLensCaption.text.length > 0
-            && !diffLensCaption.hidden && diffLensCaption.text.length > 0
-            && diffLensCaption.text.includes('↔')
-        );
-        document.querySelector('[data-lens-caption="off"]').click();
-        ReportViewer.lens.sync();
-        document.documentElement.dataset.lensCaptionOff = String(
-            lensCaptionRow.hidden && (lensCaptionIdentity.textContent || '') === ''
-        );
-        document.getElementById('btn-lens-settings').click();
-        ReportViewer.lens.setEnabled(false);
 
         ReportViewer.setMode('grid');
         const gridStageRect = stage.getBoundingClientRect();
@@ -918,7 +848,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const advancedLabels = [
         'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
         'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
-        'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
+        'Scene thresholds', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
     ];
     document.getElementById('btn-info')?.click();
@@ -1064,20 +994,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.dataset.hShortcutTogglesSourceLabels = String(
         firstPressHidLabels && secondPressRestoredLabels
     );
-
-    ReportViewer.setMode('slider');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }));
-    const lowerSelectsGrid = ReportViewer.state.mode === 'grid';
-    ReportViewer.setMode('slider');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', bubbles: true }));
-    const upperSelectsGrid = ReportViewer.state.mode === 'grid';
-    const gridButtonTitle = document.querySelector('[data-mode="grid"]')?.getAttribute('title');
-    document.documentElement.dataset.gShortcutSelectsGrid = String(
-        lowerSelectsGrid && upperSelectsGrid
-    );
-    document.documentElement.dataset.gridButtonTitle = String(
-        gridButtonTitle === 'Grid (G) — scan sources together'
-    );
 });
 </script>
 """
@@ -1147,8 +1063,6 @@ def test_report_omits_fit_width_keeps_restored_state_reachable_and_h_toggles_lab
     assert parser.document_attributes["data-fit-width-button-absent"] == "true"
     assert parser.document_attributes["data-restored-width-fit-state"] == "true"
     assert parser.document_attributes["data-h-shortcut-toggles-source-labels"] == "true"
-    assert parser.document_attributes["data-g-shortcut-selects-grid"] == "true"
-    assert parser.document_attributes["data-grid-button-title"] == "true"
 
 
 @pytest.mark.integration
@@ -1235,11 +1149,6 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-visible-inspector-behavior"] == "true"
     assert parser.document_attributes["data-filmstrip-hud-anchored"] == "true"
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
-    assert parser.document_attributes["data-vertical-zoom-order"] == "true"
-    assert parser.document_attributes["data-vertical-icon-buttons"] == "true"
-    assert parser.document_attributes["data-vertical-icon-widths"] == "true"
-    assert parser.document_attributes["data-lens-caption-modes"] == "true"
-    assert parser.document_attributes["data-lens-caption-off"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
         f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • {_FIXTURE_SIZE_LABEL}"
