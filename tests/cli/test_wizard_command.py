@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import tomllib
 from datetime import UTC, date, datetime, time
@@ -25,6 +26,12 @@ from .cli_helpers import isolated_cli_filesystem, runner
 @pytest.fixture(autouse=True)
 def _interactive_terminal(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr("frame_compare.cli.entry._sys_stream_isatty", lambda _name: True)
+
+
+@pytest.fixture(autouse=True)
+def _posix_suggestion_shell(monkeypatch: MonkeyPatch) -> None:
+    """Pin next-step quoting so assertions do not depend on the host OS."""
+    monkeypatch.setattr("frame_compare.cli.entry._is_windows_shell", lambda: False)
 
 
 def _workspace() -> tuple[Path, Path]:
@@ -92,7 +99,9 @@ def test_successful_write_prints_verified_next_steps_with_posix_quoting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("weird workspace $; \"quoted\" ; `echo hi` 'quote' name")
+        # Windows forbids `"` in file names; every other metacharacter is legal on both.
+        quoted = "" if os.name == "nt" else '"quoted" ; '
+        root = Path(f"weird workspace $; {quoted}`echo hi` 'quote' name")
         (root / "comparison_videos").mkdir(parents=True)
         config_path = root / "config" / "config.toml"
 
