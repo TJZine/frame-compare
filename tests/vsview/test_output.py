@@ -17,7 +17,5 @@ def test_review_result_uses_standard_status_and_detail_indentation(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == (
-        "\n"
-        "  [OK] VSView alignment review\n"
-        "       Accepted 2 confirmed pair(s).\n"
+        "\n  [OK] VSView alignment review\n       Accepted 2 confirmed pair(s).\n"
     )
