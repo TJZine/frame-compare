@@ -780,3 +780,10 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   and moved presentation checks from Proof lists to review. Track A's
   presentation-only assertions are removed in a follow-up pass (handoff
   "Track A test-scope correction").
+- Track A implementation (September 23): A1 streaming-service parsing, A2
+  formatting policy, A3 grid shortcut, A4 plain-magnifier lens, each reviewed
+  and committed separately. Follow-up test-scope correction removed the
+  presentation-only assertions (commit `589d267c`); the lens caption was
+  verified by looking in a real browser (Single/Slider/Diff all show). Full
+  gate green: 3452 passed, 90 skipped; strict docs build clean. Track A Final
+  report handed back for review; Track B not started.
