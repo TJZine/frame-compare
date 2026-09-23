@@ -36,7 +36,13 @@ These apply to every session. The prompts refer to them by name.
   rebase, reset, or amend branches; do not push; do not open pull requests.
 - Start by recording `git rev-parse HEAD`, `git status`, and `git log --oneline -5`.
   If the working tree has changes you did not make, stop and report them.
-- Bootstrap with `uv sync --group dev --frozen` only if `.venv` is missing.
+- Environment: use `uv sync --group dev --group docs --extra vsview --frozen`
+  whenever you need to install or re-sync. Never run a narrower `uv sync` (it
+  removes the `vsview` extra or the docs tools and breaks pyright and the docs
+  build).
+- Baseline: before any edit, run `uv run --no-sync pyright --warnings` and record
+  the result. It is expected to be 0 errors, 0 warnings. Never describe an error
+  as pre-existing unless it appears in this baseline at the start SHA.
 
 ### Authority and reading order
 
@@ -341,7 +347,10 @@ Unit notes (in addition to the plan text, not instead of it):
   and slow.pics image names still use "|". The viewer shows names only: no colour
   swatches, no #n, no LEFT/RIGHT (decisions D1 and D9). Toolbar: remove L:, vs,
   R:, Clip:; 20rem select cap with end ellipsis; Offset label/value typography.
-  Stage labels: the HDR/SDR word rule exactly as written.
+  Stage labels: the HDR/SDR word rule exactly as written. B1 also carries three
+  Checkpoint A items: the lens caption wraps instead of truncating (two-line Diff
+  form, lens grows to fit, truncation/capacity logic removed), the caption uses
+  the UI face, and the lens accessible description has no #n prefix.
 - B2: implement the proximity state machine with the exact thresholds (96 px /
   160 px hysteresis), 0.18 opacity, 150 ms transition, 3000 ms load override,
   drag override, popover override, focus-within, fine-pointer gating, and reduced
@@ -350,7 +359,9 @@ Unit notes (in addition to the plan text, not instead of it):
   viewer-report-info.webp and the B3 text: tab style, Frame tab rows and Detail
   rule, the all-sources table, the shared clip card (full and compact variants),
   the shared line with omission rule, placement text, and the Report Information
-  rows (Opens in / Default pair).
+  rows (Opens in / Default pair). B3 also carries two Checkpoint A items: restore
+  the " · DV L5" provenance note in the active-picture text, and show the default
+  mode with the toolbar names (overlay → Single).
 
 Review checks (by looking, not by tests): generate a report from the same fixtures
 the browser smoke test uses (or an equivalent synthetic fixture with three sources
@@ -398,6 +409,9 @@ Unit notes (in addition to the plan text, not instead of it):
   log reporters keep uppercase labels and bracket tokens; --json and --quiet
   output unchanged. Fix the blank lines at their source. Update
   docs/current-cli-contract.md in this unit.
+- B4 also carries two Checkpoint A items: the frame-rate line uses the A2 format
+  (`frame rates match · 23.976 fps (24000/1001)`, which supersedes the SVG), and
+  the Sources size segment is omitted when the size is unknown or zero.
 - B5: measure the VSView wait in _run_vsview_command; carry it in memory only
   (not phase_timings, run record, or JSON); implement the Align line and the
   summary time rows with the omission rules.

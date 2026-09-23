@@ -164,7 +164,8 @@ Three lengths, all from existing display profiles:
 - Lens caption text: the compact name with any segment made only of
   dynamic-range words (`HDR`, `HDR10`, `HDR10+`, `DV`, `HLG`, `SDR`) removed:
   `iT WEB-DL · ThisBlockHasProblems`. Computed in the viewer from the `micro`
-  profile by splitting on `" · "`; explicit labels are used as given.
+  profile by splitting on `" · "`; explicit labels are used as given. The caption
+  wraps instead of truncating (no ellipsis); see B1.
 - Truncation: names end-truncate with an ellipsis where width is constrained. The
   group is last, so it is cut first. Full name is always available in a tooltip
   (`title`) or accessible name.
@@ -303,7 +304,8 @@ terminal formatter in `orchestration/fps_report.py`.
   combine to one row: `{low} low · {high} high`. Other rows unchanged.
 - **Active picture:** `{w}×{h} · full frame` when `active_picture` is null;
   otherwise `{w}×{h} · active {aw}×{ah}, {top} px top` and, only when the left
-  offset is non-zero, `, {left} px left`.
+  offset is non-zero, `, {left} px left`; then ` · DV L5` when the active picture's
+  provenance is `dolby_vision_l5` (restored in B3 after the Checkpoint A review).
 
 Proof: `viewer_format` harness cases for each rule (including `23.976023976023978`,
 `25`, unknown enum, zero and non-zero left offsets); tonemap label mapping; terminal
@@ -389,8 +391,17 @@ Owners: `services/release_identity.py` (separator parameter only),
   name contains none of the whole words `HDR`, `HDR10`, `HDR10+`, `DV`, `HLG`,
   `SDR`. File size stays (documented contract). The bottom-left frame chip is
   unchanged.
-- Apply S2 typography to the toolbar, stage labels, filmstrip captions, and palette
-  readouts.
+- Apply S2 typography to the toolbar, stage labels, filmstrip captions, the lens
+  caption (UI face, not mono), and palette readouts.
+- Accessible names and descriptions contain no `#n` either: the lens's accessible
+  description (`fullSourceIdentity` in `lens.js`) uses the full name without a
+  number prefix.
+- Lens caption (Checkpoint A review decision): the caption wraps instead of
+  truncating. Remove the caption's end-truncation and character-capacity logic.
+  Single, Slider, and Grid: one caption text that wraps within the lens width. Diff:
+  two lines, the left source's caption text, then `↔ ` and the right source's
+  caption text; each line wraps if needed. The lens window grows to fit the
+  caption. Harness proof: caption text lines per mode, no ellipsis.
 
 Proof: display-profile test asserting `·` in the report payload and `|` in burned-in
 text and slow.pics names for the same fixture; viewer-format harness for the
@@ -445,7 +456,8 @@ Owners: `renderer.py`, `inspector.js`, `viewer.css`. Reference:
   header with role (`Reference` / `Comparison`), and, in the Clips
   tab only, placement (`shown left`, `shown right`, `shown`, `not shown`); a badge
   (`DV HDR` when the signal has a DV RPU and is HDR, `HDR`, or `SDR`); the standard
-  name; the filename in mono; rows `Picture` (A2 active-picture text), `Length`
+  name; the filename in mono; rows `Picture` (A2 active-picture text, including the
+  ` · DV L5` provenance note), `Length`
   (`{frames} frames · {runtime}`), `Size`, and in the Clips tab only `Signal`
   (existing signal summary).
 - **Shared line:** above the Clips tab cards, `All sources:` followed by the values
@@ -454,7 +466,9 @@ Owners: `renderer.py`, `inspector.js`, `viewer.css`. Reference:
   Omit a value that differs between clips; that value then appears on each card.
 - Replace `View role: Active/Available` with the placement text above.
 - **Report Information:** `Generated` uses A2; `Content` row
-  `{frames} frames · {clips} sources`; `Opens in` row = default mode; `Default pair` row =
+  `{frames} frames · {clips} sources`; `Opens in` row = default mode shown with the
+  toolbar names (`slider`→`Slider`, `overlay`→`Single`, `diff`→`Diff`,
+  `blink`→`Blink`, `grid`→`Grid`); `Default pair` row =
   the two default sources, one per line, each the compact name; remaining
   General rows unchanged; Advanced tonemap per A2.
 
@@ -517,7 +531,8 @@ Sources panel (`orchestration/fps_report.py`), title `Sources · {n} loaded`
 
 - First line: content title (bold). Blank line.
 - Per source: standard name (bold), followed by muted `reference` on the
-  reference only; line 2: `{w}×{h} · {fps} fps · {frames:,} frames ({runtime}) · {size}`;
+  reference only; line 2: `{w}×{h} · {fps} fps · {frames:,} frames ({runtime}) · {size}`
+  (omit the size segment when the size is unknown or zero);
   line 3: filename (muted). Blank line between sources.
 - Length check: when any comparison's frame count differs from the reference,
   one warning line per distinct difference, grouping comparisons with the same
@@ -543,7 +558,8 @@ Execution:
   `ThisBlockHasProblems audio applied · TheEndOfTheFuckingWorld needs visual
   confirmation` (from the same states). After review: `{n} pairs confirmed in VSView`
   (+ ` · {k} kept` when k > 0); the frame-rate result stays its own line:
-  `✓           frame rates match (24000/1001)`.
+  `✓           frame rates match · 23.976 fps (24000/1001)` (the A2 terminal FPS
+  format; this supersedes the shorter form in `cli-execution.svg`).
 - VSView review result (`vsview/output.py`, `alignment_vsview.py`): replace
   `Accepted 2 confirmed pair(s); 0 comparison(s) kept…` with correct plurals:
   `Accepted 2 confirmed pairs; 1 comparison kept its current offset.` (omit the
@@ -787,3 +803,14 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   verified by looking in a real browser (Single/Slider/Diff all show). Full
   gate green: 3452 passed, 90 skipped; strict docs build clean. Track A Final
   report handed back for review; Track B not started.
+- Checkpoint A review (September 23, controller): Track A accepted at `f711cb27`.
+  Verified A1 table/rules/order/mappings line by line, A2–A4 against the plan, the
+  test-scope correction, and a generated three-source report by eye (Slider, Single
+  and Diff with lens, vertical palette, Inspector Clips, Report Information). Gate
+  re-run with the `vsview` extra restored: pyright 0/0/0 (the session's "468
+  pre-existing errors" were a missing `vsview` extra after a partial re-sync),
+  ruff, bandit, lint-imports, strict docs build, full pytest all green. Carried
+  into Track B: restore ` · DV L5` (B3), lens caption wraps with a two-line Diff
+  form and UI face (B1), no `#n` in the lens accessible description (B1), Report
+  Information mode names (B3), terminal frame-rate line uses the A2 format and
+  unknown size is omitted (B4). Handoff setup and baseline rules tightened.
