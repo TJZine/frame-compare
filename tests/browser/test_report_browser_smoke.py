@@ -358,8 +358,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.diffSourceHudVisible = String(
             window.getComputedStyle(label).display !== 'none'
             && window.getComputedStyle(rightLabel).display !== 'none'
-            && label.textContent.startsWith('BASE:')
-            && rightLabel.textContent.startsWith('COMPARE:')
+            && label.textContent.startsWith(__REFERENCE_HUD_LABEL__)
+            && rightLabel.textContent.startsWith(__COMPARISON_HUD_LABEL__)
         );
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
@@ -367,16 +367,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const expectedStageHudPrefixes = {
             overlay: [__REFERENCE_HUD_LABEL__],
             slider: [
-                `LEFT: ${__REFERENCE_HUD_LABEL__}`,
-                `RIGHT: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
             diff: [
-                `BASE: ${__REFERENCE_HUD_LABEL__}`,
-                `COMPARE: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
             blink: [
-                `FIRST: ${__REFERENCE_HUD_LABEL__}`,
-                `SECOND: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
         };
         const stageHudAccessible = Object.entries(expectedStageHudPrefixes).every(
@@ -1151,7 +1151,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
-        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • {_FIXTURE_SIZE_LABEL}"
+        f"{_REFERENCE_RELEASE} · 1920×1080 · {_FIXTURE_SIZE_LABEL}"
     )
     assert parser.document_attributes["data-clips-metadata"] == "true"
     assert parser.document_attributes["data-review-tab-usable"] == "true", (

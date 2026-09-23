@@ -4,13 +4,6 @@ const Lens = (() => {
     const TOUCH_GESTURE_THRESHOLD = 6;
     const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];
     const SIZES = { small: 160, medium: 240, large: 320 };
-    // Mirrors the identity rail CSS: single/Diff subtract 8px insets + 10px padding
-    // + 2px borders; split subtracts 8px + 6px + 2px and its 1px pane divider.
-    // Character widths are conservative for the 12px and 10px mono rail fonts.
-    const CAPTION_METRICS = Object.freeze({
-        single: Object.freeze({ paneFraction: 1, horizontalChrome: 20, characterWidth: 8 }),
-        diff: Object.freeze({ paneFraction: 1, horizontalChrome: 20, characterWidth: 8 }),
-    });
     const LENS_DYNAMIC_RANGE_WORDS = Object.freeze(
         new Set(['HDR', 'HDR10', 'HDR10+', 'DV', 'HLG', 'SDR']),
     );
@@ -27,23 +20,6 @@ const Lens = (() => {
 
     function clamp(value, minimum = 0, maximum = 1) {
         return Math.max(minimum, Math.min(maximum, value));
-    }
-
-    function captionCharacterCapacity(lensPixels, context = 'single') {
-        const metrics = CAPTION_METRICS[context] || CAPTION_METRICS.single;
-        const pixels = Number(lensPixels);
-        if (!Number.isFinite(pixels) || pixels <= 0) return 0;
-        const paneWidth = pixels * metrics.paneFraction;
-        const contentWidth = Math.max(0, paneWidth - metrics.horizontalChrome);
-        return Math.max(0, Math.floor(contentWidth / metrics.characterWidth));
-    }
-
-    function endEllipsis(value, maxCharacters) {
-        const characters = Array.from(String(value ?? ''));
-        const limit = Math.max(0, Math.floor(Number(maxCharacters) || 0));
-        if (characters.length <= limit) return characters.join('');
-        if (limit === 0) return '';
-        return `${characters.slice(0, limit - 1).join('')}…`;
     }
 
     function lensCaptionText(label, micro) {
@@ -201,6 +177,7 @@ const Lens = (() => {
             differenceImage: document.querySelector('[data-lens-image="difference"]'),
             activeStatus: document.querySelector('[data-lens-status="active"]'),
             activeIdentity: document.querySelector('[data-lens-identity="active"]'),
+            secondIdentity: document.querySelector('[data-lens-identity="second"]'),
         };
         const storage = viewer.localStorage();
         const reportKey = `${REPORT_KEY_PREFIX}${viewer.state.data?.report_id || 'unknown-report'}`;
@@ -252,8 +229,7 @@ const Lens = (() => {
                 return 'Source unavailable.';
             }
             const clip = viewer.state.data?.clips?.[index];
-            const primary = ViewerFormat.clipDisplay(clip, 'primary');
-            return `#${index + 1} · ${primary}`;
+            return ViewerFormat.clipDisplay(clip, 'primary');
         }
 
         function captionSourceLabel(index) {
@@ -269,33 +245,30 @@ const Lens = (() => {
             }
         }
 
-        function renderCaption(size) {
+        function renderCaption() {
             const show = state.preferences.caption === 'on' && Number.isInteger(state.activeClipIdx);
-            let text = '';
+            let first = '';
+            let second = '';
             let full = '';
             if (show) {
                 if (viewer.state.mode === 'diff') {
-                    const capacity = captionCharacterCapacity(size, 'diff');
-                    const half = Math.max(0, Math.floor((capacity - 3) / 2));
-                    const left = endEllipsis(captionSourceLabel(viewer.state.leftClipIdx), half);
-                    const right = endEllipsis(
-                        captionSourceLabel(viewer.state.rightClipIdx),
-                        capacity - 3 - half,
-                    );
-                    text = `${left} ↔ ${right}`;
+                    first = captionSourceLabel(viewer.state.leftClipIdx);
+                    const right = captionSourceLabel(viewer.state.rightClipIdx);
+                    second = right ? `↔ ${right}` : '';
                     full = `${fullSourceIdentity(viewer.state.leftClipIdx)} ↔ ${fullSourceIdentity(viewer.state.rightClipIdx)}`;
                 } else {
-                    text = endEllipsis(
-                        captionSourceLabel(state.activeClipIdx),
-                        captionCharacterCapacity(size, 'single'),
-                    );
+                    first = captionSourceLabel(state.activeClipIdx);
                     full = fullSourceIdentity(state.activeClipIdx);
                 }
             }
-            if (dom.captionRow) dom.captionRow.hidden = !show || !text;
+            if (dom.captionRow) dom.captionRow.hidden = !show || !first;
             if (dom.activeIdentity) {
-                dom.activeIdentity.textContent = text;
-                dom.activeIdentity.setAttribute?.('aria-label', full || text);
+                dom.activeIdentity.textContent = first;
+                dom.activeIdentity.setAttribute?.('aria-label', full || first);
+            }
+            if (dom.secondIdentity) {
+                dom.secondIdentity.textContent = second;
+                dom.secondIdentity.hidden = !show || !second;
             }
         }
 
@@ -665,7 +638,7 @@ const Lens = (() => {
             } else {
                 setActiveStatus(activeAvailable ? '' : activeState.toUpperCase());
             }
-            renderCaption(size);
+            renderCaption();
             dom.lens.hidden = false;
             placeTargetMarker();
             renderControls();
@@ -999,6 +972,10 @@ const Lens = (() => {
             clearLensImage('difference');
             if (dom.captionRow) dom.captionRow.hidden = true;
             if (dom.activeIdentity) dom.activeIdentity.textContent = '';
+            if (dom.secondIdentity) {
+                dom.secondIdentity.textContent = '';
+                dom.secondIdentity.hidden = true;
+            }
             setActiveStatus('');
             dom.lens.dataset.renderMode = 'source';
             render();
@@ -1039,10 +1016,7 @@ const Lens = (() => {
         REPORT_KEY_PREFIX,
         MAGNIFICATIONS,
         SIZES,
-        CAPTION_METRICS,
-        endEllipsis,
         lensCaptionText,
-        captionCharacterCapacity,
         normalizePreferences,
         normalizeReportState,
         normalizedPoint,

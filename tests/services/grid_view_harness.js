@@ -244,12 +244,14 @@ assert.equal(cells.children[1].dataset.active, 'true');
 assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
 assert.equal(
     cells.children[0].querySelector('.rv-grid-label-text').textContent,
-    'Clip 1 • 1920×1080 • SDR • 17.00 GiB',
+    'Clip 1 · 1920×1080 · SDR · 17.00 GiB',
 );
 assert.equal(
     cells.children[1].querySelector('.rv-grid-label-text').textContent,
-    'Clip 2 • 1080×1920 • SDR • 18.00 GiB',
+    'Clip 2 · 1080×1920 · SDR · 18.00 GiB',
 );
+assert.ok(cells.children[0].getAttribute('aria-label').startsWith('Clip 1 — clip-1.mkv'));
+assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /^Clip \d,/);
 viewer.state.overlaysHidden = true;
 owner.updateCellRoles();
 assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);

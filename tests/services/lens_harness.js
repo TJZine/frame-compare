@@ -173,7 +173,9 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         '[data-lens-image="difference"]': fakeElement(),
         '[data-lens-status="active"]': fakeElement(),
         '[data-lens-identity="active"]': fakeElement(),
+        '[data-lens-identity="second"]': fakeElement(),
     };
+    selectors['[data-lens-identity="second"]'].hidden = true;
     const storageValues = new Map();
     const detachedLoaders = [];
     const storage = {
@@ -354,14 +356,9 @@ assert.deepEqual(JSON.parse(JSON.stringify(splitGeometry)), {
     left: -340,
     top: 20,
 });
-const singleCapacity = Lens.captionCharacterCapacity(240, 'single');
-const truncated = Lens.endEllipsis(
-    'Active_camera_color_managed_comparison_002_master.exr',
-    singleCapacity,
-);
-assert.ok(Array.from(truncated).length <= singleCapacity);
-assert.match(truncated, /^Active_camera/);
-assert.match(truncated, /…$/);
+assert.equal(Lens.captionCharacterCapacity, undefined);
+assert.equal(Lens.endEllipsis, undefined);
+assert.equal(Lens.CAPTION_METRICS, undefined);
 const rightBound = Lens.boundedPopoverPosition(
     { left: 0, top: 0, width: 1000, height: 700 },
     { left: 760, top: 80, width: 240, height: 272 },
@@ -410,19 +407,19 @@ assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, true);
 assert.equal(environment.selectors['[data-lens-identity="active"]'].textContent, '');
 assert.equal(
     environment.elements['rv-lens'].getAttribute('aria-label'),
-    'Image magnification lens. Current source: #2 · Active_camera_color_managed_comparison_002_master.exr',
+    'Image magnification lens. Current source: Active_camera_color_managed_comparison_002_master.exr',
 );
 environment.captionButtons[1].dispatch('click');
 assert.equal(controller.state.preferences.caption, 'on');
 assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, false);
 const singleCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
-assert.ok(Array.from(singleCaption).length <= 27);
-assert.match(singleCaption, /^Active_camera/);
-assert.match(singleCaption, /…$/);
+assert.equal(singleCaption, 'Active_camera_color_managed_comparison_002_master.exr');
+assert.doesNotMatch(singleCaption, /…$/);
 assert.equal(
     environment.selectors['[data-lens-identity="active"]'].getAttribute('aria-label'),
-    '#2 · Active_camera_color_managed_comparison_002_master.exr',
+    'Active_camera_color_managed_comparison_002_master.exr',
 );
+assert.equal(environment.selectors['[data-lens-identity="second"]'].hidden, true);
 environment.elements['btn-lens-settings'].dispatch('click');
 assert.equal(environment.elements['lens-settings-popover'].hidden, false);
 assert.equal(environment.elements['lens-settings-popover'].style.left, '720px');
@@ -470,16 +467,19 @@ environment.viewer.state.mode = 'diff';
 controller.sync();
 assert.equal(environment.elements['rv-lens'].dataset.renderMode, 'diff');
 const diffCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
-assert.ok(Array.from(diffCaption).length <= 27);
-assert.match(diffCaption, /^Reference_c/);
-assert.match(diffCaption, /↔/);
+assert.equal(diffCaption, 'Reference_camera_original_capture_001_master.exr');
+assert.doesNotMatch(diffCaption, /…$/);
+const diffSecondCaption = environment.selectors['[data-lens-identity="second"]'].textContent;
+assert.equal(diffSecondCaption, '↔ Active_camera_color_managed_comparison_002_master.exr');
+assert.doesNotMatch(diffSecondCaption, /…$/);
+assert.equal(environment.selectors['[data-lens-identity="second"]'].hidden, false);
 assert.equal(
     environment.selectors['[data-lens-identity="active"]'].getAttribute('aria-label'),
-    '#1 · Reference_camera_original_capture_001_master.exr ↔ #2 · Active_camera_color_managed_comparison_002_master.exr',
+    'Reference_camera_original_capture_001_master.exr ↔ Active_camera_color_managed_comparison_002_master.exr',
 );
 assert.match(
     environment.elements['rv-lens'].getAttribute('aria-label'),
-    /Reference_camera_original_capture_001_master\.exr versus #2 · Active_camera_color_managed_comparison_002_master\.exr/,
+    /Reference_camera_original_capture_001_master\.exr versus Active_camera_color_managed_comparison_002_master\.exr/,
 );
 assert.equal(environment.selectors['[data-lens-image="difference"]'].dataset.source, 'clip-1/frame.png');
 assert.notEqual(
@@ -549,13 +549,14 @@ assert.deepEqual(
     normalizedPositionBeforeResize,
 );
 assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '204px');
-const clampedSingleCapacity = Lens.captionCharacterCapacity(204, 'single');
-assert.ok(
-    Array.from(environment.selectors['[data-lens-identity="active"]'].textContent).length
-        <= clampedSingleCapacity,
+assert.equal(
+    environment.selectors['[data-lens-identity="active"]'].textContent,
+    'Active_camera_color_managed_comparison_002_master.exr',
 );
-assert.match(environment.selectors['[data-lens-identity="active"]'].textContent, /^Active_camera/);
-assert.match(environment.selectors['[data-lens-identity="active"]'].textContent, /…$/);
+assert.doesNotMatch(
+    environment.selectors['[data-lens-identity="active"]'].textContent,
+    /…$/,
+);
 environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 1000, height: 700 });
 controller.refresh();
 
@@ -771,8 +772,10 @@ activeFailureController.bind();
 activeFailure.captionButtons[1].dispatch('click');
 activeFailureController.setEnabled(true);
 assert.equal(activeFailure.selectors['[data-lens-status="active"]'].textContent, 'LOADING');
-assert.match(activeFailure.selectors['[data-lens-identity="active"]'].textContent, /^Active_camera/);
-assert.match(activeFailure.selectors['[data-lens-identity="active"]'].textContent, /…$/);
+assert.equal(
+    activeFailure.selectors['[data-lens-identity="active"]'].textContent,
+    'Active_camera_color_managed_comparison_002_master.exr',
+);
 const sourceALoader = activeFailure.detachedLoaders.at(-1);
 const queuedSourceACallbacks = [
     ...sourceALoader.listenerCallbacks('load'),
@@ -809,8 +812,10 @@ assert.equal(activeClone.hidden, true);
 assert.equal(activeClone.dataset.source, undefined);
 assert.equal(activeFailure.selectors['[data-lens-status="active"]'].textContent, 'UNAVAILABLE');
 assert.equal(activeFailure.selectors['[data-lens-status="active"]'].hidden, false);
-assert.match(activeFailure.selectors['[data-lens-identity="active"]'].textContent, /^Active_camera/);
-assert.match(activeFailure.selectors['[data-lens-identity="active"]'].textContent, /…$/);
+assert.equal(
+    activeFailure.selectors['[data-lens-identity="active"]'].textContent,
+    'Active_camera_color_managed_comparison_002_master.exr',
+);
 assert.equal(failedActiveLoader.listenerCount('load'), 0);
 assert.equal(failedActiveLoader.listenerCount('error'), 0);
 const failedActiveLoaderCount = activeFailure.detachedLoaders.length;
@@ -840,7 +845,7 @@ console.log(JSON.stringify({
     lensImageGeometry: true,
     boundedPopover: true,
     captionTextRule: true,
-    endTruncation: true,
+    captionWrapsWithoutTruncation: true,
     diffCompositionAndAlignment: true,
     staleContextReseeds: true,
     immediateActivation: true,

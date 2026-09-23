@@ -24,7 +24,7 @@ def test_lens_harness_proves_mapping_behavior_comparison_and_storage() -> None:
         "lensImageGeometry": True,
         "boundedPopover": True,
         "captionTextRule": True,
-        "endTruncation": True,
+        "captionWrapsWithoutTruncation": True,
         "diffCompositionAndAlignment": True,
         "staleContextReseeds": True,
         "immediateActivation": True,

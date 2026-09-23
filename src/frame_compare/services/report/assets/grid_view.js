@@ -138,7 +138,7 @@ const GridView = (() => {
                 cell.dataset.active = roles.includes('Active') ? 'true' : 'false';
                 cell.setAttribute(
                     'aria-label',
-                    [`Clip ${index + 1}, ${accessibleName}`, fileSize, ...roles]
+                    [accessibleName, fileSize, ...roles]
                         .filter(Boolean)
                         .join(', '),
                 );

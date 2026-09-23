@@ -216,22 +216,14 @@ body {
     border-radius: 0;
 }
 
-/* Sibling divider lines between adjacent interactive controls (and right label) */
+/* Sibling divider lines between adjacent interactive controls */
 .rv-control-group button + button,
 .rv-control-group button + select,
-.rv-control-group select + button,
-.rv-control-group button + span.rv-clip-vs,
-.rv-control-group span.rv-clip-vs + span.rv-clip-prefix.right {
+.rv-control-group select + button {
     border-left: 1px solid var(--border);
     border-radius: 0;
     padding-left: 0.45rem;
     margin-left: 0.45rem;
-}
-
-/* Spacing for spans inside control groups to prevent squishing */
-.rv-control-group span.rv-clip-prefix,
-.rv-control-group span.rv-clip-vs {
-    padding: 0 0.25rem;
 }
 
 .rv-mode-controls button.active {
@@ -244,9 +236,7 @@ body {
 .rv-control-group button.active,
 .rv-control-group button.active + button,
 .rv-control-group button.active + select,
-.rv-control-group select + button.active,
-.rv-control-group button.active + span.rv-clip-vs,
-.rv-control-group span.rv-clip-vs + button.active {
+.rv-control-group select + button.active {
     border-left-color: transparent;
 }
 
@@ -270,7 +260,11 @@ body {
 
 .rv-context-controls select {
     flex: 1 1 0;
-    max-width: none;
+    min-width: 0;
+    max-width: 20rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .rv-alignment-status {
@@ -283,9 +277,16 @@ body {
     border-radius: 4px;
     background: transparent;
     color: var(--text-secondary);
-    font-family: var(--font-mono);
     font-size: var(--text-xs);
     white-space: nowrap;
+}
+
+.rv-offset-label {
+    font-family: var(--font-sans);
+}
+
+.rv-offset-value {
+    font-family: var(--font-mono);
 }
 
 .rv-active-filter-badge {
@@ -391,21 +392,6 @@ select optgroup {
 .rv-number-input::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
-}
-
-.rv-clip-prefix {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    user-select: none;
-}
-
-.rv-clip-vs {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    font-weight: 500;
-    user-select: none;
-    margin: 0 0.1rem;
 }
 
 .rv-swap-button {
@@ -1006,15 +992,14 @@ select optgroup {
 }
 
 .rv-lens-caption {
-    overflow: hidden;
     max-width: var(--lens-size);
     padding: 3px 5px;
     border-top: 1px solid var(--border);
     background: var(--bg-floating);
     color: var(--text-primary);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .rv-lens-caption[hidden] {
@@ -1041,9 +1026,10 @@ select optgroup {
 
 .rv-lens-identity {
     display: block;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+}
+
+.rv-lens-identity[hidden] {
+    display: none;
 }
 
 .rv-lens-settings {
@@ -1135,6 +1121,14 @@ select optgroup {
 }
 
 .rv-overlay-label:empty { display: none; }
+
+.rv-stage-label-name {
+    color: var(--text-primary);
+}
+
+.rv-stage-label-meta {
+    color: var(--text-secondary);
+}
 
 .rv-mode-overlay .rv-overlay-label,
 .rv-mode-blink .rv-overlay-label {

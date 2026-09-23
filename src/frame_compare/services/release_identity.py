@@ -45,7 +45,7 @@ def format_content_identity(content: ContentIdentity) -> str:
     return label
 
 
-def format_release_descriptor(identity: ReleaseIdentity) -> str:
+def format_release_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
     """Format release facts without repeating content identity."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
     parts = [identity.resolution, source or None]
@@ -53,22 +53,25 @@ def format_release_descriptor(identity: ReleaseIdentity) -> str:
     parts.extend(identity.revision_tags)
     parts.extend(identity.variant_tags)
     parts.append(identity.release_group)
-    return " | ".join(part for part in parts if part)
+    return separator.join(part for part in parts if part)
 
 
-def format_compact_identity(identity: ReleaseIdentity) -> str:
+def format_compact_identity(identity: ReleaseIdentity, separator: str = " | ") -> str:
     """Format content and release facts in one compact line."""
-    return " | ".join(
+    return separator.join(
         part
-        for part in (format_content_identity(identity.content), format_release_descriptor(identity))
+        for part in (
+            format_content_identity(identity.content),
+            format_release_descriptor(identity, separator),
+        )
         if part
     )
 
 
-def format_micro_descriptor(identity: ReleaseIdentity) -> str:
+def format_micro_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
     """Format the smallest useful release descriptor for constrained surfaces."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
-    return " | ".join(
+    return separator.join(
         part
         for part in (
             source or None,

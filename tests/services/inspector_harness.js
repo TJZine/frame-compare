@@ -50,7 +50,56 @@ assert.equal(format.formatResolution(undefined), '');
 assert.equal(format.formatResolution([1920]), '');
 assert.equal(format.formatResolution(['1920', 1080]), '');
 assert.equal(format.formatResolution([0, 1080]), '');
-assert.equal(format.sourceHudLabel(clip), 'Control identity • HDR');
+assert.equal(format.sourceHudLabel(clip), 'Control identity · HDR');
+assert.deepEqual(
+    JSON.parse(JSON.stringify(format.stageLabelSegments(clip))),
+    { name: 'Control identity', meta: 'HDR' },
+);
+const hdrNamedClip = {
+    display: {
+        primary: '2160p · AMZN WEB-DL · HDR · SCOPE',
+        control: '2160p · AMZN WEB-DL · HDR · SCOPE',
+        micro: 'AMZN WEB-DL · SCOPE',
+        filename: 'show.mkv',
+    },
+    resolution: [3840, 1600],
+    size_bytes: 1024 ** 3 * 10.83,
+    signal: { is_hdr: true },
+};
+assert.equal(
+    format.sourceHudLabel(hdrNamedClip),
+    '2160p · AMZN WEB-DL · HDR · SCOPE · 3840×1600 · 10.83 GiB',
+);
+const dvNamedClip = {
+    display: {
+        primary: '2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems',
+        control: '2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems',
+        micro: 'iT WEB-DL · DV HDR · ThisBlockHasProblems',
+        filename: 'show.mkv',
+    },
+    resolution: [3840, 1606],
+    size_bytes: 1024 ** 3 * 17.49,
+    signal: { is_hdr: true },
+};
+assert.equal(
+    format.sourceHudLabel(dvNamedClip),
+    '2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems · 3840×1606 · 17.49 GiB',
+);
+const explicitClip = {
+    display: {
+        primary: 'My Explicit',
+        control: 'My Explicit',
+        micro: 'My Explicit',
+        filename: 'explicit.mkv',
+    },
+    resolution: [1920, 1080],
+    size_bytes: 1024 ** 3,
+    signal: { is_hdr: false },
+};
+assert.equal(format.sourceHudLabel(explicitClip), 'My Explicit · 1920×1080 · SDR · 1.00 GiB');
+assert.equal(format.stageLabelNeedsRangeWord('2160p · MA WEB-DL · DV HDR10+ · GRP'), false);
+assert.equal(format.stageLabelNeedsRangeWord('2160p · HLG · GRP'), false);
+assert.equal(format.stageLabelNeedsRangeWord('My Explicit'), true);
 assert.equal(format.formatSignal({ is_hdr: true, transfer: 16, range: 'limited' }), 'HDR · PQ · Limited');
 assert.equal(format.formatPresentation(clip), 'Tonemapped · BT.2390 → 203 nits');
 assert.equal(format.formatActivePicture(null, [1920, 1080]), '1920×1080 · full frame');

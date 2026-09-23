@@ -1818,9 +1818,28 @@ const ReportViewer = {
         return Boolean(closestEditable);
     },
 
-    clipOverlayLabel(clip, role = '') {
-        const identity = ViewerFormat.sourceHudLabel(clip);
-        return role ? `${role.toUpperCase()}: ${identity}` : identity;
+    clipOverlayLabel(clip) {
+        return ViewerFormat.sourceHudLabel(clip);
+    },
+
+    renderStageLabel(element, clip) {
+        if (!element) return;
+        const { name, meta } = ViewerFormat.stageLabelSegments(clip);
+        if (!name && !meta) {
+            element.replaceChildren();
+            return;
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'rv-stage-label-name';
+        nameSpan.textContent = name ?? '';
+        if (!meta) {
+            element.replaceChildren(nameSpan);
+            return;
+        }
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'rv-stage-label-meta';
+        metaSpan.textContent = ` · ${meta}`;
+        element.replaceChildren(nameSpan, metaSpan);
     },
 
     humanizeCategory(cat) {
@@ -1864,13 +1883,6 @@ const ReportViewer = {
         }
     },
 
-    blinkStageLabels(leftClipLabel, rightClipLabel) {
-        return {
-            left: `FIRST: ${leftClipLabel}`,
-            right: `SECOND: ${rightClipLabel}`,
-        };
-    },
-
     commitImageState(imageState) {
         const requestToken = ++this.state.imageRequestToken;
         const commit = () => {
@@ -1910,8 +1922,8 @@ const ReportViewer = {
             rightSrc,
             leftAlt,
             rightAlt,
-            leftLabelTxt,
-            rightLabelTxt,
+            leftClip,
+            rightClip,
             isOverlay,
             isBlink,
         } = imageState;
@@ -1928,8 +1940,9 @@ const ReportViewer = {
 
         this.dom.leftImg.alt = leftAlt;
         this.dom.rightImg.alt = rightAlt;
-        this.dom.labelLeft.textContent = leftLabelTxt;
-        this.dom.labelRight.textContent = rightLabelTxt;
+        this.renderStageLabel(this.dom.labelLeft, leftClip);
+        if (rightClip) this.renderStageLabel(this.dom.labelRight, rightClip);
+        else this.dom.labelRight?.replaceChildren?.();
         this.dom.labelLeft.classList.toggle(
             'rv-overlay-label--active',
             isBlink && this.state.activeClipIdx === this.state.leftClipIdx,
@@ -1972,7 +1985,8 @@ const ReportViewer = {
         }
 
         let leftSrc, rightSrc;
-        let leftLabelTxt, rightLabelTxt;
+        let leftClip = null;
+        let rightClip = null;
         let leftAlt, rightAlt;
         const isOverlay = this.state.mode === 'overlay';
         const isBlink = this.state.mode === 'blink';
@@ -1980,8 +1994,8 @@ const ReportViewer = {
         if (this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink') {
             const leftImage = frameData.images?.[this.state.leftClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
-            const leftClip = this.state.data.clips[this.state.leftClipIdx];
-            const rightClip = this.state.data.clips[this.state.rightClipIdx];
+            leftClip = this.state.data.clips[this.state.leftClipIdx];
+            rightClip = this.state.data.clips[this.state.rightClipIdx];
             if (!leftImage?.src || !rightImage?.src || !leftClip || !rightClip) {
                 this.showStageMessage('Selected frame image data is unavailable.');
                 this.showStatus('Selected frame image data is unavailable.', 'error');
@@ -1991,20 +2005,6 @@ const ReportViewer = {
             leftSrc = leftImage.src;
             rightSrc = rightImage.src;
 
-            if (this.state.mode === 'blink') {
-                const blinkLabels = this.blinkStageLabels(
-                    this.clipOverlayLabel(leftClip),
-                    this.clipOverlayLabel(rightClip),
-                );
-                leftLabelTxt = blinkLabels.left;
-                rightLabelTxt = blinkLabels.right;
-            } else if (this.state.mode === 'diff') {
-                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Base');
-                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Compare');
-            } else {
-                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
-                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');
-            }
             leftAlt = `${ViewerFormat.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
             rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
@@ -2016,8 +2016,8 @@ const ReportViewer = {
             const activeImage = frameData.images?.[this.state.activeClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
-            const rightClip = this.state.data.clips[this.state.rightClipIdx];
-            if (!activeImage?.src || !rightImage?.src || !activeClip || !rightClip) {
+            const pairClip = this.state.data.clips[this.state.rightClipIdx];
+            if (!activeImage?.src || !rightImage?.src || !activeClip || !pairClip) {
                 this.showStageMessage('Selected frame image data is unavailable.');
                 this.showStatus('Selected frame image data is unavailable.', 'error');
                 this.clearFrameImages();
@@ -2027,10 +2027,10 @@ const ReportViewer = {
             // Right layer remains hidden; keep its source tied to the comparison pair.
             rightSrc = rightImage.src;
 
-            leftLabelTxt = this.clipOverlayLabel(activeClip);
-            rightLabelTxt = "";
+            leftClip = activeClip;
+            rightClip = null;
             leftAlt = `${ViewerFormat.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
-            rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
+            rightAlt = `${ViewerFormat.clipAccessibleName(pairClip)} - Frame ${frameData.number}`;
         }
 
         this.hideStageMessage();
@@ -2041,8 +2041,8 @@ const ReportViewer = {
             rightSrc,
             leftAlt,
             rightAlt,
-            leftLabelTxt,
-            rightLabelTxt,
+            leftClip,
+            rightClip,
             isOverlay,
             isBlink,
         });
@@ -2063,8 +2063,8 @@ const ReportViewer = {
         }
         this.dom.leftLayer?.classList?.remove('active', 'rv-layer--aligned-active');
         this.dom.rightLayer?.classList?.remove('active');
-        if (this.dom.labelLeft) this.dom.labelLeft.textContent = '';
-        if (this.dom.labelRight) this.dom.labelRight.textContent = '';
+        if (this.dom.labelLeft) this.dom.labelLeft.replaceChildren?.();
+        if (this.dom.labelRight) this.dom.labelRight.replaceChildren?.();
         this.updateCurrentFrameMetadata(null);
     },
 

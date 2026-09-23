@@ -416,7 +416,7 @@ def _render_info_modal(
         release = _clip_display(clip, "release")
         release_html = (
             f'<div class="rv-clip-meta-release">{_esc_text(release)}</div>'
-            if release and release != primary and not primary.endswith(f"| {release}")
+            if release and release != primary and not primary.endswith(f"· {release}")
             else ""
         )
         clip_items.append(
@@ -558,25 +558,21 @@ def _render_controls(
         </div>
 
         <div class="rv-control-group rv-context-controls" data-control-scope="pair" aria-label="Comparison pair">
-            <span class="rv-clip-prefix left">L:</span>
             <select id="left-select" aria-label="Left clip">
                 {left_clip_options}
             </select>
             <button id="btn-swap-clips" class="rv-swap-button" aria-label="Swap comparison clips" title="Swap clips (X)">⇄</button>
-            <span class="rv-clip-vs">vs</span>
-            <span class="rv-clip-prefix right">R:</span>
             <select id="right-select" aria-label="Right clip">
                 {right_clip_options}
             </select>
         </div>
 
         <div class="rv-control-group rv-context-controls" data-control-scope="active" aria-label="Single clip" hidden>
-            <span class="rv-clip-prefix active">Clip:</span>
             <select id="active-select" aria-label="Single clip">
                 {active_clip_options}
             </select>
         </div>
-        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair">Offset: none</div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value"> none</span></div>
         </div>
         </div>
     </div>"""
@@ -729,7 +725,7 @@ def _render_stage() -> str:
                     <span class="rv-lens-status" data-lens-status="active" hidden></span>
                 </div>
             </div>
-            <div class="rv-lens-caption" data-lens-caption-row hidden><span data-lens-identity="active"></span></div>
+            <div class="rv-lens-caption" data-lens-caption-row hidden><span class="rv-lens-identity" data-lens-identity="active"></span><span class="rv-lens-identity" data-lens-identity="second" hidden aria-hidden="true"></span></div>
             <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>
         </aside>
         <div class="rv-stage-overlay-info">

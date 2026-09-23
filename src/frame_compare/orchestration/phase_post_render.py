@@ -275,14 +275,16 @@ def run_report_phase(
     roles = [clip_role(index) for index in range(len(clips))]
     protected = [clip.label_is_explicit for clip in clips]
     releases = [
-        format_release_descriptor(clip.release_identity) if clip.release_identity else ""
+        format_release_descriptor(clip.release_identity, separator=" · ")
+        if clip.release_identity
+        else ""
         for clip in clips
     ]
     primaries = unique_presentation_names(
         [
             clip.label
             if clip.label_is_explicit or clip.release_identity is None
-            else format_compact_identity(clip.release_identity) or clip.label
+            else format_compact_identity(clip.release_identity, separator=" · ") or clip.label
             for clip in clips
         ],
         roles=roles,
@@ -300,7 +302,11 @@ def run_report_phase(
         [
             clip.label
             if clip.label_is_explicit
-            else (format_micro_descriptor(clip.release_identity) if clip.release_identity else "")
+            else (
+                format_micro_descriptor(clip.release_identity, separator=" · ")
+                if clip.release_identity
+                else ""
+            )
             or controls[index]
             for index, clip in enumerate(clips)
         ],

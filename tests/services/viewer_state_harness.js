@@ -200,6 +200,13 @@ function fakeBody() {
     return fakeElement();
 }
 
+function renderedText(element) {
+    if (element.children.length > 0) {
+        return element.children.map(child => child.textContent).join('');
+    }
+    return element.textContent;
+}
+
 function loadViewer({ clipCount, savedState = null }) {
     const storage = new Map();
     const reviewMetrics = { creates: 0, binds: 0, renders: 0 };
@@ -514,7 +521,7 @@ const summary = {};
     assert.equal(viewer.state.alignX, 5);
     assert.equal(viewer.state.alignY, -2);
     assert.deepEqual(Object.keys(viewer.state.pairAlignments).sort(), ['0:1', '1:0']);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +5x -2y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +5x -2y');
     summary.restoreFourClip = {
         clipCount: viewer.clipCount(),
         leftClipIdx: viewer.state.leftClipIdx,
@@ -522,7 +529,7 @@ const summary = {};
         activeClipIdx: viewer.state.activeClipIdx,
         restoredPairKeys: Object.keys(viewer.state.pairAlignments).sort(),
         currentAlignment: [viewer.state.alignX, viewer.state.alignY],
-        alignmentStatus: viewer.dom.alignmentStatus.textContent,
+        alignmentStatus: renderedText(viewer.dom.alignmentStatus),
     };
 }
 
@@ -748,9 +755,9 @@ const summary = {};
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
-    const release = '2160p | WEB-DL | GROUP';
+    const release = '2160p · WEB-DL · GROUP';
     viewer.state.data.clips[0].display = {
-        primary: `Example (2026) | ${release}`,
+        primary: `Example (2026) · ${release}`,
         release,
     };
     viewer.state.data.clips[1].display = {
@@ -918,16 +925,12 @@ const summary = {};
     };
     assert.equal(
         viewer.clipOverlayLabel(clip),
-        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
-    );
-    assert.equal(
-        viewer.clipOverlayLabel(clip, 'Left'),
-        'LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
+        'Title.2160p.WEB-DL.Service-GROUP · 3840×2160 · HDR · 17.00 GiB',
     );
     summary.sourceOverlayLabels = {
         single: viewer.clipOverlayLabel(clip),
-        slider: viewer.clipOverlayLabel(clip, 'Left'),
-        diff: viewer.clipOverlayLabel(clip, 'Base'),
+        slider: viewer.clipOverlayLabel(clip),
+        diff: viewer.clipOverlayLabel(clip),
     };
 
     assert.equal(format.formatFileSize(1), '1.00 B');
@@ -956,15 +959,11 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    const labels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(labels.left, 'FIRST: Clip 1');
-    assert.equal(labels.right, 'SECOND: Clip 2');
-
     viewer.state.mode = 'blink';
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
     viewer.updateImages();
-    assert.equal(viewer.dom.labelLeft.textContent, 'FIRST: Clip 1 • 1920×1080 • SDR • 17.00 GiB');
-    assert.equal(viewer.dom.labelRight.textContent, 'SECOND: Clip 2 • 1920×1080 • SDR • 17.00 GiB');
+    assert.equal(renderedText(viewer.dom.labelLeft), 'Clip 1 · 1920×1080 · SDR · 17.00 GiB');
+    assert.equal(renderedText(viewer.dom.labelRight), 'Clip 2 · 1920×1080 · SDR · 17.00 GiB');
     assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), true);
     assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), false);
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
@@ -972,7 +971,10 @@ const summary = {};
     assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), false);
     assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), true);
     summary.blinkLabels = {
-        labels,
+        labels: {
+            left: renderedText(viewer.dom.labelLeft),
+            right: renderedText(viewer.dom.labelRight),
+        },
         activeLabelMoved: false,
         activeStateMoved: true,
     };
@@ -1106,19 +1108,19 @@ const summary = {};
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +4x +5y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
 
     viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
     assert.equal(viewer.state.alignX, 4);
     assert.equal(viewer.state.alignY, 5);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +4x +5y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
 
     viewer.setRightClip(2);
     assert.equal(viewer.state.alignX, -1);
@@ -1201,7 +1203,7 @@ const summary = {};
     summary.pairSwitchFourClip = {
         finalPair: `${viewer.state.leftClipIdx}:${viewer.state.rightClipIdx}`,
         finalAlignment: [viewer.state.alignX, viewer.state.alignY],
-        finalAlignmentStatus: viewer.dom.alignmentStatus.textContent,
+        finalAlignmentStatus: renderedText(viewer.dom.alignmentStatus),
         persistedPairKeys: Object.keys(saved.pairAlignments).sort(),
         persistedAlignments: {
             '0:1': [saved.pairAlignments['0:1'].alignX, saved.pairAlignments['0:1'].alignY],
@@ -1216,17 +1218,17 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     viewer.viewport.setAlignmentPreset('left-1');
     assert.equal(viewer.state.alignX, -1);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: preset left 1px');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
     viewer.viewport.setAlignmentPreset('none');
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     summary.alignmentStatus = {
         neutral: 'Offset: none',
         preset: 'Offset: preset left 1px',
-        reset: viewer.dom.alignmentStatus.textContent,
+        reset: renderedText(viewer.dom.alignmentStatus),
     };
 }
 

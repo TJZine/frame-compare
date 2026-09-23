@@ -57,14 +57,31 @@ const ViewerFormat = {
         return `${width}×${height}`;
     },
 
-    sourceHudLabel(clip, profile = 'control') {
-        const isHdr = clip.signal?.is_hdr === true;
-        return [
-            this.clipDisplay(clip, profile),
+    stageDynamicRangeWords() {
+        return ['HDR', 'HDR10', 'HDR10+', 'DV', 'HLG', 'SDR'];
+    },
+
+    stageLabelNeedsRangeWord(name) {
+        const words = new Set(
+            String(name ?? '').split(/[\s·]+/).filter(Boolean),
+        );
+        return !this.stageDynamicRangeWords().some(word => words.has(word));
+    },
+
+    stageLabelSegments(clip, profile = 'control') {
+        const name = this.clipDisplay(clip, profile);
+        const meta = [
             this.formatResolution(clip.resolution),
-            isHdr ? 'HDR' : 'SDR',
+            this.stageLabelNeedsRangeWord(name) ? (clip.signal?.is_hdr === true ? 'HDR' : 'SDR') : '',
             this.formatFileSize(clip.size_bytes),
-        ].filter(Boolean).join(' • ');
+        ].filter(Boolean).join(' · ');
+        return { name, meta };
+    },
+
+    sourceHudLabel(clip, profile = 'control') {
+        const { name, meta } = this.stageLabelSegments(clip, profile);
+        if (!name) return meta;
+        return meta ? `${name} · ${meta}` : name;
     },
 
     signalCodeLabel(kind, value) {

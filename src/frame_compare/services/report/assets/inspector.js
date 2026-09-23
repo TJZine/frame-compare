@@ -231,7 +231,7 @@ const Inspector = {
                         const normalizedPrimary = viewer.normalizedDisplayToken(primary);
                         const normalizedRelease = viewer.normalizedDisplayToken(release);
                         const showRelease = Boolean(normalizedRelease && normalizedPrimary !== normalizedRelease
-                            && !normalizedPrimary.endsWith(`| ${normalizedRelease}`));
+                            && !normalizedPrimary.endsWith(`· ${normalizedRelease}`));
                         releaseElement.hidden = !showRelease;
                         releaseElement.textContent = showRelease ? release : '';
                         const values = item.querySelectorAll('dd');

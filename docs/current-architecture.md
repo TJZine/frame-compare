@@ -819,8 +819,12 @@ link's safe http(s) href; no viewer script re-derives it.
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
-report. Report controls consume control or micro names, while Inspector/info and ARIA
-surfaces consume primary identity and exact filename. Canonical clip labels continue
+report, joining profile segments with `·` (burned-in screenshot text and slow.pics
+image names keep the `|` default). Report controls consume control or micro names,
+while Inspector/info and ARIA surfaces consume primary identity and exact filename.
+Stage labels show the control name plus muted resolution and size, adding an
+HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
+end ellipsis and carry the full name on each option. Canonical clip labels continue
 to own image mappings, geometry, browser state, and review JSON; payload identity
 shaping explicitly omits display profiles.
 
@@ -857,12 +861,13 @@ double-click input cannot mutate the viewport. Activation seeds a transient
 center point and retains the stable palette Lens group, which owns zoom and
 stage-clamped settings. The display-only lens body has no titlebar or controls.
 It carries a single caption row under the magnified image showing the compact
-source name end-truncated to the stage size (the left and right names joined
-with `↔` in Diff mode, the cell source under the pointer in Grid mode); the
+source name in the UI face, wrapping within the lens width while the lens
+window grows to fit (two lines in Diff mode: the left source name, then `↔`
+and the right source name; the cell source under the pointer in Grid mode); the
 caption stays hidden until the Caption preference is turned on, while a
 loading/unavailable status notice covers the lens image when it cannot be
-shown. The lens keeps its full-name accessible description for assistive
-technology. Stored lens state containing `comparisonEnabled` or
+shown. The lens keeps its full-name accessible description, without a source
+number prefix, for assistive technology. Stored lens state containing `comparisonEnabled` or
 `comparisonTarget` keys loads without error, and those keys are dropped on the
 next write. Lens Settings order is Size, Sample marker, Caption, then the reset
 button and the grip/persistence note. Direct image-inspection markers share one Projection Brass signal

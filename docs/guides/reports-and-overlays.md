@@ -63,17 +63,20 @@ The viewer supports:
 
 The lens is a plain magnifier: it enlarges the source under the pointer with a
 sample marker (Ring by default) and an optional caption naming the magnified
-source. The caption shows the compact source name, or the left and right names
-in Diff mode, and stays hidden until turned on in lens settings; a loading or
-unavailable notice covers the lens image when it cannot be shown. The lens
-window stays where you put it; drag its grip to move it. In the vertical
-palette orientation the Source labels and Lens buttons show icons instead of
-text.
+source. The caption shows the compact source name and wraps within the lens
+instead of truncating; in Diff mode it shows two lines, the left source name
+and then the right source name after a `↔`. The caption stays hidden until
+turned on in lens settings; a loading or unavailable notice covers the lens
+image when it cannot be shown. The lens window stays where you put it; drag
+its grip to move it. In the vertical palette orientation the Source labels and
+Lens buttons show icons instead of text.
 
 Report payload version 1.2 adds release-aware source presentation without changing
 canonical source identity. Ordinary controls use compact, collision-safe release
-descriptors; constrained grid and lens labels use shorter variants. Explicit source
-labels remain authoritative. The Clips inspector and Report Information retain the
+descriptors joined with `·`; constrained grid and lens labels use shorter variants.
+The viewer identifies each source by name alone, with no numbers or side words.
+Baked screenshot text and slow.pics image names keep the `|` separator.
+Explicit source labels remain authoritative. The Clips inspector and Report Information retain the
 full primary identity and exact, wrapping filename, so shortened controls do not hide
 the archival source name.
 

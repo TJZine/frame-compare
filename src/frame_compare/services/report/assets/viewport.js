@@ -636,22 +636,32 @@ const Viewport = {
         return labels[preset] || preset;
     },
 
-    alignmentStatusText() {
+    alignmentStatusValue() {
         const xText = this.formatSignedPixels(this.viewer.state.alignX, 'x');
         const yText = this.formatSignedPixels(this.viewer.state.alignY, 'y');
         const hasOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
 
-        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'Offset: none';
-        if (this.viewer.state.alignmentPreset === 'custom') return `Offset: custom ${xText} ${yText}`;
+        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'none';
+        if (this.viewer.state.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
         if (this.viewer.state.alignmentPreset !== 'none') {
-            return `Offset: preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
+            return `preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
         }
-        return `Offset: ${xText} ${yText}`;
+        return `${xText} ${yText}`;
+    },
+
+    alignmentStatusText() {
+        return `Offset: ${this.alignmentStatusValue()}`;
     },
 
     updateAlignmentStatus() {
         if (!this.viewer.dom.alignmentStatus) return;
-        this.viewer.dom.alignmentStatus.textContent = this.alignmentStatusText();
+        const label = document.createElement('span');
+        label.className = 'rv-offset-label';
+        label.textContent = 'Offset:';
+        const value = document.createElement('span');
+        value.className = 'rv-offset-value';
+        value.textContent = ` ${this.alignmentStatusValue()}`;
+        this.viewer.dom.alignmentStatus.replaceChildren(label, value);
     },
 
     updateSlider() {

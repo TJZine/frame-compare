@@ -405,6 +405,27 @@ def test_formatters_and_common_content() -> None:
     ) == ["My Encode", "Comparison 1 | My Encode"]
 
 
+def test_separator_keyword_applies_to_inner_and_outer_joins() -> None:
+    """The B1 separator flows into the nested release join, not just the outer one."""
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        resolution="2160p",
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    assert format_release_descriptor(identity, separator=" · ") == (
+        "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
+    )
+    assert format_micro_descriptor(identity, separator=" · ") == (
+        "ATV WEB-DL · DV HDR10+ · Kitsune"
+    )
+    compact = format_compact_identity(identity, separator=" · ")
+    assert compact == "Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
+    assert "|" not in compact
+
+
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("frame_compare.services.metadata_parsing.guessit", lambda _name: 42)
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: None)
