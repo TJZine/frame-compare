@@ -2506,7 +2506,7 @@ body.rv-inspector-open .rv-viewer-stage {
     font-size: var(--text-control);
 }
 
-.rv-metadata-list div {
+.rv-metadata-list > div {
     display: contents;
 }
 
