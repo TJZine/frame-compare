@@ -487,4 +487,34 @@ Mark this plan Historical only after its complete scope is accepted.
   generated report in a real Chrome tab at 1024×768 and 375×812 with the shorter label.
 - Pending for P6: visual layout with the full "Source labels" text across the P6
   viewport/zoom matrix, and full `pytest -q`.
-- P5–P6: pending.
+
+### P5 reconciliation — temporal alignment and native panel (dependency-limited)
+
+- No P5 product edits: the audio plan owns this surface and its U1/U2 copy is already
+  in current source. Controller confirmed the frozen terminal strings in
+  `services/alignment.py` (accepted/provisional/`No usable audio candidate - NOT
+  APPLIED`, manual headings, the single channel-fallback transition) and the VSView
+  pre/post-save strings in `vsview/alignment_review_panel.py`. P4 report copy is
+  spatial only and adds no temporal-trust fields to payload v1.2.
+- Upstream status (audio plan record, checked at `fa788a3c`): U1 accepted after U1-R;
+  U2 accepted after U2-R; A1 passed for production `3a25a394`; **W1 physical-Windows
+  acceptance pending**. The newest Windows oracle fixture commit (`2a6afbb0`, Sept 21)
+  predates the A1 handoff, so no W1 evidence exists yet. Later production commits
+  (`80598c86`, `4f34981e`, `06d1e6de`, `2bbbb403`, `8921a2c7`) postdate the A1
+  candidate; the audio plan's W1 candidate identity needs refreshing by its owner.
+- Controller proof on this macOS host: `pytest -rs tests/vsview` 155 passed, 0
+  skipped (offscreen Qt). Supplementary native render (not W1): an untracked scratch
+  script reused the panel test fixtures with `QT_QPA_PLATFORM=cocoa` for a mixed
+  accepted/provisional/unresolved/manual four-comparison session, grabbed at 560 px,
+  340 px, and 1.5× application font, before and after keep-current. The images show
+  outcome → action → collapsed evidence; separate `Viewing` and `Captured position`
+  lines; `+0f` distinct from "no usable audio candidate"; post-save `Alignment choices
+  saved` / `Close VSView to resume Frame Compare.` without stale guidance; and narrow
+  wrapping without clipping.
+- Observations for the U2 owner (not repaired here): on cocoa each collapsed "Audio
+  evidence details" checkbox leaves an empty bordered box below it. Application-font
+  scaling did not enlarge macOS group-box and checkbox captions, so enlarged-text
+  readability of those captions is unproven by this method.
+- Remaining: physical-Windows visible terminal/VSView acceptance (W1) and natural
+  desktop usability. The P5 acceptance claim depends on W1 and stays open.
+- P6: pending.
