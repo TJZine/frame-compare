@@ -349,12 +349,12 @@ function loadViewer({ clipCount, savedState = null }) {
             ...fakeElement(),
             id: `inspector-panel-${tab}`,
         })),
-        inspectorFrameLabel: fakeElement(),
-        inspectorFrameNumber: fakeElement(),
-        inspectorFrameCategory: fakeElement(),
+        inspectorFrameIdentity: fakeElement(),
+        inspectorFrameDetailRow: fakeElement(),
         inspectorFrameDetail: fakeElement(),
         inspectorFramePosition: fakeElement(),
         inspectorSourceFrames: fakeElement(),
+        inspectorClipsShared: fakeElement(),
         inspectorClips: fakeElement(),
         inspectorAlignPair: fakeElement(),
         inspectorAlignPreset: fakeElement(),
@@ -761,42 +761,42 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 1 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
-    const values = viewer.dom.inspectorClips.children[0].querySelectorAll('dd');
-    assert.equal(values.length, 7);
-    assert.equal(values[4].textContent, '17.00 GiB');
-    assert.equal(values[5].textContent, 'SDR · BT.709 / BT.709 / BT.2020c · Limited');
-    assert.equal(values[6].textContent, 'SDR');
+    const card = viewer.dom.inspectorClips.children[0];
+    const heading = card.children[0].children[0].textContent;
+    const badge = card.children[0].children[1].textContent;
+    const rows = card.children[3].children.map(
+        row => [row.children[0].textContent, row.children[1].textContent],
+    );
+    assert.equal(heading, 'Reference · shown left');
+    assert.equal(badge, 'SDR');
+    assert.equal(card.children[1].textContent, 'Clip 1');
+    assert.equal(card.children[2].textContent, 'clip-1.mkv');
+    assert.deepEqual(rows, [
+        ['Picture', '1920×1080 · full frame'],
+        ['Length', '100 frames · 0:00:04'],
+        ['Size', '17.00 GiB'],
+        ['Signal', 'SDR · BT.709 / BT.709 / BT.2020c · Limited'],
+    ]);
     summary.inspectorClipMetadata = {
-        valueCount: values.length,
-        fileSize: values[4].textContent,
-        signal: values[5].textContent,
-        presentation: values[6].textContent,
+        heading,
+        badge,
+        standardName: card.children[1].textContent,
+        fileName: card.children[2].textContent,
+        rows,
     };
 }
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
-    const release = '2160p · WEB-DL · GROUP';
-    viewer.state.data.clips[0].display = {
-        primary: `Example (2026) · ${release}`,
-        release,
-    };
-    viewer.state.data.clips[1].display = {
-        primary: 'Explicit comparison label',
-        release,
-    };
+    viewer.state.activeCategoryKey = '__fc_all__';
     viewer.inspector.setOpen(true, { focus: false, save: false });
-    const automaticRelease = viewer.dom.inspectorClips.children[0]
-        .querySelector('.rv-inspector-clip-release');
-    const explicitRelease = viewer.dom.inspectorClips.children[1]
-        .querySelector('.rv-inspector-clip-release');
-    assert.equal(automaticRelease.hidden, true);
-    assert.equal(automaticRelease.textContent, '');
-    assert.equal(explicitRelease.hidden, false);
-    assert.equal(explicitRelease.textContent, release);
-    summary.inspectorReleasePresentation = {
-        automaticIdentityNotDuplicated: automaticRelease.hidden,
-        explicitLabelKeepsReleaseDifferentiator: !explicitRelease.hidden,
+    assert.equal(viewer.dom.inspectorFrameIdentity.textContent, '10 · Selected');
+    assert.equal(viewer.dom.inspectorFramePosition.textContent, '1 / 2 in All');
+    assert.equal(viewer.dom.inspectorFrameDetailRow.hidden, true);
+    summary.inspectorFrameIdentity = {
+        identity: viewer.dom.inspectorFrameIdentity.textContent,
+        position: viewer.dom.inspectorFramePosition.textContent,
+        defaultDetailHidden: viewer.dom.inspectorFrameDetailRow.hidden,
     };
 }
 
@@ -804,7 +804,11 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 2 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
     summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
-        item => item.textContent,
+        row => row.children.map(
+            cell => cell.children.length > 0
+                ? cell.children.map(child => child.textContent).join(' ')
+                : cell.textContent,
+        ).join(' | '),
     );
 }
 

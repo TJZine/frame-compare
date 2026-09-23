@@ -56,16 +56,23 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
     assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
-def test_build_html_keeps_distinct_release_identity_in_info_clip_card(
+def test_build_html_renders_info_source_cards(
     report_payload: ReportPayload,
 ) -> None:
-    document = parse_elements(build_html(report_payload))
+    html = build_html(report_payload)
+    document = parse_elements(html)
     clips = find_all(document, tag="li", class_name="rv-clip-meta-item")
 
-    assert [require_first(clip, class_name="rv-clip-meta-release").text for clip in clips] == [
-        "Reference release",
-        "Encode release",
+    assert [require_first(clip, class_name="rv-clip-meta-primary").text for clip in clips] == [
+        "Reference control",
+        "Encode control",
     ]
+    assert [require_first(clip, class_name="rv-clip-meta-file").text for clip in clips] == [
+        "reference exact <unsafe>.mkv",
+        'encode exact "unsafe".mkv',
+    ]
+    assert "rv-clip-meta-release" not in html
+    assert "All sources: 24 fps" in html
 
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
@@ -352,37 +359,34 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
-    assert info_modal.section_headings == ["General", "Clips", "Rendering"]
+    assert info_modal.section_headings == ["General", "Sources", "Rendering"]
     assert info_modal.general == {
         "Title": "Renderer Contract",
         "Report ID": "report_0123456789abcdef0123456789abcdef",
         "Generated": "2026-05-22T12:00:00+00:00",
-        "Frames": "2",
-        "Clips": "2",
-        "Default Mode": "slider",
-        "Default Pair": "Reference control vs Encode control",
+        "Content": "2 frames · 2 sources",
+        "Opens in": "Slider",
+        "Default pair": "Reference microEncode micro",
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
         "Tonemap": "Not applied",
     }
     assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
         (
-            "Reference primary <unsafe>",
+            "Reference",
             "SDR",
             {
-                "Filename": "reference exact <unsafe>.mkv",
-                "Resolution": "1920x1080",
-                "FPS": "24 fps",
-                "Frames": "100",
+                "Picture": "1920×1080 · full frame",
+                "Length": "100 frames · 0:00:04",
+                "Size": "1.00 MiB",
             },
         ),
         (
-            'Encode primary "unsafe"',
+            "Comparison 1",
             "HDR",
             {
-                "Filename": 'encode exact "unsafe".mkv',
-                "Resolution": "1920x1080",
-                "FPS": "24 fps",
-                "Frames": "100",
+                "Picture": "1920×1080 · full frame",
+                "Length": "100 frames · 0:00:04",
+                "Size": "2.00 GiB",
             },
         ),
     ]
@@ -396,7 +400,7 @@ def test_build_html_displays_overlay_default_mode_as_single(
     info_modal = parse_info_modal(html)
 
     assert script_payload(html)["default_mode"] == "overlay"
-    assert info_modal.general["Default Mode"] == "Single"
+    assert info_modal.general["Opens in"] == "Single"
 
 
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
@@ -765,8 +769,11 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         panel = require_first(inspector, element_id=f"inspector-panel-{tab}")
         assert panel.attrs["tabindex"] == "-1"
 
-    assert "data-inspector-frame-label" in html
+    assert "data-inspector-frame-identity" in html
+    assert "data-inspector-frame-detail-row" in html
     assert "data-inspector-frame-position" in html
+    assert "data-inspector-source-frames" in html
+    assert "data-inspector-clips-shared" in html
     assert "data-inspector-clips" in html
     assert "data-inspector-align-pair" in html
     live = require_first(document, tag="div", element_id="viewer-live")

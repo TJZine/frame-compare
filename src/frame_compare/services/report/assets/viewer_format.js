@@ -139,7 +139,44 @@ const ViewerFormat = {
         if (!frame) return '';
         if (!active) return `${frame} · full frame`;
         const left = Number(active.x) ? `, ${active.x} px left` : '';
-        return `${frame} · active ${active.width}×${active.height}, ${active.y} px top${left}`;
+        const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
+        return `${frame} · active ${active.width}×${active.height}, ${active.y} px top${left}${provenance}`;
+    },
+
+    clipBadge(signal) {
+        if (signal?.dolby_vision_rpu === true && signal?.is_hdr === true) return 'DV HDR';
+        return signal?.is_hdr ? 'HDR' : 'SDR';
+    },
+
+    formatGroupedFrames(frameCount) {
+        const frames = Number(frameCount);
+        if (!Number.isFinite(frames) || frames < 0) return '';
+        return `${Math.floor(frames).toLocaleString('en-US')} frames`;
+    },
+
+    clipLengthText(clip) {
+        const frames = this.formatGroupedFrames(clip?.frame_count);
+        const runtime = this.formatRuntime(clip?.frame_count, clip?.fps);
+        return [frames, runtime].filter(Boolean).join(' · ');
+    },
+
+    clipFpsText(clip) {
+        const fps = this.formatFps(clip?.fps);
+        if (!fps) return '';
+        const num = clip?.fps_num;
+        const den = clip?.fps_den;
+        if (Number.isInteger(num) && Number.isInteger(den) && den !== 0) {
+            return `${fps} (${num}/${den})`;
+        }
+        return fps;
+    },
+
+    sharedClipValues(clips) {
+        const list = Array.isArray(clips) ? clips : [];
+        const only = values => (values.size === 1 ? [...values][0] || null : null);
+        const fpsValues = new Set(list.map(clip => this.clipFpsText(clip)));
+        const presentationValues = new Set(list.map(clip => this.formatPresentation(clip)));
+        return { fps: only(fpsValues), presentation: only(presentationValues) };
     },
 
     formatTonemapSummary(tonemap) {

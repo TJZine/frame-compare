@@ -74,9 +74,26 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "infoFocusTrappedAndRestored": True,
     }
     assert summary["inspectorFrameSources"] == [
-        "Clip 1 — 10 / 100 · B-frame · DV RPU",
-        "Clip 2 — 10 / 100 · B-frame",
+        "Clip 1 Shown left | 10 / 100 | B · DV RPU",
+        "Clip 2 Shown right | 10 / 100 | B",
     ]
+    assert summary["inspectorClipMetadata"] == {
+        "heading": "Reference · shown left",
+        "badge": "SDR",
+        "standardName": "Clip 1",
+        "fileName": "clip-1.mkv",
+        "rows": [
+            ["Picture", "1920×1080 · full frame"],
+            ["Length", "100 frames · 0:00:04"],
+            ["Size", "17.00 GiB"],
+            ["Signal", "SDR · BT.709 / BT.709 / BT.2020c · Limited"],
+        ],
+    }
+    assert summary["inspectorFrameIdentity"] == {
+        "identity": "10 · Selected",
+        "position": "1 / 2 in All",
+        "defaultDetailHidden": True,
+    }
 
     single_mode = summary["singleModeAlignment"]
     assert single_mode["mode"] == "overlay"

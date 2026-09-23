@@ -1282,13 +1282,6 @@ const ReportViewer = {
         return `${left} vs ${right}`;
     },
 
-    visibleFramePositionText() {
-        const visibleIndexes = this.visibleFrameIndexes();
-        const position = this.visibleFramePosition(visibleIndexes);
-        if (position === -1) return `Not shown of ${visibleIndexes.length}`;
-        return `${position + 1} of ${visibleIndexes.length} shown`;
-    },
-
     updateInspectorData() {
         this.inspector.render();
     },
@@ -1492,6 +1485,16 @@ const ReportViewer = {
 
     visibleFramePosition(visibleIndexes = this.visibleFrameIndexes()) {
         return visibleIndexes.indexOf(this.state.currentFrameIdx);
+    },
+
+    frameFilterName() {
+        if (this.state.activeCategoryKey === ALL_CATEGORY_FILTER_KEY) return 'All';
+        const activeBtn = Array.from(this.dom.filterChips || [])
+            .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
+        const label = activeBtn
+            ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
+            : this.state.activeCategoryKey;
+        return label;
     },
 
     updateFrameNavigationControls() {

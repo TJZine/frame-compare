@@ -11,12 +11,12 @@ const Inspector = {
                     btnInspectorClose: document.getElementById('btn-inspector-close'),
                     inspectorTabs: document.querySelectorAll('[data-inspector-tab]'),
                     inspectorPanels: document.querySelectorAll('.rv-inspector-panel'),
-                    inspectorFrameLabel: document.querySelector('[data-inspector-frame-label]'),
-                    inspectorFrameNumber: document.querySelector('[data-inspector-frame-number]'),
-                    inspectorFrameCategory: document.querySelector('[data-inspector-frame-category]'),
+                    inspectorFrameIdentity: document.querySelector('[data-inspector-frame-identity]'),
+                    inspectorFrameDetailRow: document.querySelector('[data-inspector-frame-detail-row]'),
                     inspectorFrameDetail: document.querySelector('[data-inspector-frame-detail]'),
                     inspectorFramePosition: document.querySelector('[data-inspector-frame-position]'),
                     inspectorSourceFrames: document.querySelector('[data-inspector-source-frames]'),
+                    inspectorClipsShared: document.querySelector('[data-inspector-clips-shared]'),
                     inspectorClips: document.querySelector('[data-inspector-clips]'),
                     inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
                     inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
@@ -163,19 +163,50 @@ const Inspector = {
                 });
             },
 
-            currentClipRole(index) {
-                const roles = [];
-                if (viewer.state.mode === 'grid' && viewer.gridView?.indexes().includes(index)) {
-                    if (index === viewer.referenceClipIndex()) roles.push('Reference');
-                    if (index === viewer.state.activeClipIdx) roles.push('Active');
-                    roles.push('Visible');
+            frameIdentityText(frame) {
+                if (!frame) return 'No frame selected';
+                const expected = `Frame ${frame.number}`;
+                if (frame.label && frame.label !== expected) return frame.label;
+                const category = frame.category ? viewer.humanizeCategory(frame.category) : '';
+                return category ? `${frame.number} · ${category}` : `${frame.number}`;
+            },
+
+            framePositionText() {
+                const visible = viewer.visibleFrameIndexes();
+                const position = viewer.visibleFramePosition(visible);
+                if (position < 0) return `Not shown in ${viewer.frameFilterName()}`;
+                return `${position + 1} / ${visible.length} in ${viewer.frameFilterName()}`;
+            },
+
+            clipPlacement(index) {
+                if (viewer.state.mode === 'overlay') {
+                    return index === viewer.state.activeClipIdx ? 'shown' : 'not shown';
                 }
-                if (index === viewer.state.leftClipIdx && !['overlay', 'grid'].includes(viewer.state.mode)) roles.push('Left');
-                if (index === viewer.state.rightClipIdx && !['overlay', 'grid'].includes(viewer.state.mode)) roles.push('Right');
-                if (index === viewer.state.activeClipIdx && (viewer.state.mode === 'overlay' || viewer.state.mode === 'blink')) {
-                    roles.push(viewer.state.mode === 'overlay' ? 'Active' : 'Visible');
+                if (viewer.state.mode === 'grid') {
+                    return (viewer.gridView?.indexes?.() || []).includes(index) ? 'shown' : 'not shown';
                 }
-                return roles.length > 0 ? roles.join(', ') : 'Available';
+                if (index === viewer.state.leftClipIdx) return 'shown left';
+                if (index === viewer.state.rightClipIdx) return 'shown right';
+                return 'not shown';
+            },
+
+            sourceVisibilityMark(index) {
+                const placement = this.clipPlacement(index);
+                if (placement === 'shown left') return 'Shown left';
+                if (placement === 'shown right') return 'Shown right';
+                if (placement === 'shown') return 'Shown';
+                return '';
+            },
+
+            clipCardRows(clip, shared) {
+                const rows = [
+                    ['Picture', ViewerFormat.formatActivePicture(clip.active_picture, clip.resolution)],
+                    ['Length', ViewerFormat.clipLengthText(clip)],
+                    ['Size', ViewerFormat.formatFileSize(clip.size_bytes)],
+                ];
+                if (!shared.fps) rows.push(['FPS', ViewerFormat.clipFpsText(clip)]);
+                if (!shared.presentation) rows.push(['Presentation', ViewerFormat.formatPresentation(clip)]);
+                return rows;
             },
 
             render() {
@@ -184,72 +215,104 @@ const Inspector = {
                 if (!viewer.state.inspectorOpen) return;
                 viewer.updateRenderingSummary();
                 const frame = viewer.currentFrame();
-                viewer.setText(viewer.dom.inspectorFrameLabel, frame?.label || 'No frame selected');
-                viewer.setText(viewer.dom.inspectorFrameNumber, frame?.number ?? '');
-                viewer.setText(viewer.dom.inspectorFrameCategory, frame?.category ? viewer.humanizeCategory(frame.category) : '');
-                viewer.setText(viewer.dom.inspectorFrameDetail, frame?.detail || '');
-                viewer.setText(viewer.dom.inspectorFramePosition, viewer.visibleFramePositionText());
+                viewer.setText(viewer.dom.inspectorFrameIdentity, this.frameIdentityText(frame));
+                viewer.setText(viewer.dom.inspectorFramePosition, this.framePositionText());
+                const detail = frame?.detail || '';
+                const showDetail = Boolean(detail) && detail !== 'Selected comparison frame';
+                if (viewer.dom.inspectorFrameDetailRow) {
+                    viewer.dom.inspectorFrameDetailRow.hidden = !showDetail;
+                }
+                if (showDetail) viewer.setText(viewer.dom.inspectorFrameDetail, detail);
 
                 if (viewer.dom.inspectorSourceFrames) {
-                    const rows = viewer.visibleSourceIndexes().map(clipIndex => {
-                        const clip = viewer.state.data.clips[clipIndex];
+                    const rows = viewer.state.data.clips.map((clip, clipIndex) => {
                         const image = frame?.images?.[clipIndex];
-                        const item = document.createElement('li');
-                        item.className = 'rv-inspector-source';
-                        const sourceFrame = Number.isInteger(image?.source_frame) ? image.source_frame : 'Unknown';
-                        const total = Number.isInteger(clip?.frame_count) ? ` / ${clip.frame_count}` : '';
-                        const pictureType = image?.picture_type ? `${image.picture_type}-frame` : 'type unknown';
-                        const dolbyVision = image?.dolby_vision_rpu === true ? ' · DV RPU' : '';
-                        item.textContent = `${ViewerFormat.clipDisplay(clip)} — ${sourceFrame}${total} · ${pictureType}${dolbyVision}`;
-                        return item;
+                        const row = document.createElement('tr');
+                        const mark = this.sourceVisibilityMark(clipIndex);
+                        row.classList.toggle('is-visible', Boolean(mark));
+                        const sourceCell = document.createElement('td');
+                        const name = document.createElement('div');
+                        name.className = 'rv-source-name';
+                        name.textContent = ViewerFormat.clipDisplay(clip, 'micro');
+                        if (mark) {
+                            const shown = document.createElement('div');
+                            shown.className = 'rv-source-shown';
+                            shown.textContent = mark;
+                            sourceCell.replaceChildren(name, shown);
+                        } else {
+                            sourceCell.replaceChildren(name);
+                        }
+                        const frameCell = document.createElement('td');
+                        frameCell.className = 'rv-source-frame';
+                        if (!Number.isInteger(image?.source_frame)) {
+                            frameCell.textContent = 'Unknown';
+                        } else if (Number.isInteger(clip?.frame_count)) {
+                            frameCell.textContent = `${image.source_frame} / ${clip.frame_count}`;
+                        } else {
+                            frameCell.textContent = `${image.source_frame}`;
+                        }
+                        const typeCell = document.createElement('td');
+                        if (image?.picture_type) {
+                            typeCell.textContent = image.dolby_vision_rpu === true
+                                ? `${image.picture_type} · DV RPU`
+                                : image.picture_type;
+                        } else {
+                            typeCell.textContent = 'unknown';
+                        }
+                        row.replaceChildren(sourceCell, frameCell, typeCell);
+                        return row;
                     });
                     viewer.dom.inspectorSourceFrames.replaceChildren(...rows);
                 }
 
+                const clips = viewer.state.data.clips;
+                const shared = ViewerFormat.sharedClipValues(clips);
+                if (viewer.dom.inspectorClipsShared) {
+                    const parts = [shared.fps, shared.presentation].filter(Boolean);
+                    viewer.dom.inspectorClipsShared.hidden = parts.length === 0;
+                    viewer.setText(
+                        viewer.dom.inspectorClipsShared,
+                        parts.length > 0 ? `All sources: ${parts.join(' · ')}` : '',
+                    );
+                }
+
                 if (viewer.dom.inspectorClips) {
-                    viewer.dom.inspectorClips.replaceChildren(...viewer.state.data.clips.map((clip, index) => {
+                    viewer.dom.inspectorClips.replaceChildren(...clips.map((clip, index) => {
                         const item = document.createElement('li');
                         item.className = 'rv-inspector-clip';
                         item.dataset.clipIndex = String(index);
-                        item.innerHTML = `
-                            <div class="rv-inspector-clip-heading"><span></span><span></span></div>
-                            <div class="rv-inspector-clip-primary"></div>
-                            <div class="rv-inspector-clip-release" hidden></div>
-                            <dl class="rv-inspector-list">
-                                <div><dt>View role</dt><dd></dd></div><div><dt>File</dt><dd></dd></div>
-                                <div><dt>Resolution</dt><dd></dd></div><div><dt>FPS</dt><dd></dd></div>
-                                <div><dt>File size</dt><dd></dd></div><div><dt>Signal</dt><dd></dd></div>
-                                <div><dt>Presentation</dt><dd></dd></div>
-                            </dl>`;
-                        const heading = item.querySelectorAll('.rv-inspector-clip-heading span');
-                        heading[0].textContent = ViewerFormat.stableClipRole(index, viewer.referenceClipIndex());
-                        heading[1].textContent = clip.signal?.is_hdr ? 'HDR' : 'SDR';
-                        const primary = ViewerFormat.clipDisplay(clip, 'primary');
-                        const release = ViewerFormat.clipDisplay(clip, 'release');
-                        item.querySelector('.rv-inspector-clip-primary').textContent = primary;
-                        const releaseElement = item.querySelector('.rv-inspector-clip-release');
-                        const normalizedPrimary = viewer.normalizedDisplayToken(primary);
-                        const normalizedRelease = viewer.normalizedDisplayToken(release);
-                        const showRelease = Boolean(normalizedRelease && normalizedPrimary !== normalizedRelease
-                            && !normalizedPrimary.endsWith(`· ${normalizedRelease}`));
-                        releaseElement.hidden = !showRelease;
-                        releaseElement.textContent = showRelease ? release : '';
-                        const values = item.querySelectorAll('dd');
-                        values[0].textContent = this.currentClipRole(index);
-                        values[1].textContent = ViewerFormat.clipFilename(clip);
-                        values[2].textContent = ViewerFormat.formatResolution(clip.resolution);
-                        values[3].textContent = ViewerFormat.formatFps(clip.fps);
-                        values[4].textContent = ViewerFormat.formatFileSize(clip.size_bytes);
-                        values[5].textContent = ViewerFormat.formatSignal(clip.signal);
-                        values[6].textContent = ViewerFormat.formatPresentation(clip);
-                        const activePicture = ViewerFormat.formatActivePicture(clip.active_picture, clip.resolution);
-                        const clipList = item.querySelector('dl');
-                        if (activePicture && clipList?.appendChild) {
-                            const row = document.createElement('div');
-                            row.innerHTML = '<dt>Active picture</dt><dd></dd>';
-                            row.querySelector('dd').textContent = activePicture;
-                            clipList.appendChild(row);
-                        }
+                        const heading = document.createElement('div');
+                        heading.className = 'rv-inspector-clip-heading';
+                        const title = document.createElement('span');
+                        title.textContent = `${ViewerFormat.stableClipRole(index, viewer.referenceClipIndex())} · ${this.clipPlacement(index)}`;
+                        const badge = document.createElement('span');
+                        badge.className = 'rv-badge';
+                        badge.textContent = ViewerFormat.clipBadge(clip.signal);
+                        heading.replaceChildren(title, badge);
+                        const name = document.createElement('div');
+                        name.className = 'rv-inspector-clip-primary';
+                        name.textContent = ViewerFormat.clipDisplay(clip, 'control');
+                        const file = document.createElement('div');
+                        file.className = 'rv-inspector-clip-file';
+                        file.textContent = ViewerFormat.clipFilename(clip);
+                        const list = document.createElement('dl');
+                        list.className = 'rv-inspector-list';
+                        const rowElements = [
+                            ...this.clipCardRows(clip, shared),
+                            ['Signal', ViewerFormat.formatSignal(clip.signal)],
+                        ]
+                            .filter(([, value]) => Boolean(value))
+                            .map(([term, value]) => {
+                                const row = document.createElement('div');
+                                const dt = document.createElement('dt');
+                                dt.textContent = term;
+                                const dd = document.createElement('dd');
+                                dd.textContent = value;
+                                row.replaceChildren(dt, dd);
+                                return row;
+                            });
+                        list.replaceChildren(...rowElements);
+                        item.replaceChildren(heading, name, file, list);
                         return item;
                     }));
                 }

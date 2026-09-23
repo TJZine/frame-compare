@@ -835,10 +835,19 @@ end ellipsis and carry the full name on each option. Canonical clip labels conti
 to own image mappings, geometry, browser state, and review JSON; payload identity
 shaping explicitly omits display profiles.
 
-The Clips inspector composes those profiles into stable Reference/Comparison cards.
-Primary and informative release identities wrap normally, exact filenames and long
-technical values may wrap anywhere, and drawer/panel overflow is constrained locally
-rather than masked at the document boundary.
+The Clips inspector and Report Information share one clip-card design built from
+those profiles: stable Reference/Comparison role headers (plus shown left/right/shown/not
+shown placement in the Clips tab), a DV HDR/HDR/SDR signal badge, the standard name,
+the exact filename, and Picture/Length/Size rows (plus Signal in the Clips tab, plus
+FPS/Presentation rows in the Clips tab only for values that differ between clips,
+plus an FPS row in Report Information only when fps differs). An `All sources:`
+line states the fps and presentation values identical across every clip — fps only in
+Report Information. The Frame tab shows a `number · category` identity (or the frame's
+own label), a `position / count in filter` row, a Detail row only for non-default
+notes, and an all-sources table (compact name, own frame number, picture type, shown
+marks for visible sources). Primary and informative release identities wrap normally,
+exact filenames and long technical values may wrap anywhere, and drawer/panel overflow
+is constrained locally rather than masked at the document boundary.
 Visible Single, Slider, Diff, Blink, and Grid source labels reuse the payload's canonical
 container byte size through the shared IEC formatter; hiding source labels hides that
 size too, and no report payload or probing owner is duplicated.
@@ -908,8 +917,9 @@ one normalized viewport center without changing pair-mode persistence semantics.
 
 `assets/viewer_format.js` is the dependency-free owner for clip display profiles,
 exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
-active-picture labels, mode names, and stable clip roles. It does not read the DOM,
-storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
+active-picture labels (including ` · DV L5` provenance), mode names, stable clip
+roles, signal badges, clip length text, and shared fps/presentation values. It does
+not read the DOM, storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
 Clips, and Image offset rendering, and lazy Review activation through the root viewer. Hidden
 Inspectors update only visibility and tab semantics; opening refreshes their content
