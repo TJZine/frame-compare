@@ -1213,6 +1213,12 @@ select optgroup {
     background: var(--bg-floating);
     box-shadow: var(--shadow-floating);
     pointer-events: auto;
+    opacity: 1;
+    transition: opacity 150ms ease;
+}
+
+.rv-viewport-palette[data-proximity="far"]:not(:focus-within) {
+    opacity: 0.18;
 }
 
 .rv-palette-group {
@@ -2360,7 +2366,8 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-stage-overlay-info,
     .rv-inspector,
     .rv-lens,
-    .rv-lens-target {
+    .rv-lens-target,
+    .rv-viewport-palette {
         transition: none !important;
         animation: none !important;
     }

@@ -166,6 +166,7 @@ const ReportViewer = {
             reviewImportCancel: document.querySelector('[data-review-import-cancel]'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
+            lensSettingsPopover: document.getElementById('lens-settings-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
             ...this.inspector.cacheDOM(),
         };
@@ -527,6 +528,7 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('active', isOpen);
         this.dom.btnAlignToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         this.dom.alignPopover.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+        this.viewport?.updatePaletteProximity?.();
 
         if (isOpen) {
             this.focusElement(this.dom.alignmentPreset);
@@ -663,7 +665,9 @@ const ReportViewer = {
             }
         });
 
+        this.viewport.initPaletteProximity();
         this.dom.stage.addEventListener('pointermove', (e) => {
+            this.viewport.schedulePaletteProximity(e.clientX, e.clientY);
             if (this.isViewerChromeEvent(e)) return;
             const lensMove = this.lens.handleStagePointerMove(e);
             this.viewport.trackPointerPosition(e);
@@ -694,10 +698,15 @@ const ReportViewer = {
                 e.preventDefault();
             }
         });
-        this.dom.stage.addEventListener('pointerup', (e) => this.viewport.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointerup', (e) => {
+            this.viewport.stopPointerInteraction(e);
+            this.viewport.updatePaletteProximity(e.clientX, e.clientY);
+        });
         this.dom.stage.addEventListener('pointercancel', (e) => {
             this.viewport.stopPointerInteraction(e, { cancelled: true });
+            this.viewport.updatePaletteProximity(e.clientX, e.clientY);
         });
+        this.dom.stage.addEventListener('pointerleave', () => this.viewport.handleStagePointerLeave());
         this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
     },

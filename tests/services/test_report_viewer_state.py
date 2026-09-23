@@ -166,3 +166,30 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "lowerSelectsGrid": True,
         "upperSelectsGrid": True,
     }
+    assert summary["proximityStateMachine"] == {
+        "thresholds": True,
+        "hysteresis": True,
+        "overrides": True,
+    }
+    assert summary["paletteProximityWiring"] == {
+        "startsNear": True,
+        "loadOverride": True,
+        "farWhenDistant": True,
+        "hysteresisHoldsFar": True,
+        "nearWhenClose": True,
+        "dragOverride": True,
+        "alignPopoverOverride": True,
+        "lensPopoverOverride": True,
+        "pointerLeaveSetsFar": True,
+        "coarseStaysNear": True,
+        "coarseLeaveStaysNear": True,
+        "mediaInitFine": True,
+        "mediaChangeGates": True,
+        "loadHoldsNear": True,
+        "loadExpiryRecomputes": True,
+        "rafDefers": True,
+        "leaveCancelsQueuedFrame": True,
+        "rafFlushApplies": True,
+        "nanHoldsFar": True,
+        "reinitCancelsQueuedFrame": True,
+    }

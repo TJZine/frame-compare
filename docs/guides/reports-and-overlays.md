@@ -111,7 +111,10 @@ The viewer uses neutral charcoal surfaces and reserves its brass accent for the 
 comparison mode, selected frame, and direct image-inspection markers. Utility toggles
 use neutral selected states. The compact viewport palette floats over the stage without
 reserving another toolbar row; its orientation, zoom, image offset, and fullscreen
-buttons have tooltips. `Offset: none` means no spatial image offset is applied to the
+buttons have tooltips. On precise pointers the palette fades to a ghost when the
+pointer moves away and returns to full opacity as it approaches; it stays fully
+visible while dragging, while either popover is open, shortly after load, and
+whenever it holds keyboard focus. `Offset: none` means no spatial image offset is applied to the
 pair, not that temporal frame alignment failed; the Inspector's Image offset tab and
 the palette's image offset settings both state that this adjustment is spatial only
 and does not change source-frame timing. The filmstrip keeps the comparison frame number

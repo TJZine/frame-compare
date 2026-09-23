@@ -620,7 +620,7 @@ def _render_viewport_palette() -> str:
     zoom_in_icon = _render_icon("M5 10h10M10 5v10")
     tag_icon = _render_icon("M3 4h8l6 6-6 6H3zM6 8a1 1 0 1 0 2 0a1 1 0 1 0-2 0")
     lens_icon = _render_icon("M3.5 8.5a5 5 0 1 0 10 0a5 5 0 1 0-10 0M12.5 12.5L17 17")
-    return f"""        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal">
+    return f"""        <div class="rv-viewport-palette" role="toolbar" aria-label="Viewport controls" data-orientation="horizontal" data-proximity="near">
         <div class="rv-palette-group">
             <button id="btn-palette-orientation" aria-label="Toggle palette orientation" title="Toggle palette orientation">{_render_icon("M3 6h14v8H3z M7 6v8 M13 6v8")}</button>
         </div>

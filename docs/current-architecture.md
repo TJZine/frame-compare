@@ -801,7 +801,14 @@ rotates its existing icon through CSS, while the viewer updates the accessible a
 palette omits a fit-width control; actual size and fit height remain, and a restored
 width-fit preference still computes zoom and keeps the fit radio group keyboard
 reachable when neither visible radio matches. The floating palette does not reserve
-stage height. Spatial alignment status is labeled `Offset`, and its Inspector tab and
+stage height. On fine pointers the palette carries a `data-proximity` state driven
+by a throttled stage pointermove listener: near at or within 96 px of the palette
+rectangle, far at or beyond 160 px with hysteresis between, far on stage pointer
+leave, forced far during viewport or slider drags, forced near for 3000 ms after
+load and while either the image-offset or lens-settings popover is open, and always
+near on coarse pointers or when the fine-pointer media query stops matching.
+Far dims to 0.18 opacity over 150 ms (disabled under reduced motion) without
+disabling pointer events, and `:focus-within` keeps the focused palette visible. Spatial alignment status is labeled `Offset`, and its Inspector tab and
 palette settings are labeled Image offset, both stating the adjustment is spatial only
 and does not affect source-frame timing, to distinguish image translation from temporal
 source-frame alignment. View-mode controls and the Help dialog state each mode's purpose

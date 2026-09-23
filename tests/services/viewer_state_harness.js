@@ -250,6 +250,22 @@ function loadViewer({ clipCount, savedState = null }) {
             matchMedia() {
                 return { matches: false };
             },
+            rafQueue: [],
+            requestAnimationFrame(callback) {
+                this.rafQueue.push(callback);
+                return this.rafQueue.length;
+            },
+            cancelAnimationFrame(id) {
+                this.rafQueue[id - 1] = null;
+            },
+            timeoutQueue: [],
+            setTimeout(callback) {
+                this.timeoutQueue.push(callback);
+                return this.timeoutQueue.length;
+            },
+            clearTimeout(id) {
+                this.timeoutQueue[id - 1] = null;
+            },
         },
     };
     activeDocument = context.document;
@@ -372,6 +388,10 @@ function loadViewer({ clipCount, savedState = null }) {
             ...fakeElement(),
             hidden: true,
         },
+        lensSettingsPopover: {
+            ...fakeElement(),
+            hidden: true,
+        },
     };
     viewer.dom.btnInfo.setAttribute('aria-label', 'Report information');
     viewer.dom.btnInfo.setAttribute('title', 'Report information');
@@ -424,6 +444,7 @@ function loadViewer({ clipCount, savedState = null }) {
         storage,
         storageKey: viewer.state.storageKey,
         document: context.document,
+        window: context.window,
         reviewMetrics,
     };
 }
@@ -1582,6 +1603,150 @@ const summary = {};
     summary.gridShortcut = {
         lowerSelectsGrid,
         upperSelectsGrid,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    const viewport = viewer.viewport;
+    const rect = {
+        left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
+    };
+    assert.equal(viewport.proximityDistanceToRect(rect, 150, 622), 0);
+    assert.equal(viewport.proximityDistanceToRect(rect, 100, 600), 0);
+    assert.equal(viewport.proximityDistanceToRect(rect, 50, 622), 50);
+    assert.equal(viewport.proximityDistanceToRect(rect, 150, 560), 40);
+    assert.equal(
+        Math.round(viewport.proximityDistanceToRect(rect, 40, 540)),
+        85,
+    );
+    const base = {
+        current: 'near',
+        distance: 200,
+        dragActive: false,
+        popoverOpen: false,
+        loadActive: false,
+        finePointer: true,
+    };
+    const thresholds = (
+        viewport.resolvePaletteProximity({ ...base, distance: 96 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, distance: 160 }) === 'far'
+    );
+    const hysteresis = (
+        viewport.resolvePaletteProximity({ ...base, distance: 100 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, current: 'far', distance: 100 }) === 'far'
+        && viewport.resolvePaletteProximity({ ...base, current: 'far', distance: 96 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, distance: 160 }) === 'far'
+    );
+    const overrides = (
+        viewport.resolvePaletteProximity({ ...base, dragActive: true, distance: 0 }) === 'far'
+        && viewport.resolvePaletteProximity({ ...base, popoverOpen: true, distance: 500 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, loadActive: true, distance: 500 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, finePointer: false, distance: 500 }) === 'near'
+    );
+    summary.proximityStateMachine = { thresholds, hysteresis, overrides };
+}
+
+{
+    const { viewer, window } = loadViewer({ clipCount: 2 });
+    const viewport = viewer.viewport;
+    viewer.dom.viewportPalette.getBoundingClientRect = () => ({
+        left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
+    });
+    viewport.initPaletteProximity();
+    const startsNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.updatePaletteProximity(900, 100);
+    const loadOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    viewer.paletteProximity.finePointer = true;
+    viewport.updatePaletteProximity(900, 100);
+    const farWhenDistant = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(500, 622);
+    const hysteresisHoldsFar = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(450, 622);
+    const nearWhenClose = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.pointerInteraction = { isDragging: true, isPanning: false, pinchActive: false };
+    viewport.updatePaletteProximity(150, 622);
+    const dragOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewer.pointerInteraction = { isDragging: false, isPanning: false, pinchActive: false };
+    viewer.dom.alignPopover.hidden = false;
+    viewport.updatePaletteProximity(900, 100);
+    const alignPopoverOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.dom.alignPopover.hidden = true;
+    viewer.dom.lensSettingsPopover.hidden = false;
+    viewport.updatePaletteProximity(900, 100);
+    const lensPopoverOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.dom.lensSettingsPopover.hidden = true;
+    viewport.handleStagePointerLeave();
+    const pointerLeaveSetsFar = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewer.paletteProximity.finePointer = false;
+    viewport.updatePaletteProximity(900, 100);
+    const coarseStaysNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.handleStagePointerLeave();
+    const coarseLeaveStaysNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    const changes = [];
+    window.matchMedia = () => ({
+        matches: true,
+        addEventListener(type, listener) {
+            if (type === 'change') changes.push(listener);
+        },
+    });
+    viewport.initPaletteProximity();
+    const mediaInitFine = viewer.paletteProximity.finePointer === true;
+    changes[0]({ matches: false });
+    const mediaChangeGates = viewer.paletteProximity.finePointer === false
+        && viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    const flushRaf = () => {
+        window.rafQueue.splice(0).forEach(callback => callback && callback());
+    };
+    const flushTimeouts = () => {
+        window.timeoutQueue.splice(0).forEach(callback => callback && callback());
+    };
+    viewport.initPaletteProximity();
+    viewport.updatePaletteProximity(900, 100);
+    const loadHoldsNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushTimeouts();
+    const loadExpiryRecomputes = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(900, 100);
+    viewport.schedulePaletteProximity(150, 622);
+    const rafDefers = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.handleStagePointerLeave();
+    flushRaf();
+    const leaveCancelsQueuedFrame = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(900, 100);
+    viewport.schedulePaletteProximity(150, 622);
+    flushRaf();
+    const rafFlushApplies = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.updatePaletteProximity(900, 100);
+    viewport.updatePaletteProximity(Number.NaN, Number.NaN);
+    const nanHoldsFar = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.schedulePaletteProximity(900, 100);
+    viewport.initPaletteProximity();
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushRaf();
+    const reinitCancelsQueuedFrame = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    summary.paletteProximityWiring = {
+        startsNear,
+        loadOverride,
+        farWhenDistant,
+        hysteresisHoldsFar,
+        nearWhenClose,
+        dragOverride,
+        alignPopoverOverride,
+        lensPopoverOverride,
+        pointerLeaveSetsFar,
+        coarseStaysNear,
+        coarseLeaveStaysNear,
+        mediaInitFine,
+        mediaChangeGates,
+        loadHoldsNear,
+        loadExpiryRecomputes,
+        rafDefers,
+        leaveCancelsQueuedFrame,
+        rafFlushApplies,
+        nanHoldsFar,
+        reinitCancelsQueuedFrame,
     };
 }
 

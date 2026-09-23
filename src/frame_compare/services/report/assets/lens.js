@@ -752,6 +752,7 @@ const Lens = (() => {
             if (!dom.popover || !dom.settings) return;
             state.settingsRestoreFocus = document.activeElement;
             dom.popover.hidden = false;
+            viewer.viewport?.updatePaletteProximity?.();
             dom.settings.setAttribute('aria-expanded', 'true');
             renderControls();
             positionSettingsPopover();
@@ -761,6 +762,7 @@ const Lens = (() => {
         function closeSettings(options = {}) {
             if (!dom.popover || dom.popover.hidden) return;
             dom.popover.hidden = true;
+            viewer.viewport?.updatePaletteProximity?.();
             dom.settings?.setAttribute('aria-expanded', 'false');
             const restore = state.settingsRestoreFocus || dom.settings;
             state.settingsRestoreFocus = null;

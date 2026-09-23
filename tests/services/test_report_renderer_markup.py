@@ -669,6 +669,7 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert palette.attrs["role"] == "toolbar"
     assert palette.attrs["aria-label"] == "Viewport controls"
     assert palette.attrs["data-orientation"] == "horizontal"
+    assert palette.attrs["data-proximity"] == "near"
     assert controls.attrs["role"] == "toolbar"
     assert stage.attrs["aria-label"] == "Comparison viewer"
 
