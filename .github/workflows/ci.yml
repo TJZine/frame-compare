@@ -44,6 +44,9 @@ jobs:
       - name: Run Ruff
         run: uv run --no-sync ruff check .
 
+      - name: Check formatting
+        run: uv run --no-sync ruff format --check .
+
   security:
     name: Security (Bandit)
     runs-on: ubuntu-latest

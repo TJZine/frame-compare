@@ -27,7 +27,7 @@ Closes #
 
 - [ ] My code follows the project's style guidelines (Ruff)
 - [ ] I have run the risk-matched verification required by `docs/ENGINEERING_RUNBOOK.md`
-- [ ] When required, `uv run --no-sync ruff check .` passes
+- [ ] When required, `uv run --no-sync ruff check .` and `uv run --no-sync ruff format --check .` pass
 - [ ] When required, `uv run --no-sync pyright --warnings` passes with no new errors
 - [ ] My changes generate no new warnings
 

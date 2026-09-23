@@ -329,6 +329,9 @@ def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     jobs = workflow["jobs"]
 
+    lint_run = "\n".join(str(step.get("run", "")) for step in jobs["lint"]["steps"])
+    assert "uv run --no-sync ruff check ." in lint_run
+    assert "uv run --no-sync ruff format --check ." in lint_run
     test_run = "\n".join(str(step.get("run", "")) for step in jobs["test"]["steps"])
     assert "pytest -q" in test_run
     assert "--cov=src/frame_compare" in test_run

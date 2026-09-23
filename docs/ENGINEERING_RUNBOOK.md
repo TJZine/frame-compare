@@ -56,6 +56,7 @@ Core local gates:
 ```bash
 uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
 uv run --no-sync pytest -q
 uv run --no-sync lint-imports --config importlinter.ini
@@ -189,7 +190,7 @@ covered by unit results. Do not repeat an unchanged clean gate solely at closeou
 
 Use for docs-only changes and small internal refactors that do not touch runtime behavior.
 
-- Run `ruff check .` when Python files changed.
+- Run `ruff check .` and `ruff format --check .` when Python files changed.
 - Run targeted `pytest` only when a touched module has direct tests.
 
 ### Logic Verification
@@ -198,7 +199,7 @@ Use for most code changes that do not affect packaging, Docker, Windows portable
 
 - Run the touched tests or a focused `pytest` selection.
 - Run `pyright --warnings`.
-- Run `ruff check .`.
+- Run `ruff check .` and `ruff format --check .`.
 - Run `bandit -c pyproject.toml -r src --severity-level medium`.
 - Run `lint-imports` if imports or top-level module boundaries changed.
 
@@ -217,6 +218,7 @@ Run:
 ```bash
 uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
 uv run --no-sync pytest -q
 uv run --no-sync lint-imports --config importlinter.ini
