@@ -927,3 +927,11 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   (`test_report_renderer_markup.py`, `test_report_viewer_assets_css.py`,
   `test_report_browser_smoke.py`) 68 passed exit 0, `ruff check .` clean
   exit 0. B4 not started.
+- Checkpoint B-viewer closed (September 24, controller): G1–G2 (`c2835710`)
+  verified; diff is exactly the two fixes. Visual check at a 760 px window: the
+  pair control lays out left select, swap, right select without overlap, no
+  horizontal overflow, stage labels fit. Gate: pyright 0/0, ruff check and
+  format, lint-imports, strict docs; pytest 3494 passed / 86 environment skips
+  on a clean run (one earlier run had a single failure that did not reproduce
+  in isolation or in a second full run; it coincided with concurrent browser
+  automation). Track B viewer accepted; Track B terminal (Prompt 3) may start.
