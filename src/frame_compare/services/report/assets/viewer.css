@@ -2325,7 +2325,7 @@ body.rv-inspector-open .rv-viewer-stage {
 
     .rv-context-zone .rv-control-group[data-control-scope="pair"] {
         display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto auto auto minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     }
 
     .rv-context-controls,

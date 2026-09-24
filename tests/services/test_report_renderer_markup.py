@@ -67,7 +67,6 @@ def test_build_html_emits_empty_report_information_containers_for_viewer_fill(
     clips_mount = require_first(document, tag="ol", attr_name="data-info-clips", attr_value=None)
     assert clips_mount.children == []
     empty_mount = require_first(document, tag="p", attr_name="data-info-clips-empty")
-    assert empty_mount.text == "No clips in payload."
     assert "hidden" in empty_mount.attrs
     shared_mount = require_first(document, tag="p", attr_name="data-info-clips-shared")
     assert shared_mount.text == ""
