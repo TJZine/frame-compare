@@ -36,6 +36,7 @@ def write_vsview_session_script(
     cache_dir: Path,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
+    short_names_by_stem: dict[str, str] | None = None,
 ) -> Path:
     """Generate and write a self-contained VSView script.
 
@@ -58,6 +59,7 @@ def write_vsview_session_script(
         audio_review_by_key=audio_review_by_key,
         frame_props_by_stem=frame_props_by_stem,
         presentation_names_by_stem=presentation_names_by_stem,
+        short_names_by_stem=short_names_by_stem,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -152,6 +154,37 @@ def _ansi_enabled():
     return "NO_COLOR" not in os.environ and getattr(sys.stderr, "isatty", lambda: False)()
 
 
+def _use_ascii():
+    encoding = getattr(sys.stderr, "encoding", None) or ""
+    return not str(encoding).lower().startswith("utf")
+
+
+def _glyph(kind):
+    table = {
+        "ok": ("\\u2713", "+"),
+        "warning": ("!", "!"),
+        "failed": ("\\u2717", "x"),
+        "waiting": ("\\u203a", ">"),
+        "skipped": ("\\u2013", "-"),
+        "running": ("\\u2026", "~"),
+    }
+    glyph, fallback = table[kind]
+    return fallback if _use_ascii() else glyph
+
+
+def _arrow():
+    return "->" if _use_ascii() else "\\u2192"
+
+
+def _accent_code():
+    colorterm = os.environ.get("COLORTERM", "")
+    if colorterm in ("truecolor", "24bit") or "WT_SESSION" in os.environ:
+        return "38;2;210;172;107"
+    if "256color" in os.environ.get("TERM", ""):
+        return "38;5;180"
+    return "33"
+
+
 def _style(text, code):
     if not _ansi_enabled():
         return text
@@ -159,7 +192,7 @@ def _style(text, code):
 
 
 def _header(text):
-    return _style(text, "1;36")
+    return _style(text, _accent_code())
 
 
 def _key(text):
@@ -175,8 +208,9 @@ def _hint(text):
 
 
 def _status(marker):
-    codes = {"[RUN]": "96", "[OK]": "32", "[WARN]": "33", "[FAIL]": "31"}
-    return _style(marker, codes[marker])
+    kinds = {"[WARN]": ("warning", "33"), "[FAIL]": ("failed", "31")}
+    kind, code = kinds[marker]
+    return _style(_glyph(kind), code)
 
 
 def _status_line(marker, text):
@@ -322,6 +356,7 @@ def _build_clip_data_section(
     audio_review_by_key: dict[str, str],
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None,
     presentation_names_by_stem: dict[str, str] | None,
+    short_names_by_stem: dict[str, str] | None = None,
 ) -> str:
     presentation_names = presentation_names_by_stem or {}
     targets_lines: list[str] = []
@@ -361,6 +396,7 @@ def _build_clip_data_section(
         },
         sort_keys=True,
     )
+    short_names_content = json.dumps(short_names_by_stem or {}, sort_keys=True)
 
     return f"""\
 # ─── Clip Data ────────────────────────────────────────────────────────────────
@@ -376,6 +412,7 @@ TARGETS = {{
 }}
 
 FRAME_PROPS_BY_LABEL = {frame_props_content}
+SHORT_NAMES = {short_names_content}
 REVIEW_METADATA_VERSION = {ALIGNMENT_REVIEW_METADATA_VERSION}
 REVIEW_METADATA_KEYS = {metadata_keys_content}
 """
@@ -452,10 +489,6 @@ def main():
         safe_print(_status_line("[FAIL]", f"Reference not found: {ref_path}"))
         sys.exit(1)
 
-    safe_print("")
-    safe_print(_status_line("[RUN]", "VSView Bootstrap"))
-    safe_print(f"    {_key('reference')}     {_value(REFERENCE['display_name'])}")
-
     try:
         ref_clip = load_preview_source(
             load_source,
@@ -477,8 +510,6 @@ def main():
         preview_assumptions.append(ref_assumption)
     ref_clip = apply_preview_defaults(core, ref_clip, REFERENCE["label"])
 
-    safe_print(f"    {_key('fps')}           {_hint(f'{ref_fps_num}/{ref_fps_den}')}")
-
     # Apply overlay to reference (best-effort)
     try:
         ref_clip = core.text.Text(
@@ -492,12 +523,11 @@ def main():
         safe_print(_status_line("[WARN]", "Could not apply reference text overlay"))
 
     prepared_comparisons = []
+    ready_hints = []
 
     for comparison_number, (label, target) in enumerate(TARGETS.items(), start=1):
         comp_path = Path(target["path"])
         display_name = target["display_name"]
-        safe_print("")
-        safe_print(f"    {_key(f'comparison {comparison_number}')}  {_value(display_name)}")
         if not comp_path.exists():
             safe_print(_status_line("[FAIL]", f"Comparison source not found: {comp_path}"))
             sys.exit(1)
@@ -557,6 +587,8 @@ def main():
             hint_pair = "Historical window and selected-stream details unavailable"
             trim_hint = "No audio analysis ran this time"
 
+        ready_hints.append((label, audio_hint))
+
         # Apply comparison identity, hint, and review guidance (best-effort)
         try:
             overlay_text = (
@@ -571,13 +603,12 @@ def main():
         except Exception:
             safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
 
-        safe_print(f"    {_key('audio hint')}    {_hint(audio_hint)}")
-        prepared_comparisons.append((comparison_number, target, comp_clip))
+        prepared_comparisons.append((comparison_number, label, target, comp_clip))
 
     session_id = Path(__file__).stem.rpartition("_")[2]
     try:
         set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id))
-        for comparison_number, target, comparison_clip in prepared_comparisons:
+        for comparison_number, _label, target, comparison_clip in prepared_comparisons:
             set_output(
                 comparison_clip,
                 comparison_number,
@@ -589,13 +620,6 @@ def main():
             _status_line("[FAIL]", f"Alignment review outputs could not be registered: {e}")
         )
         sys.exit(1)
-
-    safe_print(f"    {_key('output')}        Reference -> output 0")
-    for comparison_number, _target, _comparison_clip in prepared_comparisons:
-        safe_print(
-            f"    {_key('output')}        "
-            f"Comparison {comparison_number} -> output {comparison_number}"
-        )
 
     if preview_assumptions:
         safe_print("\\n" + _status_line("[WARN]", "VSView Display Assumptions"))
@@ -612,10 +636,28 @@ def main():
                 f"{_hint('Preview only; source, render, and report unchanged')}"
             )
 
-    safe_print("\\n" + _status_line("[OK]", "VSView Ready"))
-    safe_print("       Open Tool Panel -> Frame Compare Alignment Review.")
-    safe_print("       Unlink playheads, then position every source on the same visible moment.")
-    safe_print("       Save the alignment in the panel, then close VSView to continue Frame Compare.")
+    ready_prefix = "\\n" if preview_assumptions else ""
+    safe_print(
+        ready_prefix + _header(f"{_glyph('waiting')} VSView is open \\u00b7 waiting for you")
+    )
+    safe_print("  1  Open Tool Panel " + _arrow() + " Frame Compare Alignment Review.")
+    safe_print("  2  Unlink playheads, then position every source on the same visible moment.")
+    safe_print("  3  Save the alignment in the panel, then close VSView to continue Frame Compare.")
+    safe_print("")
+    safe_print("  outputs  0  " + REFERENCE["display_name"])
+    for comparison_number, _label, target, _comparison_clip in prepared_comparisons:
+        safe_print("           " + str(comparison_number) + "  " + target["display_name"])
+    ready_hint_rows = []
+    for label, audio_hint in ready_hints:
+        ready_hint_rows.append(
+            (SHORT_NAMES.get(label, TARGETS[label]["display_name"]), audio_hint)
+        )
+    if ready_hint_rows:
+        hint_width = max(len(name) for name, _hint_text in ready_hint_rows)
+        first_hint_name, first_hint_text = ready_hint_rows[0]
+        safe_print("  hints    " + first_hint_name.ljust(hint_width) + "  " + first_hint_text)
+        for hint_name, hint_text in ready_hint_rows[1:]:
+            safe_print("           " + hint_name.ljust(hint_width) + "  " + hint_text)
 
 main()
 """
@@ -628,6 +670,7 @@ def _build_script_content(
     audio_review_by_key: dict[str, str],
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
+    short_names_by_stem: dict[str, str] | None = None,
 ) -> str:
     """Build the script content for VSView.
 
@@ -642,6 +685,7 @@ def _build_script_content(
         audio_review_by_key,
         frame_props_by_stem,
         presentation_names_by_stem,
+        short_names_by_stem,
     )
     main_execution = _build_main_execution_section()
 

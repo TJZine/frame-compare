@@ -371,6 +371,17 @@ def maybe_launch_alignment_vsview(
                         for comparison in comparisons
                     },
                 },
+                short_names_by_stem={
+                    stem: short_name
+                    for stem, short_name in (
+                        [(reference_path.stem, reference.short_name)]
+                        + [
+                            (comparison.path.stem, comparison.short_name)
+                            for comparison in comparisons
+                        ]
+                    )
+                    if short_name is not None
+                },
             ),
             config=VSViewConfig(
                 enabled=launch_decision.enabled,

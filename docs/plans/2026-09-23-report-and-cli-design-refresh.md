@@ -995,3 +995,22 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   120; `cli-*.svg` predate the B5 rows). No real media run on this host
   (interactive VSView review needs a desktop session). Docs:
   `current-cli-contract.md` (time rows, Align split line). B6 not started.
+- Track B terminal B6 session-script output (September 24, implementation
+  session): generated helpers only — accent tiers (`38;2;210;172;107` /
+  `38;5;180` / `33` with `NO_COLOR` + TTY checks), S3 glyph mirror with ASCII
+  fallback (`›`/`✗`/`→`, plus skipped/running entries), loading silent on
+  success with failures/warnings keeping text under `✗`/`!` (colors kept), the
+  `› VSView is open` ready block (steps, outputs with presentation names,
+  hints with padded S1 short names and verbatim hint text), and
+  `short_names_by_stem=None` threaded writer → clip data (`SHORT_NAMES`,
+  `sort_keys`) fed by a new `VSViewSessionRequest` field populated from clip
+  `short_name`. Byte-identical output for identical inputs; metadata contract
+  untouched; overlays keep ASCII `->`. Consumers updated: Windows ps1 proof
+  markers → `VSView is open`, contract diagnostics section. Review:
+  conformance PASS + 5 minors (all fixed), regression PASS no findings (one
+  earlier regression round wedged without output and was replaced). Gate:
+  pyright 0/0, ruff check + format, lint-imports kept. Ready block executed
+  and eyeballed (truecolor › line, steps, outputs, padded hints; longest line
+  ~60 cols so 80/120 need no wrap; matches the `cli-execution.svg` block). No
+  real VSView launch on this host (needs a display; covered by Docker/Windows
+  proofs in CI). B7 not started.

@@ -1337,15 +1337,16 @@ When native VSView panel review launches a generated session, the diagnostic ord
 is:
 
 1. parent `VSView Session` telemetry
-2. generated `[RUN] VSView Bootstrap` and prepared reference identity, before the
-   first source load can emit native indexing diagnostics
-3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
-   truthful one-reference/ordered-comparison named-output mappings
-4. generated `[WARN] VSView Display Assumptions`, only when assumptions exist
-5. generated `[OK] VSView Ready` with the instruction to open **Frame Compare
-   Alignment Review** from VSView's Tool Panel; its three instruction lines use the
-   standard seven-space detail indentation
-6. parent waits for the bounded VSView process to close, then reports whether the
+2. generated source loading, which prints nothing on success (native indexing
+   diagnostics remain inherited without buffering); failures and warnings keep
+   their current text with `✗`/`!` glyphs
+3. generated `! VSView Display Assumptions`, only when assumptions exist
+4. the generated ready block:
+   `› VSView is open · waiting for you`, three numbered instruction lines, then
+   an `outputs` section (one row per output with the release-aware presentation
+   identity) and a `hints` section (one row per comparison with the S1 short
+   name padded to one column plus the existing audio-hint string verbatim)
+5. parent waits for the bounded VSView process to close, then reports whether the
    trusted result sidecar was accepted or retained the current alignment, using the
    standard two-space status indentation
 
@@ -1373,10 +1374,14 @@ closing without saving produces no result. The viewer guidance is `To confirm a 
 alignment, unlink the playheads and position each source on the same visible moment. Or
 keep the current alignment.` Known-offset guidance is `Enter the signed
 reference-minus-comparison offsets, then confirm. Or keep the current alignment.`
-Generated and parent no-color output retain
-the literal lifecycle markers. Native source/index diagnostics remain inherited
+Generated accent output uses `38;2;210;172;107` when `COLORTERM` is `truecolor`
+or `24bit` or `WT_SESSION` is set, else `38;5;180` when `TERM` contains
+`256color`, else `33`, keeping the `NO_COLOR` and TTY checks. Glyphs follow S3
+with the ASCII fallback when the stderr encoding is not UTF (`›` as `>`,
+`✗` as `x`, `→` as `->`); generated and parent no-color output retain the
+literal text. Native source/index diagnostics remain inherited
 without buffering. Generated Frame Compare sessions suppress only VSView's redundant
-initial `Content loaded successfully` INFO record because `[OK] VSView Ready` already
+initial `Content loaded successfully` INFO record because the ready block already
 owns that success confirmation; reload, clipboard, warning, error, and other native
 diagnostics remain unchanged.
 
@@ -1403,7 +1408,8 @@ The Frame Compare alignment-review tool panel registers with first priority so i
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 
 The generated session carries an explicit UUID session identity, one reference role,
-ordered comparison roles/keys/ordinals, presentation names, the authoritative integer
+ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
+hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
 schema v4. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
@@ -1433,7 +1439,7 @@ Generated VSView display assumptions are preview-only diagnostics derived from F
 Compare's existing clip probe metadata and serialized into the generated session
 script. Missing, unspecified, malformed, or unparseable `_Matrix`, `_Transfer`, or
 `_Primaries` frame properties are collected and shown in the styled assumptions
-section after output rows and before `VSView Ready`. Normal output identifies the
+section before the ready block. Normal output identifies the
 source and describes the preview behavior without exposing raw frame-property names.
 For those properties only, the generated session sets explicit BT.709 values on the
 preview clip so VSView does not repeat its equivalent warning for every output.

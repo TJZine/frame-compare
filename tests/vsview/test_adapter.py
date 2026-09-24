@@ -799,12 +799,23 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         comparisons=[tmp_path / "a.mkv"],
         suggested_offsets_by_key={"ref:a": 0},
         audio_review_by_key=_audio_review_map({"ref:a": 0}),
+        presentation_names_by_stem={"ref": "2160p \u00b7 REF", "a": "2160p \u00b7 A"},
+        short_names_by_stem={"a": "ShortA"},
     )
 
-    assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 3
-    assert generated.count("Unlink playheads") == 3
-    assert "       Open Tool Panel -> Frame Compare Alignment Review." in generated
-    assert "       Save the alignment in the panel" in generated
+    # Burned-in overlays keep the ASCII arrow; the ready step renders it via _arrow().
+    assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 2
+    assert '"  1  Open Tool Panel " + _arrow() + " Frame Compare Alignment Review."' in generated
+    assert (
+        "  2  Unlink playheads, then position every source on the same visible moment." in generated
+    )
+    assert (
+        "  3  Save the alignment in the panel, then close VSView to continue Frame Compare."
+        in generated
+    )
+    assert "VSView is open" in generated
+    assert "SHORT_NAMES = " in generated
+    assert '"ShortA"' in generated
 
 
 def test_write_vsview_session_script_is_atomic_and_deterministic_body(
