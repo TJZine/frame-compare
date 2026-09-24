@@ -762,16 +762,16 @@ document.addEventListener('DOMContentLoaded', () => {
             ReportViewer.inspector.setTab('frame');
             ReportViewer.updateInspectorData();
             sourceRowsByMode[mode] = Array.from(
-                document.querySelectorAll('[data-inspector-source-frames] tbody tr')
+                document.querySelectorAll('[data-inspector-source-frames] tr')
             ).map(row => row.textContent.trim());
         });
         document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
         ReportViewer.inspector.setTab('clips');
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.clipsMetadata = String(
-            document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
+            document.querySelector('[data-inspector-clips]')?.textContent.includes('Size')
             && document.querySelector('[data-inspector-clips]')?.textContent.includes('Signal')
-            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
+            && (document.querySelector('[data-inspector-clips-shared]')?.textContent ?? '').includes('All sources:')
             && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
         );
         let reviewTabUsable = false;
