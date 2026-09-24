@@ -1053,3 +1053,19 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   frozen-string exact-match tests). Track regression review (tight
   re-review after the wide round stalled): PASS, no findings. Separate
   fixup commit; full gate re-run green.
+- Checkpoint B-terminal review (September 24, controller + two `reviewer`
+  subagents): Track B terminal reviewed at `fb64dc52`. Gate green (pyright 0/0,
+  ruff, bandit, lint-imports, strict docs, pytest 3546 passed / 86 environment
+  skips). Rendered the real Run plan, Sources, Audio alignment, and summary
+  (declined, uploaded, partial failure) at 80 and 120 columns. Accepted as
+  specified: Run plan row mapping, S1 short names, S3 tokens and glyphs, B5
+  memory-only timing with unchanged run record/JSON, most of B6/B7, and the
+  out-of-owner packaging/Docker proof updates (correct, not weakened). Not
+  accepted yet: skip detail printed twice on Rich; upload and analysis-source
+  text changed for plain/log/JSON output (invariant); explicit labels dropped
+  from Sources (invariant); row-tied warnings still in the unrestyled Warnings
+  panel; alignment panel keeps its key column; VSView script ASCII fallback can
+  never fire; doctor counts skips as warnings; plus smaller consistency, dead
+  code, and Test scope items. Corrections in handoff Prompt 3b (T1–T20); the
+  controller performs that pass's visual checks. Sub-minute summary durations
+  ("48.0 s") follow the plan's "existing `_format_duration`" rule and stay.

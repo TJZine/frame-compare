@@ -23,6 +23,7 @@ maintainer/controller review before the next track starts.
 | 2c. Track B viewer follow-ups | review follow-ups F1–F9 | 2b commits | Follow-up report (joins the Checkpoint B-viewer review) |
 | 2d. Track B viewer final fixes | G1–G2 | 2c commits | Short report; controller does the visual checks and closes the Checkpoint B-viewer review |
 | 3. Track B terminal | B4 → B5 → B6 → B7 | branch tip after Checkpoint B-viewer review and fixes | Checkpoint B-terminal report |
+| 3b. Track B terminal corrections | T1–T20 | Track B terminal commits | Corrections report; controller does the visual checks and closes Checkpoint B-terminal |
 
 Paste one prompt per session. Every prompt requires the session to read the
 [Common rules](#common-rules) first.
@@ -755,4 +756,167 @@ Docs to update in the units that change them: docs/current-cli-contract.md (Run
 plan rows, Rich phase labels, summary, doctor), the audio-alignment and publishing
 guides where they quote terminal output, and docs/guides/sources-and-labels.md for
 short names.
+```
+
+## Prompt 3b — Track B terminal corrections
+
+From the Checkpoint B-terminal review (controller render check plus two `reviewer`
+subagents). Line numbers are as of `fb64dc52`; confirm each location before
+editing. The controller performs the visual checks for this pass.
+
+```text
+You are applying the Checkpoint B-terminal review corrections for the Frame
+Compare design refresh plan (Track B terminal, B4–B7, is committed at fb64dc52).
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md (Invariants, S1,
+S3, B4–B7, Test scope, Stop conditions)
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". You do not perform review checks by eye in this pass;
+the controller does. Everything else in the Common rules applies (baseline,
+environment command, adversarial review per commit, full gate, Final report).
+
+Apply every correction below, and nothing else. Where a correction states the
+wording to use, use it exactly. If one cannot be applied as written, stop that
+correction, record why, finish the others, and report.
+
+Commit 1: `fix(terminal): progress and upload reporting corrections`
+T1 Skip detail printed twice on the Rich path (for example "– Publish  Declined
+   Declined"). orchestration/phases.py (~84-95) puts the detail in display_label
+   and also passes summary=skip_detail; orchestration/progress.py (~100-108)
+   keeps it in the Rich label; utils/progress.py (~447-452) appends the summary.
+   On the Rich path pass the bare title-case label and carry the detail only as
+   the summary, with its first letter lower-cased ("– Publish  declined"). The
+   plain and log reporters keep their current output exactly. Add one test that
+   goes through the real phase execution path for a skipped phase and asserts
+   the detail appears once.
+T2 Upload label for all reporters (invariant break). services/publishers.py
+   (~485-489) now calls start_phase("Upload", ...) on every reporter. Restore the
+   original phase name f"Uploading {collection_metadata.title} to slow.pics" at
+   the call site and have only RichProgressReporter show "Upload" for the
+   UPLOAD_PRESENTATION task. Revert tests/services/test_publishers.py to the
+   original name and add a plain-reporter assertion that a failed upload line
+   keeps it.
+T3 Analysis-source log text (invariant: log/JSON content unchanged).
+   orchestration/analysis_source.py (~57, ~72) changed the diagnostic string that
+   also goes into the structured fps_report log event. Restore the original
+   strings ("Analysis source: {role} | selected by fastest-source policy" and
+   "... by configured policy") and produce the plan's Rich line
+   ("analysis source  {short name} (fastest to decode)" / "(configured)") inside
+   fps_report's Rich rendering only. Update docs/current-cli-contract.md (~441)
+   accordingly.
+T4 Align lines when review never ran. If review was pending but VSView did not
+   launch or was unavailable, the durable Align line must not show "✓": use "!"
+   and keep the pre-review summary text. Add a test.
+T5 One duration format in the Execution timeline. The Align split
+   ("{machine} + {review} review", utils/progress.py ~90) uses format_duration
+   ("17.5 s") while other phase lines use _format_elapsed ("48s"); use
+   _format_elapsed for both parts of the Align split. Delete
+   fps_report._format_gap_duration (~114-124) in favour of the existing
+   formatter except for its under-one-second branch if that is still needed.
+
+Commit 2: `fix(terminal): summary warnings and publish-state corrections`
+T6 Warnings tied to a summary row (plan B4 Summary). In cli/output.py
+   (_warning_presentations ~703-732 and the summary ~541-606):
+   - Show every follow-up failure on its row and remove it from the separate
+     Warnings panel: clipboard failure in the follow-up Columns as
+     "! URL not copied"; browser failure as the existing
+     "! browser didn't open" plus its muted reason; shortcut failure on the
+     `  shortcut` row as "! not created" plus the muted reason; webhook failure
+     on the `  webhook` row as "! delivery failed".
+   - The title count is the total number of warnings (row warnings plus panel
+     warnings), with the singular "1 warning".
+   - The separate Warnings panel shows only warnings not tied to a row. Restyle
+     it per S3: accent section name (not cyan), "!" and "–" glyphs instead of
+     [WARN]/[SKIP], no "action:" rows, dim detail lines; keep grouping by source
+     and the hidden-count behaviour.
+   - Remove STYLE_SUBHEADER's cyan and any other remaining non-S3 style in
+     output.py.
+   - Tests (plan B4 Proof): uploaded with every follow-up succeeding, uploaded
+     with each follow-up failing (row text present and not in the panel), upload
+     failure, automatic upload without confirmation, declined, and
+     report-unavailable. Replace the test that asserts "action: clipboard" in
+     the panel.
+T7 Hyperlink targets. _artifact_link (output.py ~663) resolves relative paths
+   against the current directory; resolve them against the run root
+   (_absolute_display_path(path, root)). Add a test with a relative path.
+T8 Screenshot count. "{n} files" (output.py ~603-606) is frames × sources;
+   count the actual image files in the screenshots directory, and omit the count
+   when the directory does not exist.
+
+Commit 3: `fix(terminal): sources and alignment panel corrections`
+T9 Explicit labels in Sources (invariant). fps_report.py (~233-245) ignores
+   label_is_explicit. When it is set, show the label as the source's standard
+   name. Restore the deleted assertion `assert "Reference label" in output`
+   (tests/orchestration/test_fps_report.py ~151).
+T10 Verbose detail. _render_clip_overview no longer uses input_dir/verbose, so
+   --verbose lost the source path detail. Restore it: with --verbose, show the
+   absolute path under the filename line (muted), as before this track.
+T11 Alignment panel layout (plan B4 Execution). services/alignment.py (~1082 and
+   _alignment_evidence_row): render each comparison as a bold compact-name
+   heading, then the frozen status line, detail lines (dim), and the review line
+   prefixed by "›" in the accent colour, with no key column for those lines.
+   Keep key labels (dim) only for --verbose evidence rows and the final
+   "diagnostics  {path}" row. Frozen strings stay verbatim.
+T12 Panel titles left-aligned for Sources and Audio alignment (consistent with
+   Run plan).
+T13 Frame-rate line: align "frame rates match · …" to the summary column of the
+   phase lines (the plan shows "✓           frame rates match · …"). Review
+   item; no test.
+
+Commit 4: `fix(terminal): VSView script and doctor corrections`
+T14 ASCII fallback never fires in the generated VSView script. In
+   vsview/session_script.py the prelude reconfigures stderr to UTF-8 (~149-150)
+   before _use_ascii() reads the encoding (~157-159). Record the original
+   encoding before reconfiguring (for example
+   _ORIGINAL_STDERR_ENCODING = getattr(sys.stderr, "encoding", "") or "") and base
+   _use_ascii() on it. Change the ASCII test to run the generated prelude against
+   a real io.TextIOWrapper(io.BytesIO(), encoding="cp1252").
+T15 Generated-script colours per S3: _key and _hint dim (2), _value unstyled
+   (~198-207). Remove the unused glyph entries (ok, skipped, running) if nothing
+   uses them.
+T16 Doctor verdict counts only WARN rows as warnings (match cli-doctor.svg:
+   "1 required check failed · 3 warnings" with the skipped FFMS2 row not
+   counted). doctor_command.py (~170-180). Update the affected expectations and
+   the current-cli-contract doctor section.
+T17 Doctor name column: compute one width across all groups (~148). Review item;
+   no test.
+T18 One glyph-by-stream helper: replace history_command._stream_glyph,
+   preset_command._ok_glyph, and wizard_command._stream_glyphs with a single
+   glyphs_for_stream(stream) in utils/terminal_theme.py.
+
+Commit 5: `test(terminal): test-scope and cleanup corrections`
+T19 Test scope removals/changes (plan Test scope):
+   - delete tests/utils/test_terminal_theme.py::test_style_token_values;
+   - remove the on-screen order assertions from
+     tests/cli/test_cli_output.py::test_run_plan_preserves_output_hierarchy
+     (tools < offsets, webhook < cleanup) and delete
+     test_result_summary_time_rows_render_at_narrow_width;
+   - make test_opening_vsview_review_lines_frozen_verbatim assert through the
+     real render path instead of grepping source text;
+   - make test_glyphs_for_console_uses_console_encoding deterministic (construct
+     consoles with explicit UTF-8 and cp1252 encodings);
+   - replace the ready-block full-layout comparison in
+     test_generated_ready_block_reports_outputs_and_hints_verbatim with fragment
+     assertions (each step, each output name, each (short name, hint) pair);
+   - delete the generated-source literal assertion in tests/vsview/test_adapter.py
+     (~811).
+   Add logic tests that are missing: the length-difference rules (grouping,
+   shorter/longer, seconds under and over 60 s, "A, B, and C", singular frame),
+   and the ASCII fallback on one rendered Rich surface (for example the summary
+   title) with a cp1252 console.
+T20 Dead code: remove STYLE_URL and STYLE_HEADER, the unused
+   _display_path(artifact=...) branch, the unreachable title-case branch in
+   start_phase_progress (progress.py ~101-106) if T1 leaves it unreachable, and
+   any parameter left unused by T10. Replace the live task's `[RUN]` bright_cyan
+   style with the S3 running glyph and accent. Adopt BORDER_SUCCESS /
+   BORDER_FAILED / BORDER_PENDING for the summary border (identical values).
+
+After the commits: run the full gate from the plan's Verification section
+(pytest with `-o addopts="" -q -rs --strict-markers` so the totals print), append
+a short entry to the plan's Execution record, commit it, and report using the
+Final report format with a coverage row per T1–T20, deviations, judgment calls,
+the adversarial review log, verification, and risks. No review checks by eye.
+Stop after the report.
 ```
