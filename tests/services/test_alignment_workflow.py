@@ -1059,7 +1059,7 @@ def test_rich_terminal_groups_audio_evidence_in_an_aligned_panel(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "[WARN] Audio Alignment" in captured.err
+    assert "Audio alignment" in captured.err
     assert "comparison" in captured.err
     assert "status" in captured.err
     assert "Provisional audio candidate:" in captured.err
@@ -1078,7 +1078,7 @@ def test_rich_terminal_narrow_no_color_render_keeps_decision_tokens(
         del stderr, height
         return Console(file=output, width=width, no_color=no_color, force_terminal=False)
 
-    monkeypatch.setattr(alignment_service, "Console", console_factory)
+    monkeypatch.setattr(alignment_service, "human_console", console_factory)
     _presented_attempt_result(
         tmp_path,
         monkeypatch,

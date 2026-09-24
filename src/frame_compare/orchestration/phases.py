@@ -51,6 +51,7 @@ class Phase:
     fatal_exceptions: tuple[type[BaseException], ...] = ()
     retain_on_success: bool | None = None
     skip_detail: PhaseSkipDetail | None = None
+    success_summary: str | None = None
 
     @property
     def progress_label(self) -> str:
@@ -89,7 +90,10 @@ async def execute_phases(
                 total=phase.progress_total,
             )
             reporter.set_description("Skipped")
-            reporter.complete_phase(ProgressPhaseStatus.SKIPPED)
+            reporter.complete_phase(
+                ProgressPhaseStatus.SKIPPED,
+                summary=skip_detail if isinstance(skip_detail, str) else None,
+            )
             continue
 
         phase.status = PhaseStatus.RUNNING
@@ -129,9 +133,10 @@ async def execute_phases(
             reporter.advance(1)
         finally:
             if phase.retain_on_success is None:
-                reporter.complete_phase(phase_progress_status)
+                reporter.complete_phase(phase_progress_status, summary=phase.success_summary)
             else:
                 reporter.complete_phase(
                     phase_progress_status,
                     retain=phase.retain_on_success,
+                    summary=phase.success_summary,
                 )

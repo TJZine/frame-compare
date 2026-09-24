@@ -73,7 +73,11 @@ class _RecordingProgressReporter:
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
+        presentation: str | None = None,
     ) -> None:
+        del summary, duration_text, presentation
         self.completions.append((status, retain))
 
     def suspend(self) -> None:

@@ -74,6 +74,10 @@ recognized when the token immediately after the service is `WEB`, `WEBDL`, or
 
 For live render progress, automatic labels become unique role-prefixed compact release
 descriptors. For slow.pics, automatic labels become unique full release descriptors.
+Terminal surfaces (the Sources length-difference lines and the Align summary) use
+short source names: the release group when parsing is informative, falling back to
+the compact name; explicit labels stay exact, and collisions are qualified
+deterministically.
 Report v1.2 similarly derives collision-safe control and constrained labels from the
 prepared release identity while retaining the canonical label for keys and mappings.
 The report Clips inspector keeps the exact filename available, and an explicit source

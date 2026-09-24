@@ -188,10 +188,15 @@ async def run_publish_phase(
             collection_title=collection_resolution.metadata.title,
         )
     )
+    uploaded_count = len(result.uploaded_file_paths)
+    uploaded_unit = "screenshot" if uploaded_count == 1 else "screenshots"
     return PublishPhaseOutput(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
         post_upload_actions=post_upload_actions,
+        success_summary=(
+            f"{uploaded_count} {uploaded_unit} uploaded · {ctx.config.slowpics.visibility.value}"
+        ),
     )
 
 

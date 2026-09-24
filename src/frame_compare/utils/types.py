@@ -165,6 +165,8 @@ class AlignmentClipRequest:
     selected_audio_stream: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
+    compact_name: str | None = None
+    short_name: str | None = None
 
     def __post_init__(self) -> None:
         if not _is_positive_int(self.source_frame_count):

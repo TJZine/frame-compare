@@ -935,3 +935,37 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   on a clean run (one earlier run had a single failure that did not reproduce
   in isolation or in a second full run; it coincided with concurrent browser
   automation). Track B viewer accepted; Track B terminal (Prompt 3) may start.
+- Track B terminal B4 `run` output (September 24, implementation session):
+  Shared S3/S1 plus the B4 owner list (`cli/output.py`, progress reporters,
+  `fps_report.py`, `analysis_source.py`, `selection_report.py`,
+  `alignment_report.py`, `services/alignment.py`, `alignment_vsview.py`,
+  `alignment_reuse_prompt.py`, `vsview/output.py`, `phase_render.py`,
+  `phase_alignment.py`, `phases.py`, `publishers.py`, `release_identity.py`).
+  Run plan row table row by row, Sources panel, Execution rules, Summary rows
+  with every publish state, frozen audio strings with exact-match tests
+  (`tests/services/test_alignment_frozen_strings.py`), Rich-only changes
+  (plain/log/JSON/quiet byte-identical), blank-line fixes at source,
+  `separator=" · "` in `_render_progress_label`, A2 frame-rate line, size
+  omitted when unknown/zero. Adversarial review in three narrow rounds
+  (Run plan+Summary conformance: 2 major + 6 minor; Sources+Align
+  conformance: 2 major + 1 minor; plumbing regression: 8 minor): accepted 14
+  (S3 KEY/VALUE tokens, WARN glyph for unavailable tools, tools-before-offsets
+  and webhook-before-cleanup order, no underline on artifact links, magenta
+  removal, unconditional mix row, compact-identity `·` separator, reuse-prompt
+  offset `·`, verbatim skip summaries, Rich skip-detail labels, test-double
+  hardening, human_console test fidelity, JSON stderr diagnostic wording
+  documented as intentional), rejected 3 with plan counter-evidence
+  (auto-detection text stays value-styled as the carried-over probe-failure
+  text; render-label `{role} | …` join is the S1-preserved collision shape;
+  `zip(strict=True)` failure mode pre-exists), deferred 2 with triggers (Align
+  pre-review/durable duplication and the `duration_text` producer, both to
+  B5's Align-line work). One genuine regression found and fixed
+  at the root cause (stale `align_clips_from_request` test fake missing the
+  new `review_summary` kwarg surfaced as a swallowed TypeError shifting render
+  frames). Gate: pyright 0/0, ruff check + format, lint-imports kept, full
+  pytest 3515 passed / 86 environment skips. Rendered Run plan, Sources, and
+  Summary at 80/120 columns match the `cli-*.svg` structure (deviations limited
+  to the plan-mandated A2 format and size omission). No real media run on this
+  host (no media fixtures). Docs: `current-cli-contract.md` (Run plan rows,
+  Rich phase labels, summary, Sources/frame-rate rules, JSON stderr note),
+  `sources-and-labels.md` short-names note. B5 not started.

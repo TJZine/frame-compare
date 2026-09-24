@@ -91,6 +91,11 @@ def _create_timed_phase(
             else:
                 output = maybe_awaitable
             apply_phase_output(ctx=ctx, state=state, output=output)
+            summary = getattr(output, "success_summary", None)
+            if isinstance(summary, str):
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                phase.success_summary = summary
             if retain_if is not None:
                 if phase is None:
                     raise RuntimeError("timed phase was not initialized")

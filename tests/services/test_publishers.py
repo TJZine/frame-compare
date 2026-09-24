@@ -30,6 +30,7 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadRow,
 )
 from frame_compare.services.types import SlowpicsCollectionMetadata
+from frame_compare.utils.progress import UPLOAD_PRESENTATION
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 
@@ -252,8 +253,9 @@ async def test_publish_to_slowpics_reports_progress_for_each_completed_image(
     )
 
     progress.start_phase.assert_called_once_with(
-        "Uploading My Comparison to slow.pics",
+        "Upload",
         total=4,
+        presentation=UPLOAD_PRESENTATION,
     )
     assert progress.advance.call_count == 4
     progress.complete_phase.assert_called_once_with(

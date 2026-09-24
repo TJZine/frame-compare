@@ -36,7 +36,7 @@ def test_run_respects_no_color_env_var_presence_even_if_empty(
         def print(self, *_args: object, **_kwargs: object) -> None:
             return
 
-    monkeypatch.setattr("frame_compare.cli.entry.Console", FakeConsole)
+    monkeypatch.setattr("frame_compare.cli.entry.human_console", FakeConsole)
     monkeypatch.setattr(
         "frame_compare.cli.entry.runner.run",
         lambda _request, dependencies=None: RunResult(
@@ -79,7 +79,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     stdout = _normalize_cli_output(result.stdout)
     stderr = _normalize_cli_output(result.stderr)
     assert "Run plan" in stdout
-    assert "Comparison completed" in stdout
+    assert "Comparison complete" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
     assert "Clip Overview" not in stdout

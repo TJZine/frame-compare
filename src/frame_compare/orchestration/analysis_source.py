@@ -12,6 +12,7 @@ from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.errors import FastestAnalysisSourceError
 from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.source_selection import resolve_source_selector
+from frame_compare.services.release_identity import ShortNameSource, short_source_names
 
 if TYPE_CHECKING:
     from frame_compare.vs.loader import VSLoader
@@ -47,14 +48,13 @@ def resolve_analysis_source(
 
     if selector == "reference":
         return AnalysisSourceSelection(clip=clips[0], reason="reference")
+    short_names = _clip_short_names(clips)
     if selector == "fastest":
         selected_index, selected = _select_fastest_clip(clips=clips, vs_loader=vs_loader)
         return AnalysisSourceSelection(
             clip=selected,
             reason="fastest",
-            warning=(
-                f"Analysis source: {clip_role(selected_index)} | selected by fastest-source policy"
-            ),
+            warning=(f"analysis source: {short_names[selected_index]} (fastest to decode)"),
         )
 
     paths = [clip.path for clip in clips]
@@ -69,9 +69,24 @@ def resolve_analysis_source(
             return AnalysisSourceSelection(
                 clip=clip,
                 reason="configured",
-                warning=(f"Analysis source: {clip_role(index)} | selected by configured policy"),
+                warning=(f"analysis source: {short_names[index]} (configured)"),
             )
     raise FastestAnalysisSourceError()
+
+
+def _clip_short_names(clips: list[ClipState]) -> list[str]:
+    """Return the S1 terminal short name for every clip in order."""
+    return short_source_names(
+        [
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label,
+                label_is_explicit=clip.label_is_explicit,
+            )
+            for clip in clips
+        ],
+        roles=[clip_role(index) for index in range(len(clips))],
+    )
 
 
 def _select_fastest_clip(

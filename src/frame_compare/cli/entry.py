@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
-from rich.console import Console
 
 from frame_compare.cli.cli_helpers import (
     FrameCompareTyperGroup,
@@ -49,6 +48,7 @@ from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPre
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
+from frame_compare.utils.terminal_theme import human_console
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -383,7 +383,7 @@ def run(
         write_config_to=_write_config_to,
         handle_error=handle_error,
         configure_logging=configure_logging,
-        console_factory=Console,
+        console_factory=human_console,
         open_report=_maybe_open_report,
         copy_to_clipboard=_copy_text_to_clipboard,
         open_url=_open_url_in_browser,

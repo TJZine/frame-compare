@@ -163,7 +163,13 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -285,7 +291,11 @@ def test_execute_phases_forwards_success_retention_hint(tmp_path: Path) -> None:
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
             *,
             retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del summary, duration_text
             self.complete_phase_calls.append((status, retain))
 
     reporter = SpyReporter()
@@ -391,7 +401,13 @@ def test_execute_phases_warn_only_failure_reports_warned_progress_status(
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -490,7 +506,13 @@ def test_execute_phases_fail_fast_failure_reports_failed_progress_status(
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -525,7 +547,13 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()

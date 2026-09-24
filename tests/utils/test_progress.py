@@ -38,7 +38,7 @@ def _captured_rich_reporter(
     def _console(**_kwargs: object) -> Console:
         return console
 
-    monkeypatch.setattr(progress_module, "Console", _console)
+    monkeypatch.setattr(progress_module, "human_console", _console)
     return RichProgressReporter(no_color=no_color), output
 
 
@@ -90,18 +90,18 @@ def test_rich_progress_active_marker_style_does_not_leak_to_description(
 
 
 @pytest.mark.parametrize(
-    ("status", "styled_marker"),
+    ("status", "glyph"),
     [
-        (ProgressPhaseStatus.COMPLETED, "\x1b[32m[OK]\x1b[0m"),
-        (ProgressPhaseStatus.WARNED, "\x1b[33m[WARN]\x1b[0m"),
-        (ProgressPhaseStatus.FAILED, "\x1b[31m[FAIL]\x1b[0m"),
-        (ProgressPhaseStatus.SKIPPED, "\x1b[2;33m[SKIP]\x1b[0m"),
+        (ProgressPhaseStatus.COMPLETED, "✓"),
+        (ProgressPhaseStatus.WARNED, "!"),
+        (ProgressPhaseStatus.FAILED, "✗"),
+        (ProgressPhaseStatus.SKIPPED, "–"),
     ],
 )
-def test_rich_durable_status_styles_only_the_marker(
+def test_rich_durable_status_uses_glyph_markers(
     monkeypatch: pytest.MonkeyPatch,
     status: ProgressPhaseStatus,
-    styled_marker: str,
+    glyph: str,
 ) -> None:
     reporter, output = _captured_rich_reporter(monkeypatch, no_color=False)
 
@@ -109,8 +109,56 @@ def test_rich_durable_status_styles_only_the_marker(
     reporter.complete_phase(status, retain=True)
 
     rendered = output.getvalue()
-    assert f"  {styled_marker} ALIGN" in rendered
-    assert styled_marker.replace("\x1b[0m", " ALIGN\x1b[0m") not in rendered
+    assert glyph in rendered
+    assert "ALIGN" in rendered
+
+
+def test_rich_durable_line_shows_summary_and_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    clock = iter((0.0, 278.0))
+    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
+
+    reporter.start_phase("Analyze", 1)
+    reporter.complete_phase(summary="50 frames selected")
+
+    rendered = output.getvalue()
+    assert "✓" in rendered
+    assert "Analyze" in rendered
+    assert "50 frames selected" in rendered
+    assert "4m 38s" in rendered
+
+
+def test_rich_durable_line_supports_duration_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+
+    reporter.start_phase("Align", 1)
+    reporter.complete_phase(
+        summary="2 pairs confirmed in VSView",
+        duration_text="1m 20s + 10m 34s review",
+        retain=True,
+    )
+
+    rendered = output.getvalue()
+    assert "2 pairs confirmed in VSView" in rendered
+    assert "1m 20s + 10m 34s review" in rendered
+
+
+def test_rich_durable_skip_line_keeps_summary_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+
+    reporter.start_phase("Publish", 1)
+    reporter.complete_phase(ProgressPhaseStatus.SKIPPED, summary="Declined")
+
+    rendered = output.getvalue()
+    assert "–" in rendered
+    assert "Publish" in rendered
+    assert "Declined" in rendered
 
 
 def test_rich_progress_reporter_indents_live_work(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -303,7 +351,7 @@ def test_eta_column_appears_only_after_rich_has_an_estimate() -> None:
     assert column.render(task).plain.startswith("ETA ")
 
 
-def test_rich_progress_reporter_adds_one_blank_line_when_measurable_work_begins(
+def test_rich_progress_reporter_adds_no_blank_line_when_measurable_work_begins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reporter, output = _captured_rich_reporter(monkeypatch)
@@ -313,8 +361,7 @@ def test_rich_progress_reporter_adds_one_blank_line_when_measurable_work_begins(
     reporter.set_description("Rendering frame 1")
     reporter.advance(1)
 
-    assert output.getvalue().startswith("\n")
-    assert output.getvalue().count("\n") == 1
+    assert not output.getvalue().startswith("\n")
     reporter.complete_phase()
 
 
@@ -341,7 +388,7 @@ def test_rich_progress_reporter_keeps_a_useful_bar_at_narrow_width(
     monkeypatch.setenv("TERM", "xterm-256color")
     output = StringIO()
     console = Console(file=output, force_terminal=True, no_color=True, width=60)
-    monkeypatch.setattr(progress_module, "Console", lambda **_kwargs: console)
+    monkeypatch.setattr(progress_module, "human_console", lambda **_kwargs: console)
     reporter = RichProgressReporter(no_color=True)
 
     reporter.start_phase("Reference | PMTP WEB-DL | DV HDR10+ | Kitsune", 30)
@@ -411,7 +458,7 @@ def test_rich_progress_reporter_does_not_retain_success_below_ten_seconds(
     reporter.start_phase("PLAN", 1)
     reporter.complete_phase()
 
-    assert "[OK] PLAN" not in capsys.readouterr().err
+    assert "✓ PLAN" not in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_retain_success_at_ten_seconds(
@@ -425,7 +472,11 @@ def test_rich_progress_reporter_retain_success_at_ten_seconds(
     reporter.start_phase("PLAN", 1)
     reporter.complete_phase()
 
-    assert "  [OK] PLAN  Completed in 10s" in capsys.readouterr().err
+    rendered = capsys.readouterr().err
+    assert "✓" in rendered
+    assert "PLAN" in rendered
+    assert "10s" in rendered
+    assert "Completed in" not in rendered
 
 
 def test_rich_progress_reporter_explicitly_retains_short_success(
@@ -439,7 +490,10 @@ def test_rich_progress_reporter_explicitly_retains_short_success(
     reporter.start_phase("PUBLISH", 1)
     reporter.complete_phase(retain=True)
 
-    assert "[OK] PUBLISH  Completed in 0s" in capsys.readouterr().err
+    rendered = capsys.readouterr().err
+    assert "✓" in rendered
+    assert "PUBLISH" in rendered
+    assert "0s" in rendered
 
 
 def test_rich_progress_reporter_suppresses_long_nested_success(
@@ -456,8 +510,9 @@ def test_rich_progress_reporter_suppresses_long_nested_success(
     reporter.complete_phase()
 
     output = capsys.readouterr().err
-    assert "[OK] ENCODE" not in output
-    assert "[OK] RENDER  Completed in 13s" in output
+    assert "✓ ENCODE" not in output
+    assert "✓ RENDER" in output
+    assert "13s" in output
 
 
 def test_rich_progress_reporter_suppresses_generic_confirm_completion(
@@ -471,29 +526,32 @@ def test_rich_progress_reporter_suppresses_generic_confirm_completion(
     reporter.start_phase("CONFIRM", 1)
     reporter.complete_phase(retain=False)
 
-    assert "[OK] CONFIRM" not in capsys.readouterr().err
+    assert "✓ CONFIRM" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"),
+    ("status", "glyph", "label"),
     [
-        (ProgressPhaseStatus.SKIPPED, "[SKIP] ANALYZE"),
-        (ProgressPhaseStatus.WARNED, "[WARN] ALIGN"),
-        (ProgressPhaseStatus.FAILED, "[FAIL] RENDER"),
+        (ProgressPhaseStatus.SKIPPED, "–", "ANALYZE"),
+        (ProgressPhaseStatus.WARNED, "!", "ALIGN"),
+        (ProgressPhaseStatus.FAILED, "✗", "RENDER"),
     ],
 )
 def test_rich_progress_reporter_retains_non_success_statuses(
     status: ProgressPhaseStatus,
-    expected: str,
+    glyph: str,
+    label: str,
     monkeypatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     reporter = RichProgressReporter()
 
-    reporter.start_phase(expected.split(maxsplit=1)[1], 1)
+    reporter.start_phase(label, 1)
     reporter.complete_phase(status)
 
-    assert expected in capsys.readouterr().err
+    rendered = capsys.readouterr().err
+    assert glyph in rendered
+    assert label in rendered
 
 
 def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:

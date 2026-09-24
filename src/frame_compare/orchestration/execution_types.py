@@ -73,6 +73,7 @@ class AnalyzePhaseOutput:
     )
     warnings: list[str] = field(default_factory=list[str])
     replaces_frame_plan_selection: bool = False
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,11 +84,13 @@ class AlignPhaseOutput:
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
     warnings: list[str] = field(default_factory=list[str])
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)
 class RenderPhaseOutput:
     render: RenderArtifacts
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,7 @@ class PublishPhaseOutput:
     slowpics_url: str | None
     uploaded_file_paths: tuple[Path, ...] = ()
     post_upload_actions: PostUploadActionResults = ()
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)

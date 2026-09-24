@@ -187,8 +187,8 @@ def test_run_render_phase_adds_unique_progress_labels_without_changing_canonical
         generated_progress_label,
     ]
     assert [request.progress_label for request in requests] == [
-        "Reference | ATV WEB-DL | DV HDR10+ | Kitsune",
-        f"{generated_progress_label} (2)",
+        "Reference | ATV WEB-DL · DV HDR10+ · Kitsune",
+        "Comparison 1 | ATV WEB-DL · DV HDR10+ · Kitsune",
         generated_progress_label,
     ]
 

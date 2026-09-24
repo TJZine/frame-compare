@@ -765,6 +765,20 @@ class ReusableAlignmentEntry:
     computed_result: AlignmentResult | None = None
 
 
+@dataclass
+class AlignmentReviewSummary:
+    """Aggregate native-review outcome for human summaries (memory only).
+
+    This carrier is filled during alignment review and read back by the
+    orchestration layer for terminal summaries. It is never persisted to the
+    run record, ``phase_timings``, or JSON output.
+    """
+
+    review_ran: bool = False
+    pairs_confirmed: int = 0
+    comparisons_kept: int = 0
+
+
 @dataclass(frozen=True)
 class AlignmentConfig:
     """Configuration for audio alignment."""

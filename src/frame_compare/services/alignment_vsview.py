@@ -13,7 +13,7 @@ import structlog
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
 from frame_compare.utils.types import AlignmentClipRequest
@@ -267,6 +267,22 @@ def _confirmed_frame_pairs(
     )
 
 
+def format_vsview_review_message(pairs_confirmed: int, kept_count: int) -> str:
+    """Format the VSView review result message with correct plurals."""
+    message = (
+        "Accepted 1 confirmed pair"
+        if pairs_confirmed == 1
+        else f"Accepted {pairs_confirmed} confirmed pairs"
+    )
+    if kept_count == 1:
+        message += "; 1 comparison kept its current offset."
+    elif kept_count > 1:
+        message += f"; {kept_count} comparisons kept their current offset."
+    else:
+        message += "."
+    return message
+
+
 def _handle_invalid_result(
     exc: AlignmentReviewContractError,
     *,
@@ -300,6 +316,7 @@ def maybe_launch_alignment_vsview(
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     verbose: bool = False,
+    review_summary: AlignmentReviewSummary | None = None,
 ) -> AlignmentVSViewOutcome:
     """Launch one native review and apply only a complete, trusted result."""
     if not _launch_requested(config):
@@ -382,12 +399,15 @@ def maybe_launch_alignment_vsview(
             confirmed_offsets_by_key=confirmed_offsets,
         )
         kept_count = len(result.decisions) - len(confirmed_offsets)
+        pairs_confirmed = len(confirmed_offsets)
+        message = format_vsview_review_message(pairs_confirmed, kept_count)
+        if review_summary is not None:
+            review_summary.review_ran = True
+            review_summary.pairs_confirmed = pairs_confirmed
+            review_summary.comparisons_kept = kept_count
         print_vsview_review_result(
             accepted=True,
-            message=(
-                f"Accepted {len(confirmed_offsets)} confirmed pair(s); "
-                f"{kept_count} comparison(s) kept their current offset."
-            ),
+            message=message,
             no_color=config.no_color,
         )
         return AlignmentVSViewOutcome(

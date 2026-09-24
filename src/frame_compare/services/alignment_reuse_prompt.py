@@ -20,6 +20,7 @@ from rich.text import Text
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
+from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console, human_console
 from frame_compare.utils.types import AlignmentRequest
 
 PROMPT_UNAVAILABLE_MESSAGE = (
@@ -70,7 +71,7 @@ class PreviousOffsetPromptInput:
 
 
 def _console(*, no_color: bool) -> Console:
-    return Console(
+    return human_console(
         stderr=True,
         no_color=no_color,
         color_system=None if no_color else "auto",
@@ -145,10 +146,10 @@ def _render_previous_offsets_table(
         padding=(0, 2, 0, 0),
         expand=True,
     )
-    table.add_column("key", style="grey70", no_wrap=True, min_width=12, overflow="fold")
+    table.add_column("key", style="dim", no_wrap=True, min_width=12, overflow="fold")
     table.add_column("value", overflow="fold")
     if prompt_input.content:
-        table.add_row("Content", f"[bright_white]{escape(prompt_input.content)}[/]")
+        table.add_row("Content", f"{escape(prompt_input.content)}")
         table.add_row("", "")
     reference_identity = (
         prompt_input.reference_label
@@ -161,30 +162,28 @@ def _render_previous_offsets_table(
     )
     table.add_row(
         "reference",
-        f"[bright_white]{escape(reference_identity)}[/]",
+        f"{escape(reference_identity)}",
     )
     if reference_identity not in {
         prompt_input.reference_filename,
         Path(prompt_input.reference_filename).stem,
     }:
-        table.add_row("  File", f"[bright_white]{escape(prompt_input.reference_filename)}[/]")
+        table.add_row("  File", f"{escape(prompt_input.reference_filename)}")
     for row in prompt_input.rows:
         table.add_row("", "")
         display_label = row.presentation_name or _display_label(
             label=row.label, filename=row.filename, stem=row.stem
         )
-        table.add_row("comparison", f"[bright_white]{escape(display_label)}[/]")
+        table.add_row("comparison", f"{escape(display_label)}")
         if row.presentation_name is None and display_label not in {row.filename, row.stem}:
-            table.add_row("  File", f"[bright_white]{escape(row.filename)}[/]")
+            table.add_row("  File", f"{escape(row.filename)}")
         table.add_row(
             "  Offset",
-            f"[bright_white]{escape(_format_offset(row.frame_offset))}[/] "
-            f"[dim]| {escape(f'{row.time_offset_seconds:.6g}s')}[/]",
+            f"{escape(_format_offset(row.frame_offset))} "
+            f"[dim]· {escape(f'{row.time_offset_seconds:.6g}s')}[/]",
         )
-        table.add_row("  Evidence", f"[bright_white]{escape(_format_source(row.source))}[/]")
-        table.add_row(
-            "  Accepted", f"[bright_white]{escape(_format_accepted_at(row.accepted_at))}[/]"
-        )
+        table.add_row("  Evidence", f"{escape(_format_source(row.source))}")
+        table.add_row("  Accepted", f"{escape(_format_accepted_at(row.accepted_at))}")
         if row.presentation_name is None and Path(row.path).name != row.filename:
             table.add_row("  Path", f"[dim]{escape(row.path)}[/]")
     table.add_row("", "")
@@ -260,12 +259,13 @@ def prompt_for_previous_offset_reuse(
         progress_suspended = True
     try:
         console = _console(no_color=no_color)
+        waiting_glyph = glyphs_for_console(console).waiting
         console.print(
             Padding(
                 Panel(
                     _render_previous_offsets_table(prompt_input=prompt_input),
-                    title="[bold magenta][WAIT][/] [bold cyan]Alignment reuse[/]",
-                    border_style="cyan",
+                    title=f"[bold {ACCENT}]{waiting_glyph} Alignment reuse[/]",
+                    border_style=ACCENT,
                 ),
                 (0, 0, 0, 2),
             ),

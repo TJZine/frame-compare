@@ -7,7 +7,7 @@ from time import monotonic
 from typing import TextIO
 
 import structlog
-from rich.console import Console, RenderableType
+from rich.console import RenderableType
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -19,10 +19,19 @@ from rich.progress import (
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.progress_bar import ProgressBar
 from rich.table import Column
 from rich.text import Text
 
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    FAIL,
+    OK,
+    WARN,
+    glyphs_for_console,
+    human_console,
+)
 
 log = structlog.get_logger()
 
@@ -36,11 +45,25 @@ _DURABLE_STATUS_MARKERS = {
 _STATUS_STYLES = {
     "[RUN]": "bright_cyan",
     "[OK]": "green",
-    "[WAIT]": "magenta",
+    "[WAIT]": ACCENT,
     "[WARN]": "yellow",
     "[SKIP]": "dim yellow",
     "[FAIL]": "red",
 }
+_DURABLE_STATUS_GLYPHS = {
+    ProgressPhaseStatus.COMPLETED: "ok",
+    ProgressPhaseStatus.SKIPPED: "skipped",
+    ProgressPhaseStatus.WARNED: "warning",
+    ProgressPhaseStatus.FAILED: "failed",
+}
+_DURABLE_STATUS_STYLES = {
+    ProgressPhaseStatus.COMPLETED: OK,
+    ProgressPhaseStatus.SKIPPED: "",
+    ProgressPhaseStatus.WARNED: WARN,
+    ProgressPhaseStatus.FAILED: FAIL,
+}
+
+UPLOAD_PRESENTATION = "upload"
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -96,8 +119,40 @@ class _ActiveDescriptionColumn(ProgressColumn):
         )
 
 
-def _status_line(marker: str, text: str) -> Text:
-    return Text.assemble("  ", Text(marker, style=_STATUS_STYLES[marker]), " ", text)
+class _PresentationBarColumn(BarColumn):
+    """Bar column that fills upload tasks with the accent color."""
+
+    def render(self, task: Task) -> ProgressBar:
+        if task.fields.get("presentation") != UPLOAD_PRESENTATION:
+            return super().render(task)
+        complete_style, finished_style = self.complete_style, self.finished_style
+        self.complete_style = ACCENT
+        self.finished_style = ACCENT
+        try:
+            return super().render(task)
+        finally:
+            self.complete_style = complete_style
+            self.finished_style = finished_style
+
+
+class _UploadDescriptionColumn(ProgressColumn):
+    """Render the upload task with the running glyph and no status marker."""
+
+    def __init__(self, running_glyph: str) -> None:
+        super().__init__()
+        self._running_glyph = running_glyph
+
+    def render(self, task: Task) -> RenderableType:
+        return Text.assemble("  ", self._running_glyph, " ", task.description)
+
+
+class _UploadTimeRemainingColumn(ProgressColumn):
+    """Render the muted upload remainder as `· {eta} left`."""
+
+    def render(self, task: Task) -> RenderableType:
+        if task.time_remaining is None:
+            return Text("")
+        return Text(f"· {_format_elapsed(task.time_remaining)} left", style="dim")
 
 
 class _EstimatedTimeRemainingColumn(ProgressColumn):
@@ -117,8 +172,8 @@ class _EstimatedTimeRemainingColumn(ProgressColumn):
 class NullProgressReporter:
     """No-op progress reporter."""
 
-    def start_phase(self, name: str, total: int) -> None:
-        del name, total
+    def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
+        del name, total, presentation
 
     def start_indeterminate(self, name: str) -> None:
         del name
@@ -134,8 +189,10 @@ class NullProgressReporter:
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
     ) -> None:
-        del self, status, retain
+        del self, status, retain, summary, duration_text
 
     def suspend(self) -> None:
         del self
@@ -153,8 +210,8 @@ class PlainProgressReporter:
         self._task_stack: list[_PlainTask] = []
         self._lock = RLock()
 
-    def start_phase(self, name: str, total: int) -> None:
-        del total
+    def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
+        del total, presentation
         with self._lock:
             if self._task is not None:
                 self._task_stack.append(self._task)
@@ -174,8 +231,10 @@ class PlainProgressReporter:
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
     ) -> None:
-        del retain
+        del retain, summary, duration_text
         with self._lock:
             if self._task is None:
                 return
@@ -206,22 +265,31 @@ class RichProgressReporter:
     """Progress reporter using the rich library for CLI display."""
 
     def __init__(self, *, no_color: bool = False) -> None:
+        console = human_console(stderr=True, no_color=no_color)
+        glyphs = glyphs_for_console(console)
         self._progress = Progress(
-            _ActiveDescriptionColumn(),
-            _TaskPresentationColumn(TextColumn(" "), "measurable", "indeterminate"),
             _TaskPresentationColumn(
-                BarColumn(bar_width=None, table_column=Column(min_width=20, ratio=1)),
-                "measurable",
+                _ActiveDescriptionColumn(), "measurable", "simple", "indeterminate"
             ),
-            _TaskPresentationColumn(MofNCompleteColumn(), "measurable"),
+            _TaskPresentationColumn(_UploadDescriptionColumn(glyphs.running), UPLOAD_PRESENTATION),
+            _TaskPresentationColumn(
+                TextColumn(" "), "measurable", "indeterminate", UPLOAD_PRESENTATION
+            ),
+            _TaskPresentationColumn(
+                _PresentationBarColumn(bar_width=None, table_column=Column(min_width=20, ratio=1)),
+                "measurable",
+                UPLOAD_PRESENTATION,
+            ),
+            _TaskPresentationColumn(MofNCompleteColumn(), "measurable", UPLOAD_PRESENTATION),
             _TaskPresentationColumn(_EstimatedTimeRemainingColumn(), "measurable"),
+            _TaskPresentationColumn(_UploadTimeRemainingColumn(), UPLOAD_PRESENTATION),
             _TaskPresentationColumn(SpinnerColumn(spinner_name="line"), "indeterminate"),
             transient=True,
             auto_refresh=False,
             redirect_stdout=False,
             redirect_stderr=False,
             expand=True,
-            console=Console(stderr=True, no_color=no_color),
+            console=console,
         )
         self._task_id: TaskID | None = None
         self._task_stack: list[TaskID] = []
@@ -240,10 +308,12 @@ class RichProgressReporter:
         """Return whether Rich progress targets stderr."""
         return self._progress.console.stderr
 
-    def start_phase(self, name: str, total: int) -> None:
+    def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start a new phase with a rich progress bar."""
-        presentation = "measurable" if total > 1 else "simple"
-        self._start_task(name, total=total, presentation=presentation)
+        resolved = presentation
+        if resolved is None:
+            resolved = "measurable" if total > 1 else "simple"
+        self._start_task(name, total=total, presentation=resolved)
 
     def start_indeterminate(self, name: str) -> None:
         """Start a new phase with spinner-only activity."""
@@ -257,8 +327,6 @@ class RichProgressReporter:
         presentation: str,
     ) -> None:
         with self._lock:
-            if presentation == "measurable":
-                self._progress.console.print()
             if not self._progress.live.is_started:
                 self._progress.start()
             if self._task_id is not None:
@@ -294,6 +362,8 @@ class RichProgressReporter:
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
     ) -> None:
         """Complete the current phase and stop progress if all tasks done."""
         with self._lock:
@@ -331,13 +401,13 @@ class RichProgressReporter:
                     label = task.fields.get("phase_label", task.description)
                     if not isinstance(label, str):
                         label = task.description
-                    detail = (
-                        f"  Completed in {_format_elapsed(duration)}"
-                        if status == ProgressPhaseStatus.COMPLETED
-                        else ""
+                    self._print_durable_line(
+                        status,
+                        label,
+                        summary=summary,
+                        duration=duration,
+                        duration_text=duration_text,
                     )
-                    marker = _DURABLE_STATUS_MARKERS[status]
-                    self._progress.console.print(_status_line(marker, f"{label}{detail}"))
 
                 self._progress.remove_task(task_id)
                 self._task_totals.pop(task_id, None)
@@ -351,6 +421,33 @@ class RichProgressReporter:
 
             if self._progress.live.is_started:
                 self._progress.stop()
+
+    def _print_durable_line(
+        self,
+        status: ProgressPhaseStatus,
+        label: str,
+        *,
+        summary: str | None,
+        duration: float,
+        duration_text: str | None,
+    ) -> None:
+        """Print one retained `{glyph} {Label:<9} {summary}` line."""
+        glyphs = glyphs_for_console(self._progress.console)
+        glyph = getattr(glyphs, _DURABLE_STATUS_GLYPHS[status])
+        style = _DURABLE_STATUS_STYLES[status]
+        resolved_summary = summary
+        text = f"{label:<9}"
+        if resolved_summary:
+            text = f"{text} {resolved_summary}"
+        line = Text.assemble((glyph, style), f" {text}")
+        resolved_duration = duration_text
+        if resolved_duration is None and status == ProgressPhaseStatus.COMPLETED:
+            resolved_duration = _format_elapsed(duration)
+        if resolved_duration:
+            width = self._progress.console.width or 80
+            padding = max(1, width - len(line.plain) - len(resolved_duration))
+            line = Text.assemble(line, " " * padding, (resolved_duration, "dim"))
+        self._progress.console.print(line)
 
     def suspend(self) -> None:
         """Pause live progress rendering during blocking terminal interaction."""
@@ -384,8 +481,9 @@ class LogProgressReporter:
         self._milestones: tuple[int, ...] = (10, 25, 50, 75, 100)
         self._last_logged_milestone: int = 0
 
-    def start_phase(self, name: str, total: int) -> None:
+    def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start logging a new phase."""
+        del presentation
         if self._name:
             self._task_stack.append(
                 (self._name, self._total, self._current, self._last_logged_milestone)
@@ -427,9 +525,11 @@ class LogProgressReporter:
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
     ) -> None:
         """Log phase completion."""
-        del retain
+        del retain, summary, duration_text
         log.info("phase_completed", phase=self._name, status=status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (
