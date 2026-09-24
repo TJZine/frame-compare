@@ -60,6 +60,23 @@ def human_console(**kwargs: Any) -> Console:
     return Console(**kwargs)
 
 
+def format_duration(seconds: float) -> str:
+    """Format a duration for a human summary (S3 value grammar)."""
+    total_seconds = max(0.0, seconds)
+    if total_seconds < 1.0:
+        return f"{total_seconds * 1000:.0f} ms"
+    if total_seconds < 60.0:
+        return f"{total_seconds:.1f} s"
+
+    whole_seconds = int(total_seconds)
+    minutes, remaining_seconds = divmod(whole_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {remaining_seconds:02d}s"
+
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{hours}h {remaining_minutes:02d}m {remaining_seconds:02d}s"
+
+
 __all__ = [
     "ACCENT",
     "BORDER_FAILED",
@@ -75,6 +92,7 @@ __all__ = [
     "VALUE",
     "WARN",
     "GlyphSet",
+    "format_duration",
     "glyphs_for_console",
     "glyphs_for_encoding",
     "human_console",

@@ -61,6 +61,32 @@ def _record(root: Path, run_dir: Path, *, seconds: int = 10) -> RunResultRecord:
     )
 
 
+def test_completed_record_omits_memory_only_review_wait(tmp_path: Path) -> None:
+    from frame_compare.orchestration.run_result_lifecycle import record_completed_run_result
+    from frame_compare.orchestration.types import RunResult
+
+    run_dir = tmp_path / "generated" / "run"
+    run_dir.mkdir(parents=True)
+    started = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    record_completed_run_result(
+        workspace=_workspace(tmp_path, run_dir),
+        result=RunResult(
+            success=True,
+            duration_seconds=60.0,
+            phase_timings={"align": 50.0},
+            vsview_review_seconds=42.5,
+        ),
+        started_at=started,
+        completed_at=started + timedelta(seconds=60),
+    )
+
+    from frame_compare.services.run_result_record import read_run_result
+
+    record = read_run_result(run_dir / "run_result.toml")
+    assert "vsview_review_seconds" not in record.phase_timings
+    assert not hasattr(record, "vsview_review_seconds")
+
+
 def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
     run_dir = tmp_path / "generated" / "run"
     run_dir.mkdir(parents=True)

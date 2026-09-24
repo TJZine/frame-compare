@@ -231,14 +231,41 @@ def test_managed_python_children_ignore_hostile_inherited_python_paths(
     monkeypatch.setenv("PYTHONPATH", str(hostile_python_path))
     child_env = _build_vsview_child_env(no_color=False)
 
-    returncode = _run_vsview_command(
+    returncode, wait_seconds = _run_vsview_command(
         [sys.executable, *python_args],
         env=child_env,
     )
 
     assert returncode == 0
+    assert wait_seconds >= 0.0
     assert not sitecustomize_marker.exists()
     assert not shadow_marker.exists()
+
+
+def test_run_vsview_command_returns_measured_wait_with_fake_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import frame_compare.vsview.adapter as adapter
+
+    clock = iter([100.0, 142.5])
+    monkeypatch.setattr(adapter, "monotonic", lambda: next(clock))
+
+    class _FakeProcess:
+        def __enter__(self) -> _FakeProcess:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    monkeypatch.setattr(adapter.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess())
+
+    returncode, wait_seconds = _run_vsview_command(["vsview"], env={})
+
+    assert returncode == 0
+    assert wait_seconds == pytest.approx(42.5)
 
 
 def test_preloaded_vapoursynth_wins_over_hostile_generated_session_module(
@@ -381,11 +408,12 @@ def test_launch_uses_managed_launcher(
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
 
-    session = launch_alignment_verification_session(
+    session, wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=True),
     )
 
+    assert wait_seconds >= 0.0
     assert popen.call_args.args[0] == [
         sys.executable,
         "-m",
@@ -408,11 +436,12 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     availability = MagicMock(side_effect=AssertionError("disabled launch must not probe"))
     monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", availability)
 
-    session = launch_alignment_verification_session(
+    session, wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=False),
     )
 
+    assert wait_seconds == 0.0
     assert session.script_path.parent == tmp_path / "vsview_sessions"
     assert session.script_path.name.startswith("vsview_ref_")
     assert session.result_path.name.endswith(".alignment-result.json")

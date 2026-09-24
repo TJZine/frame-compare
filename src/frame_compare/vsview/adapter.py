@@ -17,6 +17,7 @@ import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from time import monotonic
 
 import structlog
 
@@ -186,8 +187,13 @@ class VSViewSessionRequest:
 def launch_alignment_verification_session(
     request: VSViewSessionRequest,
     config: VSViewConfig,
-) -> AlignmentReviewSession:
-    """Generate and optionally launch a VSView session script."""
+) -> tuple[AlignmentReviewSession, float]:
+    """Generate and optionally launch a VSView session script.
+
+    Returns the session with the wall time spent waiting for the VSView
+    process. The wait is memory-only telemetry for the human summary, never
+    a phase timing.
+    """
     try:
         script_path = _write_vsview_session_script(request)
         session = alignment_review_session_from_script(script_path, require_result_absent=True)
@@ -200,7 +206,7 @@ def launch_alignment_verification_session(
             script_path=str(script_path),
             enabled=False,
         )
-        return session
+        return session, 0.0
 
     availability = check_vsview_availability()
     if not availability.is_available:
@@ -221,7 +227,7 @@ def launch_alignment_verification_session(
     try:
         env = _build_vsview_child_env(no_color=config.no_color)
         _check_startup_readiness(command, env=env)
-        returncode = _run_vsview_command(command, env=env)
+        returncode, wait_seconds = _run_vsview_command(command, env=env)
     except FileNotFoundError as e:
         raise VSViewError("launcher command was not found") from e
     except VSViewError:
@@ -237,7 +243,7 @@ def launch_alignment_verification_session(
             returncode=returncode,
         )
 
-    return session
+    return session, wait_seconds
 
 
 def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
@@ -330,8 +336,14 @@ def _redact_inherited_secrets(text: str, env: dict[str, str]) -> str:
     return text
 
 
-def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
+def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> tuple[int, float]:
+    """Run the VSView process and return its returncode with the wait time.
+
+    The wait covers the whole interactive review: it is memory-only telemetry
+    for the human summary, never a phase timing.
+    """
     # command is a list from _resolve_launch_command; shell=True is never used.
+    start = monotonic()
     with subprocess.Popen(  # nosec B603
         command,
         stdin=None,
@@ -341,7 +353,7 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
         cwd=_CHILD_PROCESS_CWD,
     ) as process:
         try:
-            return process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
+            returncode = process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired as exc:
             process.terminate()
             try:
@@ -353,6 +365,7 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> int:
                 "alignment review timed out before VSView closed",
                 command=tuple(command),
             ) from exc
+    return returncode, max(0.0, monotonic() - start)
 
 
 def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:

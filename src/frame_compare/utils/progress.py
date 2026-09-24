@@ -29,6 +29,7 @@ from frame_compare.utils.terminal_theme import (
     FAIL,
     OK,
     WARN,
+    format_duration,
     glyphs_for_console,
     human_console,
 )
@@ -77,12 +78,25 @@ def _format_elapsed(seconds: float) -> str:
     return f"{seconds}s"
 
 
+def align_phase_duration_text(*, align_seconds: float, review_seconds: float) -> str | None:
+    """Format the Align phase duration override splitting machine and review time.
+
+    Returns None when no review wait was measured so the caller keeps the
+    measured phase duration.
+    """
+    if review_seconds <= 0.0:
+        return None
+    machine_seconds = max(0.0, align_seconds - review_seconds)
+    return f"{format_duration(machine_seconds)} + {format_duration(review_seconds)} review"
+
+
 __all__ = [
     "LogProgressReporter",
     "NullProgressReporter",
     "PlainProgressReporter",
     "ProgressReporter",
     "RichProgressReporter",
+    "align_phase_duration_text",
 ]
 
 

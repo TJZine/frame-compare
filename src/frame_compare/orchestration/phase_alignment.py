@@ -306,6 +306,7 @@ async def run_align_phase(
             results=results,
             review=review_summary,
         ),
+        review_seconds=review_summary.review_seconds,
     )
 
 

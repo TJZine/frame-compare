@@ -58,6 +58,7 @@ def _assemble_run_result(
     preflight_warnings: list[str],
     phase_timings: dict[str, float],
     duration_seconds: float,
+    vsview_review_seconds: float = 0.0,
 ) -> RunResult:
     """Helper to assemble a RunResult from collected state."""
     return RunResult(
@@ -73,6 +74,7 @@ def _assemble_run_result(
         cache_hit=artifacts.metrics_cache_hit,
         metrics_cache_status=artifacts.metrics_cache_status,
         phase_timings=phase_timings,
+        vsview_review_seconds=max(0.0, vsview_review_seconds),
         warnings=[*preflight_warnings, *sorted(artifacts.warnings)],
     )
 
@@ -251,6 +253,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             preflight_warnings=prep.preflight_warnings,
             phase_timings=state.phase_timings,
             duration_seconds=duration_seconds,
+            vsview_review_seconds=state.vsview_review_seconds,
         )
         return record_completed_run_result(
             workspace=reserved_workspace,

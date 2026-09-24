@@ -14,8 +14,26 @@ from frame_compare.utils.progress import (
     NullProgressReporter,
     PlainProgressReporter,
     RichProgressReporter,
+    align_phase_duration_text,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+
+
+def test_align_phase_duration_text_splits_machine_and_review() -> None:
+    assert (
+        align_phase_duration_text(align_seconds=674.0, review_seconds=634.0)
+        == "40.0 s + 10m 34s review"
+    )
+
+
+def test_align_phase_duration_text_clamps_negative_machine() -> None:
+    assert (
+        align_phase_duration_text(align_seconds=10.0, review_seconds=42.5) == "0 ms + 42.5 s review"
+    )
+
+
+def test_align_phase_duration_text_absent_without_review() -> None:
+    assert align_phase_duration_text(align_seconds=12.0, review_seconds=0.0) is None
 
 
 def _captured_rich_reporter(

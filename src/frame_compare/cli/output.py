@@ -20,6 +20,7 @@ from frame_compare.utils.terminal_theme import (
     VALUE,
     WARN,
     GlyphSet,
+    format_duration,
     glyphs_for_console,
 )
 
@@ -121,23 +122,6 @@ def _display_path(
     if verbose and root is not None and display != str(absolute):
         rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
     return rendered
-
-
-def _format_duration(seconds: float) -> str:
-    """Format a run duration for a human summary."""
-    total_seconds = max(0.0, seconds)
-    if total_seconds < 1.0:
-        return f"{total_seconds * 1000:.0f} ms"
-    if total_seconds < 60.0:
-        return f"{total_seconds:.1f} s"
-
-    whole_seconds = int(total_seconds)
-    minutes, remaining_seconds = divmod(whole_seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m {remaining_seconds:02d}s"
-
-    hours, remaining_minutes = divmod(minutes, 60)
-    return f"{hours}h {remaining_minutes:02d}m {remaining_seconds:02d}s"
 
 
 def _humanize(value: str) -> str:
@@ -325,8 +309,8 @@ def print_at_a_glance(
     else:
         excluded_window = _dot_join(
             [
-                f"first {_format_duration(analysis.ignore_lead_seconds)}",
-                f"last {_format_duration(analysis.ignore_trail_seconds)}",
+                f"first {format_duration(analysis.ignore_lead_seconds)}",
+                f"last {format_duration(analysis.ignore_trail_seconds)}",
             ]
         )
     if config.screenshots.use_ffmpeg:
@@ -493,6 +477,45 @@ def print_at_a_glance(
 # ── Result summary ────────────────────────────────────────────────────────────
 
 
+def _add_time_rows(table: Table, *, result: RunResult) -> None:
+    """Add the machine/user time rows to the result summary.
+
+    The review wait is memory-only telemetry: machine times exclude it, and it
+    is never added to phase timings, the run record, or JSON output.
+    """
+    timings = result.phase_timings
+    review_seconds = max(0.0, result.vsview_review_seconds)
+    table.add_row("time", f"{format_duration(result.duration_seconds)} total")
+
+    machine_items: list[str] = []
+    setup_seconds = timings.get("preflight", 0.0) + timings.get("load_sources", 0.0)
+    if setup_seconds > 0.0:
+        machine_items.append(f"setup {format_duration(setup_seconds)}")
+    analyze_seconds = timings.get("analyze", 0.0)
+    if analyze_seconds > 0.0:
+        machine_items.append(f"analyze {format_duration(analyze_seconds)}")
+    align_seconds = max(0.0, timings.get("align", 0.0) - review_seconds)
+    if align_seconds > 0.0:
+        machine_items.append(f"align {format_duration(align_seconds)}")
+    render_seconds = timings.get("render", 0.0)
+    if render_seconds > 0.0:
+        machine_items.append(f"render {format_duration(render_seconds)}")
+    upload_seconds = timings.get("publish", 0.0)
+    if upload_seconds > 0.0:
+        machine_items.append(f"upload {format_duration(upload_seconds)}")
+    if machine_items:
+        table.add_row("  machine", Columns(machine_items, equal=False, padding=(0, 4)))
+
+    you_items: list[str] = []
+    if review_seconds > 0.0:
+        you_items.append(f"VSView review {format_duration(review_seconds)}")
+    prompts_seconds = timings.get("confirm_slowpics_upload", 0.0)
+    if prompts_seconds > 0.0:
+        you_items.append(f"prompts {format_duration(prompts_seconds)}")
+    if you_items:
+        table.add_row("  you", Columns(you_items, equal=False, padding=(0, 4)))
+
+
 def print_result_summary(
     console: Console,
     *,
@@ -599,6 +622,11 @@ def print_result_summary(
         if table.rows:
             table.add_row("", "")
         _add_kv(table, "run", _dot_join(run_segments))
+
+    # ── Time (machine vs user) ──
+    if table.rows:
+        table.add_row("", "")
+    _add_time_rows(table, result=result)
 
     console.print(
         Panel(

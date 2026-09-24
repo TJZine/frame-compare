@@ -16,7 +16,7 @@ from frame_compare.services.alignment_vsview import (
     maybe_launch_alignment_vsview,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -69,6 +69,7 @@ def _call(
     *,
     config: AlignmentConfig,
     comparisons: list[AlignmentClipRequest] | None = None,
+    review_summary: AlignmentReviewSummary | None = None,
 ) -> AlignmentVSViewOutcome:
     reference = _clip(tmp_path / "ref.mkv")
     resolved_comparisons = comparisons or [_clip(tmp_path / "comparison.mkv", frame_count=150)]
@@ -95,6 +96,7 @@ def _call(
         cache_dir=tmp_path,
         config=config,
         progress=None,
+        review_summary=review_summary,
     )
 
 
@@ -130,7 +132,7 @@ def test_native_result_confirms_and_keeps_in_request_order(
                 ),
             ),
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
@@ -164,7 +166,7 @@ def test_keep_current_only_is_a_successful_empty_override_result(
                 decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
             ),
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
@@ -172,6 +174,87 @@ def test_keep_current_only_is_a_successful_empty_override_result(
         {}, "keep_current"
     )
     assert load_manual_overrides(tmp_path) == {}
+
+
+@pytest.mark.parametrize("wait_seconds", [42.5, 0.0])
+def test_launch_wait_seconds_reach_review_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wait_seconds: float
+) -> None:
+    _set_interactive(monkeypatch)
+
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
+            ),
+        )
+        return session, wait_seconds
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    summary = AlignmentReviewSummary()
+
+    assert _call(
+        tmp_path, config=AlignmentConfig(use_vsview=True), review_summary=summary
+    ) == AlignmentVSViewOutcome({}, "keep_current")
+    assert summary.review_ran is True
+    assert summary.review_seconds == pytest.approx(wait_seconds)
+
+
+def test_rejected_result_still_records_measured_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_interactive(monkeypatch)
+    monkeypatch.setattr(
+        alignment_vsview,
+        "launch_alignment_verification_session",
+        lambda *_args, **_kwargs: (_session(tmp_path), 25.0),
+    )
+    summary = AlignmentReviewSummary()
+
+    assert _call(
+        tmp_path, config=AlignmentConfig(use_vsview=True), review_summary=summary
+    ) == AlignmentVSViewOutcome(None, "rejected_result")
+    assert summary.review_ran is False
+    assert summary.review_seconds == pytest.approx(25.0)
+
+
+def test_failed_launch_leaves_review_summary_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _set_interactive(monkeypatch)
+
+    def launch(*_args: object, **_kwargs: object):
+        raise VSViewError("launcher command was not found")
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    summary = AlignmentReviewSummary()
+
+    assert _call(
+        tmp_path, config=AlignmentConfig(use_vsview=True), review_summary=summary
+    ) == AlignmentVSViewOutcome(None, "no_result")
+    assert summary.review_ran is False
+    assert summary.review_seconds == 0.0
+
+
+def test_disabled_launch_leaves_review_summary_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(alignment_vsview, "check_vsview_availability", _available)
+    monkeypatch.setattr(
+        alignment_vsview,
+        "_current_tty_status",
+        lambda: SimpleNamespace(stdin=False, stdout=True, stderr=False),
+    )
+    summary = AlignmentReviewSummary()
+
+    assert _call(
+        tmp_path, config=AlignmentConfig(use_vsview=True), review_summary=summary
+    ) == AlignmentVSViewOutcome(None, "no_result")
+    assert summary.review_ran is False
+    assert summary.review_seconds == 0.0
 
 
 @pytest.mark.parametrize(
@@ -219,7 +302,7 @@ def test_optional_invalid_result_fails_closed_and_retains_offsets(
     def launch(*_args: object, **_kwargs: object):
         session = _session(tmp_path)
         session.result_path.write_text(payload, encoding="utf-8")
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
@@ -236,7 +319,7 @@ def test_close_without_finish_is_optional_cancellation(
     monkeypatch.setattr(
         alignment_vsview,
         "launch_alignment_verification_session",
-        lambda *_args, **_kwargs: _session(tmp_path),
+        lambda *_args, **_kwargs: (_session(tmp_path), 0.0),
     )
 
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
@@ -251,7 +334,7 @@ def test_forced_close_without_finish_is_typed_alignment_failure(
     monkeypatch.setattr(
         alignment_vsview,
         "launch_alignment_verification_session",
-        lambda *_args, **_kwargs: _session(tmp_path),
+        lambda *_args, **_kwargs: (_session(tmp_path), 0.0),
     )
 
     with pytest.raises(AudioAlignmentError, match="did not return a valid VSView review result"):
@@ -286,7 +369,7 @@ def test_result_bounds_come_from_typed_request_not_sidecar(
             ),
             encoding="utf-8",
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
@@ -310,7 +393,7 @@ def test_non_tty_optional_generates_but_does_not_launch(
         lambda: SimpleNamespace(stdin=False, stdout=True, stderr=False),
     )
     session = _session(tmp_path)
-    launch = MagicMock(return_value=session)
+    launch = MagicMock(return_value=(session, 0.0))
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
@@ -431,7 +514,7 @@ def test_native_review_never_reads_terminal_input(
                 decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
             ),
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 

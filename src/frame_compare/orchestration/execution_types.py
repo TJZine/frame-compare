@@ -85,6 +85,8 @@ class AlignPhaseOutput:
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
     warnings: list[str] = field(default_factory=list[str])
     success_summary: str | None = None
+    # Measured VSView review wait for the human summary (memory only).
+    review_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,9 @@ class ExecutionState:
     selected_frames: list[int] = field(default_factory=list[int])
     frame_plan_warnings: list[str] = field(default_factory=list[str])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
+    # Measured VSView review wait for the human summary (memory only: never a
+    # phase timing, never persisted to the run record or JSON output).
+    vsview_review_seconds: float = 0.0
 
     @property
     def warnings(self) -> list[str]:

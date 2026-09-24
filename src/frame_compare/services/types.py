@@ -777,6 +777,7 @@ class AlignmentReviewSummary:
     review_ran: bool = False
     pairs_confirmed: int = 0
     comparisons_kept: int = 0
+    review_seconds: float = 0.0
 
 
 @dataclass(frozen=True)

@@ -52,6 +52,7 @@ class Phase:
     retain_on_success: bool | None = None
     skip_detail: PhaseSkipDetail | None = None
     success_summary: str | None = None
+    duration_text: str | None = None
 
     @property
     def progress_label(self) -> str:
@@ -133,10 +134,15 @@ async def execute_phases(
             reporter.advance(1)
         finally:
             if phase.retain_on_success is None:
-                reporter.complete_phase(phase_progress_status, summary=phase.success_summary)
+                reporter.complete_phase(
+                    phase_progress_status,
+                    summary=phase.success_summary,
+                    duration_text=phase.duration_text,
+                )
             else:
                 reporter.complete_phase(
                     phase_progress_status,
                     retain=phase.retain_on_success,
                     summary=phase.success_summary,
+                    duration_text=phase.duration_text,
                 )

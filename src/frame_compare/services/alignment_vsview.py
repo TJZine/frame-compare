@@ -356,7 +356,7 @@ def maybe_launch_alignment_vsview(
     comparison_paths = [comparison.path for comparison in comparisons]
     progress_suspended = _suspend_progress_for_interaction(progress)
     try:
-        session = launch_alignment_verification_session(
+        session, wait_seconds = launch_alignment_verification_session(
             request=VSViewSessionRequest(
                 reference=reference_path,
                 comparisons=comparison_paths,
@@ -378,6 +378,8 @@ def maybe_launch_alignment_vsview(
                 verbose=verbose,
             ),
         )
+        if review_summary is not None:
+            review_summary.review_seconds = max(0.0, wait_seconds)
         if launch_decision.no_tty:
             _log_no_tty(session.script_path, tty_status)
         if not launch_decision.enabled:

@@ -883,3 +883,100 @@ def test_result_summary_quiet_mode_preserves_literal_brackets() -> None:
     output = _render(console).strip()
     assert output.startswith("Screenshots:")
     assert str(_workspace_path("screenshots", "[episode]")) in output
+
+
+def _timed_result() -> RunResult:
+    return RunResult(
+        success=True,
+        duration_seconds=95.5,
+        phase_timings={
+            "preflight": 1.5,
+            "load_sources": 2.5,
+            "analyze": 10.0,
+            "align": 60.0,
+            "render": 20.0,
+            "publish": 5.0,
+            "confirm_slowpics_upload": 3.0,
+        },
+        vsview_review_seconds=42.5,
+    )
+
+
+def test_result_summary_time_rows_split_machine_and_user() -> None:
+    console = _console()
+    print_result_summary(console, result=_timed_result(), quiet=False)
+
+    output = _render(console)
+    assert "1m 35s total" in output
+    assert "setup 4.0 s" in output
+    assert "analyze 10.0 s" in output
+    assert "align 17.5 s" in output
+    assert "render 20.0 s" in output
+    assert "upload 5.0 s" in output
+    assert "VSView review 42.5 s" in output
+    assert "prompts 3.0 s" in output
+
+
+def test_result_summary_time_rows_omit_zero_components() -> None:
+    console = _console()
+    print_result_summary(
+        console,
+        result=RunResult(success=True, duration_seconds=5.0, phase_timings={"render": 5.0}),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "5.0 s total" in output
+    assert "render 5.0 s" in output
+    assert "machine" in output
+    assert "setup" not in output
+    assert "analyze" not in output
+    assert "align" not in output
+    assert "upload" not in output
+    assert "VSView review" not in output
+    assert "prompts" not in output
+    assert "you" not in output
+
+
+def test_result_summary_time_rows_omitted_when_all_zero() -> None:
+    console = _console()
+    print_result_summary(
+        console,
+        result=RunResult(success=True, duration_seconds=2.0),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "2.0 s total" in output
+    assert "machine" not in output
+    assert "you" not in output
+
+
+def test_result_summary_time_rows_clamp_review_past_align() -> None:
+    console = _console()
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            duration_seconds=30.0,
+            phase_timings={"align": 10.0},
+            vsview_review_seconds=25.0,
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "align" not in output
+    assert "VSView review 25.0 s" in output
+
+
+def test_result_summary_time_rows_render_at_narrow_width() -> None:
+    console = _console_at_width(80)
+    print_result_summary(console, result=_timed_result(), quiet=False)
+
+    output = _render(console)
+    assert "1m 35s total" in output
+    assert "setup 4.0 s" in output
+    assert "align 17.5 s" in output
+    assert "VSView review 42.5 s" in output
+    assert "prompts 3.0 s" in output

@@ -969,3 +969,29 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   host (no media fixtures). Docs: `current-cli-contract.md` (Run plan rows,
   Rich phase labels, summary, Sources/frame-rate rules, JSON stderr note),
   `sources-and-labels.md` short-names note. B5 not started.
+- Track B terminal B5 machine vs user time (September 24, implementation
+  session): wall time measured around the VSView wait in
+  `_run_vsview_command` (monotonic, fake-clock tested) and returned with the
+  review result as `tuple[session, float]`; carried memory-only through
+  `AlignmentReviewSummary` / `AlignPhaseOutput` / `ExecutionState` /
+  `RunResult.vsview_review_seconds` (no `phase_timings` key, no run-record or
+  JSON change — both proven by exact-shape tests). Align line keeps its
+  summary and shows the S3-grammar split `{machine} + {review} review` via
+  the `duration_text` override (machine = `phase_timings["align"]` minus
+  review, computed after the timing is recorded); summary `time` / `  machine`
+  / `  you` rows with the omission rules (Columns per the S3 density rule).
+  Review: round 1 (2 reviewers, 1 blocker + 2 majors + minors, all fixed:
+  missed `tools/verify_docker_gui.sh` unpack, on-screen-order assertion
+  removed per Test scope, single `_format_duration` grammar via the S3
+  `terminal_theme.format_duration` move, render-boundary clamp, wait captured
+  on rejected paths, exact leak-guard assertions, failure-path/narrow-width
+  tests); round-2 wide re-review stalled without output and was replaced by a
+  tight re-review of the changed parts: PASS, no findings. One round-1 minor
+  rejected with evidence (no new durable-line render test: the B4
+  duration-override render test already covers the path; retention is
+  pre-existing B4 policy). Gate: pyright 0/0, ruff check + format,
+  lint-imports kept. Rendered summary time rows and Align split line at
+  80/120 columns (machine Columns wrap between items at 80, single line at
+  120; `cli-*.svg` predate the B5 rows). No real media run on this host
+  (interactive VSView review needs a desktop session). Docs:
+  `current-cli-contract.md` (time rows, Align split line). B6 not started.

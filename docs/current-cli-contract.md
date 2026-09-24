@@ -464,8 +464,16 @@ unchanged.
   muted reason); `  shortcut` path; `  webhook` only when configured
   (`✓ delivered` / `! delivery failed`); `report`; `screenshots` plus muted
   `{n} files`; a blank row; then `run` as
-  `{frames} frames · {sources} sources · cache {status}` (plus `time` rows per
-  the machine/user-time rules). A warning tied to one of the follow-up rows is
+  `{frames} frames · {sources} sources · cache {status}`; a blank row; then the
+  `time` rows: `time` as `{total} total`; `  machine` as Columns of
+  `setup {preflight + load_sources}`, `analyze`, `align` (machine time),
+  `render`, and `upload` (publish, when it ran), each omitted when zero (the
+  row is omitted when every component is zero); `  you` as Columns of
+  `VSView review {t}` and `prompts {confirm_slowpics_upload}`, omitted when
+  both are zero. The total and the phase timings share the same start, so no
+  unmeasured remainder is shown. The review wait is memory-only telemetry: it
+  never enters `phase_timings`, the run record, or JSON output. A warning tied
+  to one of the follow-up rows is
   shown on that row and removed from the separate warnings panel. The report
   path is shown before screenshots, and artifact paths are Rich hyperlinks.
   Durations use human units.
@@ -498,7 +506,10 @@ unchanged.
 - Human Rich progress uses title-case product phase labels: `Plan`, `Analyze`,
   `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`, and `Cleanup`,
   with completed lines as `{glyph} {Label:<9} {summary}` and the duration
-  right-aligned and muted. The plain and log reporters keep the uppercase
+  right-aligned and muted. After a native VSView review, the `Align` line keeps
+  its review summary on the left and shows `{align machine time} + {review
+  time} review` as the duration, where machine time is `phase_timings["align"]`
+  minus the review time. The plain and log reporters keep the uppercase
   labels. Internal phase names in logs and `phase_timings` remain the runtime
   keys such as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
 - Non-TTY human runs use those product phase labels in chronological ASCII
