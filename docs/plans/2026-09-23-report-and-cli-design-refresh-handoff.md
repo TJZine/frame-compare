@@ -23,7 +23,8 @@ maintainer/controller review before the next track starts.
 | 2c. Track B viewer follow-ups | review follow-ups F1–F9 | 2b commits | Follow-up report (joins the Checkpoint B-viewer review) |
 | 2d. Track B viewer final fixes | G1–G2 | 2c commits | Short report; controller does the visual checks and closes the Checkpoint B-viewer review |
 | 3. Track B terminal | B4 → B5 → B6 → B7 | branch tip after Checkpoint B-viewer review and fixes | Checkpoint B-terminal report |
-| 3b. Track B terminal corrections | T1–T20 | Track B terminal commits | Corrections report; controller does the visual checks and closes Checkpoint B-terminal |
+| 3b. Track B terminal corrections | T1–T20 | Track B terminal commits | Corrections report; joins the Checkpoint B-terminal review |
+| 3c. Track B terminal final fixes | U1–U10 | 3b commits | Short report; controller does the visual checks and closes Checkpoint B-terminal |
 
 Paste one prompt per session. Every prompt requires the session to read the
 [Common rules](#common-rules) first.
@@ -919,4 +920,86 @@ a short entry to the plan's Execution record, commit it, and report using the
 Final report format with a coverage row per T1–T20, deviations, judgment calls,
 the adversarial review log, verification, and risks. No review checks by eye.
 Stop after the report.
+```
+
+## Prompt 3c — Track B terminal final fixes
+
+From the review of the 3b corrections. Line numbers are as of `a3dbd6f1`; confirm
+each location before editing. The controller performs the visual checks.
+
+```text
+You are applying the final Checkpoint B-terminal fixes for the Frame Compare
+design refresh plan (corrections T1–T20 are committed at a3dbd6f1).
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md (Invariants, S3,
+B4, Test scope)
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules".
+
+Environment: the local environment is complete (dev, docs, and the vsview
+extra). Do not run any `uv sync` command in this session. If something is
+missing, stop and report instead. Do not use git stash. Record
+`git rev-parse HEAD`, `git status`, and a pyright baseline (expected 0/0) first.
+You do not perform review checks by eye; the controller does.
+
+Apply exactly these fixes and nothing else:
+
+U1 T4 on the Rich path only (invariant: plain and log reporters unchanged). The
+   Align "!" override for an unresolved review is applied on every reporter
+   (orchestration/execution.py ~105-108, orchestration/phases.py ~144-150), so
+   plain output loses "[OK] ALIGN  Completed in …" and the log reporter records
+   "warned" for every non-interactive or VSView-unavailable run with review
+   configured. Apply phase.success_status only when uses_rich_progress(reporter)
+   is true. Add a plain-reporter test (keeps "[OK] ALIGN  Completed in …") and a
+   log-reporter test (keeps "completed") for an unresolved review, and a test for
+   the service condition that sets the flag (services/alignment.py ~1567).
+U2 Real upload-failure state. The "upload failure" summary test
+   (tests/cli/test_cli_output.py ~943-957) uses success=False, which never reaches
+   print_result_summary (cli/run_command.py ~354-355). Rebuild it around the real
+   state: success=True, a `publish: <error>` warning, and no slow.pics URL.
+U3 Production data shape. In production, shortcut and webhook failure warnings
+   are also in result.warnings (orchestration/phase_output_application.py ~66-70).
+   Add a summary test where they appear both in result.warnings and on the
+   post-upload actions, asserting each appears once, on its row, and not in the
+   Warnings panel.
+U4 Frozen-strings test must not launch VSView.
+   tests/services/test_alignment_frozen_strings.py calls align_clips_from_request
+   with use_vsview=True without stubbing availability. Monkeypatch VSView
+   availability to unavailable (and the TTY check if needed) as
+   tests/services/test_alignment_vsview.py does.
+U5 Colour assertion. tests/utils/test_progress.py ~107 asserts an ANSI colour
+   sequence. Assert the running marker and the description text separately,
+   without colour codes.
+U6 Contract drift. docs/current-cli-contract.md ~481-488 still describes Warnings
+   rows with action context and [WARN]/[SKIP] markers, and ~531 and ~547 describe
+   a bright-cyan "[RUN]" marker. Update them to the current behaviour (row-tied
+   warnings on their summary rows; panel with "!"/"–" glyphs and no action rows;
+   the running glyph in the accent colour on the Rich path; plain/log markers
+   unchanged).
+U7 Dead code: remove _STATUS_STYLES (utils/progress.py ~45) if unreferenced; in
+   orchestration/fps_report.py remove the dead relative-path branch of
+   _display_path and the input_dir pass-through that has no effect (every caller
+   passes verbose=True).
+U8 Accent review line. In the alignment panel the review line ("› Opening VSView
+   …") renders in the default colour; render the "›" and the line in the S3
+   accent. Review item; no test.
+U9 Summary "time" label alignment. The top-level "time" key is one column left of
+   the other top-level keys (slow.pics, report, screenshots, run). Indent it like
+   them. Review item; no test.
+U10 Section names and panel titles at full accent. Run plan section names and
+   panel titles (for example "Workspace", "Sources") render bold+dim+accent
+   because the key column's dim style is applied on top. Render section names and
+   panel titles in bold accent without dim; sub-row keys stay dim. Review item;
+   no test.
+
+Commit as `fix(terminal): Checkpoint B-terminal final fixes` after one
+plan-conformance reviewer pass over the staged diff ("does it do exactly U1–U10
+and nothing else, and are the invariants preserved?"). Then run the full gate
+(pytest with `-o addopts="" -q -rs --strict-markers` so totals print; a single
+failure in tests/services/test_alignment_cancellation.py is a known pre-existing
+flake: re-run it alone and report both results), append a short entry to the
+plan's Execution record, commit it, and report: commit SHAs, coverage per U1–U10,
+test results, and the reviewer result. Stop.
 ```

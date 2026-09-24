@@ -1089,3 +1089,20 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   `vsview/alignment_review_panel.py` (PySide6 not installed after
   `uv sync --group dev --frozen`); zero errors in every touched file. No real
   media run on this host.
+- Review of corrections T1–T20 (September 24, controller + `reviewer` subagent):
+  T1–T3 and T5–T20 accepted. Gate with the full environment restored: pyright
+  0/0, ruff, bandit, lint-imports, strict docs, pytest 3563 passed / 86 skips
+  plus one known flake (tests/services/test_alignment_cancellation.py, passes
+  alone 5/5; pre-existing, not touched by this plan; flagged as a separate task).
+  The session's "468 pyright errors" and extra skips came from re-syncing
+  without the `vsview` extra; the runbook bootstrap omits it while CI's pyright
+  job includes it (flagged as a separate task). The session's `git stash` use
+  disturbed and then restored the maintainer's two stashes; verified intact
+  (same object ids and dates). Render check: alignment panel, summary warnings,
+  and Sources corrections look right. Not accepted: T4 applies the Align warning
+  override on plain and log reporters (invariant; affects every non-interactive
+  run with review configured). Final fixes in handoff Prompt 3c (U1–U10: T4 Rich
+  only, real upload-failure and production-shape tests, frozen-strings test must
+  not launch VSView, a colour assertion, contract drift, dead code, and three
+  visual items: accent review line, `time` label alignment, full-accent section
+  names).
