@@ -58,4 +58,5 @@ def test_lens_harness_proves_mapping_behavior_comparison_and_storage() -> None:
         "enabledAcrossContextChange": True,
         "reportPersistenceExcludesPointer": True,
         "storageFailureIsSessionOnly": True,
+        "captionHeightClampsToStage": True,
     }

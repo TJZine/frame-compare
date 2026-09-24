@@ -374,6 +374,8 @@ def _render_info_modal(
     title = data["title"]
     report_id = data["report_id"]
     generated_at = data["generated_at"]
+    frame_count = int(stats["frame_count"])
+    frame_word = "frame" if frame_count == 1 else "frames"
 
     slowpics_url = data["slowpics_url"]
     safe_slowpics_href = _safe_http_href(slowpics_url)
@@ -420,7 +422,7 @@ def _render_info_modal(
                         <div><dt>Title</dt><dd>{_esc_text(title)}</dd></div>
                         <div><dt>Report ID</dt><dd>{_esc_text(report_id)}</dd></div>
                         <div><dt>Generated</dt><dd><time datetime="{_esc_attr(generated_at)}" title="{_esc_attr(generated_at)}">{_esc_text(generated_at)}</time></dd></div>
-                        <div><dt>Content</dt><dd>{stats["frame_count"]} frames · {stats["clip_count"]} sources</dd></div>
+                        <div><dt>Content</dt><dd class="rv-value-mono">{frame_count} {frame_word} · {stats["clip_count"]} sources</dd></div>
                         <div><dt>Opens in</dt><dd data-info-opens-in></dd></div>
                         <div><dt>Default pair</dt><dd data-info-default-pair></dd></div>
                         {slowpics_row}
@@ -523,7 +525,7 @@ def _render_controls(
                 {active_clip_options}
             </select>
         </div>
-        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value"> none</span></div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value">none</span></div>
         </div>
         </div>
     </div>"""
@@ -703,8 +705,8 @@ def _render_inspector() -> str:
         </div>
         <section id="inspector-panel-frame" class="rv-inspector-panel" role="tabpanel" aria-labelledby="inspector-tab-frame" tabindex="-1">
             <dl class="rv-inspector-list">
-                <div><dt>Frame</dt><dd data-inspector-frame-identity></dd></div>
-                <div><dt>Position</dt><dd data-inspector-frame-position></dd></div>
+                <div><dt>Frame</dt><dd class="rv-value-mono" data-inspector-frame-identity></dd></div>
+                <div><dt>Position</dt><dd class="rv-value-mono" data-inspector-frame-position></dd></div>
                 <div data-inspector-frame-detail-row hidden><dt>Detail</dt><dd data-inspector-frame-detail></dd></div>
             </dl>
             <div class="rv-inspector-source-group" data-inspector-source-group>

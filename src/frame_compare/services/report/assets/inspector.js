@@ -1,3 +1,5 @@
+const CARD_MONO_TERMS = new Set(['Picture', 'Length', 'Size']);
+
 const Inspector = {
     create(viewer) {
         return {
@@ -247,6 +249,7 @@ const Inspector = {
                         dt.textContent = term;
                         const dd = document.createElement('dd');
                         dd.textContent = value;
+                        if (CARD_MONO_TERMS.has(term)) dd.className = 'rv-value-mono';
                         row.replaceChildren(dt, dd);
                         return row;
                     });
@@ -344,6 +347,7 @@ const Inspector = {
                             frameCell.textContent = `${image.source_frame}`;
                         }
                         const typeCell = document.createElement('td');
+                        typeCell.className = 'rv-source-type';
                         if (image?.picture_type) {
                             typeCell.textContent = image.dolby_vision_rpu === true
                                 ? `${image.picture_type} · DV RPU`

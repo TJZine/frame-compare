@@ -838,6 +838,30 @@ assert.equal(
     true,
 );
 
+{
+    const captionClampEnvironment = makeEnvironment();
+    const captionClampController = captionClampEnvironment.Lens.create(captionClampEnvironment.viewer);
+    captionClampController.bind();
+    captionClampEnvironment.captionButtons[1].dispatch('click');
+    captionClampController.setEnabled(true);
+    captionClampEnvironment.viewer.state.mode = 'diff';
+    captionClampController.sync();
+    // Simulate the measured footprint of a medium lens with a two-line Diff caption.
+    captionClampEnvironment.elements['rv-lens'].setRect({ left: 0, top: 0, width: 240, height: 300 });
+    captionClampController.state.report.parkedPosition = { u: 0.5, v: 1 };
+    captionClampController.refresh();
+    const parkedLeft = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.left);
+    const parkedTop = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.top);
+    assert.ok(parkedLeft >= 8 && parkedLeft + 240 <= 1000);
+    assert.ok(parkedTop >= 8 && parkedTop + 300 <= 700);
+    captionClampEnvironment.selectors['[data-lens-drag-handle]'].dispatch('keydown', {
+        key: 'ArrowDown',
+        shiftKey: false,
+    });
+    const nudgedTop = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.top);
+    assert.ok(nudgedTop >= 8 && nudgedTop + 300 <= 700);
+}
+
 console.log(JSON.stringify({
     defaultsNormalized: true,
     strictOptionsNormalized: true,
@@ -879,4 +903,5 @@ console.log(JSON.stringify({
     enabledAcrossContextChange: true,
     reportPersistenceExcludesPointer: true,
     storageFailureIsSessionOnly: true,
+    captionHeightClampsToStage: true,
 }));

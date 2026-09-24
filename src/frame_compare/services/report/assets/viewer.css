@@ -271,6 +271,7 @@ body {
     align-self: stretch;
     display: inline-flex;
     align-items: center;
+    gap: 0.25rem;
     min-height: 28px;
     padding: 0.2rem 0.65rem;
     border: 1px solid var(--border);
@@ -286,6 +287,10 @@ body {
 }
 
 .rv-offset-value {
+    font-family: var(--font-mono);
+}
+
+.rv-value-mono {
     font-family: var(--font-mono);
 }
 
@@ -1128,6 +1133,7 @@ select optgroup {
 
 .rv-stage-label-meta {
     color: var(--text-secondary);
+    font-family: var(--font-mono);
 }
 
 .rv-mode-overlay .rv-overlay-label,
@@ -1886,6 +1892,14 @@ select optgroup {
     border-top: 1px solid var(--border);
     vertical-align: top;
     min-width: 0;
+}
+
+.rv-inspector-source-table td:first-child {
+    padding-left: 6px;
+}
+
+.rv-source-type {
+    white-space: nowrap;
 }
 
 .rv-inspector-source-table tr.is-visible {

@@ -151,7 +151,8 @@ const ViewerFormat = {
     formatGroupedFrames(frameCount) {
         const frames = Number(frameCount);
         if (!Number.isFinite(frames) || frames < 0) return '';
-        return `${Math.floor(frames).toLocaleString('en-US')} frames`;
+        const whole = Math.floor(frames);
+        return `${whole.toLocaleString('en-US')} ${whole === 1 ? 'frame' : 'frames'}`;
     },
 
     clipLengthText(clip) {

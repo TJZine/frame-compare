@@ -526,10 +526,18 @@ const Lens = (() => {
             return imageRequests[slot]?.status || 'empty';
         }
 
+        function lensFootprint(size) {
+            const rect = dom.lens?.getBoundingClientRect?.();
+            const width = Number(rect?.width) > 0 ? rect.width : size;
+            const height = Number(rect?.height) > 0 ? rect.height : size;
+            return { width, height };
+        }
+
         function lensPosition(size) {
             const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const maxLeft = Math.max(8, stageRect.width - size - 8);
-            const maxTop = Math.max(8, stageRect.height - size - 8);
+            const footprint = lensFootprint(size);
+            const maxLeft = Math.max(8, stageRect.width - footprint.width - 8);
+            const maxTop = Math.max(8, stageRect.height - footprint.height - 8);
             return {
                 left: 8 + clamp(state.report.parkedPosition.u) * Math.max(0, maxLeft - 8),
                 top: 8 + clamp(state.report.parkedPosition.v) * Math.max(0, maxTop - 8),
@@ -623,6 +631,8 @@ const Lens = (() => {
             const geometry = setImageGeometry(state.activeImage, state.point, size, size);
             const activeAvailable = applyLensImage('active', source, geometry);
             const differenceAvailable = renderDiff(state.point, size);
+            renderCaption();
+            dom.lens.hidden = false;
             const position = lensPosition(size);
             dom.lens.style.left = `${position.left}px`;
             dom.lens.style.top = `${position.top}px`;
@@ -638,8 +648,6 @@ const Lens = (() => {
             } else {
                 setActiveStatus(activeAvailable ? '' : activeState.toUpperCase());
             }
-            renderCaption();
-            dom.lens.hidden = false;
             placeTargetMarker();
             renderControls();
             positionSettingsPopover();
@@ -780,8 +788,9 @@ const Lens = (() => {
 
         function setPositionFromPixels(left, top, size = lensSize()) {
             const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const maxLeft = Math.max(8, stageRect.width - size - 8);
-            const maxTop = Math.max(8, stageRect.height - size - 8);
+            const footprint = lensFootprint(size);
+            const maxLeft = Math.max(8, stageRect.width - footprint.width - 8);
+            const maxTop = Math.max(8, stageRect.height - footprint.height - 8);
             const boundedLeft = clamp(left, 8, maxLeft);
             const boundedTop = clamp(top, 8, maxTop);
             state.report.parkedPosition = {

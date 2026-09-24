@@ -889,7 +889,8 @@ next write. Lens Settings order is Size, Sample marker, Caption, then the reset
 button and the grip/persistence note. Direct image-inspection markers share one Projection Brass signal
 token family; utility controls and lens labels use neutral states, while semantic status
 colors remain separate. Frame categories use text labels. Grip pointer dragging uses
-capture, while its arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+capture, while its arrow-key operation supports a larger Shift step, clamps the full
+lens window including a wrapped caption to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.
 Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
