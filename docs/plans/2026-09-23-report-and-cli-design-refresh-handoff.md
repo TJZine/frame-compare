@@ -20,7 +20,8 @@ maintainer/controller review before the next track starts.
 | 1b. Track A test-scope correction | Track A tests only | Track A commits | Correction report (joins the Checkpoint A review) |
 | 2. Track B viewer | B1 → B2 → B3 | branch tip after Checkpoint A review and fixes | Checkpoint B-viewer report |
 | 2b. Track B viewer corrections | review corrections C1–C11 | Track B viewer commits | Corrections report (joins the Checkpoint B-viewer review) |
-| 2c. Track B viewer follow-ups | review follow-ups F1–F9 | 2b commits | Follow-up report (closes the Checkpoint B-viewer review) |
+| 2c. Track B viewer follow-ups | review follow-ups F1–F9 | 2b commits | Follow-up report (joins the Checkpoint B-viewer review) |
+| 2d. Track B viewer final fixes | G1–G2 | 2c commits | Short report; controller does the visual checks and closes the Checkpoint B-viewer review |
 | 3. Track B terminal | B4 → B5 → B6 → B7 | branch tip after Checkpoint B-viewer review and fixes | Checkpoint B-terminal report |
 
 Paste one prompt per session. Every prompt requires the session to read the
@@ -637,6 +638,57 @@ F2, and the stage-label wrap by eye at 1440 px with the Inspector open, append a
 short entry to the plan's Execution record, commit it, and report using the Final
 report format with a coverage row for each of F1–F9. Stop after the report; do not
 start B4.
+```
+
+## Prompt 2d — Track B viewer final fixes
+
+Small final pass. The controller performs the visual checks for this pass; the
+session does not.
+
+```text
+You are applying two final fixes for the Frame Compare design refresh plan's
+Checkpoint B-viewer review. B4 must not start in this session.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". This is a small pass: follow the Common rules for branch,
+environment, Test scope, and plan edits; the adversarial review and verification
+are reduced as stated below, and you do not perform review checks by eye.
+
+Before any edit: record `git rev-parse HEAD` and `git status`.
+
+G1 Pair-control grid at narrow widths (B1 regression). In
+   src/frame_compare/services/report/assets/viewer.css, the rule under the
+   max-width: 768px media query
+   `.rv-context-zone .rv-control-group[data-control-scope="pair"]` (~line 2326)
+   still uses `grid-template-columns: auto minmax(0, 1fr) auto auto auto
+   minmax(0, 1fr);`, which was laid out for the removed `L:`, `vs`, and `R:`
+   elements. The group now has three children (left select, swap button, right
+   select), so the swap button overlaps the right select. Change it to
+   `grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);`. No test (Test
+   scope: layout).
+
+G2 Wording assertion. In tests/services/test_report_renderer_markup.py (~lines
+   69-71), remove the assertion that the empty-clips message text equals
+   "No clips in payload."; keep the data-info-* hook and `hidden` assertions.
+
+Do not change anything else.
+
+Verification: run the focused suites
+(`uv run --no-sync pytest -o addopts="" -q -rs --strict-markers
+tests/services/test_report_renderer_markup.py tests/services/test_report_viewer_assets_css.py
+tests/browser/test_report_browser_smoke.py`) and `uv run --no-sync ruff check .`.
+Record exit codes and the totals line.
+
+Review: one read-only plan-conformance reviewer given this prompt and the staged
+diff ("does the diff do exactly G1 and G2 and nothing else?"). Fix or record its
+findings.
+
+Commit as `fix(report): Checkpoint B-viewer pair grid and wording assertion`,
+append a one-paragraph entry to the plan's Execution record, commit it, and
+report: commit SHAs, what changed, test results, and the reviewer result. Stop.
 ```
 
 ## Prompt 3 — Track B terminal

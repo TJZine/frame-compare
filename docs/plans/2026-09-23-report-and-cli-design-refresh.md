@@ -749,7 +749,8 @@ person and is checked at each review checkpoint, not by tests.
   plan changes; do not delete existing coverage.
 - **Review checks** (performed and recorded at each checkpoint, not automated):
   each unit's "review" items, a generated report compared with the reference
-  images at 1440 and 375 px, and terminal output at 80 and 120 columns compared
+  images at 1440 px and in a narrow desktop window (about 760 px, which also
+  covers 200% browser zoom; phones are not a target), and terminal output at 80 and 120 columns compared
   with the `cli-*.svg` references.
 
 Documentation, in the unit that changes the behaviour: `docs/current-cli-contract.md`
@@ -906,3 +907,12 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   overflow between-value wrapping at 375 px (review accepted; check there if
   the layout is touched again); inspector stub bypasses the real pair rule
   for adversarial inputs (prompt-mandated shape). B4 not started.
+- Review of follow-ups F1–F9 (September 24, controller + `reviewer` subagent):
+  F1–F8 accepted. F9's whole-meta nowrap accepted: it only overflows at phone
+  width, and the maintainer confirmed phones are not a target for this local
+  report (narrow-width review checks now use a ~760 px desktop window, which also
+  covers 200% zoom). Found in the controller's narrow-width check: B1 regression
+  where the ≤768 px pair-control grid still has six columns for the removed
+  `L:`/`vs`/`R:` elements, so the swap button overlaps the right select. Final
+  follow-ups in handoff Prompt 2d (grid fix, remove one wording assertion);
+  visual checks are done by the controller.
