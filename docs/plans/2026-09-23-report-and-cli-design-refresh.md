@@ -116,11 +116,14 @@ choosing.
   existing `display` profiles change for newly generated reports; no key is added,
   removed, or renamed.
 - **Separator changes** (`·` instead of `|`) apply only to report display profiles
-  and terminal output. Burned-in screenshot text (`format_micro_descriptor` in
-  `orchestration/phase_render.py`) and slow.pics image names
-  (`_slowpics_upload_clips`) keep the `|` separator.
+  and terminal output. slow.pics image names (`_slowpics_upload_clips`) keep the
+  `|` separator. Burned-in screenshot text uses the clip label (the filename, via
+  `batch.label`), never a release descriptor, and is unaffected by this plan.
+  (Corrected at the Checkpoint B-viewer review: an earlier version wrongly named
+  `format_micro_descriptor` in `phase_render.py` as burned-in text; it only builds
+  the terminal render-progress label, which is terminal output; see B4.)
 - **Parser fixes** (A1) intentionally change the descriptor wherever it appears,
-  including burned-in text and slow.pics names, because the service is now
+  including terminal output and slow.pics names, because the service is now
   identified correctly.
 - User-supplied explicit clip labels (`label_is_explicit`) are shown as given (in
   the terminal, the label is also the short name).
@@ -403,8 +406,8 @@ Owners: `services/release_identity.py` (separator parameter only),
   caption text; each line wraps if needed. The lens window grows to fit the
   caption. Harness proof: caption text lines per mode, no ellipsis.
 
-Proof: display-profile test asserting `·` in the report payload and `|` in burned-in
-text and slow.pics names for the same fixture; viewer-format harness for the
+Proof: display-profile test asserting `·` in the report payload and `|` in slow.pics
+image names for the same fixture; viewer-format harness for the
 HDR-word rule and explicit labels. Toolbar and stage-label appearance, truncation,
 and the viewport/zoom matrix: review.
 
@@ -547,6 +550,9 @@ Sources panel (`orchestration/fps_report.py`), title `Sources · {n} loaded`
 Execution:
 
 - Rule: `Execution` in accent, line `dim`, title left, no blank line after.
+- Render progress description (`_render_progress_label` in
+  `orchestration/phase_render.py`): terminal output, so pass `separator=" · "` to
+  `format_micro_descriptor`.
 - Alignment evidence panel (`services/alignment.py`): title `Audio alignment`
   (+ muted `· {n} needs review` when actionable), border yellow while any comparison
   needs a decision, else `dim`. Per comparison: heading = compact name (bold);
@@ -727,8 +733,8 @@ person and is checked at each review checkpoint, not by tests.
   (including old saved values); keyboard and interaction behaviour; data shown
   (which sources, which values, which rows are omitted); removed features staying
   removed; accessibility semantics (roles, `aria-checked`/`aria-pressed`, an
-  accessible name exists); and the invariants (payload keys, `|` in burned-in text
-  and slow.pics names, frozen strings verbatim, JSON/quiet/non-TTY output, run
+  accessible name exists); and the invariants (payload keys, `|` in slow.pics
+  names, frozen strings verbatim, JSON/quiet/non-TTY output, run
   record, VSView script determinism).
 - **Do not test:** element positions, sizes, widths, spacing, order on screen,
   colours, fonts, icon markup (`svg` presence), CSS `display` values, truncation,
@@ -761,7 +767,8 @@ uv run --no-sync zensical build --clean --strict
 Stop and record the question for the maintainer when:
 
 - a payload key, `phase_timings` key, run-record field, or JSON output would change;
-- burned-in screenshot text or slow.pics names would change other than through A1;
+- slow.pics names would change other than through A1, or burned-in screenshot text
+  would change at all;
 - a frozen audio string would change;
 - a retained palette control would be removed or moved (beyond A4's `Fixed` text;
   D10 removes lens-settings controls only);
@@ -827,3 +834,17 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   (pyright, ruff, bandit, lint-imports, full pytest exit 0 incl. 17 browser
   smoke proofs, strict docs build). Track B Final report handed back for review;
   B4 not started.
+- Checkpoint B-viewer review (September 23, controller + `reviewer` subagent):
+  Track B viewer reviewed at `5bc5e620`. Gate re-run green (pyright 0/0, ruff,
+  bandit, lint-imports, strict docs, pytest 3500 passed / 86 environment skips,
+  browser smoke unskipped); report checked by eye at 1440 px and true mobile width
+  (no overflow). B2 accepted as specified. Corrections required before Track B
+  terminal (handoff Prompt 2b): bare `Comparison` role (D1 deviation); one
+  clip-card renderer for Clips and Report Information; lens position accounts for
+  the caption height; S2 mono for numeric values; remove the dead fps rational
+  branch, two out-of-scope CSS tests, and dead `clipOverlayLabel`; test
+  `frameFilterName`; Offset label spacing; Frame-table first-cell padding and
+  Type nowrap; singular `1 frame`. D2 (bare fps) accepted: the payload has no
+  rational. Plan corrected: the burned-in-text invariant (burned-in text is the
+  clip label; `phase_render`'s descriptor is the terminal render-progress label,
+  now assigned to B4).
