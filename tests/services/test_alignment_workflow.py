@@ -1060,8 +1060,6 @@ def test_rich_terminal_groups_audio_evidence_in_an_aligned_panel(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "Audio alignment" in captured.err
-    assert "comparison" in captured.err
-    assert "status" in captured.err
     assert "Provisional audio candidate:" in captured.err
     assert "+0f - NOT APPLIED" in captured.err
 

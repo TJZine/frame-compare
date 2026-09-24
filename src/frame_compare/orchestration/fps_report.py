@@ -241,7 +241,9 @@ def _render_clip_overview(
             table.add_row("", "")
 
         filename = clip.path.name
-        if clip.release_identity is not None:
+        if clip.label_is_explicit:
+            standard = clip.label
+        elif clip.release_identity is not None:
             standard = (
                 format_release_descriptor(clip.release_identity, separator=" · ")
                 if common_content is not None
@@ -255,6 +257,10 @@ def _render_clip_overview(
         table.add_row("", name_row)
         table.add_row("", _source_detail_line(clip))
         table.add_row("", f"[dim]{escape(filename)}[/]")
+        if verbose:
+            table.add_row(
+                "", f"[dim]{escape(_display_path(clip.path, input_dir=input_dir, verbose=True))}[/]"
+            )
 
     return table
 
@@ -455,7 +461,7 @@ def _render_human_fps_report(
             console.print(
                 Text.assemble(
                     (glyph, OK),
-                    f" frame rates match · {effective_fps}",
+                    f"{' ':<11}frame rates match · {effective_fps}",
                 )
             )
             return
@@ -470,6 +476,7 @@ def _render_human_fps_report(
         Panel(
             table,
             title=title,
+            title_align="left",
             border_style=BORDER_NEUTRAL,
         )
     )

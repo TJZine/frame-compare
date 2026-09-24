@@ -147,8 +147,9 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
     )
 
     output = capsys.readouterr().err
+    assert "Reference label" in output
+    assert "PMTP WEB-DL" not in output
     assert output.count("Avatar Aang The Last Airbender (2026)") == 1
-    assert "2160p · PMTP WEB-DL · DV HDR10+ · Kitsune" in output
     assert "2160p · ATV WEB-DL · DV HDR10+ · REPACK · Kitsune" in output
     assert output.count("Avatar.Aang.PMTP.Kitsune.mkv") == 1
     assert output.count("Avatar.Aang.ATV.REPACK.Kitsune.mkv") == 1
@@ -504,6 +505,21 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
     assert "comparison.mkv" in captured.err
     assert str(internal_path) not in captured.err
     assert str(external_path) not in captured.err
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=clips,
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+        input_dir=input_dir,
+        verbose=True,
+    )
+
+    verbose_captured = capsys.readouterr()
+    assert str(internal_path.resolve()) in verbose_captured.err
+    assert str(external_path.resolve()) in verbose_captured.err
 
 
 def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(

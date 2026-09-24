@@ -1059,7 +1059,7 @@ def _alignment_evidence_row(line: str, *, waiting_glyph: str = "›") -> tuple[s
 
 def _render_alignment_evidence_panel(
     *,
-    entries: list[tuple[str, list[str]]],
+    entries: list[tuple[str, list[str], list[str], list[str]]],
     diagnostics_written: bool,
     no_color: bool,
     actionable: bool,
@@ -1076,16 +1076,28 @@ def _render_alignment_evidence_panel(
     table.add_column("value", overflow="fold")
     console = human_console(stderr=True, no_color=no_color, height=1000)
     waiting_glyph = glyphs_for_console(console).waiting
-    for index, (comparison_name, lines) in enumerate(entries):
+    for index, (comparison_name, lines, verbose_lines, review_lines) in enumerate(entries):
         if index:
             table.add_row("", "")
-        table.add_row("comparison", f"[bold]{escape(comparison_name)}[/]")
+        table.add_row("", f"[bold]{escape(comparison_name)}[/]")
         for line in lines:
+            _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
+            if style:
+                table.add_row("", f"[{style}]{escape(value)}[/]")
+            else:
+                table.add_row("", escape(value))
+        for line in verbose_lines:
             key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
             if style:
                 table.add_row(key, f"[{style}]{escape(value)}[/]")
             else:
                 table.add_row(key, escape(value))
+        for line in review_lines:
+            _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
+            if style:
+                table.add_row("", f"[{style}]{escape(value)}[/]")
+            else:
+                table.add_row("", escape(value))
     if diagnostics_written:
         table.add_row("", "")
         table.add_row("diagnostics", "alignment_diagnostics/")
@@ -1098,6 +1110,7 @@ def _render_alignment_evidence_panel(
             Panel(
                 table,
                 title=title,
+                title_align="left",
                 border_style=BORDER_PENDING if actionable else BORDER_NEUTRAL,
             ),
             (0, 0, 0, 2),
@@ -1242,7 +1255,7 @@ def _present_alignment_evidence(
     diagnostics_written: bool,
 ) -> None:
     lines: list[str] = []
-    entries: list[tuple[str, list[str]]] = []
+    entries: list[tuple[str, list[str], list[str], list[str]]] = []
     has_actionable_result = False
     needs_review_count = 0
     for ordinal, comparison in enumerate(request.comparisons, start=1):
@@ -1271,24 +1284,27 @@ def _present_alignment_evidence(
             continue
         if quiet and not human_actionable:
             continue
-        comparison_lines = _normal_evidence_lines(
+        normal_lines = _normal_evidence_lines(
             ordinal=ordinal,
             result=result,
             provenance=provenance,
         )
+        verbose_lines: list[str] = []
         if verbose and not quiet and result.audio_attempt is not None:
-            comparison_lines.extend(_verbose_evidence_lines(result.audio_attempt))
+            verbose_lines = _verbose_evidence_lines(result.audio_attempt)
+        review_lines: list[str] = []
         if human_actionable and (config.use_vsview or config.force_interactive):
             if decision is not None and decision.candidate is not None:
-                comparison_lines.append(
+                review_lines.append(
                     "Opening VSView for manual review. The candidate is a hint, not a "
                     "confirmed alignment."
                 )
             else:
-                comparison_lines.append(
+                review_lines.append(
                     "Opening VSView for manual review. No automatic candidate is available; "
                     "align the sources manually."
                 )
+        comparison_lines = [*normal_lines, *verbose_lines, *review_lines]
         lines.extend(comparison_lines)
         if human_actionable:
             needs_review_count += 1
@@ -1298,7 +1314,9 @@ def _present_alignment_evidence(
                 or comparison.presentation_name
                 or comparison.label
                 or comparison.path.name,
-                comparison_lines,
+                normal_lines,
+                verbose_lines,
+                review_lines,
             )
         )
     if diagnostics_written and not quiet and not json_output:
