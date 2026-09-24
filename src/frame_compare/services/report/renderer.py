@@ -20,7 +20,6 @@ _REVIEW_NOTE_MAX_LENGTH = 1000
 
 if TYPE_CHECKING:
     from frame_compare.services.report.payload import (
-        ReportActivePicturePayload,
         ReportClipPayload,
         ReportFramePayload,
         ReportPayload,
@@ -264,75 +263,6 @@ def _render_bottom_panel(
 </section>"""
 
 
-def _render_fps(fps: float) -> str:
-    text = f"{round(float(fps), 3):.3f}".rstrip("0").rstrip(".")
-    return f"{text} fps"
-
-
-_MODE_TOOLBAR_LABELS = {
-    "slider": "Slider",
-    "overlay": "Single",
-    "diff": "Diff",
-    "blink": "Blink",
-    "grid": "Grid",
-}
-
-
-def _render_mode_toolbar_label(mode: str) -> str:
-    return _MODE_TOOLBAR_LABELS.get(mode, mode)
-
-
-def _render_clip_badge(signal: Mapping[str, object]) -> str:
-    if signal.get("dolby_vision_rpu") is True and signal.get("is_hdr") is True:
-        return "DV HDR"
-    return "HDR" if signal.get("is_hdr") else "SDR"
-
-
-def _render_frame_count(frame_count: int) -> str:
-    return f"{int(frame_count):,} frames"
-
-
-def _render_clip_size(size_bytes: int) -> str:
-    value = float(size_bytes)
-    if value <= 0:
-        return ""
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if value < 1024.0 or unit == "TiB":
-            return f"{value:.2f} {unit}"
-        value /= 1024.0
-    raise AssertionError("unreachable")
-
-
-def _render_runtime(frame_count: int, fps: float) -> str:
-    fps_value = float(fps)
-    if fps_value <= 0:
-        return ""
-    total_seconds = int(frame_count // fps_value)
-    minutes, seconds = divmod(total_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}:{minutes:02d}:{seconds:02d}"
-
-
-def _render_active_picture(
-    active_picture: ReportActivePicturePayload | None, resolution: tuple[int, int]
-) -> str:
-    frame = f"{resolution[0]}×{resolution[1]}"
-    if not active_picture:
-        return f"{frame} · full frame"
-    left = f", {active_picture['x']} px left" if active_picture.get("x") else ""
-    provenance = " · DV L5" if active_picture.get("provenance") == "dolby_vision_l5" else ""
-    return (
-        f"{frame} · active {active_picture['width']}×{active_picture['height']}, "
-        f"{active_picture['y']} px top{left}{provenance}"
-    )
-
-
-def _render_clip_length(clip: ReportClipPayload) -> str:
-    frames = _render_frame_count(clip["frame_count"])
-    runtime = _render_runtime(clip["frame_count"], clip["fps"])
-    return f"{frames} · {runtime}" if runtime else frames
-
-
 def _render_tonemap_summary(rendering: object) -> str:
     """Render the concise archival tonemap summary from raw payload values."""
     rendering_map = _object_mapping(rendering)
@@ -434,33 +364,16 @@ def _render_tonemap_details(rendering: object) -> str:
     return "".join(rows)
 
 
-def _info_clip_role(index: int, reference_index: int) -> str:
-    # Mirrors ViewerFormat.stableClipRole: the reference is the default left clip.
-    if index == reference_index:
-        return "Reference"
-    return f"Comparison {index + 1 if index < reference_index else index}"
-
-
 def _render_info_modal(
     data: ReportPayload,
     *,
     left_clip_index: int,
     right_clip_index: int,
 ) -> str:
-    clips = data["clips"]
     stats = data["stats"]
     title = data["title"]
     report_id = data["report_id"]
     generated_at = data["generated_at"]
-    default_mode = data["default_mode"]
-    default_mode_label = _render_mode_toolbar_label(default_mode)
-
-    default_pair = "".join(
-        f'<div class="rv-default-pair-source">{_esc_text(_clip_display(clips[index], "micro"))}</div>'
-        if 0 <= index < len(clips)
-        else f'<div class="rv-default-pair-source">{_esc_text(f"Clip {index + 1}")}</div>'
-        for index in (left_clip_index, right_clip_index)
-    )
 
     slowpics_url = data["slowpics_url"]
     safe_slowpics_href = _safe_http_href(slowpics_url)
@@ -472,52 +385,11 @@ def _render_info_modal(
     else:
         slowpics_row = "<div><dt>slow.pics</dt><dd>Not uploaded</dd></div>"
 
-    fps_texts = {_render_fps(clip["fps"]) for clip in clips}
-    shared_fps = next(iter(fps_texts)) if len(fps_texts) == 1 and clips else ""
-    clip_items: list[str] = []
-    for i, clip in enumerate(clips):
-        signal = clip.get("signal") or {}
-        rows = [
-            (
-                "Picture",
-                _render_active_picture(
-                    clip.get("active_picture"),
-                    (int(clip["resolution"][0]), int(clip["resolution"][1])),
-                ),
-            ),
-            ("Length", _render_clip_length(clip)),
-            ("Size", _render_clip_size(int(clip["size_bytes"]))),
-        ]
-        if not shared_fps:
-            rows.append(("FPS", _render_fps(clip["fps"])))
-        row_html = "".join(
-            f"<div><dt>{label}</dt><dd>{_esc_text(value)}</dd></div>"
-            for label, value in rows
-            if value
-        )
-        clip_items.append(
-            f'<li class="rv-clip-meta-item" data-clip-index="{_esc_attr(i)}">'
-            f'<div class="rv-clip-meta-heading">'
-            f"<span>{_esc_text(_info_clip_role(i, left_clip_index))}</span>"
-            f'<span class="rv-badge">{_esc_text(_render_clip_badge(signal))}</span>'
-            f"</div>"
-            f'<div class="rv-clip-meta-primary">{_esc_text(_clip_display(clip, "control"))}</div>'
-            f'<div class="rv-clip-meta-file">{_esc_text(clip["display"]["filename"])}</div>'
-            f'<dl class="rv-metadata-list">'
-            f"{row_html}"
-            f"</dl>"
-            f"</li>"
-        )
-    clip_list_html = (
-        f'<ol class="rv-clip-meta-list">{"".join(clip_items)}</ol>'
-        if clip_items
-        else '<div class="rv-metadata-empty">No clips in payload.</div>'
-    )
-    shared_line_html = (
-        f'<p class="rv-inspector-shared">All sources: {_esc_text(shared_fps)}</p>'
-        if shared_fps
-        else ""
-    )
+    # The Sources cards, the shared fps line, the Opens in value, and the
+    # Default pair value are filled at startup by the viewer's Inspector clip-card
+    # builder (Inspector.renderReportInformation); Python emits only the containers.
+    clip_list_html = '<ol class="rv-clip-meta-list" data-info-clips></ol>'
+    shared_line_html = '<p class="rv-inspector-shared" data-info-clips-shared hidden></p>'
     rendering = data.get("rendering")
     tonemap_summary = _render_tonemap_summary(rendering)
     advanced_rows = _render_tonemap_details(rendering)
@@ -549,8 +421,8 @@ def _render_info_modal(
                         <div><dt>Report ID</dt><dd>{_esc_text(report_id)}</dd></div>
                         <div><dt>Generated</dt><dd><time datetime="{_esc_attr(generated_at)}" title="{_esc_attr(generated_at)}">{_esc_text(generated_at)}</time></dd></div>
                         <div><dt>Content</dt><dd>{stats["frame_count"]} frames · {stats["clip_count"]} sources</dd></div>
-                        <div><dt>Opens in</dt><dd>{_esc_text(default_mode_label)}</dd></div>
-                        <div><dt>Default pair</dt><dd>{default_pair}</dd></div>
+                        <div><dt>Opens in</dt><dd data-info-opens-in></dd></div>
+                        <div><dt>Default pair</dt><dd data-info-default-pair></dd></div>
                         {slowpics_row}
                     </dl>
                 </div>

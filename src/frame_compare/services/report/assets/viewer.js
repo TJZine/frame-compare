@@ -71,6 +71,7 @@ const ReportViewer = {
             this.viewport.updateFitButtons();
             this.inspector.updateTabs();
             this.inspector.updateVisibility();
+            this.inspector.renderReportInformation();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());

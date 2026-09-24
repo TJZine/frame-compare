@@ -18,6 +18,10 @@ const Inspector = {
                     inspectorSourceFrames: document.querySelector('[data-inspector-source-frames]'),
                     inspectorClipsShared: document.querySelector('[data-inspector-clips-shared]'),
                     inspectorClips: document.querySelector('[data-inspector-clips]'),
+                    infoOpensIn: document.querySelector('[data-info-opens-in]'),
+                    infoDefaultPair: document.querySelector('[data-info-default-pair]'),
+                    infoClipsShared: document.querySelector('[data-info-clips-shared]'),
+                    infoClips: document.querySelector('[data-info-clips]'),
                     inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
                     inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
                     inspectorAlignX: document.querySelector('[data-inspector-align-x]'),
@@ -198,15 +202,103 @@ const Inspector = {
                 return '';
             },
 
-            clipCardRows(clip, shared) {
+            clipCardRows(clip, shared, { includePresentation = true } = {}) {
                 const rows = [
                     ['Picture', ViewerFormat.formatActivePicture(clip.active_picture, clip.resolution)],
                     ['Length', ViewerFormat.clipLengthText(clip)],
                     ['Size', ViewerFormat.formatFileSize(clip.size_bytes)],
                 ];
                 if (!shared.fps) rows.push(['FPS', ViewerFormat.clipFpsText(clip)]);
-                if (!shared.presentation) rows.push(['Presentation', ViewerFormat.formatPresentation(clip)]);
+                if (includePresentation && !shared.presentation) {
+                    rows.push(['Presentation', ViewerFormat.formatPresentation(clip)]);
+                }
                 return rows;
+            },
+
+            buildClipCard(clip, index, shared, { compact = false } = {}) {
+                const item = document.createElement('li');
+                item.className = compact ? 'rv-clip-meta-item' : 'rv-inspector-clip';
+                item.dataset.clipIndex = String(index);
+                const heading = document.createElement('div');
+                heading.className = compact ? 'rv-clip-meta-heading' : 'rv-inspector-clip-heading';
+                const role = ViewerFormat.stableClipRole(index, viewer.referenceClipIndex());
+                const title = document.createElement('span');
+                title.textContent = compact ? role : `${role} · ${this.clipPlacement(index)}`;
+                const badge = document.createElement('span');
+                badge.className = 'rv-badge';
+                badge.textContent = ViewerFormat.clipBadge(clip.signal);
+                heading.replaceChildren(title, badge);
+                const name = document.createElement('div');
+                name.className = compact ? 'rv-clip-meta-primary' : 'rv-inspector-clip-primary';
+                name.textContent = ViewerFormat.clipDisplay(clip, 'control');
+                const file = document.createElement('div');
+                file.className = compact ? 'rv-clip-meta-file' : 'rv-inspector-clip-file';
+                file.textContent = ViewerFormat.clipFilename(clip);
+                const list = document.createElement('dl');
+                list.className = compact ? 'rv-metadata-list' : 'rv-inspector-list';
+                const rows = compact
+                    ? this.clipCardRows(clip, shared, { includePresentation: false })
+                    : [...this.clipCardRows(clip, shared), ['Signal', ViewerFormat.formatSignal(clip.signal)]];
+                const rowElements = rows
+                    .filter(([, value]) => Boolean(value))
+                    .map(([term, value]) => {
+                        const row = document.createElement('div');
+                        const dt = document.createElement('dt');
+                        dt.textContent = term;
+                        const dd = document.createElement('dd');
+                        dd.textContent = value;
+                        row.replaceChildren(dt, dd);
+                        return row;
+                    });
+                list.replaceChildren(...rowElements);
+                item.replaceChildren(heading, name, file, list);
+                return item;
+            },
+
+            renderReportInformation() {
+                const data = viewer.state.data || {};
+                const clips = Array.isArray(data.clips) ? data.clips : [];
+                if (viewer.dom.infoOpensIn) {
+                    viewer.setText(
+                        viewer.dom.infoOpensIn,
+                        ViewerFormat.modeLabel(data.default_mode) ?? '',
+                    );
+                }
+                if (viewer.dom.infoDefaultPair) {
+                    const selection = data.default_selection || {};
+                    const left = viewer.clipIndexOrDefault(selection.left_clip_index, 0);
+                    const rightFallback = clips.length > 1 ? 1 : left;
+                    const right = viewer.clipIndexOrDefault(selection.right_clip_index, rightFallback);
+                    const lines = [left, right]
+                        .filter(index => Number.isInteger(index) && clips[index])
+                        .map(index => {
+                            const line = document.createElement('div');
+                            line.className = 'rv-default-pair-source';
+                            line.textContent = ViewerFormat.clipDisplay(clips[index], 'micro');
+                            return line;
+                        });
+                    viewer.dom.infoDefaultPair.replaceChildren(...lines);
+                }
+                const shared = ViewerFormat.sharedClipValues(clips);
+                if (viewer.dom.infoClipsShared) {
+                    viewer.dom.infoClipsShared.hidden = !shared.fps;
+                    viewer.setText(
+                        viewer.dom.infoClipsShared,
+                        shared.fps ? `All sources: ${shared.fps}` : '',
+                    );
+                }
+                if (viewer.dom.infoClips) {
+                    if (clips.length === 0) {
+                        const empty = document.createElement('div');
+                        empty.className = 'rv-metadata-empty';
+                        empty.textContent = 'No clips in payload.';
+                        viewer.dom.infoClips.replaceChildren(empty);
+                    } else {
+                        viewer.dom.infoClips.replaceChildren(
+                            ...clips.map((clip, index) => this.buildClipCard(clip, index, shared, { compact: true })),
+                        );
+                    }
+                }
             },
 
             render() {
@@ -277,44 +369,9 @@ const Inspector = {
                 }
 
                 if (viewer.dom.inspectorClips) {
-                    viewer.dom.inspectorClips.replaceChildren(...clips.map((clip, index) => {
-                        const item = document.createElement('li');
-                        item.className = 'rv-inspector-clip';
-                        item.dataset.clipIndex = String(index);
-                        const heading = document.createElement('div');
-                        heading.className = 'rv-inspector-clip-heading';
-                        const title = document.createElement('span');
-                        title.textContent = `${ViewerFormat.stableClipRole(index, viewer.referenceClipIndex())} · ${this.clipPlacement(index)}`;
-                        const badge = document.createElement('span');
-                        badge.className = 'rv-badge';
-                        badge.textContent = ViewerFormat.clipBadge(clip.signal);
-                        heading.replaceChildren(title, badge);
-                        const name = document.createElement('div');
-                        name.className = 'rv-inspector-clip-primary';
-                        name.textContent = ViewerFormat.clipDisplay(clip, 'control');
-                        const file = document.createElement('div');
-                        file.className = 'rv-inspector-clip-file';
-                        file.textContent = ViewerFormat.clipFilename(clip);
-                        const list = document.createElement('dl');
-                        list.className = 'rv-inspector-list';
-                        const rowElements = [
-                            ...this.clipCardRows(clip, shared),
-                            ['Signal', ViewerFormat.formatSignal(clip.signal)],
-                        ]
-                            .filter(([, value]) => Boolean(value))
-                            .map(([term, value]) => {
-                                const row = document.createElement('div');
-                                const dt = document.createElement('dt');
-                                dt.textContent = term;
-                                const dd = document.createElement('dd');
-                                dd.textContent = value;
-                                row.replaceChildren(dt, dd);
-                                return row;
-                            });
-                        list.replaceChildren(...rowElements);
-                        item.replaceChildren(heading, name, file, list);
-                        return item;
-                    }));
+                    viewer.dom.inspectorClips.replaceChildren(
+                        ...clips.map((clip, index) => this.buildClipCard(clip, index, shared)),
+                    );
                 }
 
                 viewer.setText(viewer.dom.inspectorAlignPair, `${viewer.currentPairLabel()} (${viewer.viewport.currentPairAlignmentKey()})`);

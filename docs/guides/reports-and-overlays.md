@@ -91,9 +91,10 @@ The Frame inspector names the current frame (`number · category`, or the frame'
 label) and its position (`n / count in filter`), with a Detail row only for non-default
 notes. Its source-frames table lists every source with its own aligned frame number,
 picture type, and a shown mark for visible sources. The Clips inspector and Report
-Information share one clip-card design: role and placement, a DV HDR/HDR/SDR badge,
-the standard name, the exact filename, and Picture/Length/Size rows (plus Signal in
-the Clips tab only). An `All sources:` line states the fps and presentation values
+Information share one clip-card design built by the viewer from the same builder:
+the bare role (`Reference`/`Comparison`, no numbers), a DV HDR/HDR/SDR badge,
+the standard name, the exact filename, and Picture/Length/Size rows (placement and
+Signal in the Clips tab only). An `All sources:` line states the fps and presentation values
 identical across every source — fps only in Report Information; a value that differs
 appears on each card instead. On
 desktop the Inspector uses a wider responsive drawer; on narrower screens it overlays the stage.

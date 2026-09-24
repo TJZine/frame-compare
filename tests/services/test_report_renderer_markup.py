@@ -8,7 +8,7 @@ import re
 import pytest
 
 from frame_compare.services.report.payload import ReportPayload
-from frame_compare.services.report.renderer import _render_fps, build_html
+from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_js
 from tests.services.report_viewer_contracts import (
     SelectParser,
@@ -56,23 +56,22 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
     assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
-def test_build_html_renders_info_source_cards(
+def test_build_html_emits_empty_report_information_containers_for_viewer_fill(
     report_payload: ReportPayload,
 ) -> None:
     html = build_html(report_payload)
     document = parse_elements(html)
-    clips = find_all(document, tag="li", class_name="rv-clip-meta-item")
 
-    assert [require_first(clip, class_name="rv-clip-meta-primary").text for clip in clips] == [
-        "Reference control",
-        "Encode control",
-    ]
-    assert [require_first(clip, class_name="rv-clip-meta-file").text for clip in clips] == [
-        "reference exact <unsafe>.mkv",
-        'encode exact "unsafe".mkv',
-    ]
+    assert find_all(document, tag="li", class_name="rv-clip-meta-item") == []
     assert "rv-clip-meta-release" not in html
-    assert "All sources: 24 fps" in html
+    clips_mount = require_first(document, tag="ol", attr_name="data-info-clips", attr_value=None)
+    assert "rv-clip-meta-list" in clips_mount.classes
+    assert clips_mount.children == []
+    shared_mount = require_first(document, tag="p", attr_name="data-info-clips-shared")
+    assert "rv-inspector-shared" in shared_mount.classes
+    assert shared_mount.text == ""
+    require_first(document, tag="dd", attr_name="data-info-opens-in")
+    require_first(document, tag="dd", attr_name="data-info-default-pair")
 
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
@@ -298,20 +297,6 @@ def test_build_html_emits_generated_time_element_and_preserves_exact_timestamp(
     assert script_payload(html)["generated_at"] == timestamp
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (24000 / 1001, "23.976 fps"),
-        (23.976023976023978, "23.976 fps"),
-        (25.0, "25 fps"),
-        (29.97, "29.97 fps"),
-        (24.0, "24 fps"),
-    ],
-)
-def test_render_fps_rounds_to_three_decimals(value: float, expected: str) -> None:
-    assert _render_fps(value) == expected
-
-
 def test_build_html_falls_back_to_plain_span_for_unparseable_timestamp(
     report_payload: ReportPayload,
 ) -> None:
@@ -365,42 +350,15 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
         "Report ID": "report_0123456789abcdef0123456789abcdef",
         "Generated": "2026-05-22T12:00:00+00:00",
         "Content": "2 frames · 2 sources",
-        "Opens in": "Slider",
-        "Default pair": "Reference microEncode micro",
+        "Opens in": "",
+        "Default pair": "",
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
         "Tonemap": "Not applied",
     }
-    assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
-        (
-            "Reference",
-            "SDR",
-            {
-                "Picture": "1920×1080 · full frame",
-                "Length": "100 frames · 0:00:04",
-                "Size": "1.00 MiB",
-            },
-        ),
-        (
-            "Comparison 1",
-            "HDR",
-            {
-                "Picture": "1920×1080 · full frame",
-                "Length": "100 frames · 0:00:04",
-                "Size": "2.00 GiB",
-            },
-        ),
-    ]
-
-
-def test_build_html_displays_overlay_default_mode_as_single(
-    report_payload: ReportPayload,
-) -> None:
-    payload: ReportPayload = {**report_payload, "default_mode": "overlay"}
-    html = build_html(payload)
-    info_modal = parse_info_modal(html)
-
-    assert script_payload(html)["default_mode"] == "overlay"
-    assert info_modal.general["Opens in"] == "Single"
+    # Source cards, the shared fps line, Opens in, and Default pair are filled
+    # at startup by the viewer's Inspector clip-card builder; Python emits
+    # only the containers (covered in the Node inspector harness).
+    assert info_modal.clips == []
 
 
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
@@ -661,25 +619,6 @@ def test_build_html_uses_payload_default_selection_for_clip_controls(
     assert left_selected == ["Encode control"]
     assert right_selected == ["Reference control"]
     assert active_selected == ["Encode control"]
-
-
-def test_build_html_labels_info_modal_roles_from_default_left_clip(
-    report_payload: ReportPayload,
-) -> None:
-    payload: ReportPayload = {
-        **report_payload,
-        "default_selection": {
-            "left_clip_index": 1,
-            "right_clip_index": 0,
-        },
-    }
-
-    info_modal = parse_info_modal(build_html(payload))
-
-    assert [clip.label for clip in info_modal.clips] == [
-        "Comparison 1",
-        "Reference",
-    ]
 
 
 def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:

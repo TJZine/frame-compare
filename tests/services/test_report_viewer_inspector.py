@@ -25,6 +25,14 @@ def test_inspector_harness_owns_formatting_and_inspector_policy() -> None:
         "clipCards": True,
         "sharedLine": True,
         "dvL5Provenance": True,
+        "bareClipRoles": True,
+        "rolesFromDefaultLeft": True,
+        "nonZeroLeftOffset": True,
+        "hdrSdrBadges": True,
+        "compactInfoCards": True,
+        "infoOpensInModeNames": True,
+        "infoDefaultPairNames": True,
+        "infoSharedFpsOnly": True,
     }
 
 

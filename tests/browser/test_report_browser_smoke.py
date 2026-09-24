@@ -586,7 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         document.documentElement.dataset.inspectorIdentityComplete = String(
             inspectorText.includes('Reference')
-            && inspectorText.includes('Comparison 1')
+            && inspectorText.includes('Comparison')
             && inspectorText.includes('shown left')
             && inspectorText.includes(__REFERENCE_FILENAME__)
             && inspectorText.includes(__REFERENCE_RELEASE__)

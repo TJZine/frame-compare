@@ -141,7 +141,8 @@ assert.equal(
 assert.equal(format.formatActivePicture(null, undefined), '');
 assert.equal(format.modeLabel('overlay'), 'Single');
 assert.equal(format.stableClipRole(0, 0), 'Reference');
-assert.equal(format.stableClipRole(2, 0), 'Comparison 2');
+assert.equal(format.stableClipRole(2, 0), 'Comparison');
+assert.equal(format.stableClipRole(0, 2), 'Comparison');
 
 function element() {
     const attributes = new Map();
@@ -328,7 +329,7 @@ const tableFrame = {
         { source_frame: 5, picture_type: 'P' },
     ],
 };
-function tableViewer(clips, frame, mode, position = 0) {
+function tableViewer(clips, frame, mode, position = 0, options = {}) {
     const dom = {
         inspector: element(),
         btnInspector: element(),
@@ -341,6 +342,10 @@ function tableViewer(clips, frame, mode, position = 0) {
         inspectorSourceFrames: element(),
         inspectorClipsShared: element(),
         inspectorClips: element(),
+        infoOpensIn: element(),
+        infoDefaultPair: element(),
+        infoClipsShared: element(),
+        infoClips: element(),
     };
     const tableStub = {
         state: {
@@ -351,14 +356,27 @@ function tableViewer(clips, frame, mode, position = 0) {
             rightClipIdx: 1,
             activeClipIdx: 0,
             activeCategoryKey: '__fc_all__',
-            data: { clips },
+            data: {
+                clips,
+                default_mode: options.defaultMode ?? 'slider',
+                default_selection: options.defaultSelection ?? { left_clip_index: 0, right_clip_index: 1 },
+            },
         },
         dom,
         humanizeCategory(category) { return category === 'random' ? 'Random' : category; },
-        visibleFrameIndexes() { return [0]; },
+        visibleFrameIndexes() { return options.visibleIndexes ?? [0]; },
         visibleFramePosition() { return position; },
-        frameFilterName() { return 'All'; },
-        referenceClipIndex() { return 0; },
+        frameFilterName() { return options.filterName ?? 'All'; },
+        referenceClipIndex() { return options.referenceIndex ?? 0; },
+        clipIndexOrDefault(value, fallback) {
+            const count = clips.length;
+            if (count <= 0) return 0;
+            const idx = parseInt(value);
+            const fallbackIdx = Number.isInteger(fallback) ? fallback : 0;
+            if (Number.isInteger(idx) && idx >= 0 && idx < count) return idx;
+            if (fallbackIdx >= 0 && fallbackIdx < count) return fallbackIdx;
+            return 0;
+        },
         gridView: { indexes() { return [0, 1]; } },
         currentFrame() { return frame; },
         setText(target, value) { if (target) target.textContent = String(value); },
@@ -468,6 +486,97 @@ function tableViewer(clips, frame, mode, position = 0) {
     assert.deepEqual(cardRows, ['Picture', 'Length', 'Size', 'Signal']);
 }
 
+{
+    const { tableStub } = tableViewer(mixedClips, tableFrame, 'slider');
+    const cards = tableStub.dom.inspectorClips.children;
+    assert.equal(cards[0].children[0].children[0].textContent, 'Reference · shown left');
+    assert.equal(cards[1].children[0].children[0].textContent, 'Comparison · shown right');
+    assert.equal(cards[0].children[0].children[1].textContent, 'DV HDR');
+    assert.equal(cards[1].children[0].children[1].textContent, 'SDR');
+}
+
+{
+    const { tableStub } = tableViewer(mixedClips, tableFrame, 'slider', 0, {
+        referenceIndex: 1,
+        defaultSelection: { left_clip_index: 1, right_clip_index: 0 },
+    });
+    const cards = tableStub.dom.inspectorClips.children;
+    assert.equal(cards[0].children[0].children[0].textContent, 'Comparison · shown left');
+    assert.equal(cards[1].children[0].children[0].textContent, 'Reference · shown right');
+}
+
+{
+    const offsetClip = {
+        ...tonemappedClip,
+        active_picture: { ...tonemappedClip.active_picture, x: 10 },
+    };
+    const hdrClip = { ...cardExplicitClip, signal: { is_hdr: true } };
+    const { tableStub } = tableViewer([offsetClip, hdrClip], tableFrame, 'slider');
+    const cards = tableStub.dom.inspectorClips.children;
+    const offsetRows = cards[0].children[3].children.map(row => ([
+        row.children[0].textContent,
+        row.children[1].textContent,
+    ]));
+    assert.equal(
+        offsetRows[0][1],
+        '3840×2160 · active 3840×1600, 0 px top, 10 px left · DV L5',
+    );
+    assert.equal(cards[1].children[0].children[1].textContent, 'HDR');
+}
+
+{
+    const { tableStub, tableInspector } = tableViewer(mixedClips, tableFrame, 'slider');
+    tableInspector.renderReportInformation();
+    const info = tableStub.dom;
+    assert.equal(info.infoOpensIn.textContent, 'Slider');
+    assert.deepEqual(
+        info.infoDefaultPair.children.map(line => line.textContent),
+        ['ATV WEB-DL · DV HDR10+ · Kitsune', 'My Explicit'],
+    );
+    assert.equal(info.infoClipsShared.hidden, true);
+    assert.equal(info.infoClipsShared.textContent, '');
+    const cards = info.infoClips.children;
+    assert.equal(cards.length, 2);
+    assert.equal(cards[0].className, 'rv-clip-meta-item');
+    assert.equal(cards[0].children[0].children[0].textContent, 'Reference');
+    assert.equal(cards[0].children[0].children[1].textContent, 'DV HDR');
+    assert.equal(cards[1].children[0].children[0].textContent, 'Comparison');
+    assert.equal(cards[1].children[0].children[1].textContent, 'SDR');
+    const cardRows = cards[0].children[3].children.map(row => ([
+        row.children[0].textContent,
+        row.children[1].textContent,
+    ]));
+    assert.deepEqual(cardRows, [
+        ['Picture', '3840×2160 · active 3840×1600, 0 px top · DV L5'],
+        ['Length', '143,487 frames · 1:39:44'],
+        ['Size', '17.00 GiB'],
+        ['FPS', '23.976 fps'],
+    ]);
+}
+
+{
+    const { tableStub, tableInspector } = tableViewer(mixedClips, tableFrame, 'slider', 0, {
+        defaultMode: 'overlay',
+        defaultSelection: { left_clip_index: 1, right_clip_index: 0 },
+    });
+    tableInspector.renderReportInformation();
+    assert.equal(tableStub.dom.infoOpensIn.textContent, 'Single');
+    assert.deepEqual(
+        tableStub.dom.infoDefaultPair.children.map(line => line.textContent),
+        ['My Explicit', 'ATV WEB-DL · DV HDR10+ · Kitsune'],
+    );
+}
+
+{
+    const { tableStub, tableInspector } = tableViewer(uniformClips, tableFrame, 'slider');
+    tableInspector.renderReportInformation();
+    assert.equal(tableStub.dom.infoClipsShared.textContent, 'All sources: 24 fps');
+    assert.equal(tableStub.dom.infoClipsShared.hidden, false);
+    const cardRows = tableStub.dom.infoClips.children[0].children[3].children
+        .map(row => row.children[0].textContent);
+    assert.deepEqual(cardRows, ['Picture', 'Length', 'Size']);
+}
+
 console.log(JSON.stringify({
     pureFormattingOwner: true,
     focusedInspectorOwner: renderingSummaryCalls === 2,
@@ -476,4 +585,12 @@ console.log(JSON.stringify({
     clipCards: true,
     sharedLine: true,
     dvL5Provenance: true,
+    bareClipRoles: true,
+    rolesFromDefaultLeft: true,
+    nonZeroLeftOffset: true,
+    hdrSdrBadges: true,
+    compactInfoCards: true,
+    infoOpensInModeNames: true,
+    infoDefaultPairNames: true,
+    infoSharedFpsOnly: true,
 }));

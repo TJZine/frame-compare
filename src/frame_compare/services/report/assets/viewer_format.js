@@ -196,6 +196,6 @@ const ViewerFormat = {
 
     stableClipRole(index, referenceIndex) {
         if (index === referenceIndex) return 'Reference';
-        return `Comparison ${index < referenceIndex ? index + 1 : index}`;
+        return 'Comparison';
     },
 };

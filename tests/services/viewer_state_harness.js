@@ -490,12 +490,12 @@ const summary = {};
         'Primary release identity — Exact.File.Name.mkv',
     );
     assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Reference');
-    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison 1');
+    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison');
     viewer.state.data.default_selection.left_clip_index = 2;
-    assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Comparison 1');
-    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison 2');
+    assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Comparison');
+    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison');
     assert.equal(format.stableClipRole(2, viewer.referenceClipIndex()), 'Reference');
-    assert.equal(format.stableClipRole(3, viewer.referenceClipIndex()), 'Comparison 3');
+    assert.equal(format.stableClipRole(3, viewer.referenceClipIndex()), 'Comparison');
     summary.clipDisplayProfiles = {
         requiredPayloadProfiles: true,
         stableInspectorRoles: true,
