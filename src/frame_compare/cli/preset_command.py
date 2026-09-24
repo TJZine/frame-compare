@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Protocol
 
@@ -13,8 +14,14 @@ from frame_compare.orchestration.preflight import (
     resolve_selected_config_path,
     validate_and_normalize_config_paths,
 )
+from frame_compare.utils.terminal_theme import glyphs_for_encoding
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn
+
+
+def _ok_glyph() -> str:
+    """Return the S3 ok glyph for the preset confirmation stream encoding."""
+    return glyphs_for_encoding(getattr(sys.stderr, "encoding", None)).ok
 
 
 class ListPresetsFn(Protocol):
@@ -80,7 +87,7 @@ def handle_preset_apply(
         updated = apply_preset(config_data, name, presets_dir=presets_dir)
         validate_and_normalize_config_paths(updated, resolved_root)
         write_config_to(config_path, updated)
-        typer.echo(f"Applied preset '{name}' to {config_path}", err=True)
+        typer.echo(f"{_ok_glyph()} Applied preset '{name}' to {config_path}", err=True)
     except FrameCompareError as error:
         raise typer.Exit(
             code=handle_error(
@@ -108,7 +115,7 @@ def handle_preset_save(
         config_data = load_config(config_path)
         validate_and_normalize_config_paths(config_data, resolved_root)
         saved_path = save_preset(name, config_data, presets_dir=presets_dir)
-        typer.echo(f"Saved preset '{name}' to {saved_path}", err=True)
+        typer.echo(f"{_ok_glyph()} Saved preset '{name}' to {saved_path}", err=True)
     except FrameCompareError as error:
         raise typer.Exit(
             code=handle_error(

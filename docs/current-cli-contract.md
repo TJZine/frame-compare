@@ -1936,19 +1936,22 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   the standard error payload is written to stdout.
 - Human-mode typed top-level failures honor the `NO_COLOR` environment variable
   and do not suggest unsupported `--verbose` usage.
-- Without `--json`, `doctor` writes a human-readable report to stdout.
-- Human output starts with one readiness outcome: `[FAIL] Runtime is not ready for
-  comparisons.`, `[WARN] Ready for local comparisons; optional or network checks
-  need attention.`, or `[OK] Runtime is ready for comparisons.` It then groups checks
-  under `Required`, `Optional`, and `Network and credentials`, in their existing
-  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSView`, and
-  `TMDB API key`.
-- Human check status markers are `[FAIL]` for critical failures, `[SKIP]` for
-  passed optional checks whose capability is unavailable, `[WARN]` for failed
-  noncritical checks, and `[OK]` for passed checks. Hints remain directly beneath
-  the affected check. There is no duplicate trailing readiness summary. These
-  presentation changes do not alter JSON fields, JSON status values, or exit-code
-  behavior.
+- Without `--json`, `doctor` writes a human-readable report to stdout. It groups
+  checks under `Required`, `Optional`, and `Network and credentials`, in their
+  existing check order, using human labels such as `VapourSynth`, `FFmpeg`,
+  `VSView`, and `TMDB API key`. Each check is one row: a status glyph, the check
+  name in a fixed-width column, and the message. A hint follows on the next row
+  in the message column as muted `hint` plus the hint text, folding inside that
+  column. Check messages and hint text are unchanged.
+- Human check status glyphs are `✗` for critical failures, `–` for passed
+  optional checks whose capability is unavailable, `!` for failed noncritical
+  checks, and `✓` for passed checks (ASCII fallback `x`, `-`, `!`, `+`).
+  Section names use the accent color.
+- The report ends with one readiness verdict: `✓ Runtime is ready for
+  comparisons.` or `✗ Runtime is not ready for comparisons.`, followed by muted
+  `{f} required check(s) failed · {w} warnings` with correct plurals and zero
+  parts omitted. These presentation changes do not alter JSON fields, JSON
+  status values, or exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,

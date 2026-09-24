@@ -1014,3 +1014,31 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   ~60 cols so 80/120 need no wrap; matches the `cli-execution.svg` block). No
   real VSView launch on this host (needs a display; covered by Docker/Windows
   proofs in CI). B7 not started.
+- Track B terminal B7 other commands (September 24, implementation session):
+  doctor grouped table + end verdict (`doctor_command.py` via S3
+  `human_console`/`glyphs_for_console`: accent section names, one row per
+  check with tier-coloured glyph + bold fixed-width name + message, hint on
+  the next row as muted `hint` + verbatim text with `overflow="fold"` in the
+  message column, verdict last as `✓/✗ Runtime is (not) ready for
+  comparisons.` + muted `{f} required check(s) failed · {w} warnings` with
+  correct plurals and zero parts omitted, SKIP counting toward warnings to
+  preserve the old needs-attention signal); wizard/history/preset `✓`
+  confirmations and `!` warnings with text, streams, JSON, and history
+  tab-rows unchanged (glyphs by stream encoding, bold-accent wizard
+  headings); errors keep the `✗ Error [FC-xxxx]` shape with identical-valued
+  S3 tokens and `highlight=False` at the single human print site. Two genuine
+  defects found and fixed: the message column defaulted to ellipsis overflow
+  and truncated long hint URLs (fixed with `overflow="fold"`), and a missing
+  `f` prefix left a literal `[{MUTED}]` tag raising MarkupError on the
+  Details path (caught by the 19 error-contract tests). Tests updated to the
+  plan format (whitespace-collapsed fragments, verdict-last ordering,
+  wrap-insensitive hint matching) plus new verdict-count and ASCII-fallback
+  cases; review follow-ups added wizard/preset glyph+stream assertions and
+  made the history glyph assertion encoding-robust. Review: conformance PASS
+  + 2 minors (both fixed), regression round stalled and replaced by a tight
+  re-review: PASS, no findings. Gate: pyright 0/0, ruff check + format,
+  lint-imports kept, tests/cli 311 passed. Rendered doctor at 80/120 columns
+  matches the `cli-doctor.svg` structure (accent headings, tier glyphs, folded
+  hints, verdict with counts); error render confirms tier colours and no
+  auto-highlight of URLs/paths. No real media run on this host. Docs:
+  `current-cli-contract.md` doctor section rewritten to the B7 format.

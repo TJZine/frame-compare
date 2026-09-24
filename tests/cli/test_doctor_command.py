@@ -9,6 +9,7 @@ from frame_compare.cli.errors import ExitCode, format_error_json
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport, run_doctor
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.terminal_theme import GLYPHS_ASCII
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 from .cli_helpers import runner
@@ -156,12 +157,14 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 3
-    assert result.stdout.splitlines()[0] == "[FAIL] Runtime is not ready for comparisons."
-    assert "[FAIL] VapourSynth — missing" in result.stdout
+    assert result.stderr == ""
+    normalized = " ".join(result.stdout.split())
+    assert "✗ VapourSynth missing" in normalized
+    assert normalized.endswith("✗ Runtime is not ready for comparisons. 1 required check failed")
     assert "Core runtime is not ready" not in result.stdout
 
 
-def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyPatch) -> None:
+def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatch) -> None:
     checks = [
         DoctorCheck(
             name="vapoursynth",
@@ -209,21 +212,22 @@ def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyP
     assert result.exit_code == 0
     assert result.stderr == ""
     lines = result.stdout.splitlines()
-    assert lines[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
     assert (
         lines.index("Required") < lines.index("Optional") < lines.index("Network and credentials")
     )
-    assert "[OK] VapourSynth — VapourSynth available" in result.stdout
-    assert "[WARN] FFmpeg — FFmpeg not found" in result.stdout
-    assert "[SKIP] VSView — VSView not installed" in result.stdout
-    assert "[OK] slow.pics — slow.pics reachable" in result.stdout
-    assert result.stdout.count("Ready for local comparisons") == 1
+    normalized = " ".join(result.stdout.split())
+    assert "\u2713 VapourSynth VapourSynth available" in normalized
+    assert "! FFmpeg FFmpeg not found" in normalized
+    assert "\u2013 VSView VSView not installed" in normalized
+    assert "hint Install VSView, then rerun doctor" in normalized
+    assert "\u2713 slow.pics slow.pics reachable" in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 2 warnings")
+    assert result.stdout.count("Runtime is ready for comparisons.") == 1
     assert "Core runtime" not in result.stdout
-    assert "\u2705" not in result.stdout
-    assert "\u274c" not in result.stdout
-    assert "\u26a0" not in result.stdout
+    assert "[WARN]" not in result.stdout
+    assert "[OK]" not in result.stdout
+    assert "[SKIP]" not in result.stdout
+    assert "[FAIL]" not in result.stdout
     assert "\x1b[" not in result.stdout
 
 
@@ -255,8 +259,11 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
     human_result = runner.invoke(app, ["doctor"])
     assert human_result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
     assert human_result.stderr == ""
-    assert human_result.stdout.splitlines()[0] == "[FAIL] Runtime is not ready for comparisons."
-    assert "[FAIL] FFmpeg — FFmpeg executables do not match" in human_result.stdout
+    normalized_human = " ".join(human_result.stdout.split())
+    assert "\u2717 FFmpeg FFmpeg executables do not match" in normalized_human
+    assert normalized_human.endswith(
+        "\u2717 Runtime is not ready for comparisons. 1 required check failed"
+    )
     assert "Core runtime is not ready" not in human_result.stdout
 
     json_result = runner.invoke(app, ["doctor", "--json"])
@@ -292,11 +299,10 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert result.stdout.splitlines()[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
-    assert "[WARN] slow.pics — offline" in result.stdout
-    assert "[FAIL] slow.pics" not in result.stdout
+    normalized = " ".join(result.stdout.split())
+    assert "! slow.pics offline" in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
+    assert "\u2717 slow.pics" not in normalized
     assert "Core runtime checks passed" not in result.stdout
 
 
@@ -332,9 +338,10 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[WARN] FFmpeg — FFmpeg not found in PATH" in result.stdout
-    assert "[FAIL] FFmpeg" not in result.stdout
-    assert result.stdout.splitlines()[0].startswith("[WARN] Ready for local comparisons;")
+    normalized = " ".join(result.stdout.split())
+    assert "! FFmpeg FFmpeg not found in PATH" in normalized
+    assert "\u2717 FFmpeg" not in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
 
 
 def test_doctor_human_marks_optional_vsview_unavailable_neutrally(
@@ -367,12 +374,11 @@ def test_doctor_human_marks_optional_vsview_unavailable_neutrally(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[SKIP] VSView — VSView not installed" in result.stdout
-    assert "[OK] VSView" not in result.stdout
-    assert "[FAIL] VSView" not in result.stdout
-    assert result.stdout.splitlines()[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
+    normalized = " ".join(result.stdout.split())
+    assert "\u2013 VSView VSView not installed" in normalized
+    assert "\u2713 VSView" not in normalized
+    assert "\u2717 VSView" not in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -412,12 +418,11 @@ def test_doctor_human_marks_optional_vsview_probe_failure_neutrally(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[SKIP] VSView — VSView availability probe failed" in result.stdout
-    assert "[OK] VSView" not in result.stdout
-    assert "[FAIL] VSView" not in result.stdout
-    assert result.stdout.splitlines()[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
+    normalized = " ".join(result.stdout.split())
+    assert "\u2013 VSView VSView availability probe failed" in normalized
+    assert "\u2713 VSView" not in normalized
+    assert "\u2717 VSView" not in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -457,9 +462,10 @@ def test_doctor_human_marks_available_optional_vsview_as_pass(
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[OK] VSView — VSView is available" in result.stdout
-    assert "[SKIP] VSView" not in result.stdout
-    assert result.stdout.splitlines()[0] == "[OK] Runtime is ready for comparisons."
+    normalized = " ".join(result.stdout.split())
+    assert "\u2713 VSView VSView is available for interactive alignment" in normalized
+    assert "\u2013 VSView" not in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons.")
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -505,7 +511,7 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     assert result.stderr == ""
     assert "ffmpeg[optional]" in result.stdout
     assert "missing [ffmpeg]" in result.stdout
-    assert "Hint: install [ffmpeg]" in result.stdout
+    assert "hint install [ffmpeg]" in " ".join(result.stdout.split())
     assert "\x1b[" not in result.stdout
 
 
@@ -544,9 +550,9 @@ def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
 
     assert human_result.exit_code == 0
     assert human_result.stderr == ""
-    normalized_human_output = " ".join(human_result.stdout.split())
+    compact_human_output = "".join(human_result.stdout.split())
     for hint in _AUDITED_HINTS:
-        assert f"Hint: {hint}" in normalized_human_output
+        assert "".join(f"hint {hint}".split()) in compact_human_output
 
     json_result = runner.invoke(app, ["doctor", "--json"])
 
@@ -554,6 +560,85 @@ def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
     assert json_result.stderr == ""
     payload = json.loads(json_result.stdout)
     assert [entry["install_hint"] for entry in payload["doctor"]["checks"]] == list(_AUDITED_HINTS)
+
+
+def test_doctor_verdict_combines_failure_and_warning_counts(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    checks = [
+        DoctorCheck(
+            name="vapoursynth",
+            category="core",
+            check_fn=lambda: CheckResult(passed=False, message="missing"),
+        ),
+        DoctorCheck(
+            name="lsmas",
+            category="core",
+            check_fn=lambda: CheckResult(passed=False, message="missing"),
+        ),
+        DoctorCheck(
+            name="ffmpeg",
+            category="optional",
+            check_fn=lambda: CheckResult(passed=False, message="FFmpeg not found in PATH"),
+        ),
+    ]
+    report = DoctorReport(
+        checks=[(check, check.check_fn()) for check in checks],
+        all_passed=False,
+        critical_failures=["vapoursynth", "lsmas"],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
+    assert result.stderr == ""
+    normalized = " ".join(result.stdout.split())
+    assert normalized.endswith(
+        "✗ Runtime is not ready for comparisons. 2 required checks failed · 1 warning"
+    )
+
+
+def test_doctor_ascii_fallback_uses_ascii_glyphs(monkeypatch: MonkeyPatch) -> None:
+    check = DoctorCheck(
+        name="vapoursynth",
+        category="core",
+        check_fn=lambda: CheckResult(passed=False, message="missing"),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=False,
+        critical_failures=["vapoursynth"],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+    monkeypatch.setattr(
+        "frame_compare.cli.doctor_command.glyphs_for_console",
+        lambda console: GLYPHS_ASCII,
+    )
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
+    assert result.stderr == ""
+    normalized = " ".join(result.stdout.split())
+    assert "x VapourSynth missing" in normalized
+    assert normalized.endswith("x Runtime is not ready for comparisons. 1 required check failed")
+    assert "✗" not in result.stdout
+    assert "✓" not in result.stdout
 
 
 def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: MonkeyPatch) -> None:

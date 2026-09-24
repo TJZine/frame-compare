@@ -274,7 +274,8 @@ def test_history_open_uses_exact_recorded_report(
 
     assert result.exit_code == 0
     assert opened == [report.resolve()]
-    assert result.stdout == "Opened report for run 'Exact Run'.\n"
+    assert result.stdout.endswith("Opened report for run 'Exact Run'.\n")
+    assert result.stdout[:2] in ("\u2713 ", "+ ")
 
 
 def test_history_open_uses_external_generated_root_and_canonical_report(

@@ -80,6 +80,10 @@ def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
         assert "Dark, bright, and motion coverage" not in result.stdout
         assert "file default disabled; environment may override at run time" in result.stdout
         assert "Configuration written" in result.stderr
+        written_line = next(
+            line for line in result.stderr.splitlines() if "Configuration written" in line
+        )
+        assert written_line[:2] in ("✓ ", "+ ")
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert payload == {
             "paths": {"input_dir": "comparison_videos", "generated_dir": "generated"},
@@ -862,6 +866,7 @@ def test_stale_reference_keep_warns_in_menu_and_review(
 
         assert result.exit_code == 0
         assert result.stdout.count("Current reference does not match the discovered files") == 2
+        assert "! Current reference does not match the discovered files" in result.stdout
         assert config_path.read_text(encoding="utf-8").endswith('reference = "gone.mkv"\n')
 
 
