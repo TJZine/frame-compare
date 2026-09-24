@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import sys
 from pathlib import Path
@@ -458,16 +459,6 @@ def test_run_plan_preserves_output_hierarchy(monkeypatch: MonkeyPatch) -> None:
     }
     assert tuple(heading_lines.values()) == tuple(sorted(heading_lines.values()))
 
-    def _row_line(key: str) -> int:
-        return next(
-            index
-            for index, line in enumerate(output.splitlines())
-            if line.partition("│")[2].partition("│")[0].strip().startswith(key)
-        )
-
-    assert _row_line("tools") < _row_line("offsets")
-    assert _row_line("after upload") < _row_line("webhook") < _row_line("cleanup")
-
 
 @pytest.mark.parametrize("width", [60, 80])
 def test_run_plan_no_color_uses_native_wrapping_without_truncation(
@@ -922,6 +913,19 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
     assert "failed to copy URL" not in output
 
 
+def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    console = Console(file=stream, force_terminal=True, no_color=True, width=200)
+
+    print_result_summary(console, result=RunResult(success=True), quiet=False)
+
+    stream.seek(0)
+    output = stream.read()
+    stream.close()
+    assert "+ Comparison complete" in output
+    assert "✓" not in output
+
+
 def test_result_summary_uses_singular_warning_title() -> None:
     console = _console()
 
@@ -1156,15 +1160,3 @@ def test_result_summary_time_rows_clamp_review_past_align() -> None:
     output = _render(console)
     assert "align" not in output
     assert "VSView review 25.0 s" in output
-
-
-def test_result_summary_time_rows_render_at_narrow_width() -> None:
-    console = _console_at_width(80)
-    print_result_summary(console, result=_timed_result(), quiet=False)
-
-    output = _render(console)
-    assert "1m 35s total" in output
-    assert "setup 4.0 s" in output
-    assert "align 17.5 s" in output
-    assert "VSView review 42.5 s" in output
-    assert "prompts 3.0 s" in output

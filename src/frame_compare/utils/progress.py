@@ -43,7 +43,6 @@ _DURABLE_STATUS_MARKERS = {
     ProgressPhaseStatus.FAILED: "[FAIL]",
 }
 _STATUS_STYLES = {
-    "[RUN]": "bright_cyan",
     "[OK]": "green",
     "[WAIT]": ACCENT,
     "[WARN]": "yellow",
@@ -120,13 +119,14 @@ class _TaskPresentationColumn(ProgressColumn):
 class _ActiveDescriptionColumn(ProgressColumn):
     """Render the active marker separately from the unstyled description."""
 
-    def __init__(self) -> None:
+    def __init__(self, running_glyph: str) -> None:
         super().__init__(table_column=Column(ratio=1, overflow="ellipsis", no_wrap=True))
+        self._running_glyph = running_glyph
 
     def render(self, task: Task) -> RenderableType:
         return Text.assemble(
             "  ",
-            Text("[RUN]", style=_STATUS_STYLES["[RUN]"]),
+            Text(self._running_glyph, style=ACCENT),
             " ",
             task.description,
         )
@@ -282,7 +282,10 @@ class RichProgressReporter:
         glyphs = glyphs_for_console(console)
         self._progress = Progress(
             _TaskPresentationColumn(
-                _ActiveDescriptionColumn(), "measurable", "simple", "indeterminate"
+                _ActiveDescriptionColumn(glyphs.running),
+                "measurable",
+                "simple",
+                "indeterminate",
             ),
             _TaskPresentationColumn(_UploadDescriptionColumn(glyphs.running), UPLOAD_PRESENTATION),
             _TaskPresentationColumn(

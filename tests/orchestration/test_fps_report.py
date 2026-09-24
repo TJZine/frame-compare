@@ -15,6 +15,7 @@ from frame_compare.orchestration.fps_report import (
     FpsReportClip,
     _format_file_size,
     _format_fps_value,
+    _length_difference_lines,
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
@@ -520,6 +521,62 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
     verbose_captured = capsys.readouterr()
     assert str(internal_path.resolve()) in verbose_captured.err
     assert str(external_path.resolve()) in verbose_captured.err
+
+
+def _length_clip(name: str, num_frames: int, fps: Fraction = Fraction(24, 1)) -> FpsReportClip:
+    return FpsReportClip(
+        path=Path(f"{name}.mkv"),
+        label=name,
+        width=1920,
+        height=1080,
+        num_frames=num_frames,
+        is_hdr=False,
+        source_fps=fps,
+        effective_fps=fps,
+        fps_divergent=False,
+        note=None,
+    )
+
+
+def test_length_difference_groups_shared_counts_and_marks_shorter() -> None:
+    clips = [
+        _length_clip("ref", 1000),
+        _length_clip("a", 536),
+        _length_clip("b", 536),
+    ]
+
+    (line,) = _length_difference_lines(clips, ["ref", "a", "b"])
+
+    assert "a and b" in line
+    assert "464 frames" in line
+    assert "(19.3 s)" in line
+    assert "shorter than ref" in line
+
+
+def test_length_difference_marks_longer_and_formats_minutes() -> None:
+    clips = [_length_clip("ref", 1000), _length_clip("a", 1000 + 144 * 24)]
+
+    (line,) = _length_difference_lines(clips, ["ref", "a"])
+
+    assert "3456 frames" in line
+    assert "(2m 24s)" in line
+    assert "longer than ref" in line
+
+
+def test_length_difference_joins_three_names_and_singular_frame() -> None:
+    clips = [
+        _length_clip("ref", 1000),
+        _length_clip("a", 999),
+        _length_clip("b", 999),
+        _length_clip("c", 999),
+    ]
+
+    (line,) = _length_difference_lines(clips, ["ref", "a", "b", "c"])
+
+    assert "a, b, and c" in line
+    assert "1 frame" in line
+    assert "1 frames" not in line
+    assert "(0.0 s)" in line
 
 
 def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(

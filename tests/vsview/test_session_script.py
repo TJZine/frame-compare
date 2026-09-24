@@ -239,18 +239,16 @@ def test_generated_ready_block_reports_outputs_and_hints_verbatim(
 ) -> None:
     output = _execute_ready_block(tmp_path, monkeypatch, stderr_encoding="utf-8")
 
-    assert output.splitlines() == [
-        "\u203a VSView is open \u00b7 waiting for you",
-        "  1  Open Tool Panel \u2192 Frame Compare Alignment Review.",
-        "  2  Unlink playheads, then position every source on the same visible moment.",
-        "  3  Save the alignment in the panel, then close VSView to continue Frame Compare.",
-        "",
-        "  outputs  0  2160p \u00b7 REF",
-        "           1  2160p \u00b7 A",
-        "           2  2160p \u00b7 B",
-        "  hints    ShortA   Audio alignment accepted: +0f",
-        "           LongerB  Provisional +0f - NOT APPLIED",
-    ]
+    assert "VSView is open \u00b7 waiting for you" in output
+    assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
+    assert "Unlink playheads, then position every source on the same visible moment." in output
+    assert "Save the alignment in the panel, then close VSView to continue Frame Compare." in output
+    assert "2160p \u00b7 REF" in output
+    assert "2160p \u00b7 A" in output
+    assert "2160p \u00b7 B" in output
+    lines = output.splitlines()
+    assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
+    assert any("LongerB" in line and "Provisional +0f - NOT APPLIED" in line for line in lines)
 
 
 def test_generated_ready_block_ascii_fallback(

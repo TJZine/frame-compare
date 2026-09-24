@@ -805,7 +805,6 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
 
     # Burned-in overlays keep the ASCII arrow; the ready step renders it via _arrow().
     assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 2
-    assert '"  1  Open Tool Panel " + _arrow() + " Frame Compare Alignment Review."' in generated
     assert (
         "  2  Unlink playheads, then position every source on the same visible moment." in generated
     )

@@ -8,10 +8,20 @@ render paths (not copies of the literals).
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from frame_compare.services.alignment import align_clips_from_request as _align_async
+from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_vsview import format_vsview_review_message
+from frame_compare.services.types import AlignmentConfig
+from tests.services.alignment_request_test_support import alignment_request
+from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def _alignment_key(reference: Path, comparison: Path) -> str:
@@ -74,10 +84,82 @@ def test_vsview_review_message_omits_kept_clause_when_zero() -> None:
     assert format_vsview_review_message(2, 0) == "Accepted 2 confirmed pairs."
 
 
-def test_opening_vsview_review_lines_frozen_verbatim() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    source = (repo_root / "src" / "frame_compare" / "services" / "alignment.py").read_text()
-    assert '"Opening VSView for manual review. The candidate is a hint, not a "' in source
-    assert '"confirmed alignment."' in source
-    assert '"Opening VSView for manual review. No automatic candidate is available; "' in source
-    assert '"align the sources manually."' in source
+@pytest.mark.parametrize(
+    ("has_candidate", "expected"),
+    [
+        (
+            True,
+            "Opening VSView for manual review. The candidate is a hint, not a confirmed alignment.",
+        ),
+        (
+            False,
+            "Opening VSView for manual review. No automatic candidate is available; "
+            "align the sources manually.",
+        ),
+    ],
+)
+def test_opening_vsview_review_lines_frozen_verbatim(
+    has_candidate: bool,
+    expected: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True, use_vsview=True)
+    attempt = audio_attempt()
+    if not has_candidate:
+        attempt = replace(
+            attempt,
+            windows=tuple(
+                replace(window, terminal_category="insufficient_signal")
+                for window in attempt.windows
+            ),
+            decision=replace(
+                attempt.decision,
+                state="unavailable",
+                candidate=None,
+                primary_reason="no_usable_windows",
+                raw_correlated_windows=0,
+                consensus_windows=0,
+                consensus_ratio=None,
+                aggregate_score=None,
+                minimum_peak_ratio=None,
+            ),
+        )
+    consensus = AlignmentConsensus(
+        None,
+        0.99,
+        False,
+        "insufficient_consensus",
+        5,
+        4,
+        0.8,
+        2.0,
+        window_records=attempt.windows,
+        decision=attempt.decision,
+        audio_attempt=attempt,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: consensus,
+    )
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    asyncio.run(
+        _align_async(
+            request,
+            config,
+            reference_fps=Fraction(24),
+        )
+    )
+
+    err = capsys.readouterr().err
+    assert expected in err

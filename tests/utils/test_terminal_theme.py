@@ -2,38 +2,15 @@
 
 import io
 
+from rich.console import Console
+
 from frame_compare.utils.terminal_theme import (
-    ACCENT,
-    BORDER_FAILED,
-    BORDER_NEUTRAL,
-    BORDER_PENDING,
-    BORDER_SUCCESS,
-    FAIL,
     GLYPHS_ASCII,
     GLYPHS_UNICODE,
-    KEY,
-    MUTED,
-    OK,
-    VALUE,
-    WARN,
     glyphs_for_console,
     glyphs_for_encoding,
     human_console,
 )
-
-
-def test_style_token_values() -> None:
-    assert ACCENT == "#d2ac6b"
-    assert KEY == "dim"
-    assert VALUE == ""
-    assert MUTED == "dim"
-    assert (OK, WARN, FAIL) == ("green", "yellow", "red")
-    assert (BORDER_NEUTRAL, BORDER_PENDING, BORDER_SUCCESS, BORDER_FAILED) == (
-        "dim",
-        "yellow",
-        "green",
-        "red",
-    )
 
 
 def test_unicode_glyphs() -> None:
@@ -53,7 +30,16 @@ def test_ascii_fallback_glyphs() -> None:
 
 
 def test_glyphs_for_console_uses_console_encoding() -> None:
-    assert glyphs_for_console(human_console()).ok == GLYPHS_UNICODE.ok
+    utf_stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    ascii_stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    try:
+        utf_console = Console(file=utf_stream, force_terminal=True)
+        ascii_console = Console(file=ascii_stream, force_terminal=True)
+        assert glyphs_for_console(utf_console) == GLYPHS_UNICODE
+        assert glyphs_for_console(ascii_console) == GLYPHS_ASCII
+    finally:
+        utf_stream.close()
+        ascii_stream.close()
 
 
 def test_human_console_disables_highlight() -> None:

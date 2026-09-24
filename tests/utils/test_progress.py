@@ -88,10 +88,10 @@ def test_rich_progress_reporter_marks_active_work_without_color(
 
     reporter.start_phase("PLAN", 1)
     try:
-        assert "[RUN] PLAN" in output.getvalue()
+        assert "… PLAN" in output.getvalue()
 
         reporter.set_description("Selecting frames")
-        assert "[RUN] Selecting frames" in output.getvalue()
+        assert "… Selecting frames" in output.getvalue()
     finally:
         reporter.complete_phase()
 
@@ -104,8 +104,8 @@ def test_rich_progress_active_marker_style_does_not_leak_to_description(
     reporter.start_phase("ALIGN | Interactive verification", 1)
     try:
         rendered = output.getvalue()
-        assert "\x1b[96m[RUN]\x1b[0m ALIGN | Interactive verification" in rendered
-        assert "\x1b[96m[RUN] ALIGN" not in rendered
+        assert "\x1b[37m…\x1b[0m ALIGN | Interactive verification" in rendered
+        assert "[RUN]" not in rendered
     finally:
         reporter.complete_phase(retain=False)
 
@@ -202,7 +202,7 @@ def test_rich_progress_reporter_indents_live_work(monkeypatch: pytest.MonkeyPatc
 
     reporter.start_phase("PLAN", 1)
     try:
-        assert re.search(r" {2,}\[RUN\] PLAN", output.getvalue()) is not None
+        assert re.search(r" {2,}… PLAN", output.getvalue()) is not None
     finally:
         reporter.complete_phase()
 
@@ -342,18 +342,18 @@ def test_rich_progress_reporter_uses_distinct_task_presentations(
     task = reporter._progress.tasks[0]  # noqa: SLF001
 
     assert task.fields["presentation"] == "measurable"
-    assert "  [RUN] Rendering" in measurable_output
+    assert "  … Rendering" in measurable_output
     assert "10/30" in measurable_output
     assert "ETA" not in measurable_output
     assert "%" not in measurable_output
-    assert not re.search(r"[-\\|/]\s+\[RUN\]", measurable_output)
+    assert not re.search(r"[-\\|/]\s+…", measurable_output)
     reporter.complete_phase()
     output.seek(0)
     output.truncate()
     reporter.start_indeterminate("Loading alignment offsets")
     indeterminate_output = output.getvalue()
 
-    assert re.search(r"\[RUN\] Loading alignment offsets\s+-", indeterminate_output)
+    assert re.search(r"… Loading alignment offsets\s+-", indeterminate_output)
     assert "ETA" not in indeterminate_output
     assert not re.search(r"\d+/\d+", indeterminate_output)
     assert "━" not in indeterminate_output
@@ -364,7 +364,7 @@ def test_rich_progress_reporter_uses_distinct_task_presentations(
     reporter.start_phase("PLAN", 1)
     simple_output = output.getvalue()
 
-    assert "[RUN] PLAN" in simple_output
+    assert "… PLAN" in simple_output
     assert "ETA" not in simple_output
     assert "0/1" not in simple_output
     assert "━" not in simple_output

@@ -14,8 +14,10 @@ from rich.table import Table
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.terminal_theme import (
     ACCENT,
+    BORDER_FAILED,
     BORDER_NEUTRAL,
     BORDER_PENDING,
+    BORDER_SUCCESS,
     FAIL,
     KEY,
     OK,
@@ -37,9 +39,7 @@ if TYPE_CHECKING:
 
 STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
-STYLE_URL = "bright_cyan"
 STYLE_WARN = "yellow"
-STYLE_HEADER = "bold cyan"
 
 type WarningPresentationSeverity = Literal["warning", "skipped"]
 
@@ -99,11 +99,10 @@ def _display_path(
     *,
     root: Path | None,
     verbose: bool = False,
-    artifact: bool = False,
 ) -> str:
     """Render a complete path relative to the workspace when it is contained."""
     display = format_display_path(path, root=root)
-    rendered = _styled_value(display) if artifact else _styled_path(display)
+    rendered = _styled_path(display)
     absolute = _absolute_display_path(path, root)
     if verbose and root is not None and display != str(absolute):
         rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
@@ -531,17 +530,17 @@ def print_result_summary(
     glyphs = glyphs_for_console(console)
     if not result.success:
         title = f"[bold {FAIL}]{glyphs.failed} Comparison failed[/]"
-        border_style = FAIL
+        border_style = BORDER_FAILED
     elif warnings or row_warning_count:
         warning_count = row_warning_count + len(warnings)
         noun = "warning" if warning_count == 1 else "warnings"
         title = (
             f"[bold {WARN}]{glyphs.warning} Comparison complete[/] [dim]· {warning_count} {noun}[/]"
         )
-        border_style = WARN
+        border_style = BORDER_PENDING
     else:
         title = f"[bold {OK}]{glyphs.ok} Comparison complete[/]"
-        border_style = OK
+        border_style = BORDER_SUCCESS
     table = _group_table()
 
     # ── slow.pics ──
