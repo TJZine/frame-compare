@@ -814,3 +814,16 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   form and UI face (B1), no `#n` in the lens accessible description (B1), Report
   Information mode names (B3), terminal frame-rate line uses the A2 format and
   unknown size is omitted (B4). Handoff setup and baseline rules tightened.
+- Track B viewer implementation (September 23): B1 source identity (`f61e45bc`),
+  B2 proximity fade (`8d270540`), B3 Inspector and Report Information
+  (`104f55cc`), each reviewed and committed separately. Track-level review then
+  added four fixup commits: info-modal roles from the default left clip
+  (`2b35e8c0`), Default-pair stacking (`6ca16483`), grid UI-face type, range-word
+  punctuation, and drag-docs correction (`e4f3d0c2`), and stale smoke-probe
+  expectations (`91aed0eb`). Browser matrix in real Chrome at 1440 and 375 px
+  against all four viewer webp references: chrome matches; open deviations are
+  numbered `Comparison N` roles vs bare-mock roles and the unreachable fps
+  rational `(24000/1001)` (payload carries float only). Full gate green
+  (pyright, ruff, bandit, lint-imports, full pytest exit 0 incl. 17 browser
+  smoke proofs, strict docs build). Track B Final report handed back for review;
+  B4 not started.
