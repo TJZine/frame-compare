@@ -1042,3 +1042,14 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   hints, verdict with counts); error render confirms tier colours and no
   auto-highlight of URLs/paths. No real media run on this host. Docs:
   `current-cli-contract.md` doctor section rewritten to the B7 format.
+- Track B terminal review fixup (September 24, implementation session):
+  track-conformance review returned TRACK CONFORMANT with 2 minors; M1
+  (defined-but-unused S3 `BORDER_*` tokens) accepted and fixed by adopting
+  `BORDER_NEUTRAL`/`BORDER_PENDING` at the six identical-valued
+  `border_style` sites (`cli/output.py`, `fps_report.py`,
+  `selection_report.py`, `alignment_report.py`, `services/alignment.py`);
+  M2 (literal colour values in `test_style_token_values`) rejected with
+  evidence (S3 mandates the exact values; same category as the required
+  frozen-string exact-match tests). Track regression review (tight
+  re-review after the wide round stalled): PASS, no findings. Separate
+  fixup commit; full gate re-run green.

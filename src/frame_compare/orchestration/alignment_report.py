@@ -14,7 +14,7 @@ from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import report_console_width
 from frame_compare.services.release_identity import format_release_descriptor
 from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
-from frame_compare.utils.terminal_theme import ACCENT, human_console
+from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
 
 _MAX_SELECTED_FRAMES = 8
 
@@ -253,7 +253,7 @@ def _render_human_alignment_report(
                 verbose=verbose,
             ),
             title=f"[bold {ACCENT}]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
-            border_style="dim",
+            border_style=BORDER_NEUTRAL,
         )
     )
 

@@ -14,6 +14,8 @@ from rich.table import Table
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.terminal_theme import (
     ACCENT,
+    BORDER_NEUTRAL,
+    BORDER_PENDING,
     FAIL,
     KEY,
     OK,
@@ -469,7 +471,7 @@ def print_at_a_glance(
             table,
             title=f"[bold {ACCENT}]Run plan[/]",
             title_align="left",
-            border_style="dim",
+            border_style=BORDER_NEUTRAL,
         )
     )
 
@@ -648,7 +650,7 @@ def print_result_summary(
             Panel(
                 warning_text,
                 title=f"[{STYLE_WARN}]Warnings[/]",
-                border_style="yellow",
+                border_style=BORDER_PENDING,
                 expand=False,
             )
         )

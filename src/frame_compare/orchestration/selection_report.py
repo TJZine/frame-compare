@@ -11,7 +11,7 @@ from rich.table import Table
 
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.orchestration.presentation import report_console_width
-from frame_compare.utils.terminal_theme import ACCENT, human_console
+from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +127,7 @@ def _render_human_selection_report(
         Panel(
             table,
             title=f"[bold {ACCENT}]Final Selection[/] [dim]After Alignment[/]",
-            border_style="dim",
+            border_style=BORDER_NEUTRAL,
         )
     )
 

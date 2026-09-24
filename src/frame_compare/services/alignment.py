@@ -53,6 +53,8 @@ from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal_theme import (
     ACCENT,
+    BORDER_NEUTRAL,
+    BORDER_PENDING,
     MUTED,
     OK,
     VALUE,
@@ -1096,7 +1098,7 @@ def _render_alignment_evidence_panel(
             Panel(
                 table,
                 title=title,
-                border_style="yellow" if actionable else "dim",
+                border_style=BORDER_PENDING if actionable else BORDER_NEUTRAL,
             ),
             (0, 0, 0, 2),
         ),

@@ -27,6 +27,7 @@ from frame_compare.services.release_identity import (
 )
 from frame_compare.utils.terminal_theme import (
     ACCENT,
+    BORDER_NEUTRAL,
     OK,
     WARN,
     glyphs_for_console,
@@ -458,7 +459,7 @@ def _render_human_fps_report(
         Panel(
             table,
             title=title,
-            border_style="dim",
+            border_style=BORDER_NEUTRAL,
         )
     )
 
