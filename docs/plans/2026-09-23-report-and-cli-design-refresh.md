@@ -848,3 +848,37 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   rational. Plan corrected: the burned-in-text invariant (burned-in text is the
   clip label; `phase_render`'s descriptor is the terminal render-progress label,
   now assigned to B4).
+- Track B viewer corrections C1–C11 (September 24, implementation session):
+  three commits on `dev/v0.6.0-design-refresh`, each after plan-conformance
+  review (plus regression review for commit 1) with findings fixed or recorded:
+  `2eb059e5` roles + single clip-card renderer (C1, C2; bare
+  `Reference`/`Comparison`, Report Information cards/`Opens in`/`Default pair`
+  filled at startup by the Inspector builder, compact cards omit placement,
+  Signal, and Presentation); `5f26e5e9` lens, typography, layout (C3, C4, C8,
+  C9, C10; measured-footprint lens clamp, `--font-mono` value cells, offset
+  flex gap, source-table padding/nowrap, singular `1 frame`); `d851a795`
+  test cleanups (C5, C6, C7, C11; dead fps rational/`clipOverlayLabel`/CSS
+  assertions removed, `frameFilterName` reuse + filtered-Position case,
+  separator test renamed with the progress-label assertion dropped for B4).
+  Gate: pyright 0/0, ruff check + format, bandit 0 medium+, lint-imports kept,
+  full pytest exit 0 (environment skips only; exact counts unconfirmed — summary
+  line not captured, re-check at handoff), browser smoke 17 passed / 0 skipped,
+  API docs check + strict docs build clean. Reviewed by eye in real Chrome at
+  1440 px on a generated three-source report (info cards/rows, mono values,
+  `Offset: none`, Frame table, Diff lens with caption parked at the stage
+  bottom, fully inside). Docs: guides clip-card wording, architecture lens
+  clamp. Payload untouched. Known notes: header meta still reads `1 frames`
+  for 1-frame reports (out of B3 scope); empty-payload info message nests a
+  `div` in the list (DOM-constructed, degenerate path). B4 not started.
+- Review of corrections C1–C11 (September 24, controller + `reviewer` subagent):
+  accepted after follow-ups. Verified all eleven in code and by eye at 1440 px
+  (bare roles, viewer-built Report Information cards, `1 frame · 3 sources`,
+  mono values, `Offset: none`, Frame-table padding/nowrap, bottom-parked Diff
+  lens inside the stage). Gate green: pyright 0/0, ruff, bandit, lint-imports,
+  strict docs, pytest 3492 passed / 86 environment skips (8 fewer than before,
+  from the tests these corrections deleted). Follow-ups in handoff Prompt 2c:
+  lens size applied before placement (real clipping bug after a size change or
+  on first render), restore the Offset live-region space, remove unused
+  parameters, one default-pair rule, empty-list semantics, test-helper and
+  class-name cleanups, a singular Content test, architecture wording, and
+  stage-label meta no-wrap.

@@ -20,6 +20,7 @@ maintainer/controller review before the next track starts.
 | 1b. Track A test-scope correction | Track A tests only | Track A commits | Correction report (joins the Checkpoint A review) |
 | 2. Track B viewer | B1 → B2 → B3 | branch tip after Checkpoint A review and fixes | Checkpoint B-viewer report |
 | 2b. Track B viewer corrections | review corrections C1–C11 | Track B viewer commits | Corrections report (joins the Checkpoint B-viewer review) |
+| 2c. Track B viewer follow-ups | review follow-ups F1–F9 | 2b commits | Follow-up report (closes the Checkpoint B-viewer review) |
 | 3. Track B terminal | B4 → B5 → B6 → B7 | branch tip after Checkpoint B-viewer review and fixes | Checkpoint B-terminal report |
 
 Paste one prompt per session. Every prompt requires the session to read the
@@ -156,7 +157,9 @@ findings the same way; commit fixes as `fix(<scope>): <track> review corrections
 - Focused tests while editing; each unit's **Proof** list from the plan.
 - Before the track report, run the full gate from the plan's Verification section
   and record every command with exit code, test counts, and every skip with its
-  reason. A skipped browser suite is not browser proof.
+  reason. A skipped browser suite is not browser proof. To see pytest's totals
+  line, run `uv run --no-sync pytest -o addopts="" -q -rs --strict-markers` (the
+  repository's addopts already contain `-q`, and a second `-q` hides the summary).
 - Keep screenshots and scratch output untracked (outside the repository or in an
   ignored path). Do not commit media.
 
@@ -539,6 +542,101 @@ After the commits:
   review checks, risks, and files changed.
 
 Stop after the report. Do not start B4.
+```
+
+## Prompt 2c — Track B viewer follow-ups
+
+Give this after the review of the 2b corrections. Line numbers are as of
+`d851a795`; confirm each location before editing.
+
+```text
+You are applying the final Checkpoint B-viewer follow-ups for the Frame Compare
+design refresh plan. Corrections C1–C11 are committed. B4 must not start in this
+session.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules" (Test scope, Adversarial review, Verification, Final
+report). Read Prompt 2b in the same file for the corrections these follow up.
+
+Before any edit: record `git rev-parse HEAD`, `git status`, and a pyright baseline
+(expected 0/0). Environment command if needed:
+`uv sync --group dev --group docs --extra vsview --frozen`.
+
+Apply exactly these follow-ups and nothing else:
+
+F1 Lens size applied before placement (C3 bug). In lens.js render() (~lines
+   633-640), lensPosition(size) runs before `--lens-size` and `dataset.size` are
+   set, so after a size change and on the first render after load the lens is
+   placed using its previous box and can be clipped at the stage edge. Move the
+   `--lens-size` and `dataset.size` lines above the lensPosition(size) call. Add a
+   harness case: with the lens parked at the bottom-right, switch from medium to
+   large and assert the placement uses the large footprint (lens fully inside the
+   stage).
+
+F2 Offset status text (C8 over-reach). Restore the leading space in the value
+   text (viewport.js ~line 663 and renderer.py ~line 528) so the live-region text
+   and screen readers get "Offset: none"; keep the CSS gap and both spans. Revert
+   the harness expectations that were changed to "Offset:none"
+   (tests/services/viewer_state_harness.js ~lines 540, 1109-1121, 1219-1228).
+
+F3 Unused parameters. Remove `left_clip_index` and `right_clip_index` from
+   `_render_info_modal` in renderer.py (~lines 367-371) and the call-site
+   arguments. Leave their other uses (toolbar options) unchanged.
+
+F4 One default-pair rule. Add `defaultPairIndexes()` to the viewer returning
+   `[left, right]` using the rule already in `applyDefaultSelection`
+   (viewer.js ~lines 978-981), make applyDefaultSelection use it, and make
+   inspector.js renderReportInformation (~lines 272-276) call it instead of
+   repeating the rule. In tests/services/inspector_harness.js (~lines 371-379),
+   replace the copied clipIndexOrDefault logic with a stub returning fixed indexes;
+   cover the rule itself once in the viewer-state harness (default, out-of-range,
+   single-clip).
+
+F5 Empty Report Information list. When there are no clips, do not put a div
+   directly inside the <ol> (inspector.js ~lines 294-298, renderer.py ~line 393):
+   hide the list and show the existing "No clips in payload." message beside it.
+   Add one harness case with `clips: []`.
+
+F6 Test-helper cleanup. Delete the now-unused clip parsing in
+   tests/services/report_viewer_contracts.py (ParsedClipMetadata and the
+   clip-heading parsing in InfoModalParser, ~lines 27-39 and 160-229) and the
+   `info_modal.clips == []` assertion (test_report_renderer_markup.py ~line 361).
+
+F7 Test scope. Remove the class-name assertions:
+   tests/services/inspector_harness.js ~line 549
+   (`cards[0].className === 'rv-clip-meta-item'`) and
+   tests/services/test_report_renderer_markup.py ~lines 68 and 71
+   (`"rv-clip-meta-list" in classes`, `"rv-inspector-shared" in classes`). The
+   data-info-* hook assertions stay.
+
+F8 Singular Content row. Add a parametrized renderer test for Report Information
+   Content with frame_count 1 ("1 frame") and 2 ("2 frames").
+
+F9 Docs and a small layout fix.
+   - docs/current-architecture.md Inspector section (~lines 822-845): state that
+     the viewer's Inspector builds the Report Information source cards, Opens in,
+     and Default pair at startup, and renderer.py emits only their containers.
+   - docs/current-architecture.md ~line 829: replace "burned-in screenshot text
+     ... keep the | default" with the plan's corrected invariant (slow.pics image
+     names keep `|`; burned-in screenshot text is the clip label and does not use
+     release descriptors).
+   - Stage-label meta: keep each value on one line (no line break inside
+     "17.49 GiB" or "3840×1606"; for example white-space: nowrap on the resolution
+     and size parts). Review item; no test.
+
+Commit as one commit after the Common rules adversarial review (plan-conformance
+reviewer given Prompt 2b, this prompt, and the staged diff):
+`fix(report): Checkpoint B-viewer follow-ups`.
+
+Then run the full gate from the plan's Verification section (use the pytest
+command from Common rules > Verification so the totals line prints), check F1,
+F2, and the stage-label wrap by eye at 1440 px with the Inspector open, append a
+short entry to the plan's Execution record, commit it, and report using the Final
+report format with a coverage row for each of F1–F9. Stop after the report; do not
+start B4.
 ```
 
 ## Prompt 3 — Track B terminal
