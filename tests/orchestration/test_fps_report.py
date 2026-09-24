@@ -331,6 +331,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
         json_output=True,
         quiet=False,
         rich_output=False,
+        diagnostics=["Analysis source: Reference | selected by fastest-source policy"],
     )
 
     captured = capsys.readouterr()
@@ -340,7 +341,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     event, stage, clips, diagnostics = log_calls[0]
     assert event == "fps_report"
     assert stage == "after_load_sources"
-    assert diagnostics == []
+    assert diagnostics == ["Analysis source: Reference | selected by fastest-source policy"]
     assert len(clips) == 1
     assert {
         "path",
@@ -406,7 +407,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
         rich_output=True,
         no_color=True,
         diagnostics=[
-            "analysis source: Comparison 1 (configured)",
+            "Analysis source: Comparison 1 | selected by configured policy",
             "FPS target: 24000/1001 (majority)",
         ],
     )
@@ -429,6 +430,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "1200 frames" in captured.err
     assert "FPS target: 24000/1001 (majority)" in captured.err
     assert "analysis source" in captured.err
+    assert "(configured)" in captured.err
+    assert "selected by configured policy" not in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
     assert "[dim]" not in captured.err

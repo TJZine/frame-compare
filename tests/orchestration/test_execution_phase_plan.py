@@ -592,6 +592,6 @@ async def test_align_phase_records_review_split_duration_text(tmp_path: Path) ->
     await phase.execute(_context(tmp_path))
 
     assert timings["align"] == pytest.approx(60.0)
-    assert phase.duration_text == "17.5 s + 42.5 s review"
+    assert phase.duration_text == "17s + 42s review"
     assert phase.success_summary == "1 pair confirmed in VSView"
     assert state.vsview_review_seconds == pytest.approx(42.5)

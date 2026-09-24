@@ -10,6 +10,7 @@ from rich.progress import Progress
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
+    UPLOAD_PRESENTATION,
     LogProgressReporter,
     NullProgressReporter,
     PlainProgressReporter,
@@ -22,18 +23,20 @@ from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 def test_align_phase_duration_text_splits_machine_and_review() -> None:
     assert (
         align_phase_duration_text(align_seconds=674.0, review_seconds=634.0)
-        == "40.0 s + 10m 34s review"
+        == "40s + 10m 34s review"
     )
 
 
 def test_align_phase_duration_text_clamps_negative_machine() -> None:
-    assert (
-        align_phase_duration_text(align_seconds=10.0, review_seconds=42.5) == "0 ms + 42.5 s review"
-    )
+    assert align_phase_duration_text(align_seconds=10.0, review_seconds=42.5) == "0s + 42s review"
 
 
 def test_align_phase_duration_text_absent_without_review() -> None:
     assert align_phase_duration_text(align_seconds=12.0, review_seconds=0.0) is None
+
+
+def test_align_phase_duration_text_truncates_sub_second_parts() -> None:
+    assert align_phase_duration_text(align_seconds=0.4, review_seconds=0.4) == "0s + 0s review"
 
 
 def _captured_rich_reporter(
@@ -163,6 +166,21 @@ def test_rich_durable_line_supports_duration_override(
     rendered = output.getvalue()
     assert "2 pairs confirmed in VSView" in rendered
     assert "1m 20s + 10m 34s review" in rendered
+
+
+def test_rich_upload_presentation_shows_short_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, _output = _captured_rich_reporter(monkeypatch)
+
+    reporter.start_phase(
+        "Uploading My Comparison to slow.pics", 4, presentation=UPLOAD_PRESENTATION
+    )
+
+    task = reporter._progress.tasks[0]  # noqa: SLF001
+    assert task.description == "Upload"
+    assert task.fields["presentation"] == UPLOAD_PRESENTATION
+    reporter.complete_phase(retain=False)
 
 
 def test_rich_durable_skip_line_keeps_summary_verbatim(

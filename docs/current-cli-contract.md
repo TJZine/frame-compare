@@ -438,8 +438,10 @@ unchanged.
   output omits repeated paths; `--verbose` retains the detailed rows and full
   absolute paths. JSON-mode FPS diagnostics retain their existing structured
   stderr event and do not add fields to the successful stdout payload; the
-  event carries the new Sources wording (e.g. `analysis source {name}
-  (fastest to decode)`) because B4 replaces the diagnostic text itself.
+  event carries the original diagnostic wording (e.g. `Analysis source:
+  {role} | selected by fastest-source policy`); only the Rich rendering shows
+  the Sources short-name line (`analysis source  {short name} (fastest to
+  decode)` or `(configured)`).
 - Material `Frame Alignment` output puts comparison, offset, source, trim, and
   warning evidence before verbose provenance details. Verbose mode also retains
   canonical labels, row-zero source frames, selected aligned frames, and absolute

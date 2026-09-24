@@ -54,6 +54,7 @@ from frame_compare.orchestration.types import (
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.progress import align_phase_duration_text
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -101,6 +102,10 @@ def _create_timed_phase(
                 phase.success_summary = summary
             if timing_key == "align" and isinstance(output, AlignPhaseOutput):
                 align_output = output
+                if output.review_unresolved:
+                    if phase is None:
+                        raise RuntimeError("timed phase was not initialized")
+                    phase.success_status = ProgressPhaseStatus.WARNED
             if retain_if is not None:
                 if phase is None:
                     raise RuntimeError("timed phase was not initialized")

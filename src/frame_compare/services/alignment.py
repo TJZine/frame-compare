@@ -1546,6 +1546,8 @@ async def align_clips_from_request(
             only_keys=diagnostic_keys,
             confirmed_frame_pairs=review.confirmed_frame_pairs,
         )
+        if review_summary is not None and not review_summary.review_ran:
+            review_summary.review_unresolved = True
 
     if config.cache_results and shared_write_is_service_eligible(
         request=request,

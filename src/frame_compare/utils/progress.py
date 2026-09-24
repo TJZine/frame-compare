@@ -29,7 +29,6 @@ from frame_compare.utils.terminal_theme import (
     FAIL,
     OK,
     WARN,
-    format_duration,
     glyphs_for_console,
     human_console,
 )
@@ -87,7 +86,7 @@ def align_phase_duration_text(*, align_seconds: float, review_seconds: float) ->
     if review_seconds <= 0.0:
         return None
     machine_seconds = max(0.0, align_seconds - review_seconds)
-    return f"{format_duration(machine_seconds)} + {format_duration(review_seconds)} review"
+    return f"{_format_elapsed(machine_seconds)} + {_format_elapsed(review_seconds)} review"
 
 
 __all__ = [
@@ -327,7 +326,10 @@ class RichProgressReporter:
         resolved = presentation
         if resolved is None:
             resolved = "measurable" if total > 1 else "simple"
-        self._start_task(name, total=total, presentation=resolved)
+        # Only the Rich reporter shortens the upload phase: every other
+        # reporter keeps the caller-supplied phase name.
+        label = "Upload" if resolved == UPLOAD_PRESENTATION else name
+        self._start_task(label, total=total, presentation=resolved)
 
     def start_indeterminate(self, name: str) -> None:
         """Start a new phase with spinner-only activity."""

@@ -483,7 +483,7 @@ async def publish_to_slowpics(
 
     if progress is not None:
         progress.start_phase(
-            "Upload",
+            f"Uploading {collection_metadata.title} to slow.pics",
             total=len(files),
             presentation=UPLOAD_PRESENTATION,
         )

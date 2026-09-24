@@ -98,14 +98,10 @@ def start_phase_progress(
         reporter.start_phase(name, total=total)
         return
     if isinstance(reporter, RichProgressReporter):
-        # Keep caller-supplied detail on Rich (e.g. "SKIP  Disabled" renders
-        # "Skip  Disabled"): the detail follows the double-space join used by
-        # callers, and is carried verbatim when the label part is standard.
-        label, separator, detail = display_label.partition("  ")
-        if separator and label != phase_display_label(name):
-            rich_label = " ".join(word.capitalize() for word in display_label.split(" "))
-        else:
-            rich_label = rich_phase_label(name) + (f"  {detail}" if separator else "")
+        # Rich carries skip detail only as the completion summary (lower-cased
+        # by the caller), never in the label, so the bare title-case label is
+        # used here for every phase.
+        rich_label = rich_phase_label(name)
         if name == "align":
             reporter.start_phase(rich_label, total=1)
             return

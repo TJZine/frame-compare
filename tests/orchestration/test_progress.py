@@ -183,8 +183,8 @@ def test_interactive_alignment_uses_plain_activity_without_discarding_log_progre
     log_start_phase.assert_called_once_with("align", total=3)
 
 
-def test_rich_phase_label_keeps_skip_detail() -> None:
-    """Rich live labels keep caller detail (title-cased) instead of dropping it."""
+def test_rich_phase_label_drops_skip_detail() -> None:
+    """Rich live labels use the bare title-case label; detail rides the summary."""
     reporter = RichProgressReporter(no_color=True)
     with patch.object(
         reporter,
@@ -197,7 +197,7 @@ def test_rich_phase_label_keeps_skip_detail() -> None:
             display_label="PUBLISH  Disabled",
             total=1,
         )
-    start_phase.assert_called_once_with("Publish  Disabled", total=1)
+    start_phase.assert_called_once_with("Publish", total=1)
     reporter.complete_phase()
 
 

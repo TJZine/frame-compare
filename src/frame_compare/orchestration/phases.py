@@ -53,6 +53,9 @@ class Phase:
     skip_detail: PhaseSkipDetail | None = None
     success_summary: str | None = None
     duration_text: str | None = None
+    # Overrides the completion status only on the success path (for example an
+    # Align phase whose review never ran completes as WARNED, not COMPLETED).
+    success_status: ProgressPhaseStatus | None = None
 
     @property
     def progress_label(self) -> str:
@@ -91,9 +94,15 @@ async def execute_phases(
                 total=phase.progress_total,
             )
             reporter.set_description("Skipped")
+            summary = skip_detail if isinstance(skip_detail, str) else None
+            if summary:
+                # The Rich durable line appends the summary after the phase
+                # label, so carry the detail there with a lower-case first
+                # letter. Plain and log reporters ignore summaries.
+                summary = summary[:1].lower() + summary[1:]
             reporter.complete_phase(
                 ProgressPhaseStatus.SKIPPED,
-                summary=skip_detail if isinstance(skip_detail, str) else None,
+                summary=summary,
             )
             continue
 
@@ -133,15 +142,21 @@ async def execute_phases(
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)
         finally:
+            resolved_status = phase_progress_status
+            if (
+                resolved_status == ProgressPhaseStatus.COMPLETED
+                and phase.success_status is not None
+            ):
+                resolved_status = phase.success_status
             if phase.retain_on_success is None:
                 reporter.complete_phase(
-                    phase_progress_status,
+                    resolved_status,
                     summary=phase.success_summary,
                     duration_text=phase.duration_text,
                 )
             else:
                 reporter.complete_phase(
-                    phase_progress_status,
+                    resolved_status,
                     retain=phase.retain_on_success,
                     summary=phase.success_summary,
                     duration_text=phase.duration_text,

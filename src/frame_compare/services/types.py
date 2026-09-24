@@ -778,6 +778,9 @@ class AlignmentReviewSummary:
     pairs_confirmed: int = 0
     comparisons_kept: int = 0
     review_seconds: float = 0.0
+    # Set when review was pending but VSView never ran, so the durable Align
+    # line warns instead of showing success.
+    review_unresolved: bool = False
 
 
 @dataclass(frozen=True)

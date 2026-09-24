@@ -439,7 +439,9 @@ enable = false
 
     assert result.success is True
     assert result.cache_hit is True
-    assert diagnostics_by_stage["after_load_sources"] == ["analysis source: analysis (configured)"]
+    assert diagnostics_by_stage["after_load_sources"] == [
+        "Analysis source: Comparison 1 | selected by configured policy"
+    ]
 
 
 def test_execute_run_from_cache_only_rejects_full_frame_cache_for_active_rect_source(

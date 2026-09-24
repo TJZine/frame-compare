@@ -87,6 +87,9 @@ class AlignPhaseOutput:
     success_summary: str | None = None
     # Measured VSView review wait for the human summary (memory only).
     review_seconds: float = 0.0
+    # True when review was pending but VSView never ran: the durable Align
+    # line keeps the pre-review summary and warns instead of succeeding.
+    review_unresolved: bool = False
 
 
 @dataclass(frozen=True)

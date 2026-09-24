@@ -30,11 +30,34 @@ from frame_compare.utils.terminal_theme import (
     BORDER_NEUTRAL,
     OK,
     WARN,
+    format_duration,
     glyphs_for_console,
     human_console,
 )
 
-_ANALYSIS_SOURCE_PREFIX = "analysis source: "
+_ANALYSIS_SOURCE_PREFIX = "Analysis source: "
+
+_ANALYSIS_SOURCE_POLICIES = {
+    "fastest-source policy": "fastest to decode",
+    "configured policy": "configured",
+}
+
+
+def _analysis_source_rich_value(diagnostic: str, *, short_names: Sequence[str]) -> str:
+    """Translate the stored analysis-source diagnostic to its Rich line.
+
+    The stored text keeps the original log/JSON wording
+    ("Analysis source: {role} | selected by ... policy"); only the Rich
+    rendering shows the plan's short-name line.
+    """
+    value = diagnostic[len(_ANALYSIS_SOURCE_PREFIX) :]
+    role, separator, policy = value.partition(" | selected by ")
+    if separator and policy in _ANALYSIS_SOURCE_POLICIES:
+        for index in range(len(short_names)):
+            if clip_role(index) == role:
+                return f"{short_names[index]} ({_ANALYSIS_SOURCE_POLICIES[policy]})"
+    return value
+
 
 log = structlog.get_logger()
 
@@ -109,19 +132,6 @@ def _format_runtime(num_frames: int, fps: Fraction) -> str:
     if hours:
         return f"{hours}:{minutes:02d}:{seconds:02d}"
     return f"{minutes}:{seconds:02d}"
-
-
-def _format_gap_duration(frames: int, fps: float) -> str:
-    """Format a frame-count gap in seconds with one decimal below 60 s."""
-    seconds = frames / fps if fps > 0 else 0.0
-    if seconds < 60.0:
-        return f"{seconds:.1f} s"
-    whole_seconds = int(seconds)
-    minutes, remaining_seconds = divmod(whole_seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m {remaining_seconds:02d}s"
-    hours, remaining_minutes = divmod(minutes, 60)
-    return f"{hours}h {remaining_minutes:02d}m {remaining_seconds:02d}s"
 
 
 def _join_names(names: Sequence[str]) -> str:
@@ -302,7 +312,8 @@ def _length_difference_lines(
         verb = "is" if len(names) == 1 else "are"
         gap_text = ""
         if reference_fps > 0:
-            gap_text = f" ({_format_gap_duration(frames, reference_fps)})"
+            seconds = frames / reference_fps
+            gap_text = f" ({seconds:.1f} s)" if seconds < 1.0 else f" ({format_duration(seconds)})"
         lines.append(
             f"[{WARN}]![/] Lengths differ: {escape(_join_names(names))} {verb} "
             f"[bold]{frames} {unit}{gap_text}[/] "
@@ -337,7 +348,7 @@ def _render_load_sources_overview(
         for line in length_lines:
             table.add_row("", line)
         for diagnostic in analysis_lines:
-            value = diagnostic[len(_ANALYSIS_SOURCE_PREFIX) :]
+            value = _analysis_source_rich_value(diagnostic, short_names=short_names)
             short, _, reason = value.partition(" (")
             if reason:
                 table.add_row(
