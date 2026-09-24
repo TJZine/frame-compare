@@ -221,7 +221,7 @@ def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatc
     assert "\u2013 VSView VSView not installed" in normalized
     assert "hint Install VSView, then rerun doctor" in normalized
     assert "\u2713 slow.pics slow.pics reachable" in normalized
-    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 2 warnings")
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
     assert result.stdout.count("Runtime is ready for comparisons.") == 1
     assert "Core runtime" not in result.stdout
     assert "[WARN]" not in result.stdout
@@ -378,7 +378,7 @@ def test_doctor_human_marks_optional_vsview_unavailable_neutrally(
     assert "\u2013 VSView VSView not installed" in normalized
     assert "\u2713 VSView" not in normalized
     assert "\u2717 VSView" not in normalized
-    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons.")
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
@@ -422,7 +422,7 @@ def test_doctor_human_marks_optional_vsview_probe_failure_neutrally(
     assert "\u2013 VSView VSView availability probe failed" in normalized
     assert "\u2713 VSView" not in normalized
     assert "\u2717 VSView" not in normalized
-    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons.")
 
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0

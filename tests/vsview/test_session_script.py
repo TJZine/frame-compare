@@ -58,7 +58,7 @@ def test_write_vsview_session_script_removes_reserved_path_after_write_failure(
     assert list(sessions_dir.iterdir()) == []
 
 
-def _exec_generated_helpers(*, stderr: io.StringIO) -> dict[str, Any]:
+def _exec_generated_helpers(*, stderr: io.TextIOBase) -> dict[str, Any]:
     namespace: dict[str, Any] = {"sys": SimpleNamespace(stdout=io.StringIO(), stderr=stderr)}
     namespace["os"] = os
     exec(
@@ -119,12 +119,14 @@ def test_generated_glyph_and_arrow_ascii_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
-    helpers = _exec_generated_helpers(stderr=_AsciiStderr())
+    ascii_stderr = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    helpers = _exec_generated_helpers(stderr=ascii_stderr)
 
     assert helpers["_glyph"]("waiting") == ">"
     assert helpers["_glyph"]("failed") == "x"
     assert helpers["_glyph"]("warning") == "!"
     assert helpers["_arrow"]() == "->"
+    ascii_stderr.close()
 
     helpers = _exec_generated_helpers(stderr=_StubStderr())
 

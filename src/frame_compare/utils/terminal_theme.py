@@ -54,6 +54,11 @@ def glyphs_for_console(console: Console) -> GlyphSet:
     return glyphs_for_encoding(console.encoding)
 
 
+def glyphs_for_stream(stream: object) -> GlyphSet:
+    """Return the S3 glyph set for a text stream's encoding."""
+    return glyphs_for_encoding(getattr(stream, "encoding", None))
+
+
 def human_console(**kwargs: Any) -> Console:
     """Build a Rich console for human output with highlighting disabled."""
     kwargs.setdefault("highlight", False)
@@ -95,5 +100,6 @@ __all__ = [
     "format_duration",
     "glyphs_for_console",
     "glyphs_for_encoding",
+    "glyphs_for_stream",
     "human_console",
 ]

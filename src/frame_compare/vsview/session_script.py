@@ -131,6 +131,9 @@ def _build_helpers_section() -> str:
         f"INDEX_CONSTRUCTION_FAILURE_MARKER = {marker}\n\n"
         + '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
+_ORIGINAL_STDERR_ENCODING = getattr(sys.stderr, "encoding", "") or ""
+
+
 def _reconfigure_text_stream(stream):
     reconfigure = getattr(stream, "reconfigure", None)
     if reconfigure is None:
@@ -155,18 +158,14 @@ def _ansi_enabled():
 
 
 def _use_ascii():
-    encoding = getattr(sys.stderr, "encoding", None) or ""
-    return not str(encoding).lower().startswith("utf")
+    return not str(_ORIGINAL_STDERR_ENCODING).lower().startswith("utf")
 
 
 def _glyph(kind):
     table = {
-        "ok": ("\\u2713", "+"),
         "warning": ("!", "!"),
         "failed": ("\\u2717", "x"),
         "waiting": ("\\u203a", ">"),
-        "skipped": ("\\u2013", "-"),
-        "running": ("\\u2026", "~"),
     }
     glyph, fallback = table[kind]
     return fallback if _use_ascii() else glyph
@@ -196,15 +195,15 @@ def _header(text):
 
 
 def _key(text):
-    return _style(text, "34")
+    return _style(text, "2")
 
 
 def _value(text):
-    return _style(text, "97")
+    return text
 
 
 def _hint(text):
-    return _style(text, "33")
+    return _style(text, "2")
 
 
 def _status(marker):

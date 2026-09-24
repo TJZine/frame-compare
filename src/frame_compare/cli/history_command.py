@@ -23,16 +23,9 @@ from frame_compare.services.run_result_record import (
     list_history,
     resolve_history_report,
 )
-from frame_compare.utils.terminal_theme import glyphs_for_encoding
+from frame_compare.utils.terminal_theme import glyphs_for_stream
 
 from .cli_helpers import HandleErrorFn
-
-
-def _stream_glyph(kind: str, *, err: bool) -> str:
-    """Return the S3 status glyph for the history stream encoding."""
-    stream = sys.stderr if err else sys.stdout
-    glyphs = glyphs_for_encoding(getattr(stream, "encoding", None))
-    return getattr(glyphs, kind)
 
 
 def _resolve_history_roots(root: Path, config_path: Path) -> tuple[Path, Path]:
@@ -88,7 +81,7 @@ def handle_history_list(
         for entry in entries:
             if entry.warning is not None:
                 typer.echo(
-                    f"{_stream_glyph('warning', err=True)} Warning: {entry.name}: {entry.warning}",
+                    f"{glyphs_for_stream(sys.stderr).warning} Warning: {entry.name}: {entry.warning}",
                     err=True,
                 )
     except FrameCompareError as error:
@@ -122,7 +115,7 @@ def handle_history_open(
                 "The report could not be opened in a browser.",
                 "Check the default browser and open the report manually.",
             )
-        typer.echo(f"{_stream_glyph('ok', err=False)} Opened report for run '{run_name}'.")
+        typer.echo(f"{glyphs_for_stream(sys.stdout).ok} Opened report for run '{run_name}'.")
     except FrameCompareError as error:
         raise typer.Exit(
             code=handle_error(error, no_color=no_color, verbose=False, verbose_hint=None)

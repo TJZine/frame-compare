@@ -1952,8 +1952,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - The report ends with one readiness verdict: `✓ Runtime is ready for
   comparisons.` or `✗ Runtime is not ready for comparisons.`, followed by muted
   `{f} required check(s) failed · {w} warnings` with correct plurals and zero
-  parts omitted. These presentation changes do not alter JSON fields, JSON
-  status values, or exit-code behavior.
+  parts omitted. Only `!` rows count as warnings; `–` skipped rows do not.
+  These presentation changes do not alter JSON fields, JSON status values, or
+  exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,

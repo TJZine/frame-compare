@@ -137,6 +137,10 @@ def print_doctor_report(report: DoctorReport, *, no_color: bool = False) -> None
         for category, heading in _DOCTOR_GROUPS
     ]
     started = False
+    name_width = max(
+        [len(_doctor_display_label(check.name)) for check, _ in report.checks],
+        default=0,
+    )
     for heading, grouped_checks in rendered_groups:
         if not grouped_checks:
             continue
@@ -146,7 +150,6 @@ def print_doctor_report(report: DoctorReport, *, no_color: bool = False) -> None
         console.print(f"[bold {ACCENT}]{escape(heading)}[/]")
         table = Table(box=None, show_header=False, padding=(0, 1, 0, 2), show_edge=False)
         table.add_column("status", width=1)
-        name_width = max(len(_doctor_display_label(check.name)) for check, _ in grouped_checks)
         table.add_column("check", style="bold", width=name_width)
         table.add_column("message", overflow="fold")
         for check, result in grouped_checks:
@@ -175,7 +178,7 @@ def print_doctor_report(report: DoctorReport, *, no_color: bool = False) -> None
             available=result.available,
             critical_failures=critical_failures,
         )
-        in ("WARN", "SKIP")
+        == "WARN"
         for check, result in report.checks
     )
     if critical_failures:

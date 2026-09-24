@@ -36,7 +36,7 @@ from frame_compare.orchestration.source_selection import (
 )
 from frame_compare.utils.terminal_theme import (
     ACCENT,
-    glyphs_for_encoding,
+    glyphs_for_stream,
     human_console,
 )
 
@@ -59,12 +59,6 @@ from .wizard_policy import (
 
 _CANCELED = "Canceled; configuration unchanged."
 _DISCOVERY_PREVIEW_LIMIT = 8
-
-
-def _stream_glyphs(*, err: bool):
-    """Return the S3 glyph set for the wizard stream encoding."""
-    stream = sys.stderr if err else sys.stdout
-    return glyphs_for_encoding(getattr(stream, "encoding", None))
 
 
 def _print_heading(text: str, *, err: bool, no_color: bool) -> None:
@@ -213,7 +207,7 @@ def handle_wizard(
             return
 
         write_payload(selected_path, candidate)
-        ok = _stream_glyphs(err=True).ok
+        ok = glyphs_for_stream(sys.stderr).ok
         typer.echo(f"{ok} Configuration written: {selected_path}", err=True)
         _print_next_steps(
             root=root, config_path=selected_path, is_windows=is_windows, no_color=no_color
@@ -310,7 +304,7 @@ def _prompt_reference(
     for index, (label, _) in enumerate(options, start=1):
         typer.echo(f"  {index}. {label}")
     if stale_current:
-        typer.echo(f"{_stream_glyphs(err=False).warning} {_STALE_REFERENCE_WARNING}")
+        typer.echo(f"{glyphs_for_stream(sys.stdout).warning} {_STALE_REFERENCE_WARNING}")
 
     selected = _prompt_menu_index(prompt, options_count=len(options), default=1)
     _, selector = options[selected - 1]
@@ -451,7 +445,7 @@ def _print_review(
     if goal.metric_scan == "quality":
         typer.echo(f"  {VISUAL_COVERAGE_SCAN_NOTE}")
     if stale_reference:
-        typer.echo(f"  {_stream_glyphs(err=False).warning} {_STALE_REFERENCE_WARNING}")
+        typer.echo(f"  {glyphs_for_stream(sys.stdout).warning} {_STALE_REFERENCE_WARNING}")
 
     _print_heading("Privacy", err=False, no_color=no_color)
     typer.echo("  Secret values are never displayed.")
