@@ -555,13 +555,67 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     assert "2 sources" in output
     assert "cache hit" in output
     assert output.index("report.html") < output.index("screenshots")
-    assert "24 files" in output
+    assert "files" not in output
     assert "slow.pics" in output
     assert "shortcut" in output
     relative_report = Path("generated") / "run-1" / "report.html"
     absolute_report = (root / relative_report).resolve()
     assert str(relative_report) in output
     assert str(absolute_report) not in output
+
+
+def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
+    screenshots = tmp_path / "screenshots"
+    screenshots.mkdir()
+    for name in ("0-0.png", "0-1.png", "0-2.png"):
+        (screenshots / name).write_bytes(b"\x89PNG\r\n\x1a\n")
+    (screenshots / "notes.txt").write_text("not an image")
+
+    console = _console()
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            screenshot_dir=screenshots,
+            frame_count=12,
+            clips_processed=2,
+        ),
+        quiet=False,
+    )
+
+    assert "3 files" in _render(console)
+
+    missing_console = _console()
+    print_result_summary(
+        missing_console,
+        result=RunResult(
+            success=True,
+            screenshot_dir=screenshots / "absent",
+            frame_count=12,
+            clips_processed=2,
+        ),
+        quiet=False,
+    )
+
+    assert "files" not in _render(missing_console)
+
+
+def test_result_summary_resolves_relative_artifact_link_against_root(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    root = tmp_path / "workspace"
+    monkeypatch.chdir(tmp_path)
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(success=True, report_path=Path("generated") / "report.html"),
+        quiet=False,
+        root=root,
+    )
+
+    expected = (root / "generated" / "report.html").as_uri()
+    assert f'href="{expected}"' in console.export_html()
 
 
 def test_verbose_run_plan_path_presentation_adds_absolute_detail(
@@ -749,7 +803,7 @@ def test_result_summary_prints_report_unavailable_slowpics_as_skipped() -> None:
     assert "[SKIP]" not in output
 
 
-def test_result_summary_groups_warning_sources_with_severity_detail_and_action() -> None:
+def test_result_summary_shows_followup_failure_on_row_not_in_panel() -> None:
     console = _console()
 
     print_result_summary(
@@ -773,15 +827,149 @@ def test_result_summary_groups_warning_sources_with_severity_detail_and_action()
     )
 
     output = _render(console)
+    assert "Comparison complete · 4 warnings" in output
+    assert "URL not copied" in output
+    assert "action: clipboard" not in output
+    assert "failed to copy URL" not in output
     assert "alignment" in output
     assert "slow.pics" in output
     assert output.count("alignment") == 1
-    assert "[WARN] align: encode_b low confidence; left unapplied and untrimmed" in output
-    assert "[WARN] align: encode_c low confidence; left unapplied and untrimmed" in output
-    assert "[SKIP] slow.pics upload skipped" in output
+    assert "! align: encode_b low confidence; left unapplied and untrimmed" in output
+    assert "! align: encode_c low confidence; left unapplied and untrimmed" in output
+    assert "– slow.pics upload skipped" in output
     assert output.count("because report confirmation was unavailable") == 1
-    assert "action: clipboard" in output
+    assert "[WARN]" not in output
+    assert "[SKIP]" not in output
     assert output.index("encode_c") < output.index("slow.pics upload skipped")
+
+
+def test_result_summary_uploaded_with_all_followups_succeeding() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            report_path=_workspace_path("report.html"),
+        ),
+        quiet=False,
+        post_upload_actions=(
+            PostUploadActionResult(kind="clipboard", success=True),
+            PostUploadActionResult(kind="browser", success=True),
+            PostUploadActionResult(
+                kind="shortcut",
+                success=True,
+                path=_workspace_path("Example.url"),
+            ),
+            PostUploadActionResult(kind="webhook", success=True),
+        ),
+    )
+
+    output = _render(console)
+    assert "Comparison complete" in output
+    assert "warnings" not in output
+    assert "Warnings" not in output
+    assert "URL copied" in output
+    assert "opened in browser" in output
+    assert "shortcut" in output
+    assert "delivered" in output
+
+
+def test_result_summary_uploaded_with_each_followup_failing() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+        ),
+        quiet=False,
+        post_upload_actions=(
+            PostUploadActionResult(
+                kind="clipboard",
+                success=False,
+                warning="slow.pics clipboard: failed to copy URL",
+            ),
+            PostUploadActionResult(
+                kind="browser",
+                success=False,
+                warning="slow.pics browser: failed to open URL: no browser accepted the request",
+            ),
+            PostUploadActionResult(
+                kind="shortcut",
+                success=False,
+                warning="slow.pics shortcut: failed to write URL shortcut Example.url: boom",
+            ),
+            PostUploadActionResult(
+                kind="webhook",
+                success=False,
+                warning="slow.pics webhook: delivery failed",
+            ),
+        ),
+    )
+
+    output = _render(console)
+    assert "Comparison complete · 4 warnings" in output
+    assert "URL not copied" in output
+    assert "browser didn't open" in output
+    assert "no browser accepted the request" in output
+    assert "not created" in output
+    assert "failed to write URL shortcut Example.url: boom" in output
+    assert "delivery failed" in output
+    assert "Warnings" not in output
+    assert "failed to copy URL" not in output
+
+
+def test_result_summary_uses_singular_warning_title() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(success=True, warnings=["metadata skipped"]),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "Comparison complete · 1 warning" in output
+    assert "Warnings" in output
+
+
+def test_result_summary_upload_failure_shows_failed_title() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=False,
+            warnings=["slow.pics upload failed: connection reset"],
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "Comparison failed" in output
+    assert "slow.pics" in output
+
+
+def test_result_summary_automatic_upload_without_confirmation() -> None:
+    console = _console()
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+        ),
+        quiet=False,
+    )
+
+    output = _render(console)
+    assert "Comparison complete" in output
+    assert "https://slow.pics/c/example" in output
+    assert "not uploaded" not in output
+    assert "Warnings" not in output
 
 
 def test_result_summary_preserves_literal_brackets_in_dynamic_values() -> None:

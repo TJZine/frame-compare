@@ -38,16 +38,10 @@ if TYPE_CHECKING:
 STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
 STYLE_URL = "bright_cyan"
-STYLE_SUCCESS = "bold green"
 STYLE_WARN = "yellow"
-STYLE_SKIPPED = "yellow"
-STYLE_FAILURE = "bold red"
 STYLE_HEADER = "bold cyan"
-STYLE_SUBHEADER = "bold bright_cyan"
-STYLE_METRIC_KEY = "dim"
 
 type WarningPresentationSeverity = Literal["warning", "skipped"]
-type StatusPresentation = Literal["OK", "WARN", "SKIP", "FAIL"]
 
 
 @dataclass(frozen=True)
@@ -77,16 +71,6 @@ def _styled_unit(value: str) -> str:
 
 def _styled_path(value: str) -> str:
     return f"[{STYLE_PATH}]{escape(value)}[/]"
-
-
-def _status_token(status: StatusPresentation) -> str:
-    styles: dict[StatusPresentation, str] = {
-        "OK": STYLE_SUCCESS,
-        "WARN": STYLE_WARN,
-        "SKIP": STYLE_SKIPPED,
-        "FAIL": STYLE_FAILURE,
-    }
-    return f"[{styles[status]}][{status}][/]"
 
 
 def _absolute_display_path(path: Path, root: Path | None) -> Path:
@@ -538,16 +522,21 @@ def print_result_summary(
         *result.post_upload_actions,
         *post_upload_actions,
     )
-    warnings = _warning_presentations(result.warnings, all_post_upload_actions)
+    row_warning_count = _row_warning_count(all_post_upload_actions)
+    warnings = [
+        presentation
+        for presentation in _warning_presentations(result.warnings, all_post_upload_actions)
+        if presentation.action not in _ROW_WARNING_ACTIONS
+    ]
     glyphs = glyphs_for_console(console)
     if not result.success:
         title = f"[bold {FAIL}]{glyphs.failed} Comparison failed[/]"
         border_style = FAIL
-    elif warnings:
-        warning_count = len(warnings)
+    elif warnings or row_warning_count:
+        warning_count = row_warning_count + len(warnings)
+        noun = "warning" if warning_count == 1 else "warnings"
         title = (
-            f"[bold {WARN}]{glyphs.warning} Comparison complete[/] "
-            f"[dim]· {warning_count} warnings[/]"
+            f"[bold {WARN}]{glyphs.warning} Comparison complete[/] [dim]· {warning_count} {noun}[/]"
         )
         border_style = WARN
     else:
@@ -577,12 +566,17 @@ def print_result_summary(
 
     # ── Shortcut ──
     for action in all_post_upload_actions:
-        if action.kind == "shortcut" and action.success and action.path is not None:
+        if action.kind != "shortcut":
+            continue
+        if action.success and action.path is not None:
             _add_kv(
                 table,
                 "  shortcut",
                 _artifact_link(action.path, root=root, verbose=verbose),
             )
+            break
+        if not action.success:
+            _add_kv(table, "  shortcut", _shortcut_failure_value(action, glyphs=glyphs))
             break
 
     # ── Webhook ──
@@ -600,8 +594,8 @@ def print_result_summary(
         _add_kv(table, "report", _artifact_link(result.report_path, root=root, verbose=verbose))
     if result.screenshot_dir is not None:
         screenshots_value = _artifact_link(result.screenshot_dir, root=root, verbose=verbose)
-        screenshot_total = result.frame_count * result.clips_processed
-        if screenshot_total > 0:
+        screenshot_total = _count_screenshot_files(result.screenshot_dir)
+        if screenshot_total is not None:
             unit = "file" if screenshot_total == 1 else "files"
             screenshots_value += f"  [dim]{screenshot_total} {unit}[/]"
         _add_kv(table, "screenshots", screenshots_value)
@@ -643,9 +637,9 @@ def print_result_summary(
         max_lines = len(warnings) if verbose else 8
         visible = warnings[:max_lines]
         remaining = len(warnings) - len(visible)
-        warning_text = _format_warning_panel_text(visible)
+        warning_text = _format_warning_panel_text(visible, glyphs=glyphs)
         if remaining > 0:
-            warning_text += _format_hidden_warning_counts(warnings[max_lines:])
+            warning_text += _format_hidden_warning_counts(warnings[max_lines:], glyphs=glyphs)
         console.print(
             Panel(
                 warning_text,
@@ -656,11 +650,22 @@ def print_result_summary(
         )
 
 
+def _count_screenshot_files(screenshot_dir: Path) -> int | None:
+    """Count the image files in the screenshots directory, if it exists."""
+    try:
+        entries = list(screenshot_dir.iterdir())
+    except OSError:
+        return None
+    return sum(1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png")
+
+
 def _artifact_link(path: Path, *, root: Path | None, verbose: bool = False) -> str:
     """Render an artifact path as a Rich hyperlink with a workspace-relative label."""
     display = format_display_path(path, root=root)
     absolute = _absolute_display_path(path, root)
-    rendered = f"[link={path.resolve().as_uri()}]{escape(display)}[/link]"
+    if not absolute.is_absolute():
+        absolute = path.resolve()
+    rendered = f"[link={absolute.as_uri()}]{escape(display)}[/link]"
     if verbose and root is not None and display != str(absolute):
         rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
     return rendered
@@ -675,6 +680,38 @@ def _slowpics_link(url: str) -> str:
 _BROWSER_FAILURE_PREFIX = "slow.pics browser: failed to open URL"
 
 
+_ROW_WARNING_ACTIONS = ("clipboard", "browser", "shortcut", "webhook")
+
+_SHORTCUT_FAILURE_PREFIX = "slow.pics shortcut:"
+
+
+def _row_warning_count(actions: PostUploadActionResults) -> int:
+    """Count follow-up failures shown on their own summary row."""
+    count = sum(
+        1 for action in actions if not action.success and action.kind in ("clipboard", "browser")
+    )
+    for kind in ("shortcut", "webhook"):
+        for action in actions:
+            if action.kind == kind:
+                if not action.success:
+                    count += 1
+                break
+    return count
+
+
+def _shortcut_failure_value(action: PostUploadActionResult, *, glyphs: GlyphSet) -> str:
+    """Render a failed shortcut action for the `  shortcut` summary row."""
+    item = f"[{WARN}]{glyphs.warning}[/] not created"
+    reason = ""
+    if action.warning is not None and action.warning.startswith(_SHORTCUT_FAILURE_PREFIX):
+        reason = action.warning[len(_SHORTCUT_FAILURE_PREFIX) :].lstrip(": ")
+    elif action.warning is not None:
+        reason = action.warning
+    if reason:
+        item += f" [dim]({escape(reason)})[/]"
+    return item
+
+
 def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet) -> list[str]:
     """Build the unlabelled follow-up result items for the Columns row."""
     items: list[str] = []
@@ -682,6 +719,8 @@ def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet
         if action.kind == "clipboard":
             if action.success:
                 items.append(f"[{OK}]{glyphs.ok}[/] URL copied")
+            else:
+                items.append(f"[{WARN}]{glyphs.warning}[/] URL not copied")
         elif action.kind == "browser":
             if action.success:
                 items.append(f"[{OK}]{glyphs.ok}[/] opened in browser")
@@ -798,25 +837,25 @@ def _group_warnings_by_source(warnings: list[WarningPresentation]) -> list[Warni
     return [warning for source in sources for warning in grouped[source]]
 
 
-def _format_warning_panel_text(warnings: list[WarningPresentation]) -> str:
+def _format_warning_panel_text(warnings: list[WarningPresentation], *, glyphs: GlyphSet) -> str:
     lines: list[str] = []
     current_source: str | None = None
     for warning in warnings:
         if warning.source != current_source:
             if lines:
                 lines.append("")
-            lines.append(f"[{STYLE_SUBHEADER}]{escape(warning.source)}[/]")
+            lines.append(f"[bold {ACCENT}]{escape(warning.source)}[/]")
             current_source = warning.source
-        status: StatusPresentation = "SKIP" if warning.severity == "skipped" else "WARN"
-        lines.append(f"{_status_token(status)} {escape(warning.message)}")
+        if warning.severity == "skipped":
+            lines.append(f"[dim]{glyphs.skipped} {escape(warning.message)}[/]")
+        else:
+            lines.append(f"[{WARN}]{glyphs.warning}[/] {escape(warning.message)}")
         if warning.detail is not None:
-            lines.append(f"  [{STYLE_METRIC_KEY}]{escape(warning.detail)}[/]")
-        if warning.action is not None:
-            lines.append(f"  [{STYLE_METRIC_KEY}]action: {escape(warning.action)}[/]")
+            lines.append(f"  [dim]{escape(warning.detail)}[/]")
     return "\n".join(lines)
 
 
-def _format_hidden_warning_counts(hidden: list[WarningPresentation]) -> str:
+def _format_hidden_warning_counts(hidden: list[WarningPresentation], *, glyphs: GlyphSet) -> str:
     counts_by_source: dict[str, int] = {}
     for warning in hidden:
         counts_by_source[warning.source] = counts_by_source.get(warning.source, 0) + 1
@@ -824,4 +863,4 @@ def _format_hidden_warning_counts(hidden: list[WarningPresentation]) -> str:
     count_text = ", ".join(
         f"{escape(source)}={count}" for source, count in sorted(counts_by_source.items())
     )
-    return f"\n{_status_token('WARN')} ... ({len(hidden)} more) hidden by source: {count_text}"
+    return f"\n[{WARN}]{glyphs.warning}[/] ... ({len(hidden)} more) hidden by source: {count_text}"
