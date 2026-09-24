@@ -390,96 +390,155 @@ and Inspector sections.
 ## Prompt 2b — Track B viewer corrections
 
 Give this to a new session (or the Track B viewer session if it is still open)
-after the Checkpoint B-viewer review.
+after the Checkpoint B-viewer review. Line numbers are as of `5bc5e620`; confirm
+each location in the current source before editing.
 
 ```text
 You are applying the Checkpoint B-viewer review corrections to the Frame Compare
-design refresh plan. Track B viewer (B1–B3) is committed; B4 has not started and
+design refresh plan. Track B viewer (B1–B3) is committed. B4 has not started and
 must not start in this session.
 
 Repository: /Users/tristan/Software/frame-compare
 Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
 Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
 Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
-section "Common rules". Read that section, the plan (including the corrected
-Invariants, S1, S2, B1–B3, Test scope, and the "Checkpoint B-viewer review"
-entry in the Execution record) before any edit, and follow both exactly.
+section "Common rules" (including Test scope, Adversarial review, Final report).
 
-Apply these corrections. Each is required by the plan text; none is optional.
-Group them into the commits listed at the end.
+Before any edit:
+- Record `git rev-parse HEAD`, `git status`, and a pyright baseline
+  (`uv run --no-sync pyright --warnings`, expected 0/0). Environment command, if
+  you need to sync: `uv sync --group dev --group docs --extra vsview --frozen`.
+- Read the plan's Invariants (corrected), S1, S2, B1, B2, B3, the Verification
+  section's Test scope, and the Execution record entry "Checkpoint B-viewer
+  review". Line numbers below are from commit 5bc5e620; confirm each location in
+  the current source before editing.
 
-C1 Roles (plan B3 and D1). Clip-card roles are `Reference` and `Comparison`, with
-   no number, in the Clips tab and Report Information. Change the one role
-   function (viewer_format.js stableClipRole) and update every expectation that
-   asserted "Comparison 1/2" (markup tests, harnesses, the browser smoke probe).
+Apply every correction below. Each one is required by the plan text; none is
+optional, and do nothing beyond them. If a correction cannot be applied as
+written, stop that correction, record why, finish the others, and report.
 
-C2 One clip-card renderer (plan B3). Report Information's source cards, its
-   `Opens in` value, and its `Default pair` value are filled by the viewer JS
-   with the same card builder and ViewerFormat helpers the Clips tab uses
-   (compact card variant: no placement line, no Signal row). renderer.py emits
-   only the containers for those parts. Delete the duplicated Python helpers
-   (_MODE_TOOLBAR_LABELS, _render_clip_badge, _render_clip_size, _render_runtime,
-   _render_active_picture, _render_frame_count, _info_clip_role, and any other
-   helper whose only purpose was those cards or rows). Move their test coverage
-   to the harnesses: DV L5 note, non-zero left offset, DV HDR / HDR / SDR badge,
-   per-card fps shown when fps differs, bare roles, mode names (overlay → Single),
-   and default-pair names. The Advanced tonemap rows stay in Python.
+C1 Bare roles (plan B3 "role (Reference / Comparison)", decision D1 no numbers).
+   - viewer_format.js stableClipRole (~line 197) returns `Comparison ${n}`; make
+     it return `Reference` for the reference clip and `Comparison` for every other
+     clip.
+   - Update every expectation of "Comparison 1"/"Comparison 2": the renderer
+     markup tests, the inspector/viewer-state harnesses, and the browser smoke
+     probe (tests/browser/test_report_browser_smoke.py ~line 589,
+     `inspectorText.includes('Comparison 1')`).
+   - docs/guides/reports-and-overlays.md already says "no numbers"; make sure the
+     code now matches it.
 
-C3 Lens caption never clipped (plan B1 caption wrap). lensPosition and
-   setPositionFromPixels in lens.js clamp the lens using its measured rendered
-   height (image plus caption), not the square size. Add a harness case: a lens
-   near the stage bottom with a two-line Diff caption stays fully inside the stage.
+C2 One clip-card renderer (plan B3 "one renderer used by the Clips tab and Report
+   Information").
+   - Today Report Information cards are rendered in Python (renderer.py ~lines
+     272–461) with helpers that duplicate viewer_format.js: _MODE_TOOLBAR_LABELS
+     (~272), _render_clip_badge (~285), _render_clip_size (~295),
+     _render_runtime (~306), _render_active_picture (~316), _render_frame_count,
+     _info_clip_role (~437), and the default-pair builder (~461, including its
+     `Clip {n}` fallback).
+   - Change renderer.py to emit only empty containers for: the Report
+     Information source cards, the `Opens in` value, and the `Default pair`
+     value. Keep every other Report Information row in Python, including Title,
+     Report ID, Generated, Content, slow.pics, Tonemap, and Advanced tonemap.
+   - In the viewer JS, fill those containers at startup with the same card
+     builder the Clips tab uses (inspector.js ~line 201), compact variant: no
+     placement line, no Signal row. Use ViewerFormat.modeLabel for `Opens in` and
+     the compact names for `Default pair` (one per line).
+   - Delete the now-unused Python helpers and their Python-only tests.
+   - Re-home the coverage in the harnesses: DV L5 note, non-zero left offset, DV
+     HDR / HDR / SDR badge, per-card fps shown when fps differs between clips,
+     bare roles, mode names (overlay → Single), and default-pair names in
+     Report Information.
+   - The report payload (payload.py) must not change.
 
-C4 Mono for numeric values (plan S2). Use --font-mono for: the stage-label meta
-   (resolution and size), the card values of Picture, Length, and Size, the Frame
-   tab's Frame and Position values, and Report Information's Content value.
-   Whole value cells are mono; labels stay in the UI face. Review item only (no
-   tests, per Test scope).
+C3 Lens caption never clipped (plan B1 "caption wraps", Checkpoint A decision).
+   - lens.js lensPosition (~line 529) and setPositionFromPixels (~line 781)
+     clamp using the square `size`, but the lens is now taller when a caption
+     wraps, and .rv-viewer-stage has overflow: hidden.
+   - Clamp using the lens element's measured rendered height (image plus
+     caption) and width.
+   - Harness case: a lens positioned at the stage bottom with a two-line Diff
+     caption stays fully inside the stage.
 
-C5 Remove the dead fps rational branch (payload has no rational; D2 accepted):
-   the fps_num/fps_den branch in viewer_format.js clipFpsText and its harness case.
+C4 Mono for numeric values (plan S2). Use --font-mono for these value cells:
+   - the stage-label meta (resolution and size; .rv-stage-label-meta, viewer.css
+     ~line 1129);
+   - the card values of Picture, Length, and Size;
+   - the Frame tab's Frame and Position values;
+   - Report Information's Content value.
+   The whole value cell is mono; labels stay in the UI face. Review item only; do
+   not add tests (Test scope).
 
-C6 Remove the two Test-scope violations in
-   tests/services/test_report_viewer_assets_css.py: the `display: contents`
-   assertion and the font-family assertion.
+C5 Dead fps rational branch (D2 accepted: the payload has only a float fps).
+   - Delete the fps_num/fps_den branch in viewer_format.js clipFpsText (~lines
+     163–171).
+   - Delete its harness case (tests/services/inspector_harness.js ~line 120).
 
-C7 Filter name. The filter badge calls frameFilterName() instead of duplicating
-   its logic. Add a harness case for the Position row with a category filter
-   active. Delete the unused clipOverlayLabel (viewer.js) and its meaningless
-   harness entries (sourceOverlayLabels).
+C6 Test-scope violations: delete two assertions in
+   tests/services/test_report_viewer_assets_css.py:
+   - the `display: contents` assertion (~line 79);
+   - the font-family assertion (~line 87).
+   Do not replace them.
 
-C8 Offset status spacing. "Offset" and its value are separated by a visible space
-   (for example a flex gap on .rv-alignment-status); today it renders
-   "Offset:none". Review item.
+C7 Filter name and dead helpers.
+   - The filter badge (viewer.js ~lines 1461–1464) calls frameFilterName()
+     (~line 1490) instead of repeating its logic.
+   - Add a harness case: the Frame tab Position row with a category filter
+     active reads "{position} / {count} in {category}".
+   - Delete the unused clipOverlayLabel (viewer.js ~line 1833) and its harness
+     entries (sourceOverlayLabels in tests/services/viewer_state_harness.js
+     ~lines 950–954, plus the matching Python assertion).
 
-C9 Frame tab table. The first cell has left padding so its text clears the brass
-   edge of visible rows; the Type column does not wrap ("B · DV RPU" stays on one
-   line). Review items.
+C8 Offset status spacing. It renders "Offset:none" because the space sits inside
+   a flex item (renderer.py ~line 654). Give .rv-alignment-status a small gap so
+   it reads "Offset: none"; keep the label and value spans. Review item.
 
-C10 Singular frame count: "1 frame" (not "1 frames") wherever B3 builds
-   "{n} frames" (Report Information Content, card Length). Harness case for 1
-   and 2.
+C9 Frame tab table.
+   - The first cell needs left padding so its text clears the brass edge of
+     visible rows.
+   - The Type column must not wrap ("B · DV RPU" stays on one line).
+   Review items.
 
-C11 Separator test. Rename and reword the test that claims to prove burned-in
-   text keeps "|" (tests/orchestration/test_phase_post_render_outputs.py): keep
-   the report-profile "·" and slow.pics "|" assertions; remove the
-   _render_progress_label assertion (it is terminal output and B4 will change
-   it). Do not change phase_render.py in this session.
+C10 Singular frame count. Use "1 frame" rather than "1 frames" wherever B3 builds
+   "{n} frames":
+   - Report Information Content;
+   - the card Length row.
+   Harness cases for 1 and 2 frames.
 
-Docs: update docs/guides/reports-and-overlays.md and the architecture viewer
-sections where C1, C2, or C3 change described behaviour.
+C11 Separator test.
+   - tests/orchestration/test_phase_post_render_outputs.py (~line 303) claims to
+     prove that burned-in text keeps "|", but it checks
+     phase_render._render_progress_label, which is terminal output.
+   - Rename and reword the test; keep its report-profile "·" and slow.pics "|"
+     assertions.
+   - Remove the _render_progress_label assertion (B4 will change that label to
+     "·").
+   - Do not change phase_render.py in this session.
 
-Commits (each after the Common rules adversarial review):
-1. `fix(report): Checkpoint B-viewer roles and single clip-card renderer` (C1, C2)
+Docs: update docs/guides/reports-and-overlays.md and the architecture's
+viewer/Inspector sections wherever C1, C2, or C3 change described behaviour.
+
+Commits, each after the Common rules adversarial review (plan-conformance
+reviewer for every commit; regression reviewer for commit 1):
+1. `fix(report): Checkpoint B-viewer roles and single clip-card renderer`
+   (C1, C2)
 2. `fix(report): Checkpoint B-viewer lens, typography, and layout corrections`
    (C3, C4, C8, C9, C10)
 3. `test(report): Checkpoint B-viewer test cleanups` (C5, C6, C7, C11)
 
-Then run the full gate from the plan's Verification section, perform the review
-checks by eye (C4, C8, C9, and the Report Information cards at 1440 px), append a
-short entry to the plan's Execution record, and report using the Final report
-format: coverage of C1–C11, deviations, review log, verification, review checks,
-and risks. Stop after that; do not start B4.
+After the commits:
+- Run the full gate from the plan's Verification section, including the browser
+  smoke test with -rs. Record exit codes, counts, and skips.
+- Perform the review checks by eye on a generated three-source report at 1440 px:
+  Report Information cards and rows (C1, C2), mono values (C4), Offset spacing
+  (C8), the Frame tab table (C9), and a lens parked at the stage bottom in Diff
+  with Caption on (C3). Keep screenshots untracked and give their paths.
+- Append a short entry to the plan's Execution record.
+- Report using the Final report format, with a coverage row for each of C1–C11,
+  plus deviations, judgment calls, the adversarial review log, verification,
+  review checks, risks, and files changed.
+
+Stop after the report. Do not start B4.
 ```
 
 ## Prompt 3 — Track B terminal
