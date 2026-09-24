@@ -974,11 +974,16 @@ const ReportViewer = {
         );
     },
 
-    applyDefaultSelection() {
-        const selection = this.state.data.default_selection || {};
+    defaultPairIndexes() {
+        const selection = (this.state.data || {}).default_selection || {};
         const left = this.clipIndexOrDefault(selection.left_clip_index, 0);
         const rightFallback = this.clipCount() > 1 ? 1 : left;
         const right = this.clipIndexOrDefault(selection.right_clip_index, rightFallback);
+        return [left, right];
+    },
+
+    applyDefaultSelection() {
+        const [left, right] = this.defaultPairIndexes();
 
         this.state.leftClipIdx = left;
         this.state.rightClipIdx = right;

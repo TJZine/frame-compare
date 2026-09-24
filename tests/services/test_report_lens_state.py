@@ -59,4 +59,5 @@ def test_lens_harness_proves_mapping_behavior_comparison_and_storage() -> None:
         "reportPersistenceExcludesPointer": True,
         "storageFailureIsSessionOnly": True,
         "captionHeightClampsToStage": True,
+        "lensSizeAppliedBeforePlacement": True,
     }

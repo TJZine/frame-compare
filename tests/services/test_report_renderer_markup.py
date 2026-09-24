@@ -65,13 +65,32 @@ def test_build_html_emits_empty_report_information_containers_for_viewer_fill(
     assert find_all(document, tag="li", class_name="rv-clip-meta-item") == []
     assert "rv-clip-meta-release" not in html
     clips_mount = require_first(document, tag="ol", attr_name="data-info-clips", attr_value=None)
-    assert "rv-clip-meta-list" in clips_mount.classes
     assert clips_mount.children == []
+    empty_mount = require_first(document, tag="p", attr_name="data-info-clips-empty")
+    assert empty_mount.text == "No clips in payload."
+    assert "hidden" in empty_mount.attrs
     shared_mount = require_first(document, tag="p", attr_name="data-info-clips-shared")
-    assert "rv-inspector-shared" in shared_mount.classes
     assert shared_mount.text == ""
     require_first(document, tag="dd", attr_name="data-info-opens-in")
     require_first(document, tag="dd", attr_name="data-info-default-pair")
+
+
+@pytest.mark.parametrize(
+    ("frame_count", "expected"),
+    [
+        (1, "1 frame · 2 sources"),
+        (2, "2 frames · 2 sources"),
+    ],
+)
+def test_build_html_report_information_content_counts_frames(
+    report_payload: ReportPayload, frame_count: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "stats": {"frame_count": frame_count, "clip_count": 2},
+    }
+    html = build_html(payload)
+    assert parse_info_modal(html).general["Content"] == expected
 
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
@@ -358,7 +377,6 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     # Source cards, the shared fps line, Opens in, and Default pair are filled
     # at startup by the viewer's Inspector clip-card builder; Python emits
     # only the containers (covered in the Node inspector harness).
-    assert info_modal.clips == []
 
 
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(

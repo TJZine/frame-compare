@@ -24,6 +24,7 @@ const Inspector = {
                     infoDefaultPair: document.querySelector('[data-info-default-pair]'),
                     infoClipsShared: document.querySelector('[data-info-clips-shared]'),
                     infoClips: document.querySelector('[data-info-clips]'),
+                    infoClipsEmpty: document.querySelector('[data-info-clips-empty]'),
                     inspectorAlignPair: document.querySelector('[data-inspector-align-pair]'),
                     inspectorAlignPreset: document.querySelector('[data-inspector-align-preset]'),
                     inspectorAlignX: document.querySelector('[data-inspector-align-x]'),
@@ -268,10 +269,7 @@ const Inspector = {
                     );
                 }
                 if (viewer.dom.infoDefaultPair) {
-                    const selection = data.default_selection || {};
-                    const left = viewer.clipIndexOrDefault(selection.left_clip_index, 0);
-                    const rightFallback = clips.length > 1 ? 1 : left;
-                    const right = viewer.clipIndexOrDefault(selection.right_clip_index, rightFallback);
+                    const [left, right] = viewer.defaultPairIndexes();
                     const lines = [left, right]
                         .filter(index => Number.isInteger(index) && clips[index])
                         .map(index => {
@@ -291,12 +289,10 @@ const Inspector = {
                     );
                 }
                 if (viewer.dom.infoClips) {
-                    if (clips.length === 0) {
-                        const empty = document.createElement('div');
-                        empty.className = 'rv-metadata-empty';
-                        empty.textContent = 'No clips in payload.';
-                        viewer.dom.infoClips.replaceChildren(empty);
-                    } else {
+                    const empty = clips.length === 0;
+                    viewer.dom.infoClips.hidden = empty;
+                    if (viewer.dom.infoClipsEmpty) viewer.dom.infoClipsEmpty.hidden = !empty;
+                    if (!empty) {
                         viewer.dom.infoClips.replaceChildren(
                             ...clips.map((clip, index) => this.buildClipCard(clip, index, shared, { compact: true })),
                         );

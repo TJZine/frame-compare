@@ -862,6 +862,33 @@ assert.equal(
     assert.ok(nudgedTop >= 8 && nudgedTop + 300 <= 700);
 }
 
+{
+    const sizeEnvironment = makeEnvironment();
+    const sizeController = sizeEnvironment.Lens.create(sizeEnvironment.viewer);
+    sizeController.bind();
+    const sizedLens = sizeEnvironment.elements['rv-lens'];
+    const staticRect = sizedLens.getBoundingClientRect.bind(sizedLens);
+    // Simulate the browser, where the applied --lens-size drives the measured
+    // box: the placement footprint follows the new size, not the previous rect.
+    sizedLens.getBoundingClientRect = () => {
+        const applied = Number.parseFloat(sizedLens.style.values['--lens-size']);
+        const side = Number.isFinite(applied) && applied > 0 ? applied : staticRect().width;
+        return { left: 0, top: 0, width: side, height: side, right: side, bottom: side };
+    };
+    sizeController.setEnabled(true);
+    sizeController.sync();
+    sizeController.state.report.parkedPosition = { u: 1, v: 1 };
+    sizeController.refresh();
+    sizeEnvironment.sizeButtons[2].dispatch('click');
+    assert.equal(sizeController.state.preferences.size, 'large');
+    assert.equal(sizedLens.style.values['--lens-size'], '320px');
+    assert.equal(sizedLens.dataset.size, 'large');
+    const sizedLeft = Number.parseFloat(sizedLens.style.left);
+    const sizedTop = Number.parseFloat(sizedLens.style.top);
+    assert.ok(sizedLeft >= 8 && sizedLeft + 320 <= 1000);
+    assert.ok(sizedTop >= 8 && sizedTop + 320 <= 700);
+}
+
 console.log(JSON.stringify({
     defaultsNormalized: true,
     strictOptionsNormalized: true,
@@ -904,4 +931,5 @@ console.log(JSON.stringify({
     reportPersistenceExcludesPointer: true,
     storageFailureIsSessionOnly: true,
     captionHeightClampsToStage: true,
+    lensSizeAppliedBeforePlacement: true,
 }));

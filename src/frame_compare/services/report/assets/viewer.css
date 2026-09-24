@@ -1134,6 +1134,7 @@ select optgroup {
 .rv-stage-label-meta {
     color: var(--text-secondary);
     font-family: var(--font-mono);
+    white-space: nowrap;
 }
 
 .rv-mode-overlay .rv-overlay-label,

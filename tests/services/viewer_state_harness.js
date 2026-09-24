@@ -503,6 +503,21 @@ const summary = {};
 }
 
 {
+    const { viewer: defaultViewer } = loadViewer({ clipCount: 4 });
+    const pairIndexes = () => JSON.parse(JSON.stringify(defaultViewer.defaultPairIndexes()));
+    assert.deepEqual(pairIndexes(), [0, 1]);
+    defaultViewer.state.data.default_selection = { left_clip_index: 9, right_clip_index: 9 };
+    assert.deepEqual(pairIndexes(), [0, 1]);
+    const { viewer: singleViewer } = loadViewer({ clipCount: 1 });
+    assert.deepEqual(JSON.parse(JSON.stringify(singleViewer.defaultPairIndexes())), [0, 0]);
+    summary.defaultPairRule = {
+        default: true,
+        outOfRangeFallsBack: true,
+        singleClipPairsWithItself: true,
+    };
+}
+
+{
     const { viewer } = loadViewer({
         clipCount: 4,
         savedState: {
@@ -537,7 +552,7 @@ const summary = {};
     assert.equal(viewer.state.alignX, 5);
     assert.equal(viewer.state.alignY, -2);
     assert.deepEqual(Object.keys(viewer.state.pairAlignments).sort(), ['0:1', '1:0']);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:custom +5x -2y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +5x -2y');
     summary.restoreFourClip = {
         clipCount: viewer.clipCount(),
         leftClipIdx: viewer.state.leftClipIdx,
@@ -1106,19 +1121,19 @@ const summary = {};
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:custom +4x +5y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
 
     viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
     assert.equal(viewer.state.alignX, 4);
     assert.equal(viewer.state.alignY, 5);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:custom +4x +5y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
 
     viewer.setRightClip(2);
     assert.equal(viewer.state.alignX, -1);
@@ -1216,16 +1231,16 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     viewer.viewport.setAlignmentPreset('left-1');
     assert.equal(viewer.state.alignX, -1);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:preset left 1px');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
     viewer.viewport.setAlignmentPreset('none');
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset:none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     summary.alignmentStatus = {
-        neutral: 'Offset:none',
-        preset: 'Offset:preset left 1px',
+        neutral: 'Offset: none',
+        preset: 'Offset: preset left 1px',
         reset: renderedText(viewer.dom.alignmentStatus),
     };
 }

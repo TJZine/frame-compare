@@ -821,13 +821,16 @@ text to medium date plus short time. The exact timestamp remains available in th
 tooltip, Report Information, and payload.
 Report Information is the single place for report metadata: title, report ID, generated
 timestamp, frame/clip counts, and the slow.pics link. The renderer alone builds that
-link's safe http(s) href; no viewer script re-derives it.
+link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
+the Report Information source cards, Opens in, and Default pair at startup; renderer.py
+emits only their containers.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
-report, joining profile segments with `·` (burned-in screenshot text and slow.pics
-image names keep the `|` default). Report controls consume control or micro names,
+report, joining profile segments with `·` (slow.pics image names keep the `|`
+separator; burned-in screenshot text is the clip label and does not use release
+descriptors). Report controls consume control or micro names,
 while Inspector/info and ARIA surfaces consume primary identity and exact filename.
 Stage labels show the control name plus muted resolution and size, adding an
 HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an

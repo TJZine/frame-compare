@@ -364,12 +364,7 @@ def _render_tonemap_details(rendering: object) -> str:
     return "".join(rows)
 
 
-def _render_info_modal(
-    data: ReportPayload,
-    *,
-    left_clip_index: int,
-    right_clip_index: int,
-) -> str:
+def _render_info_modal(data: ReportPayload) -> str:
     stats = data["stats"]
     title = data["title"]
     report_id = data["report_id"]
@@ -390,7 +385,10 @@ def _render_info_modal(
     # The Sources cards, the shared fps line, the Opens in value, and the
     # Default pair value are filled at startup by the viewer's Inspector clip-card
     # builder (Inspector.renderReportInformation); Python emits only the containers.
-    clip_list_html = '<ol class="rv-clip-meta-list" data-info-clips></ol>'
+    clip_list_html = (
+        '<ol class="rv-clip-meta-list" data-info-clips></ol>'
+        '<p class="rv-metadata-empty" data-info-clips-empty hidden>No clips in payload.</p>'
+    )
     shared_line_html = '<p class="rv-inspector-shared" data-info-clips-shared hidden></p>'
     rendering = data.get("rendering")
     tonemap_summary = _render_tonemap_summary(rendering)
@@ -525,7 +523,7 @@ def _render_controls(
                 {active_clip_options}
             </select>
         </div>
-        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value">none</span></div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value"> none</span></div>
         </div>
         </div>
     </div>"""
@@ -881,11 +879,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     stage_html = _render_stage()
     inspector_html = _render_inspector()
     modal_html = _render_help_modal()
-    info_modal_html = _render_info_modal(
-        data,
-        left_clip_index=left_clip_index,
-        right_clip_index=right_clip_index,
-    )
+    info_modal_html = _render_info_modal(data)
     scripts_html = _render_scripts(json_str)
 
     return f"""<!DOCTYPE html>

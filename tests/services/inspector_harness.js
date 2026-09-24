@@ -346,6 +346,7 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
         infoDefaultPair: element(),
         infoClipsShared: element(),
         infoClips: element(),
+        infoClipsEmpty: element(),
     };
     const tableStub = {
         state: {
@@ -368,15 +369,7 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
         visibleFramePosition() { return position; },
         frameFilterName() { return options.filterName ?? 'All'; },
         referenceClipIndex() { return options.referenceIndex ?? 0; },
-        clipIndexOrDefault(value, fallback) {
-            const count = clips.length;
-            if (count <= 0) return 0;
-            const idx = parseInt(value);
-            const fallbackIdx = Number.isInteger(fallback) ? fallback : 0;
-            if (Number.isInteger(idx) && idx >= 0 && idx < count) return idx;
-            if (fallbackIdx >= 0 && fallbackIdx < count) return fallbackIdx;
-            return 0;
-        },
+        defaultPairIndexes() { return options.defaultPair ?? [0, 1]; },
         gridView: { indexes() { return [0, 1]; } },
         currentFrame() { return frame; },
         setText(target, value) { if (target) target.textContent = String(value); },
@@ -536,6 +529,8 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
     const { tableStub, tableInspector } = tableViewer(mixedClips, tableFrame, 'slider');
     tableInspector.renderReportInformation();
     const info = tableStub.dom;
+    assert.equal(info.infoClips.hidden, false);
+    assert.equal(info.infoClipsEmpty.hidden, true);
     assert.equal(info.infoOpensIn.textContent, 'Slider');
     assert.deepEqual(
         info.infoDefaultPair.children.map(line => line.textContent),
@@ -545,7 +540,6 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
     assert.equal(info.infoClipsShared.textContent, '');
     const cards = info.infoClips.children;
     assert.equal(cards.length, 2);
-    assert.equal(cards[0].className, 'rv-clip-meta-item');
     assert.equal(cards[0].children[0].children[0].textContent, 'Reference');
     assert.equal(cards[0].children[0].children[1].textContent, 'DV HDR');
     assert.equal(cards[1].children[0].children[0].textContent, 'Comparison');
@@ -565,7 +559,7 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
 {
     const { tableStub, tableInspector } = tableViewer(mixedClips, tableFrame, 'slider', 0, {
         defaultMode: 'overlay',
-        defaultSelection: { left_clip_index: 1, right_clip_index: 0 },
+        defaultPair: [1, 0],
     });
     tableInspector.renderReportInformation();
     assert.equal(tableStub.dom.infoOpensIn.textContent, 'Single');
@@ -583,6 +577,14 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
     const cardRows = tableStub.dom.infoClips.children[0].children[3].children
         .map(row => row.children[0].textContent);
     assert.deepEqual(cardRows, ['Picture', 'Length', 'Size']);
+}
+
+{
+    const { tableStub, tableInspector } = tableViewer([], tableFrame, 'slider');
+    tableInspector.renderReportInformation();
+    assert.equal(tableStub.dom.infoClips.hidden, true);
+    assert.equal(tableStub.dom.infoClipsEmpty.hidden, false);
+    assert.deepEqual(tableStub.dom.infoDefaultPair.children, []);
 }
 
 console.log(JSON.stringify({

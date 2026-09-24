@@ -660,7 +660,7 @@ const Viewport = {
         label.textContent = 'Offset:';
         const value = document.createElement('span');
         value.className = 'rv-offset-value';
-        value.textContent = this.alignmentStatusValue();
+        value.textContent = ` ${this.alignmentStatusValue()}`;
         this.viewer.dom.alignmentStatus.replaceChildren(label, value);
     },
 

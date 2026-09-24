@@ -633,11 +633,11 @@ const Lens = (() => {
             const differenceAvailable = renderDiff(state.point, size);
             renderCaption();
             dom.lens.hidden = false;
+            dom.lens.style.setProperty('--lens-size', `${size}px`);
+            dom.lens.dataset.size = state.preferences.size;
             const position = lensPosition(size);
             dom.lens.style.left = `${position.left}px`;
             dom.lens.style.top = `${position.top}px`;
-            dom.lens.style.setProperty('--lens-size', `${size}px`);
-            dom.lens.dataset.size = state.preferences.size;
             const activeState = requestStatus('active') === 'loading' ? 'loading' : 'unavailable';
             const differenceState = requestStatus('difference') === 'loading' ? 'loading' : 'unavailable';
             if (viewer.state.mode === 'diff') {
