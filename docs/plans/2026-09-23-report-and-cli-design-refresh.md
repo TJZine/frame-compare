@@ -1069,3 +1069,23 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   code, and Test scope items. Corrections in handoff Prompt 3b (T1–T20); the
   controller performs that pass's visual checks. Sub-minute summary durations
   ("48.0 s") follow the plan's "existing `_format_duration`" rule and stay.
+- Checkpoint B-terminal corrections T1–T20 (September 24, implementation session):
+  five commits on `dev/v0.6.0-design-refresh` (`5f5e3cbe` T1–T5 progress/upload,
+  `d504a282` T6–T8 summary, `10812ba4` T9–T13 sources/alignment, `edd0cd71`
+  T14–T18 script/doctor, `50360e1c` T19–T20 scope/cleanup), no pushes. Every
+  correction applied as written; no review checks by eye (controller's pass).
+  Adversarial review per commit (plan-conformance + regression subagents, no
+  blockers/majors): Commit 1 fixed an import-order lint and strengthened the
+  JSON diagnostics test, added plain-skip/end-to-end WARN/sub-second tests;
+  Commit 2 added the singular-title test and removed an orphaned style token;
+  Commit 3 unified Rich/plain evidence order (normal, verbose, review);
+  Commit 4 closed a test stream; Commit 5 restored the no-candidate frozen
+  variant as a parametrized real-path test. Judgment calls: T4 WARNED status
+  also changes the plain `[OK]`/log `completed` markers for that edge case;
+  T8 renders "0 files" for an existing-but-empty screenshots dir; T20 leaves
+  `vsview/output.py`'s accent-valued `STYLE_HEADER` (S3-conformant, other
+  module). Full gate: pytest 3521 passed / 90 environment (Windows/pwsh) skips;
+  ruff check + format clean. Pyright reports 468 errors confined to
+  `vsview/alignment_review_panel.py` (PySide6 not installed after
+  `uv sync --group dev --frozen`); zero errors in every touched file. No real
+  media run on this host.
