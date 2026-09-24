@@ -882,3 +882,27 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   parameters, one default-pair rule, empty-list semantics, test-helper and
   class-name cleanups, a singular Content test, architecture wording, and
   stage-label meta no-wrap.
+- Track B viewer follow-ups F1–F9 (September 24, implementation session): one
+  commit `dfae7015` on `dev/v0.6.0-design-refresh` after plan-conformance review
+  (all F1–F9 verified, no blockers/majors) plus regression review (1 major, 4
+  minors): fixed the major (Python hook assertion for the new
+  `data-info-clips-empty` container) and 2 minors (null-data guard in
+  `defaultPairIndexes`, empty-message hidden flags in the non-empty harness
+  case); rejected 2 with evidence (whole-meta nowrap is the prompt's "for
+  example" and per-part spans would break the harness text concatenation;
+  F4-mandated fixed-index stub, rule covered in the viewer-state harness).
+  F1 verified as a true regression test (new harness case fails on the old
+  order at the placement assertion, passes on the new). Gate: pyright 0/0,
+  ruff check + format, bandit no issues, lint-imports kept, full pytest 3494
+  passed / 86 environment skips, browser smoke 17 passed, API docs check +
+  strict docs build clean. Reviewed by eye in headless Chrome at 1440 px on a
+  generated three-source report (untracked scratch under /tmp/eyecheck):
+  large lens parked bottom-right fully inside the stage (rect 1112,335–1432,657
+  in stage 0,109–1440,665; border and margin visible), live-region text exactly
+  `Offset: none`, stage-label meta `white-space: nowrap` with wraps only
+  between values (`3840×1606`, `17.49 GiB` unbroken), Report Information modal
+  with bare roles, viewer-built cards, `Opens in: Slider`, two-line Default
+  pair, and `1 frame · 3 sources`. Residual risks: whole-meta nowrap could
+  overflow between-value wrapping at 375 px (review accepted; check there if
+  the layout is touched again); inspector stub bypasses the real pair rule
+  for adversarial inputs (prompt-mandated shape). B4 not started.
