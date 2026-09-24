@@ -916,3 +916,14 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   `L:`/`vs`/`R:` elements, so the swap button overlaps the right select. Final
   follow-ups in handoff Prompt 2d (grid fix, remove one wording assertion);
   visual checks are done by the controller.
+- Track B viewer final fixes G1–G2 (September 24, implementation session):
+  commit `c2835710` on `dev/v0.6.0-design-refresh` after a read-only
+  plan-conformance review (PASS, no findings): G1 changed the ≤768 px
+  pair-control grid to three tracks (`minmax(0, 1fr) auto minmax(0, 1fr)`) for
+  the three remaining children in `viewer.css`, and G2 removed the
+  "No clips in payload." wording assertion while keeping the `data-info-*`
+  hook and `hidden` assertions in `test_report_renderer_markup.py`; nothing
+  else changed. Verification: focused suites
+  (`test_report_renderer_markup.py`, `test_report_viewer_assets_css.py`,
+  `test_report_browser_smoke.py`) 68 passed exit 0, `ruff check .` clean
+  exit 0. B4 not started.
