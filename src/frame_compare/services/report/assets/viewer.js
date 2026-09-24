@@ -1459,12 +1459,7 @@ const ReportViewer = {
         if (this.dom.activeFilterBadge) {
             const isFiltered = this.state.activeCategoryKey !== ALL_CATEGORY_FILTER_KEY;
             if (isFiltered) {
-                const activeBtn = Array.from(this.dom.filterChips)
-                    .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
-                const label = activeBtn
-                    ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
-                    : this.state.activeCategoryKey;
-                this.dom.activeFilterBadge.textContent = `Filtered: ${label}`;
+                this.dom.activeFilterBadge.textContent = `Filtered: ${this.frameFilterName()}`;
                 this.dom.activeFilterBadge.hidden = false;
             } else {
                 this.dom.activeFilterBadge.hidden = true;
@@ -1829,10 +1824,6 @@ const ReportViewer = {
             'input, select, button, textarea, [contenteditable=""], [contenteditable="true"]'
         );
         return Boolean(closestEditable);
-    },
-
-    clipOverlayLabel(clip) {
-        return ViewerFormat.sourceHudLabel(clip);
     },
 
     renderStageLabel(element, clip) {

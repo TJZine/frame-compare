@@ -13,7 +13,7 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetail,
 )
-from frame_compare.orchestration import phase_post_render, phase_render
+from frame_compare.orchestration import phase_post_render
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.execution_types import (
     ExecutionState,
@@ -300,13 +300,15 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert captured["report_config"] == ctx.config.report
 
 
-def test_report_display_uses_middot_while_burned_in_and_slowpics_keep_pipe(
+def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """B1 separator invariant for one shared fixture.
 
-    Report display profiles use " · ", while burned-in screenshot text and
-    slow.pics image names keep " | ".
+    Report display profiles use " · ", while the default descriptor separator
+    and slow.pics image names keep " | ". Burned-in screenshot text is the
+    clip label and is unaffected; the terminal render-progress label moves to
+    " · " in B4.
     """
     identity = ReleaseIdentity(
         ContentIdentity("Example", year=2026),
@@ -356,12 +358,8 @@ def test_report_display_uses_middot_while_burned_in_and_slowpics_keep_pipe(
         assert " · " in clip.display.micro
         assert "|" not in clip.display.release
 
-    burned_in = format_micro_descriptor(identity)
-    assert burned_in == "ATV WEB-DL | DV HDR10+ | Kitsune"
-    assert (
-        phase_render._render_progress_label(ctx.reference, 0)
-        == "Reference | ATV WEB-DL | DV HDR10+ | Kitsune"
-    )
+    default_separator = format_micro_descriptor(identity)
+    assert default_separator == "ATV WEB-DL | DV HDR10+ | Kitsune"
 
     upload_clips = phase_post_render._slowpics_upload_clips(ctx)
     assert [clip.image_name for clip in upload_clips] == [

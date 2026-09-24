@@ -162,14 +162,7 @@ const ViewerFormat = {
     },
 
     clipFpsText(clip) {
-        const fps = this.formatFps(clip?.fps);
-        if (!fps) return '';
-        const num = clip?.fps_num;
-        const den = clip?.fps_den;
-        if (Number.isInteger(num) && Number.isInteger(den) && den !== 0) {
-            return `${fps} (${num}/${den})`;
-        }
-        return fps;
+        return this.formatFps(clip?.fps);
     },
 
     sharedClipValues(clips) {

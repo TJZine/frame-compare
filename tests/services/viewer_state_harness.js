@@ -929,29 +929,7 @@ const summary = {};
 }
 
 {
-    const { viewer, format } = loadViewer({ clipCount: 2 });
-    const clip = {
-        label: 'Title.2160p.WEB-DL.Service-GROUP',
-        display: {
-            primary: 'Title.2160p.WEB-DL.Service-GROUP',
-            release: '2160p | Service WEB-DL | GROUP',
-            control: 'Title.2160p.WEB-DL.Service-GROUP',
-            micro: 'Service WEB-DL',
-            filename: 'Title.2160p.WEB-DL.Service-GROUP.mkv',
-        },
-        resolution: [3840, 2160],
-        size_bytes: 17 * 1024 ** 3,
-        signal: { is_hdr: true },
-    };
-    assert.equal(
-        viewer.clipOverlayLabel(clip),
-        'Title.2160p.WEB-DL.Service-GROUP · 3840×2160 · HDR · 17.00 GiB',
-    );
-    summary.sourceOverlayLabels = {
-        single: viewer.clipOverlayLabel(clip),
-        slider: viewer.clipOverlayLabel(clip),
-        diff: viewer.clipOverlayLabel(clip),
-    };
+    const { format } = loadViewer({ clipCount: 2 });
 
     assert.equal(format.formatFileSize(1), '1.00 B');
     assert.equal(format.formatFileSize(1023), '1023.00 B');

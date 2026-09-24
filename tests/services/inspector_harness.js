@@ -120,10 +120,6 @@ assert.equal(format.formatGroupedFrames(2), '2 frames');
 assert.equal(format.clipLengthText({ frame_count: 1, fps: 24 }), '1 frame · 0:00:00');
 assert.equal(format.clipLengthText({ frame_count: 2, fps: 24 }), '2 frames · 0:00:00');
 assert.equal(format.clipFpsText({ fps: 23.976 }), '23.976 fps');
-assert.equal(
-    format.clipFpsText({ fps: 23.976, fps_num: 24000, fps_den: 1001 }),
-    '23.976 fps (24000/1001)',
-);
 assert.deepEqual(
     JSON.parse(JSON.stringify(format.sharedClipValues([
         { fps: 24, presentation: { state: 'passthrough' } },
@@ -476,6 +472,14 @@ function tableViewer(clips, frame, mode, position = 0, options = {}) {
 {
     const { tableStub } = tableViewer(mixedClips, tableFrame, 'slider', -1);
     assert.equal(tableStub.dom.inspectorFramePosition.textContent, 'Not shown in All');
+}
+
+{
+    const { tableStub } = tableViewer(mixedClips, tableFrame, 'slider', 1, {
+        filterName: 'Dark',
+        visibleIndexes: [0, 1, 2],
+    });
+    assert.equal(tableStub.dom.inspectorFramePosition.textContent, '2 / 3 in Dark');
 }
 
 {
