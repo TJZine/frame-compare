@@ -109,7 +109,7 @@ def short_source_names(sources: Sequence[ShortNameSource], *, roles: Sequence[st
     for source, group in zip(sources, groups, strict=True):
         label = source.label.strip()
         if source.label_is_explicit and label:
-            names.append(label)
+            names.append(source.label)
             protected.append(True)
             continue
         if group and _release_group_is_unique(group, groups):
