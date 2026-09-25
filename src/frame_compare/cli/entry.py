@@ -48,7 +48,10 @@ from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPre
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
-from frame_compare.utils.terminal_theme import human_console
+from frame_compare.utils.terminal_theme import (
+    human_console,
+    use_ascii_fallback_on_non_utf_streams,
+)
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -143,6 +146,7 @@ def _prompt_text(text: str, *, default: str) -> str:
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """Video frame comparison tool."""
+    use_ascii_fallback_on_non_utf_streams()
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
         raise typer.Exit()

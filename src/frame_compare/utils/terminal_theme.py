@@ -1,12 +1,16 @@
 """Shared terminal style tokens for the design-refresh terminal surfaces.
 
 Specification S3: one module importable by every layer. It holds the color
-vocabulary, the status glyphs with their ASCII fallback, and human-console
-construction with Rich's automatic number highlighting disabled.
+vocabulary, the status glyphs with their ASCII fallback, human-console
+construction with Rich's automatic number highlighting disabled, and the
+ASCII fallback for text a non-UTF terminal stream cannot encode.
 """
 
 from __future__ import annotations
 
+import codecs
+import io
+import sys
 from dataclasses import dataclass
 from typing import IO, Literal
 
@@ -84,6 +88,30 @@ def human_console(
     )
 
 
+_ASCII_PUNCTUATION = str.maketrans({"·": "|", "×": "x", "–": "-", "—": "-", "…": "...", "›": ">"})
+_ASCII_FALLBACK_ERRORS = "frame_compare.ascii_fallback"
+
+
+def _ascii_fallback(error: UnicodeError) -> tuple[str, int]:
+    if not isinstance(error, UnicodeEncodeError):
+        raise error
+    text = error.object[error.start : error.end].translate(_ASCII_PUNCTUATION)
+    return text.encode("ascii", "replace").decode("ascii"), error.end
+
+
+def use_ascii_fallback_on_non_utf_streams() -> None:
+    """Degrade unencodable terminal text instead of crashing on non-UTF streams.
+
+    Only characters the stream cannot encode are replaced: generated punctuation
+    gets an ASCII equivalent and anything else becomes ``?``. JSON output is
+    ASCII-escaped and never reaches the handler.
+    """
+    codecs.register_error(_ASCII_FALLBACK_ERRORS, _ascii_fallback)
+    for stream in (sys.stdout, sys.stderr):
+        if glyphs_for_stream(stream) is GLYPHS_ASCII and isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors=_ASCII_FALLBACK_ERRORS)
+
+
 def format_duration(seconds: float) -> str:
     """Format a duration for a human summary (S3 value grammar)."""
     total_seconds = max(0.0, seconds)
@@ -121,4 +149,5 @@ __all__ = [
     "glyphs_for_encoding",
     "glyphs_for_stream",
     "human_console",
+    "use_ascii_fallback_on_non_utf_streams",
 ]

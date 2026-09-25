@@ -1,15 +1,21 @@
 """Tests for the shared terminal style tokens (S3)."""
 
 import io
+import sys
+from pathlib import Path
 
+import pytest
 from rich.console import Console
 
+from frame_compare.cli.output import print_result_summary
+from frame_compare.orchestration.types import RunResult
 from frame_compare.utils.terminal_theme import (
     GLYPHS_ASCII,
     GLYPHS_UNICODE,
     glyphs_for_console,
     glyphs_for_encoding,
     human_console,
+    use_ascii_fallback_on_non_utf_streams,
 )
 
 
@@ -46,3 +52,31 @@ def test_human_console_disables_highlight() -> None:
     stream = io.StringIO()
     human_console(file=stream, force_terminal=True, width=100).print("seed 20202020")
     assert stream.getvalue() == "seed 20202020\n"
+
+
+@pytest.mark.parametrize(
+    ("encoding", "expected"),
+    [
+        ("ascii", "Comparison complete | 1 warning"),
+        ("cp1252", "Comparison complete · 1 warning"),
+        ("utf-8", "Comparison complete · 1 warning"),
+    ],
+)
+def test_result_summary_degrades_generated_punctuation_on_non_utf_stderr(
+    monkeypatch: pytest.MonkeyPatch, encoding: str, expected: str
+) -> None:
+    stderr = io.TextIOWrapper(io.BytesIO(), encoding=encoding)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    use_ascii_fallback_on_non_utf_streams()
+
+    print_result_summary(
+        human_console(stderr=True, width=100),
+        result=RunResult(success=True, duration_seconds=5.0, warnings=["Übersicht"]),
+        quiet=False,
+        root=Path.cwd(),
+    )
+    stderr.flush()
+    output = stderr.buffer.getvalue().decode(encoding)
+
+    assert expected in output
+    assert ("?bersicht" if encoding == "ascii" else "Übersicht") in output

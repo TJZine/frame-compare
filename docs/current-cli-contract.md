@@ -553,6 +553,11 @@ unchanged.
   red; the skipped `–` carries no color. The description remains normally styled,
   and no-color output retains the same literal glyphs. The plain and log
   reporters keep their existing ASCII markers.
+- On a non-UTF stdout or stderr, human output never fails on characters the
+  stream cannot encode: generated punctuation degrades to ASCII (`·` as `|`,
+  `×` as `x`, dashes as `-`, `…` as `...`, `›` as `>`) and any other
+  unencodable character becomes `?`. Encodable text, including cp1252 output,
+  is unchanged, and JSON output is ASCII-escaped.
 - Audio alignment remains one coherent `Align` phase in Rich output (`ALIGN`
   in plain/log output). Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task. Fresh

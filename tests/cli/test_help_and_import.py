@@ -1,6 +1,7 @@
 import pytest
 import typer.rich_utils as typer_rich_utils
 from pytest import MonkeyPatch
+from typer.core import TyperGroup
 from typer.main import get_command
 
 from frame_compare.cli.entry import _stabilize_typer_help_width, app
@@ -274,6 +275,7 @@ def test_run_help_panel_persistence_matches_cli_override_map() -> None:
     override map so the two cannot silently drift apart.
     """
     command = get_command(app)
+    assert isinstance(command, TyperGroup)
     run_command = command.commands["run"]
     persistent_flags = {f"--{name.replace('_', '-')}" for name in CLI_OVERRIDE_MAP}
 
@@ -437,3 +439,16 @@ def test_import_does_not_mutate_terminal_width():
     except subprocess.TimeoutExpired as exc:
         pytest.fail(f"CLI import subprocess timed out after {exc.timeout} seconds")
     assert res.returncode == 0, res.stderr
+
+
+def test_cli_installs_ascii_fallback_before_any_command(monkeypatch: MonkeyPatch) -> None:
+    calls: list[None] = []
+    monkeypatch.setattr(
+        "frame_compare.cli.entry.use_ascii_fallback_on_non_utf_streams",
+        lambda: calls.append(None),
+    )
+
+    result = runner.invoke(app, ["version"])
+
+    assert result.exit_code == 0
+    assert calls == [None]
