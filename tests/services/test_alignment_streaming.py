@@ -301,7 +301,7 @@ def test_reader_failure_is_distinct_from_eof_and_cleans_every_owner(
     def fail_reader(*args: Any) -> None:
         done = args[-2]
         slot = args[-1]
-        slot.record(category, "injected reader failure")
+        slot(category, "injected reader failure")
         done.set()
 
     monkeypatch.setattr(alignment_streaming, reader_name, fail_reader)
@@ -322,7 +322,7 @@ def test_stdout_reader_failure_invalidates_already_consumed_pcm(
         del stream, stop
         chunks.put(_payload([1.0]))
         threading.Event().wait(0.05)
-        slot.record("stdout_reader_failed", "injected failure after data")
+        slot("stdout_reader_failed", "injected failure after data")
         done.set()
 
     monkeypatch.setattr(alignment_streaming, "_read_stdout", output_then_fail)
@@ -348,7 +348,7 @@ def test_out_of_band_reader_error_survives_full_stdout_queue(
         del stream, stop
         for _ in range(chunk_count):
             chunks.put(chunk)
-        slot.record("stdout_reader_failed", "injected failure behind full queue")
+        slot("stdout_reader_failed", "injected failure behind full queue")
         done.set()
 
     monkeypatch.setattr(alignment_streaming, "_read_stdout", fill_then_fail)
@@ -391,7 +391,7 @@ def test_first_reader_failure_survives_separate_cleanup_failure(
     def fail_stdout(*args: Any) -> None:
         done = args[-2]
         slot = args[-1]
-        slot.record("stdout_reader_failed", "first cause")
+        slot("stdout_reader_failed", "first cause")
         done.set()
 
     def cleanup_with_failure(*args: Any, **kwargs: Any) -> Any:

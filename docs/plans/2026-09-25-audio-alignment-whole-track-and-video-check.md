@@ -526,3 +526,29 @@ Return to the controller or maintainer if:
   zero-pads a short final reference chunk (see U2). Verification: 31 focused tests,
   `tests/services`, pyright, ruff check/format, lint-imports and `git diff --check`
   all pass.
+- 2026-09-25: U2 implemented by the external implementer with three adversarial
+  self-reviews. The independent `deep_reviewer` (Opus, high) found one major and
+  eight minor findings; a re-review then found one new minor, one test flake and
+  nits. All were accepted and fixed by the controller:
+  - the failure slot is re-read after cleanup (a late reader failure can no longer
+    look like success);
+  - every decoded block is finiteness-checked;
+  - the overflow is raised, not asserted;
+  - a crashed child is detected and reaped at its EOF, with a stall bound and slot
+    checks;
+  - one spawn helper, callable failure recorders and early buffer allocation;
+  - signal-death, late-reader and stdout-closed-but-alive tests were added, and
+    timing-dependent tests made deterministic.
+
+  Memory note (A7): each side holds one sample store plus one delivery scratch
+  buffer, so window-sized memory is 2x the plan's wording. It is still constant:
+  about 34 MB at the largest admitted M.
+
+  Structure decision for U3, from the review: keep one streaming module (a split
+  would create a private cross-module API with one consumer). As U3's first step,
+  fold the per-side state and free functions into a `_ChildStream` class with a
+  frozen run context, alongside deleting the single-child collector.
+
+  Verification: full pytest, paired resource tests, pyright, ruff, bandit,
+  lint-imports and `git diff --check` pass natively; focused and paired resource
+  tests pass in Docker. Windows handle-release proof is pending.
