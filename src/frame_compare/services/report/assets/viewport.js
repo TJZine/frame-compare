@@ -636,28 +636,218 @@ const Viewport = {
         return labels[preset] || preset;
     },
 
-    alignmentStatusText() {
+    alignmentStatusValue() {
         const xText = this.formatSignedPixels(this.viewer.state.alignX, 'x');
         const yText = this.formatSignedPixels(this.viewer.state.alignY, 'y');
         const hasOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
 
-        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'Offset: none';
-        if (this.viewer.state.alignmentPreset === 'custom') return `Offset: custom ${xText} ${yText}`;
+        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'none';
+        if (this.viewer.state.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
         if (this.viewer.state.alignmentPreset !== 'none') {
-            return `Offset: preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
+            return `preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
         }
-        return `Offset: ${xText} ${yText}`;
+        return `${xText} ${yText}`;
+    },
+
+    alignmentStatusText() {
+        return `Offset: ${this.alignmentStatusValue()}`;
     },
 
     updateAlignmentStatus() {
         if (!this.viewer.dom.alignmentStatus) return;
-        this.viewer.dom.alignmentStatus.textContent = this.alignmentStatusText();
+        const label = document.createElement('span');
+        label.className = 'rv-offset-label';
+        label.textContent = 'Offset:';
+        const value = document.createElement('span');
+        value.className = 'rv-offset-value';
+        value.textContent = ` ${this.alignmentStatusValue()}`;
+        this.viewer.dom.alignmentStatus.replaceChildren(label, value);
     },
 
     updateSlider() {
         this.viewer.dom.leftLayer.style.setProperty('--reveal-percent', this.viewer.state.revealPercent + '%');
         this.viewer.dom.divider.style.setProperty('--reveal-percent', this.viewer.state.revealPercent + '%');
         this.viewer.dom.canvas.style.setProperty('--reveal-percent', this.viewer.state.revealPercent + '%');
+    },
+
+    paletteProximityNearPx: 96,
+    paletteProximityFarPx: 160,
+    paletteProximityLoadMs: 3000,
+
+    proximityDistanceToRect(rect, clientX, clientY) {
+        const left = Number(rect?.left) || 0;
+        const top = Number(rect?.top) || 0;
+        const width = Math.max(0, Number(rect?.width) || 0);
+        const height = Math.max(0, Number(rect?.height) || 0);
+        const dx = clientX < left
+            ? left - clientX
+            : Math.max(0, clientX - (left + width));
+        const dy = clientY < top
+            ? top - clientY
+            : Math.max(0, clientY - (top + height));
+        return Math.hypot(dx, dy);
+    },
+
+    resolvePaletteProximity({
+        current,
+        distance,
+        dragActive,
+        popoverOpen,
+        loadActive,
+        finePointer,
+    }) {
+        if (!finePointer) return 'near';
+        if (loadActive) return 'near';
+        if (popoverOpen) return 'near';
+        if (dragActive) return 'far';
+        if (distance <= this.paletteProximityNearPx) return 'near';
+        if (distance >= this.paletteProximityFarPx) return 'far';
+        return current === 'far' ? 'far' : 'near';
+    },
+
+    isPaletteDragActive() {
+        const pointer = this.viewer.pointerInteraction;
+        return Boolean(
+            pointer && (pointer.isDragging || pointer.isPanning || pointer.pinchActive),
+        );
+    },
+
+    isPalettePopoverOpen() {
+        if (typeof this.viewer.isAlignmentPopoverOpen === 'function'
+            && this.viewer.isAlignmentPopoverOpen()) return true;
+        const lensPopover = this.viewer.dom.lensSettingsPopover;
+        return Boolean(lensPopover && lensPopover.hidden === false);
+    },
+
+    applyPaletteProximity(next) {
+        const proximity = this.viewer.paletteProximity || {};
+        proximity.current = next;
+        this.viewer.paletteProximity = proximity;
+        this.viewer.dom.viewportPalette?.setAttribute?.('data-proximity', next);
+    },
+
+    updatePaletteProximity(clientX, clientY) {
+        const palette = this.viewer.dom.viewportPalette;
+        if (!palette) return;
+        const proximity = this.viewer.paletteProximity || {};
+        if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+            proximity.lastX = clientX;
+            proximity.lastY = clientY;
+        }
+        this.viewer.paletteProximity = proximity;
+        const rect = palette.getBoundingClientRect?.();
+        const x = proximity.lastX;
+        const y = proximity.lastY;
+        const distance = (Number.isFinite(x) && Number.isFinite(y) && rect)
+            ? this.proximityDistanceToRect(rect, x, y)
+            : Number.POSITIVE_INFINITY;
+        this.applyPaletteProximity(this.resolvePaletteProximity({
+            current: proximity.current || 'near',
+            distance,
+            dragActive: this.isPaletteDragActive(),
+            popoverOpen: this.isPalettePopoverOpen(),
+            loadActive: Date.now() < (proximity.loadUntil || 0),
+            finePointer: proximity.finePointer !== false,
+        }));
+    },
+
+    schedulePaletteProximity(clientX, clientY) {
+        const proximity = this.viewer.paletteProximity || {};
+        this.viewer.paletteProximity = proximity;
+        proximity.pendingX = clientX;
+        proximity.pendingY = clientY;
+        if (proximity.rafQueued) return;
+        const apply = () => {
+            proximity.rafQueued = 0;
+            this.updatePaletteProximity(proximity.pendingX, proximity.pendingY);
+        };
+        if (typeof window !== 'undefined'
+            && typeof window.requestAnimationFrame === 'function') {
+            proximity.rafQueued = window.requestAnimationFrame(apply);
+        } else {
+            apply();
+        }
+    },
+
+    cancelQueuedPaletteProximity() {
+        const proximity = this.viewer.paletteProximity || {};
+        if (proximity.rafQueued
+            && typeof window !== 'undefined'
+            && typeof window.cancelAnimationFrame === 'function') {
+            window.cancelAnimationFrame(proximity.rafQueued);
+        }
+        proximity.rafQueued = 0;
+        this.viewer.paletteProximity = proximity;
+    },
+
+    handleStagePointerLeave() {
+        this.cancelQueuedPaletteProximity();
+        const proximity = this.viewer.paletteProximity || {};
+        proximity.lastX = undefined;
+        proximity.lastY = undefined;
+        this.applyPaletteProximity(this.resolvePaletteProximity({
+            current: proximity.current || 'near',
+            distance: Number.POSITIVE_INFINITY,
+            dragActive: this.isPaletteDragActive(),
+            popoverOpen: this.isPalettePopoverOpen(),
+            loadActive: Date.now() < (proximity.loadUntil || 0),
+            finePointer: proximity.finePointer !== false,
+        }));
+    },
+
+    detachPaletteMediaListener(proximity) {
+        const query = proximity.mediaQuery;
+        const listener = proximity.mediaListener;
+        if (!query || !listener) return;
+        if (typeof query.removeEventListener === 'function') {
+            query.removeEventListener('change', listener);
+        } else if (typeof query.removeListener === 'function') {
+            query.removeListener(listener);
+        }
+        proximity.mediaQuery = null;
+        proximity.mediaListener = null;
+    },
+
+    initPaletteProximity() {
+        const proximity = this.viewer.paletteProximity || {};
+        this.cancelQueuedPaletteProximity();
+        this.detachPaletteMediaListener(proximity);
+        if (proximity.loadTimer
+            && typeof window !== 'undefined'
+            && typeof window.clearTimeout === 'function') {
+            window.clearTimeout(proximity.loadTimer);
+        }
+        proximity.current = 'near';
+        proximity.loadUntil = Date.now() + this.paletteProximityLoadMs;
+        proximity.lastX = undefined;
+        proximity.lastY = undefined;
+        proximity.pendingX = undefined;
+        proximity.pendingY = undefined;
+        proximity.rafQueued = 0;
+        proximity.loadTimer = 0;
+        const query = (typeof window !== 'undefined' && typeof window.matchMedia === 'function')
+            ? window.matchMedia('(hover: hover) and (pointer: fine)')
+            : null;
+        proximity.finePointer = query ? query.matches === true : false;
+        proximity.mediaQuery = query;
+        this.viewer.paletteProximity = proximity;
+        this.applyPaletteProximity('near');
+        const onMediaChange = event => {
+            this.viewer.paletteProximity.finePointer = event.matches === true;
+            this.updatePaletteProximity();
+        };
+        proximity.mediaListener = onMediaChange;
+        if (query && typeof query.addEventListener === 'function') {
+            query.addEventListener('change', onMediaChange);
+        } else if (query && typeof query.addListener === 'function') {
+            query.addListener(onMediaChange);
+        }
+        if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+            proximity.loadTimer = window.setTimeout(() => {
+                proximity.loadTimer = 0;
+                this.updatePaletteProximity();
+            }, this.paletteProximityLoadMs + 50);
+        }
     },
 
     },

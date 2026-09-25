@@ -29,6 +29,7 @@ from frame_compare.orchestration.phase_selection import (
     selection_timecode_for_frame,
     source_frames_for_reference_base_domain,
 )
+from frame_compare.orchestration.presentation import clip_role
 from frame_compare.services.alignment import (
     align_clips_from_request,
     calculate_alignment_trims,
@@ -36,12 +37,19 @@ from frame_compare.services.alignment import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.release_identity import (
+    ShortNameSource,
     common_content_identity,
     format_compact_identity,
     format_content_identity,
+    format_micro_descriptor,
     format_release_descriptor,
+    short_source_names,
 )
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentResult,
+    AlignmentReviewSummary,
+)
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -91,6 +99,7 @@ async def run_align_phase(
         no_color=ctx.no_color,
     )
     alignment_request = _alignment_request_from_context(ctx)
+    review_summary = AlignmentReviewSummary()
     log.debug(
         "alignment_request_prepared",
         comparisons=len(alignment_request.comparisons),
@@ -102,6 +111,7 @@ async def run_align_phase(
         alignment_request,
         alignment_config,
         progress=ctx.reporter,
+        review_summary=review_summary,
         reference_fps=ctx.reference.effective_fps,
         frame_props_by_stem={
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
@@ -291,7 +301,47 @@ async def run_align_phase(
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
         warnings=warnings,
+        success_summary=_align_success_summary(
+            request=alignment_request,
+            results=results,
+            review=review_summary,
+        ),
+        review_seconds=review_summary.review_seconds,
+        review_unresolved=review_summary.review_unresolved,
     )
+
+
+def _align_success_summary(
+    *,
+    request: AlignmentRequest,
+    results: list[AlignmentResult],
+    review: AlignmentReviewSummary,
+) -> str:
+    """Build the durable Align phase summary from short names and review counts."""
+    if review.review_ran:
+        pairs = review.pairs_confirmed
+        summary = (
+            f"{pairs} pair confirmed in VSView"
+            if pairs == 1
+            else f"{pairs} pairs confirmed in VSView"
+        )
+        if review.comparisons_kept > 0:
+            summary += f" · {review.comparisons_kept} kept"
+        return summary
+    parts = [
+        (
+            f"{_request_short_name(comparison)} audio applied"
+            if result.applied
+            else f"{_request_short_name(comparison)} needs visual confirmation"
+        )
+        for comparison, result in zip(request.comparisons, results, strict=True)
+    ]
+    return " · ".join(parts)
+
+
+def _request_short_name(comparison: AlignmentClipRequest) -> str:
+    """Return the comparison's short name with label/path fallbacks."""
+    return comparison.short_name or comparison.label or comparison.path.name
 
 
 def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
@@ -325,11 +375,26 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         clip.path.name if not name or counts[name] > 1 else name
         for clip, name in zip(clips, presentation_names, strict=True)
     ]
+    compact_names = [_alignment_compact_name(clip) for clip in clips]
+    short_names = short_source_names(
+        [
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label,
+                label_is_explicit=clip.label_is_explicit,
+            )
+            for clip in clips
+        ],
+        roles=[clip_role(index) for index in range(len(clips))],
+    )
+    short_names = [short or clip.path.name for short, clip in zip(short_names, clips, strict=True)]
     return AlignmentRequest(
         reference=_alignment_clip_request(
             ctx.reference,
             selected_audio_stream=ctx.config.audio_alignment.reference_stream,
             presentation_name=presentation_names[0],
+            compact_name=compact_names[0],
+            short_name=short_names[0],
         ),
         selected_reference_relationship=_selected_reference_relationship(ctx),
         comparisons=[
@@ -339,6 +404,8 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
                     comparison.path.stem
                 ),
                 presentation_name=presentation_names[index],
+                compact_name=compact_names[index],
+                short_name=short_names[index],
             )
             for index, comparison in enumerate(ctx.comparisons, start=1)
         ],
@@ -360,7 +427,15 @@ def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> s
     if clip.release_identity is None:
         return clip.path.name
     formatter = format_release_descriptor if has_common_content else format_compact_identity
-    return formatter(clip.release_identity) or clip.path.name
+    return formatter(clip.release_identity, separator=" · ") or clip.path.name
+
+
+def _alignment_compact_name(clip: ClipState) -> str:
+    if clip.label_is_explicit and clip.label.strip():
+        return clip.label.strip()
+    if clip.release_identity is None:
+        return clip.path.name
+    return format_micro_descriptor(clip.release_identity, separator=" · ") or clip.path.name
 
 
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
@@ -371,7 +446,12 @@ def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedRefere
 
 
 def _alignment_clip_request(
-    clip: ClipState, *, selected_audio_stream: int | None, presentation_name: str | None = None
+    clip: ClipState,
+    *,
+    selected_audio_stream: int | None,
+    presentation_name: str | None = None,
+    compact_name: str | None = None,
+    short_name: str | None = None,
 ) -> AlignmentClipRequest:
     fingerprint = clip.probe.fingerprint
     return AlignmentClipRequest(
@@ -390,6 +470,8 @@ def _alignment_clip_request(
         selected_audio_stream=selected_audio_stream,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
         presentation_name=presentation_name,
+        compact_name=compact_name,
+        short_name=short_name,
     )
 
 

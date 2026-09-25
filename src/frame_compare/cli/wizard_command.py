@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import sys
 from pathlib import Path
 from typing import Protocol
 
@@ -33,6 +34,11 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
 )
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    glyphs_for_stream,
+    human_console,
+)
 
 from .cli_helpers import HandleErrorFn, TextWriter
 from .wizard_policy import (
@@ -53,6 +59,14 @@ from .wizard_policy import (
 
 _CANCELED = "Canceled; configuration unchanged."
 _DISCOVERY_PREVIEW_LIMIT = 8
+
+
+def _print_heading(text: str, *, err: bool, no_color: bool) -> None:
+    """Print a section heading in the accent, keeping stream and text unchanged."""
+    stream = sys.stderr if err else sys.stdout
+    human_console(file=stream, no_color=no_color).print(f"[bold {ACCENT}]{text}[/]")
+
+
 _STALE_REFERENCE_WARNING = (
     "Current reference does not match the discovered files; a run may fail until the files "
     "or selector change."
@@ -147,9 +161,12 @@ def handle_wizard(
             current_config=current_config,
             candidate=candidate,
             existing=existing,
+            no_color=no_color,
         )
 
-        goal = _prompt_goal(prompt=prompt, current_config=current_config, existing=existing)
+        goal = _prompt_goal(
+            prompt=prompt, current_config=current_config, existing=existing, no_color=no_color
+        )
         before_goal = copy_payload(candidate)
         if goal.goal != WizardGoal.KEEP:
             set_table_values(candidate, "analysis", goal.analysis_patch)
@@ -163,7 +180,9 @@ def handle_wizard(
                 "No configuration changes. Configuration was not written.",
                 err=True,
             )
-            _print_next_steps(root=root, config_path=selected_path, is_windows=is_windows)
+            _print_next_steps(
+                root=root, config_path=selected_path, is_windows=is_windows, no_color=no_color
+            )
             return
 
         strip_nonpersistable_config_values(candidate)
@@ -181,14 +200,18 @@ def handle_wizard(
             frame_changed=frame_changed,
             goal=goal,
             stale_reference=stale_reference,
+            no_color=no_color,
         )
         if not confirm("Write these changes?", default=False):
             typer.echo(_CANCELED, err=True)
             return
 
         write_payload(selected_path, candidate)
-        typer.echo(f"Configuration written: {selected_path}", err=True)
-        _print_next_steps(root=root, config_path=selected_path, is_windows=is_windows)
+        ok = glyphs_for_stream(sys.stderr).ok
+        typer.echo(f"{ok} Configuration written: {selected_path}", err=True)
+        _print_next_steps(
+            root=root, config_path=selected_path, is_windows=is_windows, no_color=no_color
+        )
     except (KeyboardInterrupt, EOFError, typer.Abort):
         typer.echo(_CANCELED, err=True)
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
@@ -247,6 +270,7 @@ def _prompt_reference(
     current_config: ConfigSchema,
     candidate: TomlPayload,
     existing: bool,
+    no_color: bool,
 ) -> tuple[tuple[str, str] | None, bool]:
     if not discovered:
         return None, False
@@ -276,11 +300,11 @@ def _prompt_reference(
     options.append((automatic_label, None))
     options.extend((name, name) for name in names)
 
-    typer.echo("Reference:")
+    _print_heading("Reference:", err=False, no_color=no_color)
     for index, (label, _) in enumerate(options, start=1):
         typer.echo(f"  {index}. {label}")
     if stale_current:
-        typer.echo(_STALE_REFERENCE_WARNING)
+        typer.echo(f"{glyphs_for_stream(sys.stdout).warning} {_STALE_REFERENCE_WARNING}")
 
     selected = _prompt_menu_index(prompt, options_count=len(options), default=1)
     _, selector = options[selected - 1]
@@ -333,8 +357,9 @@ def _prompt_goal(
     prompt: PromptFn,
     current_config: ConfigSchema,
     existing: bool,
+    no_color: bool,
 ) -> GoalChoice:
-    typer.echo("How should frames be selected?")
+    _print_heading("How should frames be selected?", err=False, no_color=no_color)
     if existing:
         typer.echo("  0. Keep current frame selection")
     for line in GOAL_MENU_LINES:
@@ -395,9 +420,10 @@ def _print_review(
     frame_changed: bool,
     goal: GoalChoice,
     stale_reference: bool,
+    no_color: bool,
 ) -> None:
-    typer.echo("Review configuration changes")
-    typer.echo("Changes")
+    _print_heading("Review configuration changes", err=False, no_color=no_color)
+    _print_heading("Changes", err=False, no_color=no_color)
     typer.echo(f"  Config: {config_path}")
     if input_changed:
         old_input = old_config.paths.input_dir if existing else "<not configured>"
@@ -414,14 +440,14 @@ def _print_review(
         old_summary = keep_goal(old_config).summary if existing else "<default>"
         typer.echo(f"  Frame selection: {old_summary} -> {goal.summary}")
 
-    typer.echo("Runtime impact")
+    _print_heading("Runtime impact", err=False, no_color=no_color)
     typer.echo(f"  Metric scan: {goal.metric_scan}")
     if goal.metric_scan == "quality":
         typer.echo(f"  {VISUAL_COVERAGE_SCAN_NOTE}")
     if stale_reference:
-        typer.echo(f"  {_STALE_REFERENCE_WARNING}")
+        typer.echo(f"  {glyphs_for_stream(sys.stdout).warning} {_STALE_REFERENCE_WARNING}")
 
-    typer.echo("Privacy")
+    _print_heading("Privacy", err=False, no_color=no_color)
     typer.echo("  Secret values are never displayed.")
     webhook_removed = existing and table_key(original, "slowpics", "webhook_url") is not None
     if webhook_removed:
@@ -429,7 +455,7 @@ def _print_review(
     if existing and table_key(original, "tmdb", "api_key") is not None:
         typer.echo("  TMDB API key: removed from generated configuration")
 
-    typer.echo("Preserved settings")
+    _print_heading("Preserved settings", err=False, no_color=no_color)
     publishing = (
         "preserved except webhook URL"
         if webhook_removed
@@ -462,9 +488,9 @@ def _format_suggested_run_command(
     return command
 
 
-def _print_next_steps(*, root: Path, config_path: Path, is_windows: bool) -> None:
+def _print_next_steps(*, root: Path, config_path: Path, is_windows: bool, no_color: bool) -> None:
     """Suggest the verified diagnose/preview/execute commands for this exact selection."""
-    typer.echo("Next steps:", err=True)
+    _print_heading("Next steps:", err=True, no_color=no_color)
     typer.echo("  1. Diagnose the runtime: frame-compare doctor", err=True)
     preview_command = _format_suggested_run_command(
         root, config_path, is_windows=is_windows, dry_run=True

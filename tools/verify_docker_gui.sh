@@ -203,7 +203,7 @@ audio_review_by_key = {
     )
     for key in ("reference:comparison", "reference:comparison_2")
 }
-session = launch_alignment_verification_session(
+session, _wait_seconds = launch_alignment_verification_session(
     VSViewSessionRequest(
         reference=reference,
         comparisons=[comparison, comparison_2],

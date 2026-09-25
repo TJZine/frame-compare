@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
@@ -15,6 +14,7 @@ from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import report_console_width
 from frame_compare.services.release_identity import format_release_descriptor
 from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
+from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
 
 _MAX_SELECTED_FRAMES = 8
 
@@ -64,7 +64,7 @@ def build_frame_alignment_report(
                 comparison.label
                 if comparison.label_is_explicit
                 else (
-                    format_release_descriptor(comparison.release_identity)
+                    format_release_descriptor(comparison.release_identity, separator=" · ")
                     if comparison.release_identity is not None
                     else comparison.label
                 )
@@ -160,7 +160,7 @@ def _render_alignment_table(
         padding=(0, 2, 0, 0),
         expand=False,
     )
-    table.add_column("key", style="blue", no_wrap=True, min_width=12, overflow="fold")
+    table.add_column("key", style="dim", no_wrap=True, min_width=12, overflow="fold")
     table.add_column("value", overflow="fold")
 
     for index, comparison in enumerate(comparisons):
@@ -171,10 +171,10 @@ def _render_alignment_table(
         display_name = (
             comparison.label if verbose else (comparison.presentation_name or comparison.label)
         )
-        table.add_row("comparison", f"[bright_white]{escape(display_name)}[/]")
+        table.add_row("comparison", f"{escape(display_name)}")
         table.add_row(
             "  offset",
-            f"[bright_white]{escape(_format_offset(comparison.relative_offset_frames))}[/]",
+            f"{escape(_format_offset(comparison.relative_offset_frames))}",
         )
         stability = comparison.stability
         if stability is not None and (
@@ -184,20 +184,18 @@ def _render_alignment_table(
             value = _format_stability(stability)
             if verbose:
                 value += f"; {stability.valid_windows} valid windows"
-            table.add_row("  stability", f"[bright_white]{escape(value)}[/]")
-        table.add_row("  source", f"[bright_white]{escape(source)}[/]")
+            table.add_row("  stability", f"{escape(value)}")
+        table.add_row("  source", f"{escape(source)}")
         table.add_row(
             "  trims",
-            "[bright_white]"
             f"Reference {escape(_format_range(comparison.reference_trim_range))}, "
             f"{escape(display_name)} "
-            f"{escape(_format_range(comparison.comparison_trim_range))}"
-            "[/]",
+            f"{escape(_format_range(comparison.comparison_trim_range))}",
         )
         if selected_frames:
             table.add_row(
                 "  frames",
-                f"[bright_white]aligned {escape(_format_selected_frames(selected_frames))}[/]",
+                f"aligned {escape(_format_selected_frames(selected_frames))}",
             )
 
     if alignment_warnings:
@@ -210,14 +208,12 @@ def _render_alignment_table(
     if verbose:
         for comparison in comparisons:
             table.add_row("", "")
-            table.add_row("details", f"[bright_white]{escape(comparison.label)}[/]")
+            table.add_row("details", f"{escape(comparison.label)}")
             table.add_row(
                 "  row 0",
-                "[bright_white]"
                 f"Reference source {comparison.reference_row_zero_source_frame}"
                 f" <-> {escape(comparison.label)} source "
-                f"{comparison.comparison_row_zero_source_frame}"
-                "[/]",
+                f"{comparison.comparison_row_zero_source_frame}",
             )
             if comparison.reference_path is not None:
                 table.add_row(
@@ -242,7 +238,7 @@ def _render_human_alignment_report(
     no_color: bool,
     verbose: bool,
 ) -> None:
-    console = Console(
+    console = human_console(
         stderr=True,
         no_color=no_color,
         width=report_console_width(),
@@ -256,8 +252,8 @@ def _render_human_alignment_report(
                 alignment_warnings=alignment_warnings,
                 verbose=verbose,
             ),
-            title=f"[bold cyan]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
-            border_style="cyan",
+            title=f"[bold {ACCENT} not dim]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
+            border_style=BORDER_NEUTRAL,
         )
     )
 

@@ -61,10 +61,22 @@ The viewer supports:
 - a lens for close inspection;
 - browser-local review state and notes.
 
+The lens is a plain magnifier: it enlarges the source under the pointer with a
+sample marker (Ring by default) and an optional caption naming the magnified
+source. The caption shows the compact source name and wraps within the lens
+instead of truncating; in Diff mode it shows two lines, the left source name
+and then the right source name after a `↔`. The caption stays hidden until
+turned on in lens settings; a loading or unavailable notice covers the lens
+image when it cannot be shown. The lens window stays where you put it; drag
+its grip to move it. In the vertical palette orientation the Source labels and
+Lens buttons show icons instead of text.
+
 Report payload version 1.2 adds release-aware source presentation without changing
 canonical source identity. Ordinary controls use compact, collision-safe release
-descriptors; constrained grid and lens labels use shorter variants. Explicit source
-labels remain authoritative. The Clips inspector and Report Information retain the
+descriptors joined with `·`; constrained grid and lens labels use shorter variants.
+The viewer identifies each source by name alone, with no numbers or side words.
+Baked screenshot text and slow.pics image names keep the `|` separator.
+Explicit source labels remain authoritative. The Clips inspector and Report Information retain the
 full primary identity and exact, wrapping filename, so shortened controls do not hide
 the archival source name.
 
@@ -75,15 +87,24 @@ renderer can prove them. The Frame inspector updates that source list with the c
 Single, Slider, Diff, Blink, or Grid view; it does not present one reference-source
 frame as universal truth.
 
-The Clips inspector keeps archival source facts compact: complete file size, observed
-signal, actual presentation state, and a non-full active picture when applicable. On
-desktop it uses a wider responsive drawer; on narrower screens it overlays the stage.
+The Frame inspector names the current frame (`number · category`, or the frame's own
+label) and its position (`n / count in filter`), with a Detail row only for non-default
+notes. Its source-frames table lists every source with its own aligned frame number,
+picture type, and a shown mark for visible sources. The Clips inspector and Report
+Information share one clip-card design built by the viewer from the same builder:
+the bare role (`Reference`/`Comparison`, no numbers), a DV HDR/HDR/SDR badge,
+the standard name, the exact filename, and Picture/Length/Size rows (placement and
+Signal in the Clips tab only). An `All sources:` line states the fps and presentation values
+identical across every source — fps only in Report Information; a value that differs
+appears on each card instead. On
+desktop the Inspector uses a wider responsive drawer; on narrower screens it overlays the stage.
 Source names, filenames, and long signal/presentation values wrap without requiring a
 document or Inspector horizontal scrollbar. Open Report Information for the Rendering
 section. It always states whether tonemapping was applied and, when applied, provides
 the full resolved settings in a closed-by-default advanced disclosure. Report Information
 is also the single place for report metadata: title, report ID, generated timestamp,
-frame/clip counts, and the slow.pics link when uploaded. No additional report tab or
+content (`frames · sources`), the default mode in toolbar names, the default pair,
+and the slow.pics link when uploaded. No additional report tab or
 permanent metadata panel duplicates it.
 
 Visible source labels in Single, Slider, Diff, Blink, and Grid views append that
@@ -99,7 +120,10 @@ The viewer uses neutral charcoal surfaces and reserves its brass accent for the 
 comparison mode, selected frame, and direct image-inspection markers. Utility toggles
 use neutral selected states. The compact viewport palette floats over the stage without
 reserving another toolbar row; its orientation, zoom, image offset, and fullscreen
-buttons have tooltips. `Offset: none` means no spatial image offset is applied to the
+buttons have tooltips. On precise pointers the palette fades to a ghost when the
+pointer moves away and returns to full opacity as it approaches; it dims to a
+ghost while dragging, and stays fully visible while either popover is open,
+shortly after load, and whenever it holds keyboard focus. `Offset: none` means no spatial image offset is applied to the
 pair, not that temporal frame alignment failed; the Inspector's Image offset tab and
 the palette's image offset settings both state that this adjustment is spatial only
 and does not change source-frame timing. The filmstrip keeps the comparison frame number
@@ -107,8 +131,11 @@ and selection category centered together over a shallow bottom gradient at every
 thumbnail size, leaving the full thumbnail area available to the image. Categories use
 text labels instead of colored stripes or filter dots; filter counts and the brass
 selection border remain.
-Keyboard focus uses a light neutral outline. The header shows only the generation
-date; hover over it or open Report Information for the exact timestamp.
+Keyboard focus uses a light neutral outline. The header shows the generation
+timestamp localized to the browser locale; hover over it or open Report Information
+for the exact ISO timestamp. Frame rates round to three decimals (`23.976 fps`),
+file sizes use two decimals (`10.83 GiB`), and runtimes use `H:MM:SS` floored to
+whole seconds.
 
 Source selectors, the optional source labels, and baked overlays serve different
 contexts. Selectors identify the source at the point of selection. Source labels stay

@@ -96,7 +96,6 @@ function fakeElement() {
     const listeners = new Map();
     let definitionValues = null;
     const inspectorPrimary = { value: null };
-    const inspectorRelease = { value: null };
     return {
         value: '',
         textContent: '',
@@ -166,10 +165,6 @@ function fakeElement() {
                 if (!inspectorPrimary.value) inspectorPrimary.value = fakeElement();
                 return inspectorPrimary.value;
             }
-            if (selector === '.rv-inspector-clip-release') {
-                if (!inspectorRelease.value) inspectorRelease.value = fakeElement();
-                return inspectorRelease.value;
-            }
             return null;
         },
         querySelectorAll(selector) {
@@ -198,6 +193,13 @@ function fakeElement() {
 
 function fakeBody() {
     return fakeElement();
+}
+
+function renderedText(element) {
+    if (element.children.length > 0) {
+        return element.children.map(child => child.textContent).join('');
+    }
+    return element.textContent;
 }
 
 function loadViewer({ clipCount, savedState = null }) {
@@ -242,6 +244,22 @@ function loadViewer({ clipCount, savedState = null }) {
             localStorage: storageApi,
             matchMedia() {
                 return { matches: false };
+            },
+            rafQueue: [],
+            requestAnimationFrame(callback) {
+                this.rafQueue.push(callback);
+                return this.rafQueue.length;
+            },
+            cancelAnimationFrame(id) {
+                this.rafQueue[id - 1] = null;
+            },
+            timeoutQueue: [],
+            setTimeout(callback) {
+                this.timeoutQueue.push(callback);
+                return this.timeoutQueue.length;
+            },
+            clearTimeout(id) {
+                this.timeoutQueue[id - 1] = null;
             },
         },
     };
@@ -326,12 +344,12 @@ function loadViewer({ clipCount, savedState = null }) {
             ...fakeElement(),
             id: `inspector-panel-${tab}`,
         })),
-        inspectorFrameLabel: fakeElement(),
-        inspectorFrameNumber: fakeElement(),
-        inspectorFrameCategory: fakeElement(),
+        inspectorFrameIdentity: fakeElement(),
+        inspectorFrameDetailRow: fakeElement(),
         inspectorFrameDetail: fakeElement(),
         inspectorFramePosition: fakeElement(),
         inspectorSourceFrames: fakeElement(),
+        inspectorClipsShared: fakeElement(),
         inspectorClips: fakeElement(),
         inspectorAlignPair: fakeElement(),
         inspectorAlignPreset: fakeElement(),
@@ -362,6 +380,10 @@ function loadViewer({ clipCount, savedState = null }) {
         filmstrip: fakeElement(),
         activeFilterBadge: fakeElement(),
         alignPopover: {
+            ...fakeElement(),
+            hidden: true,
+        },
+        lensSettingsPopover: {
             ...fakeElement(),
             hidden: true,
         },
@@ -417,6 +439,7 @@ function loadViewer({ clipCount, savedState = null }) {
         storage,
         storageKey: viewer.state.storageKey,
         document: context.document,
+        window: context.window,
         reviewMetrics,
     };
 }
@@ -467,15 +490,30 @@ const summary = {};
         'Primary release identity — Exact.File.Name.mkv',
     );
     assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Reference');
-    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison 1');
+    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison');
     viewer.state.data.default_selection.left_clip_index = 2;
-    assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Comparison 1');
-    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison 2');
+    assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Comparison');
+    assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison');
     assert.equal(format.stableClipRole(2, viewer.referenceClipIndex()), 'Reference');
-    assert.equal(format.stableClipRole(3, viewer.referenceClipIndex()), 'Comparison 3');
+    assert.equal(format.stableClipRole(3, viewer.referenceClipIndex()), 'Comparison');
     summary.clipDisplayProfiles = {
         requiredPayloadProfiles: true,
         stableInspectorRoles: true,
+    };
+}
+
+{
+    const { viewer: defaultViewer } = loadViewer({ clipCount: 4 });
+    const pairIndexes = () => JSON.parse(JSON.stringify(defaultViewer.defaultPairIndexes()));
+    assert.deepEqual(pairIndexes(), [0, 1]);
+    defaultViewer.state.data.default_selection = { left_clip_index: 9, right_clip_index: 9 };
+    assert.deepEqual(pairIndexes(), [0, 1]);
+    const { viewer: singleViewer } = loadViewer({ clipCount: 1 });
+    assert.deepEqual(JSON.parse(JSON.stringify(singleViewer.defaultPairIndexes())), [0, 0]);
+    summary.defaultPairRule = {
+        default: true,
+        outOfRangeFallsBack: true,
+        singleClipPairsWithItself: true,
     };
 }
 
@@ -514,7 +552,7 @@ const summary = {};
     assert.equal(viewer.state.alignX, 5);
     assert.equal(viewer.state.alignY, -2);
     assert.deepEqual(Object.keys(viewer.state.pairAlignments).sort(), ['0:1', '1:0']);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +5x -2y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +5x -2y');
     summary.restoreFourClip = {
         clipCount: viewer.clipCount(),
         leftClipIdx: viewer.state.leftClipIdx,
@@ -522,7 +560,7 @@ const summary = {};
         activeClipIdx: viewer.state.activeClipIdx,
         restoredPairKeys: Object.keys(viewer.state.pairAlignments).sort(),
         currentAlignment: [viewer.state.alignX, viewer.state.alignY],
-        alignmentStatus: viewer.dom.alignmentStatus.textContent,
+        alignmentStatus: renderedText(viewer.dom.alignmentStatus),
     };
 }
 
@@ -733,42 +771,42 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 1 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
-    const values = viewer.dom.inspectorClips.children[0].querySelectorAll('dd');
-    assert.equal(values.length, 7);
-    assert.equal(values[4].textContent, '17.00 GiB');
-    assert.equal(values[5].textContent, 'SDR · BT.709 / BT.709 / BT.2020c · Limited');
-    assert.equal(values[6].textContent, 'SDR');
+    const card = viewer.dom.inspectorClips.children[0];
+    const heading = card.children[0].children[0].textContent;
+    const badge = card.children[0].children[1].textContent;
+    const rows = card.children[3].children.map(
+        row => [row.children[0].textContent, row.children[1].textContent],
+    );
+    assert.equal(heading, 'Reference · shown left');
+    assert.equal(badge, 'SDR');
+    assert.equal(card.children[1].textContent, 'Clip 1');
+    assert.equal(card.children[2].textContent, 'clip-1.mkv');
+    assert.deepEqual(rows, [
+        ['Picture', '1920×1080 · full frame'],
+        ['Length', '100 frames · 0:00:04'],
+        ['Size', '17.00 GiB'],
+        ['Signal', 'SDR · BT.709 / BT.709 / BT.2020c · Limited'],
+    ]);
     summary.inspectorClipMetadata = {
-        valueCount: values.length,
-        fileSize: values[4].textContent,
-        signal: values[5].textContent,
-        presentation: values[6].textContent,
+        heading,
+        badge,
+        standardName: card.children[1].textContent,
+        fileName: card.children[2].textContent,
+        rows,
     };
 }
 
 {
     const { viewer } = loadViewer({ clipCount: 2 });
-    const release = '2160p | WEB-DL | GROUP';
-    viewer.state.data.clips[0].display = {
-        primary: `Example (2026) | ${release}`,
-        release,
-    };
-    viewer.state.data.clips[1].display = {
-        primary: 'Explicit comparison label',
-        release,
-    };
+    viewer.state.activeCategoryKey = '__fc_all__';
     viewer.inspector.setOpen(true, { focus: false, save: false });
-    const automaticRelease = viewer.dom.inspectorClips.children[0]
-        .querySelector('.rv-inspector-clip-release');
-    const explicitRelease = viewer.dom.inspectorClips.children[1]
-        .querySelector('.rv-inspector-clip-release');
-    assert.equal(automaticRelease.hidden, true);
-    assert.equal(automaticRelease.textContent, '');
-    assert.equal(explicitRelease.hidden, false);
-    assert.equal(explicitRelease.textContent, release);
-    summary.inspectorReleasePresentation = {
-        automaticIdentityNotDuplicated: automaticRelease.hidden,
-        explicitLabelKeepsReleaseDifferentiator: !explicitRelease.hidden,
+    assert.equal(viewer.dom.inspectorFrameIdentity.textContent, '10 · Selected');
+    assert.equal(viewer.dom.inspectorFramePosition.textContent, '1 / 2 in All');
+    assert.equal(viewer.dom.inspectorFrameDetailRow.hidden, true);
+    summary.inspectorFrameIdentity = {
+        identity: viewer.dom.inspectorFrameIdentity.textContent,
+        position: viewer.dom.inspectorFramePosition.textContent,
+        defaultDetailHidden: viewer.dom.inspectorFrameDetailRow.hidden,
     };
 }
 
@@ -776,7 +814,11 @@ const summary = {};
     const { viewer } = loadViewer({ clipCount: 2 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
     summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
-        item => item.textContent,
+        row => row.children.map(
+            cell => cell.children.length > 0
+                ? cell.children.map(child => child.textContent).join(' ')
+                : cell.textContent,
+        ).join(' | '),
     );
 }
 
@@ -902,33 +944,7 @@ const summary = {};
 }
 
 {
-    const { viewer, format } = loadViewer({ clipCount: 2 });
-    const clip = {
-        label: 'Title.2160p.WEB-DL.Service-GROUP',
-        display: {
-            primary: 'Title.2160p.WEB-DL.Service-GROUP',
-            release: '2160p | Service WEB-DL | GROUP',
-            control: 'Title.2160p.WEB-DL.Service-GROUP',
-            micro: 'Service WEB-DL',
-            filename: 'Title.2160p.WEB-DL.Service-GROUP.mkv',
-        },
-        resolution: [3840, 2160],
-        size_bytes: 17 * 1024 ** 3,
-        signal: { is_hdr: true },
-    };
-    assert.equal(
-        viewer.clipOverlayLabel(clip),
-        'Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
-    );
-    assert.equal(
-        viewer.clipOverlayLabel(clip, 'Left'),
-        'LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB',
-    );
-    summary.sourceOverlayLabels = {
-        single: viewer.clipOverlayLabel(clip),
-        slider: viewer.clipOverlayLabel(clip, 'Left'),
-        diff: viewer.clipOverlayLabel(clip, 'Base'),
-    };
+    const { format } = loadViewer({ clipCount: 2 });
 
     assert.equal(format.formatFileSize(1), '1.00 B');
     assert.equal(format.formatFileSize(1023), '1023.00 B');
@@ -956,15 +972,11 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    const labels = viewer.blinkStageLabels('Clip 1', 'Clip 2');
-    assert.equal(labels.left, 'FIRST: Clip 1');
-    assert.equal(labels.right, 'SECOND: Clip 2');
-
     viewer.state.mode = 'blink';
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
     viewer.updateImages();
-    assert.equal(viewer.dom.labelLeft.textContent, 'FIRST: Clip 1 • 1920×1080 • SDR • 17.00 GiB');
-    assert.equal(viewer.dom.labelRight.textContent, 'SECOND: Clip 2 • 1920×1080 • SDR • 17.00 GiB');
+    assert.equal(renderedText(viewer.dom.labelLeft), 'Clip 1 · 1920×1080 · SDR · 17.00 GiB');
+    assert.equal(renderedText(viewer.dom.labelRight), 'Clip 2 · 1920×1080 · SDR · 17.00 GiB');
     assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), true);
     assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), false);
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
@@ -972,7 +984,10 @@ const summary = {};
     assert.equal(viewer.dom.labelLeft.classList.contains('rv-overlay-label--active'), false);
     assert.equal(viewer.dom.labelRight.classList.contains('rv-overlay-label--active'), true);
     summary.blinkLabels = {
-        labels,
+        labels: {
+            left: renderedText(viewer.dom.labelLeft),
+            right: renderedText(viewer.dom.labelRight),
+        },
         activeLabelMoved: false,
         activeStateMoved: true,
     };
@@ -1106,19 +1121,19 @@ const summary = {};
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +4x +5y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
     assert.equal(viewer.state.alignX, 0);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
 
     viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
     assert.equal(viewer.state.alignX, 4);
     assert.equal(viewer.state.alignY, 5);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: custom +4x +5y');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
 
     viewer.setRightClip(2);
     assert.equal(viewer.state.alignX, -1);
@@ -1201,7 +1216,7 @@ const summary = {};
     summary.pairSwitchFourClip = {
         finalPair: `${viewer.state.leftClipIdx}:${viewer.state.rightClipIdx}`,
         finalAlignment: [viewer.state.alignX, viewer.state.alignY],
-        finalAlignmentStatus: viewer.dom.alignmentStatus.textContent,
+        finalAlignmentStatus: renderedText(viewer.dom.alignmentStatus),
         persistedPairKeys: Object.keys(saved.pairAlignments).sort(),
         persistedAlignments: {
             '0:1': [saved.pairAlignments['0:1'].alignX, saved.pairAlignments['0:1'].alignY],
@@ -1216,17 +1231,17 @@ const summary = {};
 {
     const { viewer } = loadViewer({ clipCount: 4 });
 
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     viewer.viewport.setAlignmentPreset('left-1');
     assert.equal(viewer.state.alignX, -1);
     assert.equal(viewer.state.alignY, 0);
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: preset left 1px');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
     viewer.viewport.setAlignmentPreset('none');
-    assert.equal(viewer.dom.alignmentStatus.textContent, 'Offset: none');
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     summary.alignmentStatus = {
         neutral: 'Offset: none',
         preset: 'Offset: preset left 1px',
-        reset: viewer.dom.alignmentStatus.textContent,
+        reset: renderedText(viewer.dom.alignmentStatus),
     };
 }
 
@@ -1559,6 +1574,185 @@ const summary = {};
         zoomUsedWidthMath,
         noRadioChecked: checkedStates.every((state) => state === 'false'),
         exactlyOneKeyboardReachable: tabIndexes.filter((value) => value === 0).length === 1,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 4 });
+    viewer.dom.modal.classList.remove('open');
+    viewer.dom.infoModal.classList.remove('open');
+    const keyEvent = key => ({
+        key,
+        target: { tagName: 'DIV', isContentEditable: false, closest() { return null; } },
+        preventDefault() {},
+    });
+    viewer.setMode('slider');
+    viewer.handleKey(keyEvent('g'));
+    const lowerSelectsGrid = viewer.state.mode === 'grid';
+    viewer.setMode('slider');
+    viewer.handleKey(keyEvent('G'));
+    const upperSelectsGrid = viewer.state.mode === 'grid';
+    summary.gridShortcut = {
+        lowerSelectsGrid,
+        upperSelectsGrid,
+    };
+}
+
+{
+    const { viewer } = loadViewer({ clipCount: 2 });
+    const viewport = viewer.viewport;
+    const rect = {
+        left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
+    };
+    assert.equal(viewport.proximityDistanceToRect(rect, 150, 622), 0);
+    assert.equal(viewport.proximityDistanceToRect(rect, 100, 600), 0);
+    assert.equal(viewport.proximityDistanceToRect(rect, 50, 622), 50);
+    assert.equal(viewport.proximityDistanceToRect(rect, 150, 560), 40);
+    assert.equal(
+        Math.round(viewport.proximityDistanceToRect(rect, 40, 540)),
+        85,
+    );
+    const base = {
+        current: 'near',
+        distance: 200,
+        dragActive: false,
+        popoverOpen: false,
+        loadActive: false,
+        finePointer: true,
+    };
+    const thresholds = (
+        viewport.resolvePaletteProximity({ ...base, distance: 96 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, distance: 160 }) === 'far'
+    );
+    const hysteresis = (
+        viewport.resolvePaletteProximity({ ...base, distance: 100 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, current: 'far', distance: 100 }) === 'far'
+        && viewport.resolvePaletteProximity({ ...base, current: 'far', distance: 96 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, distance: 160 }) === 'far'
+    );
+    const overrides = (
+        viewport.resolvePaletteProximity({ ...base, dragActive: true, distance: 0 }) === 'far'
+        && viewport.resolvePaletteProximity({ ...base, popoverOpen: true, distance: 500 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, loadActive: true, distance: 500 }) === 'near'
+        && viewport.resolvePaletteProximity({ ...base, finePointer: false, distance: 500 }) === 'near'
+    );
+    summary.proximityStateMachine = { thresholds, hysteresis, overrides };
+}
+
+{
+    const { viewer, window } = loadViewer({ clipCount: 2 });
+    const viewport = viewer.viewport;
+    viewer.dom.viewportPalette.getBoundingClientRect = () => ({
+        left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
+    });
+    viewport.initPaletteProximity();
+    const startsNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.updatePaletteProximity(900, 100);
+    const loadOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    viewer.paletteProximity.finePointer = true;
+    viewport.updatePaletteProximity(900, 100);
+    const farWhenDistant = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(500, 622);
+    const hysteresisHoldsFar = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(450, 622);
+    const nearWhenClose = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.pointerInteraction = { isDragging: true, isPanning: false, pinchActive: false };
+    viewport.updatePaletteProximity(150, 622);
+    const dragOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewer.pointerInteraction = { isDragging: false, isPanning: false, pinchActive: false };
+    viewer.dom.alignPopover.hidden = false;
+    viewport.updatePaletteProximity(900, 100);
+    const alignPopoverOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.dom.alignPopover.hidden = true;
+    viewer.dom.lensSettingsPopover.hidden = false;
+    viewport.updatePaletteProximity(900, 100);
+    const lensPopoverOverride = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.dom.lensSettingsPopover.hidden = true;
+    viewport.handleStagePointerLeave();
+    const pointerLeaveSetsFar = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewer.paletteProximity.finePointer = false;
+    viewport.updatePaletteProximity(900, 100);
+    const coarseStaysNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.handleStagePointerLeave();
+    const coarseLeaveStaysNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    const changes = [];
+    window.matchMedia = () => ({
+        matches: true,
+        addEventListener(type, listener) {
+            if (type === 'change') changes.push(listener);
+        },
+    });
+    viewport.initPaletteProximity();
+    const mediaInitFine = viewer.paletteProximity.finePointer === true;
+    changes[0]({ matches: false });
+    const mediaChangeGates = viewer.paletteProximity.finePointer === false
+        && viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    const flushRaf = () => {
+        window.rafQueue.splice(0).forEach(callback => callback && callback());
+    };
+    const flushTimeouts = () => {
+        window.timeoutQueue.splice(0).forEach(callback => callback && callback());
+    };
+    viewport.initPaletteProximity();
+    viewport.updatePaletteProximity(900, 100);
+    const loadHoldsNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushTimeouts();
+    const loadExpiryRecomputes = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(900, 100);
+    viewport.schedulePaletteProximity(150, 622);
+    const rafDefers = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.handleStagePointerLeave();
+    flushRaf();
+    const leaveCancelsQueuedFrame = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.updatePaletteProximity(900, 100);
+    viewport.schedulePaletteProximity(150, 622);
+    flushRaf();
+    const rafFlushApplies = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.updatePaletteProximity(900, 100);
+    viewport.updatePaletteProximity(Number.NaN, Number.NaN);
+    const nanHoldsFar = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.schedulePaletteProximity(900, 100);
+    viewport.initPaletteProximity();
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushRaf();
+    const reinitCancelsQueuedFrame = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.initPaletteProximity();
+    viewport.updatePaletteProximity(150, 622);
+    viewport.handleStagePointerLeave();
+    const leaveDuringLoadHoldsNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushTimeouts();
+    const leaveDuringLoadFadesAfterLoad = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.initPaletteProximity();
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushTimeouts();
+    const noPointerFadesAfterLoad = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    summary.paletteProximityWiring = {
+        startsNear,
+        loadOverride,
+        farWhenDistant,
+        hysteresisHoldsFar,
+        nearWhenClose,
+        dragOverride,
+        alignPopoverOverride,
+        lensPopoverOverride,
+        pointerLeaveSetsFar,
+        coarseStaysNear,
+        coarseLeaveStaysNear,
+        mediaInitFine,
+        mediaChangeGates,
+        loadHoldsNear,
+        loadExpiryRecomputes,
+        rafDefers,
+        leaveCancelsQueuedFrame,
+        rafFlushApplies,
+        nanHoldsFar,
+        reinitCancelsQueuedFrame,
+        leaveDuringLoadHoldsNear,
+        leaveDuringLoadFadesAfterLoad,
+        noPointerFadesAfterLoad,
     };
 }
 

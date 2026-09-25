@@ -165,7 +165,7 @@ def test_interactive_alignment_uses_plain_activity_without_discarding_log_progre
             display_label="ALIGN",
             total=3,
         )
-    rich_start_phase.assert_called_once_with("ALIGN", total=1)
+    rich_start_phase.assert_called_once_with("Align", total=1)
     rich_reporter.complete_phase()
 
     log_reporter = LogProgressReporter()
@@ -183,6 +183,24 @@ def test_interactive_alignment_uses_plain_activity_without_discarding_log_progre
     log_start_phase.assert_called_once_with("align", total=3)
 
 
+def test_rich_phase_label_drops_skip_detail() -> None:
+    """Rich live labels use the bare title-case label; detail rides the summary."""
+    reporter = RichProgressReporter(no_color=True)
+    with patch.object(
+        reporter,
+        "start_phase",
+        wraps=reporter.start_phase,
+    ) as start_phase:
+        start_phase_progress(
+            reporter,
+            name="publish",
+            display_label="PUBLISH  Disabled",
+            total=1,
+        )
+    start_phase.assert_called_once_with("Publish", total=1)
+    reporter.complete_phase()
+
+
 @pytest.mark.parametrize("width", [60, 80])
 def test_execution_section_is_rich_only_and_fits_without_color(
     width: int,
@@ -190,7 +208,7 @@ def test_execution_section_is_rich_only_and_fits_without_color(
 ) -> None:
     output = StringIO()
     console = Console(file=output, width=width, no_color=True, force_terminal=False)
-    monkeypatch.setattr(progress_module, "Console", lambda **_kwargs: console)
+    monkeypatch.setattr(progress_module, "human_console", lambda **_kwargs: console)
 
     reporter = RichProgressReporter(no_color=True)
     emit_execution_section_start(reporter, no_color=True)

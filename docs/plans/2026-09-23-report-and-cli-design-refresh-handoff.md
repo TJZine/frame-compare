@@ -1,0 +1,1005 @@
+---
+search:
+  exclude: true
+---
+
+Status: Reference
+Scope: Copy-paste implementation handoffs for the report viewer and CLI design refresh plan, one per review checkpoint.
+Owner: Maintainer; implementation sessions run in Muse Code, reviews run in the planning (controller) session.
+
+# Design refresh implementation handoffs
+
+This file is an execution handoff, not a second plan. The authority is
+[the design refresh plan](2026-09-23-report-and-cli-design-refresh.md). Each track
+below is implemented in its own session, in order, on one branch, and stops for a
+maintainer/controller review before the next track starts.
+
+| Session | Units | Starts from | Ends at |
+| --- | --- | --- | --- |
+| 1. Track A | A1 → A2 → A3 → A4 | branch tip after the plan commit | Checkpoint A report |
+| 1b. Track A test-scope correction | Track A tests only | Track A commits | Correction report (joins the Checkpoint A review) |
+| 2. Track B viewer | B1 → B2 → B3 | branch tip after Checkpoint A review and fixes | Checkpoint B-viewer report |
+| 2b. Track B viewer corrections | review corrections C1–C11 | Track B viewer commits | Corrections report (joins the Checkpoint B-viewer review) |
+| 2c. Track B viewer follow-ups | review follow-ups F1–F9 | 2b commits | Follow-up report (joins the Checkpoint B-viewer review) |
+| 2d. Track B viewer final fixes | G1–G2 | 2c commits | Short report; controller does the visual checks and closes the Checkpoint B-viewer review |
+| 3. Track B terminal | B4 → B5 → B6 → B7 | branch tip after Checkpoint B-viewer review and fixes | Checkpoint B-terminal report |
+| 3b. Track B terminal corrections | T1–T20 | Track B terminal commits | Corrections report; joins the Checkpoint B-terminal review |
+| 3c. Track B terminal final fixes | U1–U10 | 3b commits | Short report; controller does the visual checks and closes Checkpoint B-terminal |
+
+Paste one prompt per session. Every prompt requires the session to read the
+[Common rules](#common-rules) first.
+
+**Checkpoint reviews (controller side).** When a track's final report comes back,
+the controller reviews it with the repository's `reviewer` subagent
+(`.claude/agents/reviewer.md`), not `deep_reviewer`. Give it the track's plan
+sections, Invariants, Test scope, the final report, and `git diff <track start
+SHA>..<track end SHA>`; the controller verifies its findings, re-runs the gate, and
+performs the review checks by eye before accepting the track.
+
+## Common rules
+
+These apply to every session. The prompts refer to them by name.
+
+### Repository and branch
+
+- Repository: `/Users/tristan/Software/frame-compare` (on Windows, the maintainer's
+  equivalent checkout).
+- Branch: `dev/v0.6.0-design-refresh`. Work directly on it. Do not create, switch,
+  rebase, reset, or amend branches; do not push; do not open pull requests.
+- Start by recording `git rev-parse HEAD`, `git status`, and `git log --oneline -5`.
+  If the working tree has changes you did not make, stop and report them.
+- Environment: use `uv sync --group dev --group docs --extra vsview --frozen`
+  whenever you need to install or re-sync. Never run a narrower `uv sync` (it
+  removes the `vsview` extra or the docs tools and breaks pyright and the docs
+  build).
+- Baseline: before any edit, run `uv run --no-sync pyright --warnings` and record
+  the result. It is expected to be 0 errors, 0 warnings. Never describe an error
+  as pre-existing unless it appears in this baseline at the start SHA.
+
+### Authority and reading order
+
+1. The plan: `docs/plans/2026-09-23-report-and-cli-design-refresh.md`. Read it in
+   full, including Locked decisions, Invariants, Shared specifications, your
+   track's units, Sequencing, Verification, and Stop conditions.
+2. The reference assets in `docs/plans/2026-09-23-design-refresh-assets/`
+   (images, `viewer-mock.html`, `cli-*.svg`) for the units you implement. The plan
+   text wins wherever an asset differs.
+3. `AGENTS.md`, `docs/ENGINEERING_RUNBOOK.md` (Verification, Planning and Handoff,
+   Review Policy), and the repo-local skills that match the changed surface in
+   `.agents/skills/` (for example `report-output-patterns`,
+   `cli-contract-boundaries`, `python-test-design`, `closeout-verification`).
+4. The source files named as owners in each unit, read before editing.
+
+### Follow the plan exactly
+
+- Implement every bullet of every unit in your track, and nothing else. No extra
+  features, refactors, renames, reformatting of untouched code, or "improvements".
+- Use the exact strings, values, thresholds, file owners, and names in the plan.
+- Do not make product, design, wording, or contract decisions. If the plan does
+  not cover a situation, apply the nearest stated rule. If no rule applies, or two
+  rules conflict, or a stop condition is reached: stop that unit, record the
+  question, finish any independent units, and report.
+- The only plan edit you may make is appending to its **Execution record**
+  section. Do not change any other part of the plan or the assets.
+- Preserve all invariants. In particular: no report payload key changes, no
+  `phase_timings`/run-record/JSON output changes, slow.pics image names keep the
+  `|` separator, burned-in screenshot text unchanged, frozen audio strings verbatim, plain and
+  log reporters unchanged.
+
+### Test scope
+
+Follow the plan's **Test scope** section (under Verification) exactly. In short:
+test logic, behaviour, saved state, accessibility semantics, and invariants; do not
+test positions, sizes, spacing, colours, fonts, icon markup, CSS values, exact
+tooltip/Help/note wording, option label lists, or terminal layout and wrapping.
+Keep the browser smoke test to "loads and core interactions work"; put viewer logic
+in the Node harnesses; test each rule in one place. Visual checks are still done,
+by looking, and recorded in the report's **Review checks** section.
+
+### Subagents
+
+Use subagents where they help. Keep one writer at a time: only the main session
+edits files unless a subagent is given an explicit, disjoint file set and the
+main session makes no competing edits while it runs.
+
+Good uses:
+
+- read-only exploration: locating callers, tests, fixtures, and every place a
+  string or behaviour appears before changing it;
+- running long verification (full pytest, browser smoke, docs build) and
+  summarizing failures;
+- performing the review checks by looking (a generated report in a browser,
+  terminal output at 80 and 120 columns) and reporting what was seen;
+- the adversarial reviews below (always read-only, fresh context).
+
+### Adversarial review before every commit
+
+After a unit's implementation and focused tests pass, and before committing it:
+
+1. Stage the unit's changes (`git add` of the unit's files only).
+2. Launch **independent, read-only reviewer subagents** with fresh context. Give
+   each the plan path, the unit id, the full text of the unit's plan section plus
+   the Invariants and Shared specifications it relies on, and the staged diff
+   (`git diff --staged`). Do not give them your reasoning or conclusions.
+   - **Plan-conformance reviewer** (every unit): "Assume this diff does not follow
+     the plan. For every bullet and value in the unit's plan section, find the
+     code and test that implement it, or report it missing or different. Report
+     anything in the diff that the plan did not ask for. Report every invariant
+     the diff could break. Report every test assertion that breaks the plan's
+     Test scope section (presentation checks, duplicate checks, debug output in
+     tests) as a finding."
+   - **Regression and contract reviewer** (units A1, A4, B1, B4, B5, B6, B7, and any
+     unit touching Python production code): "Find behaviour this diff breaks or
+     changes outside the plan: public CLI/JSON/report/persistence contracts,
+     callers of changed functions, saved browser state, accessibility (roles,
+     names, focus), `NO_COLOR`, non-TTY output, Windows paths and encodings, and
+     missing or weak tests."
+3. Each reviewer returns findings as: plan clause or invariant, file:line,
+   severity (blocker / major / minor), evidence, and a proposed correction; plus a
+   list of plan bullets it verified as implemented.
+4. Adjudicate every finding against the plan and the code: **fix** (then re-run
+   focused tests and a fresh review of the changed parts), **reject with
+   evidence** (quote the plan text or code that shows it is not a deviation), or
+   **leave open** (record why). Never silently drop a finding.
+5. Repeat until a review round has no unresolved blocker or major findings, to a
+   maximum of three rounds. If blockers remain after three rounds, do not commit
+   the unit; stop and report.
+6. Commit the unit: one commit per unit, message
+   `<type>(<scope>): <unit id> <summary>` (for example
+   `feat(report): B2 proximity fade for the viewport palette`), body listing the
+   plan bullets covered and any open findings.
+
+After the last unit of the track, run one **track-level adversarial review** with
+two fresh reviewers over `git diff <track start SHA>..HEAD`, given the whole
+track's plan sections: one for plan conformance across units (including docs the
+plan requires and cross-unit consistency), one for regressions. Fix or record
+findings the same way; commit fixes as `fix(<scope>): <track> review corrections`.
+
+### Verification
+
+- Focused tests while editing; each unit's **Proof** list from the plan.
+- Before the track report, run the full gate from the plan's Verification section
+  and record every command with exit code, test counts, and every skip with its
+  reason. A skipped browser suite is not browser proof. To see pytest's totals
+  line, run `uv run --no-sync pytest -o addopts="" -q -rs --strict-markers` (the
+  repository's addopts already contain `-q`, and a second `-q` hides the summary).
+- Keep screenshots and scratch output untracked (outside the repository or in an
+  ignored path). Do not commit media.
+
+### Final report (bring this back for review)
+
+End the session with this report, in this order, and append a condensed version
+to the plan's Execution record. Be complete and specific; the review stage relies
+on it. Do not summarize problems away.
+
+1. **Identity:** branch, start SHA, end SHA, commits (`sha` · unit · subject).
+2. **Coverage matrix:** for every bullet of every unit in the track, one row:
+   plan clause · implemented where (file:line) · proven by (test name or manual
+   evidence) · status (done / partial / not done).
+3. **Deviations:** every place the result differs from the plan text or the
+   reference assets, however small, with the reason. If none, say "none found"
+   and name who checked (which reviewer rounds).
+4. **Judgment calls:** anything the plan did not specify exactly and what you
+   chose (these should be rare; each is a review item).
+5. **Stop conditions and open questions:** anything you stopped on, with the plan
+   text and the facts that caused it.
+6. **Adversarial review log:** each round per unit and the track-level review:
+   findings, severity, and disposition (fixed in `sha` / rejected with evidence /
+   open).
+7. **Verification:** commands, exit codes, counts, skips with reasons, and anything
+   not verified and why.
+8. **Review checks:** for each "review" item in the track's Proof lines and the
+   plan's Test scope review checks, what you looked at (viewport size, mode,
+   columns) and what you saw, including any difference from the reference assets.
+   Keep screenshots untracked and give their paths.
+9. **Possible issues and risks:** suspected regressions, fragile code, weak tests,
+   platform concerns (Windows, encodings, light terminal themes), performance.
+10. **Files changed:** grouped by unit; flag any file outside the unit's owner list.
+11. **Documentation:** which docs were updated for which unit, and the strict docs
+    build result.
+
+## Prompt 1 — Track A
+
+```text
+You are implementing Track A (units A1, A2, A3, A4) of the Frame Compare design
+refresh plan.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". Read that section and the whole plan before any edit, and
+follow both exactly. The plan text is authoritative; do not make product or design
+decisions. Stop and report instead.
+
+Scope: A1 → A2 → A3 → A4, one commit per unit, each after passing adversarial
+review as the Common rules describe. Then a track-level adversarial review, the
+full verification gate, and the Final report. Stop after Track A; do not start
+Track B.
+
+Unit notes (in addition to the plan text, not instead of it):
+- A1: implement the service table, the "Needs WEB next" rule, the lookup order, and
+  the guessit name mappings exactly. ATVP/APTV/Apple TV+ → ATVP and HMAX/HBO Max →
+  HMAX are intended changes; update only the tests that asserted the old codes and
+  list each updated assertion in the report. Include every proof case the plan
+  lists (including the "It" title and the no-WEB IT case).
+- A2: use the exact FPS, size, runtime, timestamp, tonemap label, and
+  active-picture rules. Source tonemap labels only from the plan's table.
+- A3: add only the G shortcut and its title/Help text. Do not add a frame-position
+  counter or shortcut letters to the toolbar (decision D9).
+- A4: this includes decision D10 (plain-magnifier lens): remove the split
+  comparison, its controls, state, and markup; add the Caption preference
+  (default off) with the S1 caption text; keep the loading/unavailable notice and
+  the accessible description. Also the Ring default, the Fixed text removal and
+  note, distinct icons, SVG zoom glyphs, and the vertical palette order and icon
+  buttons. Check that stored lens state containing comparisonEnabled or
+  comparisonTarget loads without error.
+
+Suggested subagent use: one read-only explorer to map every reference to the lens
+comparison feature (JS, CSS, renderer, tests, docs) before A4 edits; one to map
+every service-code assertion in tests before A1 edits; verification runners for the
+browser smoke and full pytest.
+
+Docs to update in the units that change them: docs/guides/sources-and-labels.md
+(services), docs/guides/reports-and-overlays.md (lens, shortcuts, formatting), and
+the architecture's viewer sections if they describe the lens comparison.
+```
+
+## Prompt 1b — Track A test-scope correction
+
+Give this to the Track A implementer after Track A's units are committed. If the
+Track A session is still open, send it there; otherwise start a new session.
+
+```text
+You are applying a test-scope correction to Track A of the Frame Compare design
+refresh plan. This changes tests only; do not change product code except to fix a
+real bug found by step 2.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules".
+
+The maintainer added a "Test scope" section to the plan (under Verification) and
+moved presentation checks from the Proof lists to review. Read that section, the
+updated A1–A4 Proof lines, and the Common rules "Test scope" section first. Track A
+added assertions that now break those rules. Remove them as listed below. Only
+remove assertions that Track A added: compare against the plan commit with
+`git diff 8a177276 HEAD -- tests/`. Pre-existing assertions stay, including
+existing assertions Track A updated for new expected values.
+
+1. Working tree. `tests/browser/test_report_browser_smoke.py` has uncommitted
+   changes that restructure and extend the lens-caption browser checks. Before
+   discarding them, write down why they were being made (see step 2).
+
+2. Lens caption in Single mode. The uncommitted changes suggest the browser caption
+   check failed in Single (overlay) mode while the Node harness passes. Do not
+   delete a failing check to hide a bug. Open a generated report in a real
+   browser, turn the lens on, set Caption to On, and check Single, Slider, and Diff
+   by looking. If the caption does not show in any of those modes, that is a
+   product bug: fix it in lens.js, add the missing case to the lens Node harness
+   (tests/services/lens_harness.js and its pytest wrapper), and record it in the
+   report. If it works, record that and continue.
+
+3. tests/browser/test_report_browser_smoke.py: restore the file to HEAD
+   (discarding the uncommitted edits after step 1), then remove every Track A
+   addition except the updated advanced-tonemap label list ('Scene thresholds'):
+   - the vertical palette checks: verticalZoomOrder, verticalIconButtons,
+     verticalIconWidths, the rectangle and width measurements behind them, and
+     their assertions;
+   - the lens-caption block (lensCaption* attributes and any debug attributes) and
+     its assertions (covered by the lens harness);
+   - the G-shortcut and Grid-title block (gShortcutSelectsGrid, gridButtonTitle)
+     and its assertions (the shortcut is covered by the viewer-state harness;
+     title wording is a review item).
+
+4. tests/services/test_report_renderer_markup.py: remove Track A-added assertions
+   on:
+   - the Grid title and Help wording ('title="Grid (G) — scan sources together"'
+     in the HTML, "Modes (Slider/Single/Diff/Blink/Grid)", "S / O / D / B / G");
+   - icon markup: svg presence on the zoom, Source labels, and Lens buttons, and
+     empty button text for the zoom buttons;
+   - exact visible text or title of the Lens button, option label lists for Size,
+     Sample marker, and Caption, tabindex of a non-selected option, and the lens
+     note text ("drag its grip to move it").
+   Keep: absence of the removed features (Fixed text, comparison controls,
+   data-lens-current-source, COMPARE, comparison image slot, role badges);
+   Ring checked by default; Caption Off checked and On unchecked by default;
+   aria-label present on the lens and palette buttons; the timestamp <time>
+   element and its datetime; the FPS, runtime, active-picture, and tonemap label
+   tests; and any pre-existing assertion.
+
+5. Leave unchanged: A1 parser tests, A2 formatting tests (Python and harness), the
+   viewer-state harness G test, the lens-state harness and its summary keys,
+   test_fps_report.py.
+
+6. Check the remaining Track A tests against the plan's Test scope one more time
+   and remove any other presentation-only assertion Track A added; list each one
+   in the report.
+
+7. Run: the focused suites you touched, then the full gate from the plan's
+   Verification section (including the browser smoke test with -rs). Record exit
+   codes, counts, and skips.
+
+8. Adversarial review before committing, as the Common rules describe, with one
+   plan-conformance reviewer given the plan's Test scope section, the A1–A4 Proof
+   lines, and the staged diff: "Find any removed assertion that tested logic,
+   behaviour, saved state, accessibility semantics, or an invariant (it must be
+   restored), and any remaining assertion that breaks the Test scope."
+
+9. Commit as `test(report): Track A test-scope correction` (plus a separate
+   `fix(report): …` commit first if step 2 found a bug), append a short entry to the
+   plan's Execution record, and report: what was removed (file and assertion),
+   what was kept and why, the step 2 finding, verification results, and the
+   review log.
+```
+
+## Prompt 2 — Track B viewer
+
+```text
+You are implementing Track B viewer (units B1, B2, B3) of the Frame Compare design
+refresh plan. Track A is complete and reviewed.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". Read that section, the whole plan, and the plan's
+Execution record for Track A before any edit, and follow both exactly. The plan
+text is authoritative; do not make product or design decisions. Stop and report
+instead.
+
+Scope: B1 → B2 → B3, one commit per unit, each after passing adversarial review as
+the Common rules describe. Then a track-level adversarial review, the full
+verification gate, and the Final report. Stop after B3; do not start B4.
+
+Unit notes (in addition to the plan text, not instead of it):
+- B1: add the separator keyword with a " | " default to the three formatters and
+  pass " · " only from report display building. Prove with one test that, for the
+  same fixture, report display profiles use "·" while burned-in screenshot text
+  and slow.pics image names still use "|". The viewer shows names only: no colour
+  swatches, no #n, no LEFT/RIGHT (decisions D1 and D9). Toolbar: remove L:, vs,
+  R:, Clip:; 20rem select cap with end ellipsis; Offset label/value typography.
+  Stage labels: the HDR/SDR word rule exactly as written. B1 also carries three
+  Checkpoint A items: the lens caption wraps instead of truncating (two-line Diff
+  form, lens grows to fit, truncation/capacity logic removed), the caption uses
+  the UI face, and the lens accessible description has no #n prefix.
+- B2: implement the proximity state machine with the exact thresholds (96 px /
+  160 px hysteresis), 0.18 opacity, 150 ms transition, 3000 ms load override,
+  drag override, popover override, focus-within, fine-pointer gating, and reduced
+  motion. Cover each rule in the harness.
+- B3: implement to viewer-inspector-frame.webp, viewer-inspector-clips.webp, and
+  viewer-report-info.webp and the B3 text: tab style, Frame tab rows and Detail
+  rule, the all-sources table, the shared clip card (full and compact variants),
+  the shared line with omission rule, placement text, and the Report Information
+  rows (Opens in / Default pair). B3 also carries two Checkpoint A items: restore
+  the " · DV L5" provenance note in the active-picture text, and show the default
+  mode with the toolbar names (overlay → Single).
+
+Review checks (by looking, not by tests): generate a report from the same fixtures
+the browser smoke test uses (or an equivalent synthetic fixture with three sources
+and the three long names from the plan), and compare it in a real browser against
+the reference images at 1440 and 375 px. Record what you saw in Review checks and
+any difference in Deviations. Keep screenshots untracked. Do not add presentation
+assertions to the browser smoke test (plan Test scope).
+
+Suggested subagent use: read-only explorers to map every consumer of the display
+profiles and of the stage-label and Inspector rendering before edits; a browser
+verification subagent for the viewport matrix; verification runners.
+
+Docs to update in the units that change them: docs/guides/reports-and-overlays.md
+(names, palette fade, Inspector, Report Information) and the architecture's viewer
+and Inspector sections.
+```
+
+## Prompt 2b — Track B viewer corrections
+
+Give this to a new session (or the Track B viewer session if it is still open)
+after the Checkpoint B-viewer review. Line numbers are as of `5bc5e620`; confirm
+each location in the current source before editing.
+
+```text
+You are applying the Checkpoint B-viewer review corrections to the Frame Compare
+design refresh plan. Track B viewer (B1–B3) is committed. B4 has not started and
+must not start in this session.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules" (including Test scope, Adversarial review, Final report).
+
+Before any edit:
+- Record `git rev-parse HEAD`, `git status`, and a pyright baseline
+  (`uv run --no-sync pyright --warnings`, expected 0/0). Environment command, if
+  you need to sync: `uv sync --group dev --group docs --extra vsview --frozen`.
+- Read the plan's Invariants (corrected), S1, S2, B1, B2, B3, the Verification
+  section's Test scope, and the Execution record entry "Checkpoint B-viewer
+  review". Line numbers below are from commit 5bc5e620; confirm each location in
+  the current source before editing.
+
+Apply every correction below. Each one is required by the plan text; none is
+optional, and do nothing beyond them. If a correction cannot be applied as
+written, stop that correction, record why, finish the others, and report.
+
+C1 Bare roles (plan B3 "role (Reference / Comparison)", decision D1 no numbers).
+   - viewer_format.js stableClipRole (~line 197) returns `Comparison ${n}`; make
+     it return `Reference` for the reference clip and `Comparison` for every other
+     clip.
+   - Update every expectation of "Comparison 1"/"Comparison 2": the renderer
+     markup tests, the inspector/viewer-state harnesses, and the browser smoke
+     probe (tests/browser/test_report_browser_smoke.py ~line 589,
+     `inspectorText.includes('Comparison 1')`).
+   - docs/guides/reports-and-overlays.md already says "no numbers"; make sure the
+     code now matches it.
+
+C2 One clip-card renderer (plan B3 "one renderer used by the Clips tab and Report
+   Information").
+   - Today Report Information cards are rendered in Python (renderer.py ~lines
+     272–461) with helpers that duplicate viewer_format.js: _MODE_TOOLBAR_LABELS
+     (~272), _render_clip_badge (~285), _render_clip_size (~295),
+     _render_runtime (~306), _render_active_picture (~316), _render_frame_count,
+     _info_clip_role (~437), and the default-pair builder (~461, including its
+     `Clip {n}` fallback).
+   - Change renderer.py to emit only empty containers for: the Report
+     Information source cards, the `Opens in` value, and the `Default pair`
+     value. Keep every other Report Information row in Python, including Title,
+     Report ID, Generated, Content, slow.pics, Tonemap, and Advanced tonemap.
+   - In the viewer JS, fill those containers at startup with the same card
+     builder the Clips tab uses (inspector.js ~line 201), compact variant: no
+     placement line, no Signal row. Use ViewerFormat.modeLabel for `Opens in` and
+     the compact names for `Default pair` (one per line).
+   - Delete the now-unused Python helpers and their Python-only tests.
+   - Re-home the coverage in the harnesses: DV L5 note, non-zero left offset, DV
+     HDR / HDR / SDR badge, per-card fps shown when fps differs between clips,
+     bare roles, mode names (overlay → Single), and default-pair names in
+     Report Information.
+   - The report payload (payload.py) must not change.
+
+C3 Lens caption never clipped (plan B1 "caption wraps", Checkpoint A decision).
+   - lens.js lensPosition (~line 529) and setPositionFromPixels (~line 781)
+     clamp using the square `size`, but the lens is now taller when a caption
+     wraps, and .rv-viewer-stage has overflow: hidden.
+   - Clamp using the lens element's measured rendered height (image plus
+     caption) and width.
+   - Harness case: a lens positioned at the stage bottom with a two-line Diff
+     caption stays fully inside the stage.
+
+C4 Mono for numeric values (plan S2). Use --font-mono for these value cells:
+   - the stage-label meta (resolution and size; .rv-stage-label-meta, viewer.css
+     ~line 1129);
+   - the card values of Picture, Length, and Size;
+   - the Frame tab's Frame and Position values;
+   - Report Information's Content value.
+   The whole value cell is mono; labels stay in the UI face. Review item only; do
+   not add tests (Test scope).
+
+C5 Dead fps rational branch (D2 accepted: the payload has only a float fps).
+   - Delete the fps_num/fps_den branch in viewer_format.js clipFpsText (~lines
+     163–171).
+   - Delete its harness case (tests/services/inspector_harness.js ~line 120).
+
+C6 Test-scope violations: delete two assertions in
+   tests/services/test_report_viewer_assets_css.py:
+   - the `display: contents` assertion (~line 79);
+   - the font-family assertion (~line 87).
+   Do not replace them.
+
+C7 Filter name and dead helpers.
+   - The filter badge (viewer.js ~lines 1461–1464) calls frameFilterName()
+     (~line 1490) instead of repeating its logic.
+   - Add a harness case: the Frame tab Position row with a category filter
+     active reads "{position} / {count} in {category}".
+   - Delete the unused clipOverlayLabel (viewer.js ~line 1833) and its harness
+     entries (sourceOverlayLabels in tests/services/viewer_state_harness.js
+     ~lines 950–954, plus the matching Python assertion).
+
+C8 Offset status spacing. It renders "Offset:none" because the space sits inside
+   a flex item (renderer.py ~line 654). Give .rv-alignment-status a small gap so
+   it reads "Offset: none"; keep the label and value spans. Review item.
+
+C9 Frame tab table.
+   - The first cell needs left padding so its text clears the brass edge of
+     visible rows.
+   - The Type column must not wrap ("B · DV RPU" stays on one line).
+   Review items.
+
+C10 Singular frame count. Use "1 frame" rather than "1 frames" wherever B3 builds
+   "{n} frames":
+   - Report Information Content;
+   - the card Length row.
+   Harness cases for 1 and 2 frames.
+
+C11 Separator test.
+   - tests/orchestration/test_phase_post_render_outputs.py (~line 303) claims to
+     prove that burned-in text keeps "|", but it checks
+     phase_render._render_progress_label, which is terminal output.
+   - Rename and reword the test; keep its report-profile "·" and slow.pics "|"
+     assertions.
+   - Remove the _render_progress_label assertion (B4 will change that label to
+     "·").
+   - Do not change phase_render.py in this session.
+
+Docs: update docs/guides/reports-and-overlays.md and the architecture's
+viewer/Inspector sections wherever C1, C2, or C3 change described behaviour.
+
+Commits, each after the Common rules adversarial review (plan-conformance
+reviewer for every commit; regression reviewer for commit 1):
+1. `fix(report): Checkpoint B-viewer roles and single clip-card renderer`
+   (C1, C2)
+2. `fix(report): Checkpoint B-viewer lens, typography, and layout corrections`
+   (C3, C4, C8, C9, C10)
+3. `test(report): Checkpoint B-viewer test cleanups` (C5, C6, C7, C11)
+
+After the commits:
+- Run the full gate from the plan's Verification section, including the browser
+  smoke test with -rs. Record exit codes, counts, and skips.
+- Perform the review checks by eye on a generated three-source report at 1440 px:
+  Report Information cards and rows (C1, C2), mono values (C4), Offset spacing
+  (C8), the Frame tab table (C9), and a lens parked at the stage bottom in Diff
+  with Caption on (C3). Keep screenshots untracked and give their paths.
+- Append a short entry to the plan's Execution record.
+- Report using the Final report format, with a coverage row for each of C1–C11,
+  plus deviations, judgment calls, the adversarial review log, verification,
+  review checks, risks, and files changed.
+
+Stop after the report. Do not start B4.
+```
+
+## Prompt 2c — Track B viewer follow-ups
+
+Give this after the review of the 2b corrections. Line numbers are as of
+`d851a795`; confirm each location before editing.
+
+```text
+You are applying the final Checkpoint B-viewer follow-ups for the Frame Compare
+design refresh plan. Corrections C1–C11 are committed. B4 must not start in this
+session.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules" (Test scope, Adversarial review, Verification, Final
+report). Read Prompt 2b in the same file for the corrections these follow up.
+
+Before any edit: record `git rev-parse HEAD`, `git status`, and a pyright baseline
+(expected 0/0). Environment command if needed:
+`uv sync --group dev --group docs --extra vsview --frozen`.
+
+Apply exactly these follow-ups and nothing else:
+
+F1 Lens size applied before placement (C3 bug). In lens.js render() (~lines
+   633-640), lensPosition(size) runs before `--lens-size` and `dataset.size` are
+   set, so after a size change and on the first render after load the lens is
+   placed using its previous box and can be clipped at the stage edge. Move the
+   `--lens-size` and `dataset.size` lines above the lensPosition(size) call. Add a
+   harness case: with the lens parked at the bottom-right, switch from medium to
+   large and assert the placement uses the large footprint (lens fully inside the
+   stage).
+
+F2 Offset status text (C8 over-reach). Restore the leading space in the value
+   text (viewport.js ~line 663 and renderer.py ~line 528) so the live-region text
+   and screen readers get "Offset: none"; keep the CSS gap and both spans. Revert
+   the harness expectations that were changed to "Offset:none"
+   (tests/services/viewer_state_harness.js ~lines 540, 1109-1121, 1219-1228).
+
+F3 Unused parameters. Remove `left_clip_index` and `right_clip_index` from
+   `_render_info_modal` in renderer.py (~lines 367-371) and the call-site
+   arguments. Leave their other uses (toolbar options) unchanged.
+
+F4 One default-pair rule. Add `defaultPairIndexes()` to the viewer returning
+   `[left, right]` using the rule already in `applyDefaultSelection`
+   (viewer.js ~lines 978-981), make applyDefaultSelection use it, and make
+   inspector.js renderReportInformation (~lines 272-276) call it instead of
+   repeating the rule. In tests/services/inspector_harness.js (~lines 371-379),
+   replace the copied clipIndexOrDefault logic with a stub returning fixed indexes;
+   cover the rule itself once in the viewer-state harness (default, out-of-range,
+   single-clip).
+
+F5 Empty Report Information list. When there are no clips, do not put a div
+   directly inside the <ol> (inspector.js ~lines 294-298, renderer.py ~line 393):
+   hide the list and show the existing "No clips in payload." message beside it.
+   Add one harness case with `clips: []`.
+
+F6 Test-helper cleanup. Delete the now-unused clip parsing in
+   tests/services/report_viewer_contracts.py (ParsedClipMetadata and the
+   clip-heading parsing in InfoModalParser, ~lines 27-39 and 160-229) and the
+   `info_modal.clips == []` assertion (test_report_renderer_markup.py ~line 361).
+
+F7 Test scope. Remove the class-name assertions:
+   tests/services/inspector_harness.js ~line 549
+   (`cards[0].className === 'rv-clip-meta-item'`) and
+   tests/services/test_report_renderer_markup.py ~lines 68 and 71
+   (`"rv-clip-meta-list" in classes`, `"rv-inspector-shared" in classes`). The
+   data-info-* hook assertions stay.
+
+F8 Singular Content row. Add a parametrized renderer test for Report Information
+   Content with frame_count 1 ("1 frame") and 2 ("2 frames").
+
+F9 Docs and a small layout fix.
+   - docs/current-architecture.md Inspector section (~lines 822-845): state that
+     the viewer's Inspector builds the Report Information source cards, Opens in,
+     and Default pair at startup, and renderer.py emits only their containers.
+   - docs/current-architecture.md ~line 829: replace "burned-in screenshot text
+     ... keep the | default" with the plan's corrected invariant (slow.pics image
+     names keep `|`; burned-in screenshot text is the clip label and does not use
+     release descriptors).
+   - Stage-label meta: keep each value on one line (no line break inside
+     "17.49 GiB" or "3840×1606"; for example white-space: nowrap on the resolution
+     and size parts). Review item; no test.
+
+Commit as one commit after the Common rules adversarial review (plan-conformance
+reviewer given Prompt 2b, this prompt, and the staged diff):
+`fix(report): Checkpoint B-viewer follow-ups`.
+
+Then run the full gate from the plan's Verification section (use the pytest
+command from Common rules > Verification so the totals line prints), check F1,
+F2, and the stage-label wrap by eye at 1440 px with the Inspector open, append a
+short entry to the plan's Execution record, commit it, and report using the Final
+report format with a coverage row for each of F1–F9. Stop after the report; do not
+start B4.
+```
+
+## Prompt 2d — Track B viewer final fixes
+
+Small final pass. The controller performs the visual checks for this pass; the
+session does not.
+
+```text
+You are applying two final fixes for the Frame Compare design refresh plan's
+Checkpoint B-viewer review. B4 must not start in this session.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". This is a small pass: follow the Common rules for branch,
+environment, Test scope, and plan edits; the adversarial review and verification
+are reduced as stated below, and you do not perform review checks by eye.
+
+Before any edit: record `git rev-parse HEAD` and `git status`.
+
+G1 Pair-control grid at narrow widths (B1 regression). In
+   src/frame_compare/services/report/assets/viewer.css, the rule under the
+   max-width: 768px media query
+   `.rv-context-zone .rv-control-group[data-control-scope="pair"]` (~line 2326)
+   still uses `grid-template-columns: auto minmax(0, 1fr) auto auto auto
+   minmax(0, 1fr);`, which was laid out for the removed `L:`, `vs`, and `R:`
+   elements. The group now has three children (left select, swap button, right
+   select), so the swap button overlaps the right select. Change it to
+   `grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);`. No test (Test
+   scope: layout).
+
+G2 Wording assertion. In tests/services/test_report_renderer_markup.py (~lines
+   69-71), remove the assertion that the empty-clips message text equals
+   "No clips in payload."; keep the data-info-* hook and `hidden` assertions.
+
+Do not change anything else.
+
+Verification: run the focused suites
+(`uv run --no-sync pytest -o addopts="" -q -rs --strict-markers
+tests/services/test_report_renderer_markup.py tests/services/test_report_viewer_assets_css.py
+tests/browser/test_report_browser_smoke.py`) and `uv run --no-sync ruff check .`.
+Record exit codes and the totals line.
+
+Review: one read-only plan-conformance reviewer given this prompt and the staged
+diff ("does the diff do exactly G1 and G2 and nothing else?"). Fix or record its
+findings.
+
+Commit as `fix(report): Checkpoint B-viewer pair grid and wording assertion`,
+append a one-paragraph entry to the plan's Execution record, commit it, and
+report: commit SHAs, what changed, test results, and the reviewer result. Stop.
+```
+
+## Prompt 3 — Track B terminal
+
+```text
+You are implementing Track B terminal (units B4, B5, B6, B7) of the Frame Compare
+design refresh plan. Track A and Track B viewer are complete and reviewed.
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". Read that section, the whole plan, and the plan's
+Execution record for earlier tracks before any edit, and follow both exactly. The
+plan text is authoritative; do not make product or design decisions. Stop and
+report instead.
+
+Scope: B4 → B5 → B6 → B7, one commit per unit, each after passing adversarial
+review as the Common rules describe. Then a track-level adversarial review, the
+full verification gate, and the Final report.
+
+Unit notes (in addition to the plan text, not instead of it):
+- Shared: create src/frame_compare/utils/terminal_theme.py with the S3 tokens,
+  glyphs, ASCII fallback, and highlight=False console construction; keep
+  lint-imports passing. Add short_source_names to services/release_identity.py
+  per S1 (release group, fallback to compact name, explicit labels, collisions).
+- B4: follow the Run plan row-mapping table row by row; the Sources, Execution,
+  publish, and Summary rules; every publish state listed. Reproduce frozen audio
+  strings verbatim (add exact-match tests). Only the Rich path changes: plain and
+  log reporters keep uppercase labels and bracket tokens; --json and --quiet
+  output unchanged. Fix the blank lines at their source. Update
+  docs/current-cli-contract.md in this unit.
+- B4: the render progress description (`_render_progress_label` in
+  orchestration/phase_render.py) is terminal output: pass separator=" · " (plan
+  B4, corrected invariant). Burned-in screenshot text is the clip label and must
+  not change.
+- B4 also carries two Checkpoint A items: the frame-rate line uses the A2 format
+  (`frame rates match · 23.976 fps (24000/1001)`, which supersedes the SVG), and
+  the Sources size segment is omitted when the size is unknown or zero.
+- B5: measure the VSView wait in _run_vsview_command; carry it in memory only
+  (not phase_timings, run record, or JSON); implement the Align line and the
+  summary time rows with the omission rules.
+- B6: generated-script helpers only (no Rich or frame_compare imports in the
+  generated script); colour tiers, glyph and arrow fallback, the ready block
+  exactly as shown, short_names_by_stem parameter with a None default, and
+  byte-identical output for identical inputs.
+- B7: doctor layout and verdict line; glyphs and accent for wizard, history,
+  preset, and errors without changing their text, streams, JSON, or history list's
+  tab-separated rows.
+
+Tests (behaviour and invariants): NO_COLOR, ASCII-only encoding, --quiet, --json,
+and non-TTY output, frozen strings verbatim. Do not assert colours, spacing, or
+wrapping (plan Test scope).
+Review checks (by looking): render each changed surface at 80 and 120 columns and
+compare with the cli-*.svg references; record what you saw in Review checks and
+any difference in Deviations. If a real media run is possible on this host, run one
+and include its output; otherwise say so.
+
+Suggested subagent use: read-only explorers to map every printer of the affected
+panels and every test asserting their text before edits; a render subagent for the
+column and mode matrix; verification runners.
+
+Docs to update in the units that change them: docs/current-cli-contract.md (Run
+plan rows, Rich phase labels, summary, doctor), the audio-alignment and publishing
+guides where they quote terminal output, and docs/guides/sources-and-labels.md for
+short names.
+```
+
+## Prompt 3b — Track B terminal corrections
+
+From the Checkpoint B-terminal review (controller render check plus two `reviewer`
+subagents). Line numbers are as of `fb64dc52`; confirm each location before
+editing. The controller performs the visual checks for this pass.
+
+```text
+You are applying the Checkpoint B-terminal review corrections for the Frame
+Compare design refresh plan (Track B terminal, B4–B7, is committed at fb64dc52).
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md (Invariants, S1,
+S3, B4–B7, Test scope, Stop conditions)
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules". You do not perform review checks by eye in this pass;
+the controller does. Everything else in the Common rules applies (baseline,
+environment command, adversarial review per commit, full gate, Final report).
+
+Apply every correction below, and nothing else. Where a correction states the
+wording to use, use it exactly. If one cannot be applied as written, stop that
+correction, record why, finish the others, and report.
+
+Commit 1: `fix(terminal): progress and upload reporting corrections`
+T1 Skip detail printed twice on the Rich path (for example "– Publish  Declined
+   Declined"). orchestration/phases.py (~84-95) puts the detail in display_label
+   and also passes summary=skip_detail; orchestration/progress.py (~100-108)
+   keeps it in the Rich label; utils/progress.py (~447-452) appends the summary.
+   On the Rich path pass the bare title-case label and carry the detail only as
+   the summary, with its first letter lower-cased ("– Publish  declined"). The
+   plain and log reporters keep their current output exactly. Add one test that
+   goes through the real phase execution path for a skipped phase and asserts
+   the detail appears once.
+T2 Upload label for all reporters (invariant break). services/publishers.py
+   (~485-489) now calls start_phase("Upload", ...) on every reporter. Restore the
+   original phase name f"Uploading {collection_metadata.title} to slow.pics" at
+   the call site and have only RichProgressReporter show "Upload" for the
+   UPLOAD_PRESENTATION task. Revert tests/services/test_publishers.py to the
+   original name and add a plain-reporter assertion that a failed upload line
+   keeps it.
+T3 Analysis-source log text (invariant: log/JSON content unchanged).
+   orchestration/analysis_source.py (~57, ~72) changed the diagnostic string that
+   also goes into the structured fps_report log event. Restore the original
+   strings ("Analysis source: {role} | selected by fastest-source policy" and
+   "... by configured policy") and produce the plan's Rich line
+   ("analysis source  {short name} (fastest to decode)" / "(configured)") inside
+   fps_report's Rich rendering only. Update docs/current-cli-contract.md (~441)
+   accordingly.
+T4 Align lines when review never ran. If review was pending but VSView did not
+   launch or was unavailable, the durable Align line must not show "✓": use "!"
+   and keep the pre-review summary text. Add a test.
+T5 One duration format in the Execution timeline. The Align split
+   ("{machine} + {review} review", utils/progress.py ~90) uses format_duration
+   ("17.5 s") while other phase lines use _format_elapsed ("48s"); use
+   _format_elapsed for both parts of the Align split. Delete
+   fps_report._format_gap_duration (~114-124) in favour of the existing
+   formatter except for its under-one-second branch if that is still needed.
+
+Commit 2: `fix(terminal): summary warnings and publish-state corrections`
+T6 Warnings tied to a summary row (plan B4 Summary). In cli/output.py
+   (_warning_presentations ~703-732 and the summary ~541-606):
+   - Show every follow-up failure on its row and remove it from the separate
+     Warnings panel: clipboard failure in the follow-up Columns as
+     "! URL not copied"; browser failure as the existing
+     "! browser didn't open" plus its muted reason; shortcut failure on the
+     `  shortcut` row as "! not created" plus the muted reason; webhook failure
+     on the `  webhook` row as "! delivery failed".
+   - The title count is the total number of warnings (row warnings plus panel
+     warnings), with the singular "1 warning".
+   - The separate Warnings panel shows only warnings not tied to a row. Restyle
+     it per S3: accent section name (not cyan), "!" and "–" glyphs instead of
+     [WARN]/[SKIP], no "action:" rows, dim detail lines; keep grouping by source
+     and the hidden-count behaviour.
+   - Remove STYLE_SUBHEADER's cyan and any other remaining non-S3 style in
+     output.py.
+   - Tests (plan B4 Proof): uploaded with every follow-up succeeding, uploaded
+     with each follow-up failing (row text present and not in the panel), upload
+     failure, automatic upload without confirmation, declined, and
+     report-unavailable. Replace the test that asserts "action: clipboard" in
+     the panel.
+T7 Hyperlink targets. _artifact_link (output.py ~663) resolves relative paths
+   against the current directory; resolve them against the run root
+   (_absolute_display_path(path, root)). Add a test with a relative path.
+T8 Screenshot count. "{n} files" (output.py ~603-606) is frames × sources;
+   count the actual image files in the screenshots directory, and omit the count
+   when the directory does not exist.
+
+Commit 3: `fix(terminal): sources and alignment panel corrections`
+T9 Explicit labels in Sources (invariant). fps_report.py (~233-245) ignores
+   label_is_explicit. When it is set, show the label as the source's standard
+   name. Restore the deleted assertion `assert "Reference label" in output`
+   (tests/orchestration/test_fps_report.py ~151).
+T10 Verbose detail. _render_clip_overview no longer uses input_dir/verbose, so
+   --verbose lost the source path detail. Restore it: with --verbose, show the
+   absolute path under the filename line (muted), as before this track.
+T11 Alignment panel layout (plan B4 Execution). services/alignment.py (~1082 and
+   _alignment_evidence_row): render each comparison as a bold compact-name
+   heading, then the frozen status line, detail lines (dim), and the review line
+   prefixed by "›" in the accent colour, with no key column for those lines.
+   Keep key labels (dim) only for --verbose evidence rows and the final
+   "diagnostics  {path}" row. Frozen strings stay verbatim.
+T12 Panel titles left-aligned for Sources and Audio alignment (consistent with
+   Run plan).
+T13 Frame-rate line: align "frame rates match · …" to the summary column of the
+   phase lines (the plan shows "✓           frame rates match · …"). Review
+   item; no test.
+
+Commit 4: `fix(terminal): VSView script and doctor corrections`
+T14 ASCII fallback never fires in the generated VSView script. In
+   vsview/session_script.py the prelude reconfigures stderr to UTF-8 (~149-150)
+   before _use_ascii() reads the encoding (~157-159). Record the original
+   encoding before reconfiguring (for example
+   _ORIGINAL_STDERR_ENCODING = getattr(sys.stderr, "encoding", "") or "") and base
+   _use_ascii() on it. Change the ASCII test to run the generated prelude against
+   a real io.TextIOWrapper(io.BytesIO(), encoding="cp1252").
+T15 Generated-script colours per S3: _key and _hint dim (2), _value unstyled
+   (~198-207). Remove the unused glyph entries (ok, skipped, running) if nothing
+   uses them.
+T16 Doctor verdict counts only WARN rows as warnings (match cli-doctor.svg:
+   "1 required check failed · 3 warnings" with the skipped FFMS2 row not
+   counted). doctor_command.py (~170-180). Update the affected expectations and
+   the current-cli-contract doctor section.
+T17 Doctor name column: compute one width across all groups (~148). Review item;
+   no test.
+T18 One glyph-by-stream helper: replace history_command._stream_glyph,
+   preset_command._ok_glyph, and wizard_command._stream_glyphs with a single
+   glyphs_for_stream(stream) in utils/terminal_theme.py.
+
+Commit 5: `test(terminal): test-scope and cleanup corrections`
+T19 Test scope removals/changes (plan Test scope):
+   - delete tests/utils/test_terminal_theme.py::test_style_token_values;
+   - remove the on-screen order assertions from
+     tests/cli/test_cli_output.py::test_run_plan_preserves_output_hierarchy
+     (tools < offsets, webhook < cleanup) and delete
+     test_result_summary_time_rows_render_at_narrow_width;
+   - make test_opening_vsview_review_lines_frozen_verbatim assert through the
+     real render path instead of grepping source text;
+   - make test_glyphs_for_console_uses_console_encoding deterministic (construct
+     consoles with explicit UTF-8 and cp1252 encodings);
+   - replace the ready-block full-layout comparison in
+     test_generated_ready_block_reports_outputs_and_hints_verbatim with fragment
+     assertions (each step, each output name, each (short name, hint) pair);
+   - delete the generated-source literal assertion in tests/vsview/test_adapter.py
+     (~811).
+   Add logic tests that are missing: the length-difference rules (grouping,
+   shorter/longer, seconds under and over 60 s, "A, B, and C", singular frame),
+   and the ASCII fallback on one rendered Rich surface (for example the summary
+   title) with a cp1252 console.
+T20 Dead code: remove STYLE_URL and STYLE_HEADER, the unused
+   _display_path(artifact=...) branch, the unreachable title-case branch in
+   start_phase_progress (progress.py ~101-106) if T1 leaves it unreachable, and
+   any parameter left unused by T10. Replace the live task's `[RUN]` bright_cyan
+   style with the S3 running glyph and accent. Adopt BORDER_SUCCESS /
+   BORDER_FAILED / BORDER_PENDING for the summary border (identical values).
+
+After the commits: run the full gate from the plan's Verification section
+(pytest with `-o addopts="" -q -rs --strict-markers` so the totals print), append
+a short entry to the plan's Execution record, commit it, and report using the
+Final report format with a coverage row per T1–T20, deviations, judgment calls,
+the adversarial review log, verification, and risks. No review checks by eye.
+Stop after the report.
+```
+
+## Prompt 3c — Track B terminal final fixes
+
+From the review of the 3b corrections. Line numbers are as of `a3dbd6f1`; confirm
+each location before editing. The controller performs the visual checks.
+
+```text
+You are applying the final Checkpoint B-terminal fixes for the Frame Compare
+design refresh plan (corrections T1–T20 are committed at a3dbd6f1).
+
+Repository: /Users/tristan/Software/frame-compare
+Branch: dev/v0.6.0-design-refresh (work directly on it; do not push)
+Plan: docs/plans/2026-09-23-report-and-cli-design-refresh.md (Invariants, S3,
+B4, Test scope)
+Handoff rules: docs/plans/2026-09-23-report-and-cli-design-refresh-handoff.md,
+section "Common rules".
+
+Environment: the local environment is complete (dev, docs, and the vsview
+extra). Do not run any `uv sync` command in this session. If something is
+missing, stop and report instead. Do not use git stash. Record
+`git rev-parse HEAD`, `git status`, and a pyright baseline (expected 0/0) first.
+You do not perform review checks by eye; the controller does.
+
+Apply exactly these fixes and nothing else:
+
+U1 T4 on the Rich path only (invariant: plain and log reporters unchanged). The
+   Align "!" override for an unresolved review is applied on every reporter
+   (orchestration/execution.py ~105-108, orchestration/phases.py ~144-150), so
+   plain output loses "[OK] ALIGN  Completed in …" and the log reporter records
+   "warned" for every non-interactive or VSView-unavailable run with review
+   configured. Apply phase.success_status only when uses_rich_progress(reporter)
+   is true. Add a plain-reporter test (keeps "[OK] ALIGN  Completed in …") and a
+   log-reporter test (keeps "completed") for an unresolved review, and a test for
+   the service condition that sets the flag (services/alignment.py ~1567).
+U2 Real upload-failure state. The "upload failure" summary test
+   (tests/cli/test_cli_output.py ~943-957) uses success=False, which never reaches
+   print_result_summary (cli/run_command.py ~354-355). Rebuild it around the real
+   state: success=True, a `publish: <error>` warning, and no slow.pics URL.
+U3 Production data shape. In production, shortcut and webhook failure warnings
+   are also in result.warnings (orchestration/phase_output_application.py ~66-70).
+   Add a summary test where they appear both in result.warnings and on the
+   post-upload actions, asserting each appears once, on its row, and not in the
+   Warnings panel.
+U4 Frozen-strings test must not launch VSView.
+   tests/services/test_alignment_frozen_strings.py calls align_clips_from_request
+   with use_vsview=True without stubbing availability. Monkeypatch VSView
+   availability to unavailable (and the TTY check if needed) as
+   tests/services/test_alignment_vsview.py does.
+U5 Colour assertion. tests/utils/test_progress.py ~107 asserts an ANSI colour
+   sequence. Assert the running marker and the description text separately,
+   without colour codes.
+U6 Contract drift. docs/current-cli-contract.md ~481-488 still describes Warnings
+   rows with action context and [WARN]/[SKIP] markers, and ~531 and ~547 describe
+   a bright-cyan "[RUN]" marker. Update them to the current behaviour (row-tied
+   warnings on their summary rows; panel with "!"/"–" glyphs and no action rows;
+   the running glyph in the accent colour on the Rich path; plain/log markers
+   unchanged).
+U7 Dead code: remove _STATUS_STYLES (utils/progress.py ~45) if unreferenced; in
+   orchestration/fps_report.py remove the dead relative-path branch of
+   _display_path and the input_dir pass-through that has no effect (every caller
+   passes verbose=True).
+U8 Accent review line. In the alignment panel the review line ("› Opening VSView
+   …") renders in the default colour; render the "›" and the line in the S3
+   accent. Review item; no test.
+U9 Summary "time" label alignment. The top-level "time" key is one column left of
+   the other top-level keys (slow.pics, report, screenshots, run). Indent it like
+   them. Review item; no test.
+U10 Section names and panel titles at full accent. Run plan section names and
+   panel titles (for example "Workspace", "Sources") render bold+dim+accent
+   because the key column's dim style is applied on top. Render section names and
+   panel titles in bold accent without dim; sub-row keys stay dim. Review item;
+   no test.
+
+Commit as `fix(terminal): Checkpoint B-terminal final fixes` after one
+plan-conformance reviewer pass over the staged diff ("does it do exactly U1–U10
+and nothing else, and are the invariants preserved?"). Then run the full gate
+(pytest with `-o addopts="" -q -rs --strict-markers` so totals print; a single
+failure in tests/services/test_alignment_cancellation.py is a known pre-existing
+flake: re-run it alone and report both results), append a short entry to the
+plan's Execution record, commit it, and report: commit SHAs, coverage per U1–U10,
+test results, and the reviewer result. Stop.
+```

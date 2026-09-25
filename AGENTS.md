@@ -16,7 +16,7 @@ Always-on defaults:
 - Task-specific user instructions take precedence over skill workflow guidance.
   Honor explicit requests to review a proposal before editing; apply the runbook's
   escalation rules within the scope the user has authorized.
-- Bootstrap with `uv sync --group dev --frozen` if `.venv/bin/*` is missing.
+- Bootstrap with `uv sync --group dev --extra vsview --frozen` if `.venv/bin/*` is missing.
 - Use Codanna for unknown owners, callers, and impact when available; confirm
   important results in source and use `rg`/direct reads for exact queries.
 - Use the smallest matching repo-local skill set. Prefer one process skill plus only

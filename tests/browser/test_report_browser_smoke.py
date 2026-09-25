@@ -358,8 +358,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.diffSourceHudVisible = String(
             window.getComputedStyle(label).display !== 'none'
             && window.getComputedStyle(rightLabel).display !== 'none'
-            && label.textContent.startsWith('BASE:')
-            && rightLabel.textContent.startsWith('COMPARE:')
+            && label.textContent.startsWith(__REFERENCE_HUD_LABEL__)
+            && rightLabel.textContent.startsWith(__COMPARISON_HUD_LABEL__)
         );
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
@@ -367,16 +367,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const expectedStageHudPrefixes = {
             overlay: [__REFERENCE_HUD_LABEL__],
             slider: [
-                `LEFT: ${__REFERENCE_HUD_LABEL__}`,
-                `RIGHT: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
             diff: [
-                `BASE: ${__REFERENCE_HUD_LABEL__}`,
-                `COMPARE: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
             blink: [
-                `FIRST: ${__REFERENCE_HUD_LABEL__}`,
-                `SECOND: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
         };
         const stageHudAccessible = Object.entries(expectedStageHudPrefixes).every(
@@ -586,10 +586,9 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         document.documentElement.dataset.inspectorIdentityComplete = String(
             inspectorText.includes('Reference')
-            && inspectorText.includes('Comparison 1')
-            && inspectorText.includes('View role')
+            && inspectorText.includes('Comparison')
+            && inspectorText.includes('shown left')
             && inspectorText.includes(__REFERENCE_FILENAME__)
-            && inspectorText.includes(__REFERENCE_PRIMARY__)
             && inspectorText.includes(__REFERENCE_RELEASE__)
             && inspectorText.includes('1920×1080')
             && ['2160p', 'PMTP', 'WEB-DL', 'DV HDR10+', 'REPACK', 'Kitsune']
@@ -625,15 +624,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.infoModalIdentityComplete = String(
             infoText.includes(__REFERENCE_FILENAME__)
             && infoText.includes(__COMPARISON_FILENAME__)
-            && infoText.includes(__REFERENCE_PRIMARY__)
-            && infoText.includes(__COMPARISON_PRIMARY__)
             && infoText.includes(__REFERENCE_RELEASE__)
             && infoText.includes(__COMPARISON_RELEASE__)
             && infoCards.length === 2
             && infoCards[0].textContent.includes(__REFERENCE_FILENAME__)
             && infoCards[0].textContent.includes(__REFERENCE_RELEASE__)
             && infoCards[1].textContent.includes(__COMPARISON_FILENAME__)
-            && infoCards[1].textContent.includes(__COMPARISON_PRIMARY__)
             && infoCards[1].textContent.includes(__COMPARISON_RELEASE__)
             && infoClipHeadings.every(heading => {
                 const style = window.getComputedStyle(heading);
@@ -766,16 +762,16 @@ document.addEventListener('DOMContentLoaded', () => {
             ReportViewer.inspector.setTab('frame');
             ReportViewer.updateInspectorData();
             sourceRowsByMode[mode] = Array.from(
-                document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
+                document.querySelectorAll('[data-inspector-source-frames] tr')
             ).map(row => row.textContent.trim());
         });
         document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
         ReportViewer.inspector.setTab('clips');
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.clipsMetadata = String(
-            document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
+            document.querySelector('[data-inspector-clips]')?.textContent.includes('Size')
             && document.querySelector('[data-inspector-clips]')?.textContent.includes('Signal')
-            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
+            && (document.querySelector('[data-inspector-clips-shared]')?.textContent ?? '').includes('All sources:')
             && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
         );
         let reviewTabUsable = false;
@@ -848,7 +844,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const advancedLabels = [
         'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
         'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
-        'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
+        'Scene thresholds', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
     ];
     document.getElementById('btn-info')?.click();
@@ -1151,7 +1147,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
-        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • {_FIXTURE_SIZE_LABEL}"
+        f"{_REFERENCE_RELEASE} · 1920×1080 · {_FIXTURE_SIZE_LABEL}"
     )
     assert parser.document_attributes["data-clips-metadata"] == "true"
     assert parser.document_attributes["data-review-tab-usable"] == "true", (
@@ -1160,14 +1156,18 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-rendering-disclosure"] == "true"
     assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
     source_rows = json.loads(parser.document_attributes["data-frame-source-rows"] or "{}")
-    assert source_rows["overlay"] == [f"{_REFERENCE_RELEASE} — 10 / 20 · B-frame"]
+    assert source_rows["overlay"] == ["PMTP DVShown10 / 20B", "ATV HDR1012 / 20B"]
     assert source_rows["slider"] == [
-        f"{_REFERENCE_RELEASE} — 10 / 20 · B-frame",
-        f"{_COMPARISON_RELEASE} — 12 / 20 · B-frame",
+        "PMTP DVShown left10 / 20B",
+        "ATV HDR10Shown right12 / 20B",
     ]
     assert source_rows["diff"] == source_rows["slider"]
     assert source_rows["blink"] == source_rows["slider"]
-    expected_grid_rows = source_rows["slider"][:1] if width <= 768 else source_rows["slider"]
+    expected_grid_rows = (
+        ["PMTP DVShown10 / 20B", "ATV HDR1012 / 20B"]
+        if width <= 768
+        else ["PMTP DVShown10 / 20B", "ATV HDR10Shown12 / 20B"]
+    )
     assert source_rows["grid"] == expected_grid_rows
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()

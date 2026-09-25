@@ -872,8 +872,7 @@ function Invoke-VSViewOffscreenLaunchProof(
     throw "VSView offscreen proof exited before the expected steady-state GUI timeout."
   }
   foreach ($marker in @(
-    "[RUN] VSView Bootstrap",
-    "[OK] VSView Ready",
+    "VSView is open",
     "Script execution completed",
     "Switching to video output",
     "Frame 0 rendered"

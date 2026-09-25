@@ -801,31 +801,56 @@ rotates its existing icon through CSS, while the viewer updates the accessible a
 palette omits a fit-width control; actual size and fit height remain, and a restored
 width-fit preference still computes zoom and keeps the fit radio group keyboard
 reachable when neither visible radio matches. The floating palette does not reserve
-stage height. Spatial alignment status is labeled `Offset`, and its Inspector tab and
+stage height. On fine pointers the palette carries a `data-proximity` state driven
+by a throttled stage pointermove listener: near at or within 96 px of the palette
+rectangle, far at or beyond 160 px with hysteresis between, far on stage pointer
+leave, forced far during viewport or slider drags, forced near for 3000 ms after
+load and while either the image-offset or lens-settings popover is open, and always
+near on coarse pointers or when the fine-pointer media query stops matching.
+Far dims to 0.18 opacity over 150 ms (disabled under reduced motion) without
+disabling pointer events, and `:focus-within` keeps the focused palette visible. Spatial alignment status is labeled `Offset`, and its Inspector tab and
 palette settings are labeled Image offset, both stating the adjustment is spatial only
 and does not affect source-frame timing, to distinguish image translation from temporal
 source-frame alignment. View-mode controls and the Help dialog state each mode's purpose
 (reveal spatial differences, inspect one source, locate changed pixels, alternate the
 selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
-shadow. The renderer shortens the header generation timestamp to its recorded ISO date;
-the exact timestamp remains available in the tooltip, Report Information, and payload.
+shadow. The renderer emits the header generation timestamp as a `<time>` element
+carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
+text to medium date plus short time. The exact timestamp remains available in the
+tooltip, Report Information, and payload.
 Report Information is the single place for report metadata: title, report ID, generated
 timestamp, frame/clip counts, and the slow.pics link. The renderer alone builds that
-link's safe http(s) href; no viewer script re-derives it.
+link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
+the Report Information source cards, Opens in, and Default pair at startup; renderer.py
+emits only their containers.
 
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
-report. Report controls consume control or micro names, while Inspector/info and ARIA
-surfaces consume primary identity and exact filename. Canonical clip labels continue
+report, joining profile segments with `·` (slow.pics image names keep the `|`
+separator; burned-in screenshot text is the clip label and does not use release
+descriptors). Report controls consume control or micro names,
+while Inspector/info and ARIA surfaces consume primary identity and exact filename.
+Stage labels show the control name plus muted resolution and size, adding an
+HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
+end ellipsis and carry the full name on each option. Canonical clip labels continue
 to own image mappings, geometry, browser state, and review JSON; payload identity
 shaping explicitly omits display profiles.
 
-The Clips inspector composes those profiles into stable Reference/Comparison cards.
-Primary and informative release identities wrap normally, exact filenames and long
-technical values may wrap anywhere, and drawer/panel overflow is constrained locally
-rather than masked at the document boundary.
+The Clips inspector and Report Information share one clip-card design built from
+those profiles: stable Reference/Comparison role headers (plus shown left/right/shown/not
+shown placement in the Clips tab), a DV HDR/HDR/SDR signal badge, the standard name,
+the exact filename, and Picture/Length/Size rows (plus Signal in the Clips tab, plus
+FPS/Presentation rows in the Clips tab only for values that differ between clips,
+plus an FPS row in Report Information only when fps differs). An `All sources:`
+line states the fps and presentation values identical across every clip — fps only in
+Report Information. The Frame tab shows a `number · category` identity (or the frame's
+own label), a `position / count in filter` row, a Detail row only for non-default
+notes, and an all-sources table (compact name, own frame number, picture type, shown
+marks for visible sources). Primary and informative release identities wrap normally,
+exact filenames and long technical values may wrap anywhere, and drawer/panel overflow
+is constrained locally rather than masked at the document boundary.
 Visible Single, Slider, Diff, Blink, and Grid source labels reuse the payload's canonical
 container byte size through the shared IEC formatter; hiding source labels hides that
 size too, and no report payload or probing owner is duplicated.
@@ -844,21 +869,31 @@ separately approved invocation, delivery, reveal, and publishing contract.
 `assets/lens.js` is the focused owner for the optional
 floating image lens: normalized per-source mapping, fixed-window placement, dedicated
 edge-grip dragging, pending touch tap-versus-viewport-gesture ownership,
-160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, Off/Ring/Brackets sample
-marking, and an optional Single-mode active/comparison split. The sample follows
+160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, and an Off/Ring/Brackets
+sample marker that defaults to Ring. The sample follows
 pointer movement across the displayed source while the lens window stays fixed;
-only its grip can move the window. Diff uses separate aligned base and difference DOM
-images with CSS difference blending, while the viewer exposes one palette/lens chrome
-event boundary so bubbled pointer, wheel, and double-click input cannot mutate the
-viewport. Activation seeds a transient center point and retains the stable palette
-Lens group, which owns zoom, fixed status, and stage-clamped settings. The display-only
-lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
-DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
-preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
-current-source label. Direct image-inspection markers share one Projection Brass signal
+only its grip can move the window. There is no split comparison view: the lens
+is a plain magnifier over the sampled source. Diff uses separate aligned base
+and difference DOM images with CSS difference blending, while the viewer exposes
+one palette/lens chrome event boundary so bubbled pointer, wheel, and
+double-click input cannot mutate the viewport. Activation seeds a transient
+center point and retains the stable palette Lens group, which owns zoom and
+stage-clamped settings. The display-only lens body has no titlebar or controls.
+It carries a single caption row under the magnified image showing the compact
+source name in the UI face, wrapping within the lens width while the lens
+window grows to fit (two lines in Diff mode: the left source name, then `↔`
+and the right source name; the cell source under the pointer in Grid mode); the
+caption stays hidden until the Caption preference is turned on, while a
+loading/unavailable status notice covers the lens image when it cannot be
+shown. The lens keeps its full-name accessible description, without a source
+number prefix, for assistive technology. Stored lens state containing `comparisonEnabled` or
+`comparisonTarget` keys loads without error, and those keys are dropped on the
+next write. Lens Settings order is Size, Sample marker, Caption, then the reset
+button and the grip/persistence note. Direct image-inspection markers share one Projection Brass signal
 token family; utility controls and lens labels use neutral states, while semantic status
 colors remain separate. Frame categories use text labels. Grip pointer dragging uses
-capture, while its arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+capture, while its arrow-key operation supports a larger Shift step, clamps the full
+lens window including a wrapped caption to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.
 Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
@@ -886,8 +921,9 @@ one normalized viewport center without changing pair-mode persistence semantics.
 
 `assets/viewer_format.js` is the dependency-free owner for clip display profiles,
 exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
-active-picture labels, mode names, and stable clip roles. It does not read the DOM,
-storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
+active-picture labels (including ` · DV L5` provenance), mode names, stable clip
+roles, signal badges, clip length text, and shared fps/presentation values. It does
+not read the DOM, storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
 Clips, and Image offset rendering, and lazy Review activation through the root viewer. Hidden
 Inspectors update only visibility and tab semantics; opening refreshes their content
@@ -931,9 +967,9 @@ Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, source-labels visibility, filmstrip
 collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
-best-effort browser-global v2 key for magnification, size, and sample-marker style,
-whose default is Off. Report-scoped lens state stores enabled state, fixed normalized
-window position, and Single comparison selection. Grip drag end and keyboard movement
+best-effort browser-global v2 key for magnification, size, sample-marker style
+(default Ring), and caption (default Off). Report-scoped lens state stores only
+enabled state and fixed normalized window position. Grip drag end and keyboard movement
 persist that normalized position so size and responsive layout changes preserve its
 relative placement. Pointer/sample position and Blink paused state are
 transient. Storage failure leaves the lens usable for the current session and is

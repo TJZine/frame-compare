@@ -49,6 +49,8 @@ const ReportViewer = {
             return;
         }
 
+        this.localizeTimestamps();
+
         try {
             this.state.data = this.normalizePayload(this.readPayload());
             this.state.mode = this.validPayloadMode(this.state.data.default_mode)
@@ -69,6 +71,7 @@ const ReportViewer = {
             this.viewport.updateFitButtons();
             this.inspector.updateTabs();
             this.inspector.updateVisibility();
+            this.inspector.renderReportInformation();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -164,6 +167,7 @@ const ReportViewer = {
             reviewImportCancel: document.querySelector('[data-review-import-cancel]'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
+            lensSettingsPopover: document.getElementById('lens-settings-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
             ...this.inspector.cacheDOM(),
         };
@@ -349,6 +353,15 @@ const ReportViewer = {
         this.dom.status.hidden = true;
     },
 
+    localizeTimestamps(root) {
+        const scope = root || (typeof document !== 'undefined' ? document : null);
+        const elements = scope?.querySelectorAll?.('time[datetime]') || [];
+        elements.forEach?.(element => {
+            const text = ViewerFormat.formatTimestamp(element.getAttribute('datetime'));
+            if (text) element.textContent = text;
+        });
+    },
+
     showStageMessage(message) {
         if (!this.dom.emptyState || !this.dom.stage) return;
         this.dom.emptyState.textContent = message;
@@ -516,6 +529,7 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('active', isOpen);
         this.dom.btnAlignToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         this.dom.alignPopover.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+        this.viewport?.updatePaletteProximity?.();
 
         if (isOpen) {
             this.focusElement(this.dom.alignmentPreset);
@@ -652,7 +666,9 @@ const ReportViewer = {
             }
         });
 
+        this.viewport.initPaletteProximity();
         this.dom.stage.addEventListener('pointermove', (e) => {
+            this.viewport.schedulePaletteProximity(e.clientX, e.clientY);
             if (this.isViewerChromeEvent(e)) return;
             const lensMove = this.lens.handleStagePointerMove(e);
             this.viewport.trackPointerPosition(e);
@@ -683,10 +699,15 @@ const ReportViewer = {
                 e.preventDefault();
             }
         });
-        this.dom.stage.addEventListener('pointerup', (e) => this.viewport.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointerup', (e) => {
+            this.viewport.stopPointerInteraction(e);
+            this.viewport.updatePaletteProximity(e.clientX, e.clientY);
+        });
         this.dom.stage.addEventListener('pointercancel', (e) => {
             this.viewport.stopPointerInteraction(e, { cancelled: true });
+            this.viewport.updatePaletteProximity(e.clientX, e.clientY);
         });
+        this.dom.stage.addEventListener('pointerleave', () => this.viewport.handleStagePointerLeave());
         this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
     },
@@ -953,11 +974,16 @@ const ReportViewer = {
         );
     },
 
-    applyDefaultSelection() {
-        const selection = this.state.data.default_selection || {};
+    defaultPairIndexes() {
+        const selection = (this.state.data || {}).default_selection || {};
         const left = this.clipIndexOrDefault(selection.left_clip_index, 0);
         const rightFallback = this.clipCount() > 1 ? 1 : left;
         const right = this.clipIndexOrDefault(selection.right_clip_index, rightFallback);
+        return [left, right];
+    },
+
+    applyDefaultSelection() {
+        const [left, right] = this.defaultPairIndexes();
 
         this.state.leftClipIdx = left;
         this.state.rightClipIdx = right;
@@ -1262,13 +1288,6 @@ const ReportViewer = {
         return `${left} vs ${right}`;
     },
 
-    visibleFramePositionText() {
-        const visibleIndexes = this.visibleFrameIndexes();
-        const position = this.visibleFramePosition(visibleIndexes);
-        if (position === -1) return `Not shown of ${visibleIndexes.length}`;
-        return `${position + 1} of ${visibleIndexes.length} shown`;
-    },
-
     updateInspectorData() {
         this.inspector.render();
     },
@@ -1445,12 +1464,7 @@ const ReportViewer = {
         if (this.dom.activeFilterBadge) {
             const isFiltered = this.state.activeCategoryKey !== ALL_CATEGORY_FILTER_KEY;
             if (isFiltered) {
-                const activeBtn = Array.from(this.dom.filterChips)
-                    .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
-                const label = activeBtn
-                    ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
-                    : this.state.activeCategoryKey;
-                this.dom.activeFilterBadge.textContent = `Filtered: ${label}`;
+                this.dom.activeFilterBadge.textContent = `Filtered: ${this.frameFilterName()}`;
                 this.dom.activeFilterBadge.hidden = false;
             } else {
                 this.dom.activeFilterBadge.hidden = true;
@@ -1472,6 +1486,16 @@ const ReportViewer = {
 
     visibleFramePosition(visibleIndexes = this.visibleFrameIndexes()) {
         return visibleIndexes.indexOf(this.state.currentFrameIdx);
+    },
+
+    frameFilterName() {
+        if (this.state.activeCategoryKey === ALL_CATEGORY_FILTER_KEY) return 'All';
+        const activeBtn = Array.from(this.dom.filterChips || [])
+            .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
+        const label = activeBtn
+            ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
+            : this.state.activeCategoryKey;
+        return label;
     },
 
     updateFrameNavigationControls() {
@@ -1595,6 +1619,7 @@ const ReportViewer = {
             case 'o': case 'O': this.setMode('overlay'); break;
             case 'd': case 'D': this.setMode('diff'); break;
             case 'b': case 'B': this.setMode('blink'); break;
+            case 'g': case 'G': this.setMode('grid'); break;
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
             case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;
@@ -1806,9 +1831,24 @@ const ReportViewer = {
         return Boolean(closestEditable);
     },
 
-    clipOverlayLabel(clip, role = '') {
-        const identity = ViewerFormat.sourceHudLabel(clip);
-        return role ? `${role.toUpperCase()}: ${identity}` : identity;
+    renderStageLabel(element, clip) {
+        if (!element) return;
+        const { name, meta } = ViewerFormat.stageLabelSegments(clip);
+        if (!name && !meta) {
+            element.replaceChildren();
+            return;
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'rv-stage-label-name';
+        nameSpan.textContent = name ?? '';
+        if (!meta) {
+            element.replaceChildren(nameSpan);
+            return;
+        }
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'rv-stage-label-meta';
+        metaSpan.textContent = ` · ${meta}`;
+        element.replaceChildren(nameSpan, metaSpan);
     },
 
     humanizeCategory(cat) {
@@ -1852,13 +1892,6 @@ const ReportViewer = {
         }
     },
 
-    blinkStageLabels(leftClipLabel, rightClipLabel) {
-        return {
-            left: `FIRST: ${leftClipLabel}`,
-            right: `SECOND: ${rightClipLabel}`,
-        };
-    },
-
     commitImageState(imageState) {
         const requestToken = ++this.state.imageRequestToken;
         const commit = () => {
@@ -1898,8 +1931,8 @@ const ReportViewer = {
             rightSrc,
             leftAlt,
             rightAlt,
-            leftLabelTxt,
-            rightLabelTxt,
+            leftClip,
+            rightClip,
             isOverlay,
             isBlink,
         } = imageState;
@@ -1916,8 +1949,9 @@ const ReportViewer = {
 
         this.dom.leftImg.alt = leftAlt;
         this.dom.rightImg.alt = rightAlt;
-        this.dom.labelLeft.textContent = leftLabelTxt;
-        this.dom.labelRight.textContent = rightLabelTxt;
+        this.renderStageLabel(this.dom.labelLeft, leftClip);
+        if (rightClip) this.renderStageLabel(this.dom.labelRight, rightClip);
+        else this.dom.labelRight?.replaceChildren?.();
         this.dom.labelLeft.classList.toggle(
             'rv-overlay-label--active',
             isBlink && this.state.activeClipIdx === this.state.leftClipIdx,
@@ -1960,7 +1994,8 @@ const ReportViewer = {
         }
 
         let leftSrc, rightSrc;
-        let leftLabelTxt, rightLabelTxt;
+        let leftClip = null;
+        let rightClip = null;
         let leftAlt, rightAlt;
         const isOverlay = this.state.mode === 'overlay';
         const isBlink = this.state.mode === 'blink';
@@ -1968,8 +2003,8 @@ const ReportViewer = {
         if (this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink') {
             const leftImage = frameData.images?.[this.state.leftClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
-            const leftClip = this.state.data.clips[this.state.leftClipIdx];
-            const rightClip = this.state.data.clips[this.state.rightClipIdx];
+            leftClip = this.state.data.clips[this.state.leftClipIdx];
+            rightClip = this.state.data.clips[this.state.rightClipIdx];
             if (!leftImage?.src || !rightImage?.src || !leftClip || !rightClip) {
                 this.showStageMessage('Selected frame image data is unavailable.');
                 this.showStatus('Selected frame image data is unavailable.', 'error');
@@ -1979,20 +2014,6 @@ const ReportViewer = {
             leftSrc = leftImage.src;
             rightSrc = rightImage.src;
 
-            if (this.state.mode === 'blink') {
-                const blinkLabels = this.blinkStageLabels(
-                    this.clipOverlayLabel(leftClip),
-                    this.clipOverlayLabel(rightClip),
-                );
-                leftLabelTxt = blinkLabels.left;
-                rightLabelTxt = blinkLabels.right;
-            } else if (this.state.mode === 'diff') {
-                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Base');
-                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Compare');
-            } else {
-                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
-                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');
-            }
             leftAlt = `${ViewerFormat.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
             rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
@@ -2004,8 +2025,8 @@ const ReportViewer = {
             const activeImage = frameData.images?.[this.state.activeClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
-            const rightClip = this.state.data.clips[this.state.rightClipIdx];
-            if (!activeImage?.src || !rightImage?.src || !activeClip || !rightClip) {
+            const pairClip = this.state.data.clips[this.state.rightClipIdx];
+            if (!activeImage?.src || !rightImage?.src || !activeClip || !pairClip) {
                 this.showStageMessage('Selected frame image data is unavailable.');
                 this.showStatus('Selected frame image data is unavailable.', 'error');
                 this.clearFrameImages();
@@ -2015,10 +2036,10 @@ const ReportViewer = {
             // Right layer remains hidden; keep its source tied to the comparison pair.
             rightSrc = rightImage.src;
 
-            leftLabelTxt = this.clipOverlayLabel(activeClip);
-            rightLabelTxt = "";
+            leftClip = activeClip;
+            rightClip = null;
             leftAlt = `${ViewerFormat.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
-            rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
+            rightAlt = `${ViewerFormat.clipAccessibleName(pairClip)} - Frame ${frameData.number}`;
         }
 
         this.hideStageMessage();
@@ -2029,8 +2050,8 @@ const ReportViewer = {
             rightSrc,
             leftAlt,
             rightAlt,
-            leftLabelTxt,
-            rightLabelTxt,
+            leftClip,
+            rightClip,
             isOverlay,
             isBlink,
         });
@@ -2051,8 +2072,8 @@ const ReportViewer = {
         }
         this.dom.leftLayer?.classList?.remove('active', 'rv-layer--aligned-active');
         this.dom.rightLayer?.classList?.remove('active');
-        if (this.dom.labelLeft) this.dom.labelLeft.textContent = '';
-        if (this.dom.labelRight) this.dom.labelRight.textContent = '';
+        if (this.dom.labelLeft) this.dom.labelLeft.replaceChildren?.();
+        if (this.dom.labelRight) this.dom.labelRight.replaceChildren?.();
         this.updateCurrentFrameMetadata(null);
     },
 

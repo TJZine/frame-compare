@@ -20,6 +20,19 @@ def test_inspector_harness_owns_formatting_and_inspector_policy() -> None:
     assert json.loads(result.stdout.strip().splitlines()[-1]) == {
         "pureFormattingOwner": True,
         "focusedInspectorOwner": True,
+        "frameTabRows": True,
+        "sourceTable": True,
+        "clipCards": True,
+        "sharedLine": True,
+        "dvL5Provenance": True,
+        "bareClipRoles": True,
+        "rolesFromDefaultLeft": True,
+        "nonZeroLeftOffset": True,
+        "hdrSdrBadges": True,
+        "compactInfoCards": True,
+        "infoOpensInModeNames": True,
+        "infoDefaultPairNames": True,
+        "infoSharedFpsOnly": True,
     }
 
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
+
 from frame_compare.analysis.types import (
     FrameMetrics,
     MetricsMetadata,
@@ -13,6 +15,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
+from frame_compare.orchestration import execution
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
 from frame_compare.orchestration.execution import (
@@ -37,7 +40,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
-from .phase_task_helpers import _render_artifacts
+from .phase_task_helpers import _context, _render_artifacts
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
@@ -558,3 +561,37 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
 
     with pytest.raises(TypeError, match="UnknownPhaseOutput"):
         apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]
+
+
+@pytest.mark.anyio
+async def test_align_phase_records_review_split_duration_text(tmp_path: Path) -> None:
+    output = AlignPhaseOutput(
+        reference=clip_state(tmp_path / "ref.mkv", label="Reference"),
+        comparisons=[clip_state(tmp_path / "comp.mkv", label="Encode")],
+        selected_frames=[1],
+        success_summary="1 pair confirmed in VSView",
+        review_seconds=42.5,
+    )
+
+    async def executor(_ctx: RunContext) -> AlignPhaseOutput:
+        return output
+
+    state = ExecutionState(artifacts=RunArtifacts())
+    timings: dict[str, float] = {}
+    clock = iter([100.0, 160.0])
+    phase = execution._create_timed_phase(
+        "align",
+        "align",
+        None,
+        executor,
+        state,
+        lambda: next(clock),
+        timings,
+        [],
+    )
+    await phase.execute(_context(tmp_path))
+
+    assert timings["align"] == pytest.approx(60.0)
+    assert phase.duration_text == "17s + 42s review"
+    assert phase.success_summary == "1 pair confirmed in VSView"
+    assert state.vsview_review_seconds == pytest.approx(42.5)

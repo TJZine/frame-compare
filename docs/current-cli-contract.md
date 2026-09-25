@@ -343,15 +343,33 @@ unchanged.
   generation is disabled, and renders all slow.pics post-upload actions as
   `not applicable` when slow.pics upload is disabled. This presentation rule does
   not alter the JSON fields, which continue to report effective configuration.
-- Normal non-quiet runs begin with a `Run plan` decision checklist containing
-  `Workspace`, `Frame selection`, `Rendering`, `Alignment`, `Review`, and
-  `Publishing` groups. It retains the renderer policy (`ffmpeg` when forced,
-  otherwise `auto` with VapourSynth preferred), overlay, geometry,
-  active-picture policy, tone mapping, frame-selection counts and seed, analysis
-  source/mode, nonzero lead/trail exclusions, alignment/reuse/manual-review policy,
-  report intent, slow.pics visibility/confirmation/actions, and local deletion
-  behavior. Configured webhook values are represented only as configured/not
-  configured; the URL itself is never displayed.
+- Normal non-quiet runs begin with a `Run plan` panel containing `Workspace`,
+  `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing` sections with
+  the section value on the section row and a blank line between sections.
+  `Workspace` is the root with `config`, `input`, and `output` (formerly
+  `generated`) sub-rows. `Frames` is `N total` with a `mix` row of non-zero
+  categories (`20 random · 10 dark · …`), a `user frames` comma list,
+  `analysis` as `{mode lower} profile · {policy} source` (plus
+  `· skipped for this run`), `cache` as `read and write` / `cache only` /
+  `bypassed`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
+  `Rendering` is `automatic · VapourSynth preferred` or `FFmpeg`, with
+  `overlay` as `{mode lower}` and `geometry` as
+  `{geometry lower} geometry · active area {mode lower}`. `tone map` is
+  `{curve} {preset lower} · {N} nits` (e.g. `BT.2390 reference · 100 nits`) or
+  `disabled`. `Alignment` is `audio, then VSView review` /
+  `audio, VSView required` / `audio` / `disabled`, with a `tools` row of
+  `{glyph} FFmpeg audio   {glyph} VSView` where each unavailable tool is
+  followed by muted `(unavailable)` or the existing probe-failure text (VSView
+  omitted when not requested; FFmpeg shows `–` when alignment is disabled) and
+  an `offsets` row with the existing label lower-cased first. `Review` is
+  `HTML report · opens when done` / `HTML report` / `disabled` with `metadata`
+  as `TMDB lookup` / `disabled`. `Publishing` is
+  `slow.pics · {visibility lower} · ask after the local report` /
+  `automatic upload`, or `disabled` / `disabled by --no-upload`, with
+  `after upload` as the enabled actions
+  (`copy URL · open browser · create shortcut`) / `none`, `webhook` as
+  `configured` / muted `not configured` (the URL itself is never displayed),
+  and `cleanup` with the existing text lower-cased first.
 - Human run-plan paths show the resolved workspace root once as an absolute anchor.
   Contained config, input, generated-data, and result paths are shown relative to
   that root; external paths remain absolute. Rich folds long paths at narrow
@@ -398,24 +416,32 @@ unchanged.
   valid-window counts; individual diagnostic windows are never printed.
   It is suppressed by
   `--quiet` and is never emitted to `run --json` stdout.
-- After sources load, normal human output uses one `[OK] Sources — N loaded`
-  panel heading. Its rows use `Reference` and `Comparison N` roles, factor one
-  reliable common content identity, and show each source's filename-claimed release
-  descriptor and exact filename separately. Explicit labels remain primary. Parsed
-  release claims remain distinct from probed resolution, source frame count, HDR/SDR
-  signal, source/effective FPS when they differ, complete container file size in
-  IEC units, and an input-relative path when the source is beneath the configured
-  input directory when nested. External sources remain absolute. Sizes use one
-  decimal place. The displayed size comes
-  from the probed fingerprint's `size_bytes`; it is not bitrate or a quality
-  signal, and it is not added to successful `run --json`.
-- After alignment, normal human output emits one `[OK] Frame rates match: X` line
+- After sources load, normal human output uses one `Sources · N loaded` panel
+  heading (accent + muted). The first line is the content title (bold), followed
+  by a blank line. Per source: the standard name (bold) with muted `reference`
+  on the reference only; line 2 is
+  `{w}×{h} · {fps} fps · {frames:,} frames ({runtime}) · {size}` (the size
+  segment is omitted when the size is unknown or zero); line 3 is the filename
+  (muted), with a blank line between sources. When any comparison's frame count
+  differs from the reference, one warning line per distinct difference groups
+  comparisons with the same count using short names (e.g. `! Lengths differ: A
+  and B are 464 frames (19.4 s) shorter than SCOPE.`). The last line is
+  `analysis source  {short name} (fastest to decode)` for the fastest-source
+  policy or `{short name} (configured)` for the configured policy. The displayed
+  size comes from the probed fingerprint's `size_bytes`; it is not bitrate or a
+  quality signal, and it is not added to successful `run --json`.
+- After alignment, normal human output emits one collapsed line of the form
+  `✓ frame rates match · 23.976 fps (24000/1001)` (the A2 terminal FPS format)
   only when every effective FPS is equal and no source FPS was adjusted. Any
   adjustment or effective-FPS divergence instead keeps a compact evidence table
   with the source-to-effective transition and status. Normal post-alignment FPS
   output omits repeated paths; `--verbose` retains the detailed rows and full
   absolute paths. JSON-mode FPS diagnostics retain their existing structured
-  stderr event and do not add fields to the successful stdout payload.
+  stderr event and do not add fields to the successful stdout payload; the
+  event carries the original diagnostic wording (e.g. `Analysis source:
+  {role} | selected by fastest-source policy`); only the Rich rendering shows
+  the Sources short-name line (`analysis source  {short name} (fastest to
+  decode)` or `(configured)`).
 - Material `Frame Alignment` output puts comparison, offset, source, trim, and
   warning evidence before verbose provenance details. Verbose mode also retains
   canonical labels, row-zero source frames, selected aligned frames, and absolute
@@ -430,39 +456,67 @@ unchanged.
   domain. If the breakdown is unavailable, the aligned count is still reported with
   an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
   and it does not add a JSON field or log event.
-- Human-readable non-quiet successful runs use `[OK] Comparison completed`
-  or `[WARN] Comparison completed with N warning(s)` as the result panel title,
-  using a de-duplicated warning presentation count. The panel contains concise run
-  facts, then a `Review` group with the report before screenshots, a separate
-  `Publishing` group, and a
-  separate `Follow-up actions` group for successful post-upload actions. Durations
-  use human units and the source/cache facts are labeled `sources` and `Cache`.
+- Human-readable non-quiet successful runs use `✓ Comparison complete`,
+  `! Comparison complete · N warnings`, or `✗ Comparison failed` as the result
+  panel title with a matching border, using a de-duplicated warning
+  presentation count. Rows in order: `slow.pics` (the URL as an accent
+  underlined link when uploaded; muted `not uploaded (declined)` when declined,
+  otherwise the existing skip text); an unlabelled row of follow-up results
+  (`✓ URL copied`, `✓ opened in browser`, or `! browser didn't open` plus the
+  muted reason); `  shortcut` path; `  webhook` only when configured
+  (`✓ delivered` / `! delivery failed`); `report`; `screenshots` plus muted
+  `{n} files`; a blank row; then `run` as
+  `{frames} frames · {sources} sources · cache {status}`; a blank row; then the
+  `time` rows: `time` as `{total} total`; `  machine` as Columns of
+  `setup {preflight + load_sources}`, `analyze`, `align` (machine time),
+  `render`, and `upload` (publish, when it ran), each omitted when zero (the
+  row is omitted when every component is zero); `  you` as Columns of
+  `VSView review {t}` and `prompts {confirm_slowpics_upload}`, omitted when
+  both are zero. The total and the phase timings share the same start, so no
+  unmeasured remainder is shown. The review wait is memory-only telemetry: it
+  never enters `phase_timings`, the run record, or JSON output. A warning tied
+  to one of the follow-up rows is
+  shown on that row and removed from the separate warnings panel. The report
+  path is shown before screenshots, and artifact paths are Rich hyperlinks.
+  Durations use human units.
 - Final warnings are grouped by source in a `Warnings` panel. Existing runtime
   warning strings and slow.pics post-upload action warnings are bridged into
-  presentation rows with source, severity, message, and optional action context,
-  then de-duplicated for display. A `because ...` reason is shown once as detail.
+  presentation rows with source, severity, message, and optional detail, then
+  de-duplicated for display. A warning tied to one of the follow-up rows
+  (clipboard, browser, shortcut, webhook) is shown on that row and removed from
+  the separate warnings panel. A `because ...` reason is shown once as detail.
   Normal output shows at most eight warning rows and summarizes hidden rows by
-  source; `--verbose` shows every warning. Status text uses ASCII `[OK]`, `[WARN]`,
-  `[SKIP]`, `[FAIL]`, and `[WAIT]` markers, with color only reinforcing meaning.
+  source; `--verbose` shows every warning. Panel rows use the `!` (warning) and
+  `–` (skipped) glyphs, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
 - When the Run plan reports optional VSView probe failures, it uses a
-  sanitized summary rather than raw probe exception text.
-- The Run plan uses neutral configuration rows such as `Mode`, `Offsets`, `Review`,
-  and `VSView`; status tokens are reserved for actual capability checks and
-  runtime outcomes. The `Offsets` row reports `Do not reuse previous offsets`,
-  `Ask before reusing previous offsets`, or `Reuse previous offsets when valid`.
-- The `Analysis` row reports the effective `analysis.performance_mode` as
-  `Quality` or `Performance` and appends a space followed by
-  `(skipped for this run)` when `--skip-analysis` is active.
-- The Run plan workspace paths show `root`, `config`, `input`, and the resolved
-  `generated` data root. The constant run-folder policy and derived screenshot path
+  sanitized summary (e.g. `probe failed (RuntimeError)`) rather than raw probe
+  exception text; the secret exception message itself is never displayed.
+- The Run plan uses neutral configuration rows; status tokens are reserved for
+  actual capability checks and runtime outcomes. The `offsets` row reports the
+  existing label with a lower-case first letter (`do not reuse previous
+  offsets`, `ask before reusing previous offsets`,
+  `reuse previous offsets when valid`).
+- The `analysis` row reports the effective `analysis.performance_mode` as
+  `{mode lower} profile · {policy} source` and appends `· skipped for this run`
+  when `--skip-analysis` is active. Rich phase labels are title case (`Plan`,
+  `Analyze`, `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`,
+  `Cleanup`); the plain and log reporters keep uppercase labels.
+- The Run plan `Workspace` section row shows the resolved workspace root, with
+  `config`, `input`, and `output` sub-rows; `output` is the resolved
+  generated-data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.
-- Human Rich progress uses product phase labels: `PLAN`, `ANALYZE`, `ALIGN`,
-  `RENDER`, `METADATA`, `PUBLISH`, `REPORT`, `CONFIRM`, and `CLEANUP`.
-  Internal phase names in logs and `phase_timings` remain the runtime keys such
-  as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Human Rich progress uses title-case product phase labels: `Plan`, `Analyze`,
+  `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`, and `Cleanup`,
+  with completed lines as `{glyph} {Label:<9} {summary}` and the duration
+  right-aligned and muted. After a native VSView review, the `Align` line keeps
+  its review summary on the left and shows `{align machine time} + {review
+  time} review` as the duration, where machine time is `phase_timings["align"]`
+  minus the review time. The plain and log reporters keep the uppercase
+  labels. Internal phase names in logs and `phase_timings` remain the runtime
+  keys such as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
 - Non-TTY human runs use those product phase labels in chronological ASCII
   progress lines on stderr. Each top-level phase emits once when it completes;
   successful lines include elapsed time, skips preserve their detail, and failed
@@ -477,7 +531,8 @@ unchanged.
   evidence and blocking-decision panels remain panels, with nested decision
   questions using a four-space inset immediately below their panel. JSON, quiet,
   and non-TTY output do not gain the band or inset.
-- Every Rich phase remains live while active with an ASCII `[RUN]` marker. Meaningful
+- Every Rich phase remains live while active with the `…` running glyph in the
+  accent colour. The plain and log reporters keep their existing markers. Meaningful
   measurable tasks use a Rich progress bar separated from preceding
   durable output by one blank line and report completed/total work with a labeled
   `ETA` once Rich has an estimate; before then, only completed/total work is shown.
@@ -485,18 +540,26 @@ unchanged.
   one-step phases remain simple activity lines without a bar. The nested screenshot
   bar uses the stable aggregate description `Screenshots` and advances as each
   screenshot completes; an FFmpeg batch advances together when the batch completes.
-  A successful top-level phase leaves a durable ASCII status line with elapsed time
-  when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
-  while skipped,
+  A successful top-level phase leaves a durable status line with elapsed time
+  when it runs for at least 10.0 seconds (Rich: `{glyph} {Label:<9} {summary}`;
+  the plain and log reporters keep their uppercase ASCII markers). Successful
+  nested tasks remain transient, while skipped,
   warned, and failed phases always remain visible. A successful slow.pics upload
-  also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
-  prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
+  also leaves a durable `Publish` line regardless of duration. The report-confirmed
+  prompt is recorded by its confirmation panel; it does not add a redundant
   generic successful completion line. Progress is suspended around that blocking
   prompt and restored afterward. Rich status color is confined to the semantic
-  marker: `[RUN]` is bright cyan, `[OK]` green, `[WAIT]` magenta, `[WARN]` yellow,
-  `[SKIP]` subdued yellow, and `[FAIL]` red. The description remains normally styled,
-  and no-color output retains the same literal markers.
-- Audio alignment remains one coherent `ALIGN` phase. Saved/manual/shared offset
+  marker: the running `…` is the accent colour, `✓` green, `!` yellow, and `✗`
+  red; the skipped `–` carries no color. The description remains normally styled,
+  and no-color output retains the same literal glyphs. The plain and log
+  reporters keep their existing ASCII markers.
+- On a non-UTF stdout or stderr, human output never fails on characters the
+  stream cannot encode: generated punctuation degrades to ASCII (`·` as `|`,
+  `×` as `x`, dashes as `-`, `…` as `...`, `›` as `>`) and any other
+  unencodable character becomes `?`. Encodable text, including cp1252 output,
+  is unchanged, and JSON output is ASCII-escaped.
+- Audio alignment remains one coherent `Align` phase in Rich output (`ALIGN`
+  in plain/log output). Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task. Fresh
   comparison work is shown while active as `ALIGN | Analyzing audio | Comparison N |
   <prepared presentation>`; a declined confirmed offset that can reuse its earlier
@@ -862,7 +925,7 @@ Report-confirmed slow.pics upload is the exception to that precedence rule. In
 that opted-in workflow, the CLI presents the local report before prompting for
 upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
-opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
+opened. A compact `› Publish to slow.pics?` panel (`>` on non-UTF consoles) shows the visibility and,
 if the report was not opened, its path exactly once before the visibility-specific
 default-No question. The confirmation seam receives the literal
 four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</code>, where
@@ -1287,15 +1350,16 @@ When native VSView panel review launches a generated session, the diagnostic ord
 is:
 
 1. parent `VSView Session` telemetry
-2. generated `[RUN] VSView Bootstrap` and prepared reference identity, before the
-   first source load can emit native indexing diagnostics
-3. generated reference FPS plus prepared `Comparison N` identities, audio hints, and
-   truthful one-reference/ordered-comparison named-output mappings
-4. generated `[WARN] VSView Display Assumptions`, only when assumptions exist
-5. generated `[OK] VSView Ready` with the instruction to open **Frame Compare
-   Alignment Review** from VSView's Tool Panel; its three instruction lines use the
-   standard seven-space detail indentation
-6. parent waits for the bounded VSView process to close, then reports whether the
+2. generated source loading, which prints nothing on success (native indexing
+   diagnostics remain inherited without buffering); failures and warnings keep
+   their current text with `✗`/`!` glyphs
+3. generated `! VSView Display Assumptions`, only when assumptions exist
+4. the generated ready block:
+   `› VSView is open · waiting for you`, three numbered instruction lines, then
+   an `outputs` section (one row per output with the release-aware presentation
+   identity) and a `hints` section (one row per comparison with the S1 short
+   name padded to one column plus the existing audio-hint string verbatim)
+5. parent waits for the bounded VSView process to close, then reports whether the
    trusted result sidecar was accepted or retained the current alignment, using the
    standard two-space status indentation
 
@@ -1323,10 +1387,14 @@ closing without saving produces no result. The viewer guidance is `To confirm a 
 alignment, unlink the playheads and position each source on the same visible moment. Or
 keep the current alignment.` Known-offset guidance is `Enter the signed
 reference-minus-comparison offsets, then confirm. Or keep the current alignment.`
-Generated and parent no-color output retain
-the literal lifecycle markers. Native source/index diagnostics remain inherited
+Generated accent output uses `38;2;210;172;107` when `COLORTERM` is `truecolor`
+or `24bit` or `WT_SESSION` is set, else `38;5;180` when `TERM` contains
+`256color`, else `33`, keeping the `NO_COLOR` and TTY checks. Glyphs follow S3
+with the ASCII fallback when the stderr encoding is not UTF (`›` as `>`,
+`✗` as `x`, `→` as `->`); generated and parent no-color output retain the
+literal text. Native source/index diagnostics remain inherited
 without buffering. Generated Frame Compare sessions suppress only VSView's redundant
-initial `Content loaded successfully` INFO record because `[OK] VSView Ready` already
+initial `Content loaded successfully` INFO record because the ready block already
 owns that success confirmation; reload, clipboard, warning, error, and other native
 diagnostics remain unchanged.
 
@@ -1353,7 +1421,8 @@ The Frame Compare alignment-review tool panel registers with first priority so i
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 
 The generated session carries an explicit UUID session identity, one reference role,
-ordered comparison roles/keys/ordinals, presentation names, the authoritative integer
+ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
+hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
 schema v4. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
@@ -1383,7 +1452,7 @@ Generated VSView display assumptions are preview-only diagnostics derived from F
 Compare's existing clip probe metadata and serialized into the generated session
 script. Missing, unspecified, malformed, or unparseable `_Matrix`, `_Transfer`, or
 `_Primaries` frame properties are collected and shown in the styled assumptions
-section after output rows and before `VSView Ready`. Normal output identifies the
+section before the ready block. Normal output identifies the
 source and describes the preview behavior without exposing raw frame-property names.
 For those properties only, the generated session sets explicit BT.709 values on the
 preview clip so VSView does not repeat its equivalent warning for every output.
@@ -1880,19 +1949,23 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   the standard error payload is written to stdout.
 - Human-mode typed top-level failures honor the `NO_COLOR` environment variable
   and do not suggest unsupported `--verbose` usage.
-- Without `--json`, `doctor` writes a human-readable report to stdout.
-- Human output starts with one readiness outcome: `[FAIL] Runtime is not ready for
-  comparisons.`, `[WARN] Ready for local comparisons; optional or network checks
-  need attention.`, or `[OK] Runtime is ready for comparisons.` It then groups checks
-  under `Required`, `Optional`, and `Network and credentials`, in their existing
-  check order, using human labels such as `VapourSynth`, `FFmpeg`, `VSView`, and
-  `TMDB API key`.
-- Human check status markers are `[FAIL]` for critical failures, `[SKIP]` for
-  passed optional checks whose capability is unavailable, `[WARN]` for failed
-  noncritical checks, and `[OK]` for passed checks. Hints remain directly beneath
-  the affected check. There is no duplicate trailing readiness summary. These
-  presentation changes do not alter JSON fields, JSON status values, or exit-code
-  behavior.
+- Without `--json`, `doctor` writes a human-readable report to stdout. It groups
+  checks under `Required`, `Optional`, and `Network and credentials`, in their
+  existing check order, using human labels such as `VapourSynth`, `FFmpeg`,
+  `VSView`, and `TMDB API key`. Each check is one row: a status glyph, the check
+  name in a fixed-width column, and the message. A hint follows on the next row
+  in the message column as muted `hint` plus the hint text, folding inside that
+  column. Check messages and hint text are unchanged.
+- Human check status glyphs are `✗` for critical failures, `–` for passed
+  optional checks whose capability is unavailable, `!` for failed noncritical
+  checks, and `✓` for passed checks (ASCII fallback `x`, `-`, `!`, `+`).
+  Section names use the accent color.
+- The report ends with one readiness verdict: `✓ Runtime is ready for
+  comparisons.` or `✗ Runtime is not ready for comparisons.`, followed by muted
+  `{f} required check(s) failed · {w} warnings` with correct plurals and zero
+  parts omitted. Only `!` rows count as warnings; `–` skipped rows do not.
+  These presentation changes do not alter JSON fields, JSON status values, or
+  exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,

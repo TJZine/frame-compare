@@ -19,6 +19,7 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
     ExecutionPhasePlan,
     ExecutionState,
@@ -52,6 +53,8 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.errors import AudioAlignmentCleanupError
+from frame_compare.utils.progress import align_phase_duration_text
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -84,6 +87,7 @@ def _create_timed_phase(
 
     async def _execute(ctx: RunContext) -> None:
         start = monotonic_timer()
+        align_output: AlignPhaseOutput | None = None
         try:
             maybe_awaitable = executor(ctx)
             if inspect.isawaitable(maybe_awaitable):
@@ -91,6 +95,17 @@ def _create_timed_phase(
             else:
                 output = maybe_awaitable
             apply_phase_output(ctx=ctx, state=state, output=output)
+            summary = getattr(output, "success_summary", None)
+            if isinstance(summary, str):
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                phase.success_summary = summary
+            if timing_key == "align" and isinstance(output, AlignPhaseOutput):
+                align_output = output
+                if output.review_unresolved:
+                    if phase is None:
+                        raise RuntimeError("timed phase was not initialized")
+                    phase.success_status = ProgressPhaseStatus.WARNED
             if retain_if is not None:
                 if phase is None:
                     raise RuntimeError("timed phase was not initialized")
@@ -102,6 +117,15 @@ def _create_timed_phase(
             raise
         finally:
             phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
+            if align_output is not None:
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                duration_text = align_phase_duration_text(
+                    align_seconds=phase_timings[timing_key],
+                    review_seconds=align_output.review_seconds,
+                )
+                if duration_text is not None:
+                    phase.duration_text = duration_text
 
     phase = Phase(
         name=name,

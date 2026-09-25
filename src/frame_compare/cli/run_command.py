@@ -39,6 +39,7 @@ from frame_compare.orchestration.preflight import (
     validate_and_normalize_config_paths,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 from .run_contracts import (
@@ -464,18 +465,19 @@ def build_confirm_slowpics_upload_callback(
             resolve_effective_config=resolve_effective_config,
         )
         details = Table.grid(padding=(0, 2))
-        details.add_column(style="grey70", no_wrap=True)
+        details.add_column(style="dim", no_wrap=True)
         details.add_column(overflow="fold")
         details.add_row("Visibility", escape(visibility_text.title()))
         if not opened:
             details.add_row("Report", escape(str(request.report_path)))
+        waiting_glyph = glyphs_for_console(console).waiting
         console.print()
         console.print(
             Padding(
                 Panel.fit(
                     Group("[dim]Review the local report before publishing.[/]", details),
-                    title="[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]",
-                    border_style="cyan",
+                    title=f"[bold {ACCENT}]{waiting_glyph} Publish to slow.pics?[/]",
+                    border_style=ACCENT,
                 ),
                 (0, 0, 0, 2),
             )

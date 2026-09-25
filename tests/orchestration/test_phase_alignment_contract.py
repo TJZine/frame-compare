@@ -9,7 +9,11 @@ from frame_compare.orchestration import phase_alignment
 from frame_compare.services import alignment as alignment_service
 from frame_compare.services import alignment_consensus
 from frame_compare.services.alignment_consensus import AlignmentConsensus
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentResult,
+    AlignmentReviewSummary,
+)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
@@ -241,6 +245,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         verbose: bool = False,
         quiet: bool = False,
         json_output: bool = False,
+        review_summary: AlignmentReviewSummary | None = None,
     ) -> list[AlignmentResult]:
         results = await real_align(
             request,
@@ -251,6 +256,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             verbose=verbose,
             quiet=quiet,
             json_output=json_output,
+            review_summary=review_summary,
         )
         assert len(results) == 1
         assert results[0].audio_attempt == attempt

@@ -120,7 +120,7 @@ def test_confirmed_native_pair_replaces_computed_offset_and_persists_override(
                 ),
             ),
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
@@ -205,7 +205,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
                 ),
             ),
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
     reference = tmp_path / "ref.mkv"
@@ -254,7 +254,7 @@ def test_keep_current_native_decision_retains_computed_offset(
                 decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
             ),
         )
-        return session
+        return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
@@ -275,7 +275,7 @@ def test_optional_missing_result_retains_computed_offset(
     monkeypatch.setattr(
         alignment_vsview,
         "launch_alignment_verification_session",
-        lambda *_args, **_kwargs: _session(tmp_path),
+        lambda *_args, **_kwargs: (_session(tmp_path), 0.0),
     )
 
     results = _run(
@@ -294,7 +294,7 @@ def test_forced_missing_result_stops_alignment(
     monkeypatch.setattr(
         alignment_vsview,
         "launch_alignment_verification_session",
-        lambda *_args, **_kwargs: _session(tmp_path),
+        lambda *_args, **_kwargs: (_session(tmp_path), 0.0),
     )
 
     with pytest.raises(AudioAlignmentError, match="did not return a valid VSView review result"):
@@ -312,7 +312,7 @@ def test_forced_missing_result_stops_alignment(
 def test_alignment_passes_complete_native_session_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    launch = MagicMock(side_effect=lambda *_args, **_kwargs: _session(tmp_path))
+    launch = MagicMock(side_effect=lambda *_args, **_kwargs: (_session(tmp_path), 0.0))
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
     _run(

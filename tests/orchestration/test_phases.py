@@ -6,6 +6,7 @@ import asyncio
 import json
 from fractions import Fraction
 from pathlib import Path
+from time import monotonic
 
 import pytest
 import structlog
@@ -20,8 +21,9 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.execution import build_phases_after_align
+from frame_compare.orchestration.execution import _create_timed_phase, build_phases_after_align
 from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
     ExecutionState,
     MetadataPrefetch,
     RunArtifacts,
@@ -33,6 +35,7 @@ from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
     PlainProgressReporter,
+    RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
@@ -163,7 +166,13 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -194,6 +203,240 @@ def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
     ]
     assert phases[0].status is PhaseStatus.SKIPPED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_rich_skip_detail_renders_once(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_publish(_: RunContext) -> None:
+        return None
+
+    asyncio.run(
+        execute_phases(
+            [
+                Phase(
+                    name="publish",
+                    execute=phase_publish,
+                    skip_condition=lambda config: True,
+                    skip_detail="Declined",
+                )
+            ],
+            context,
+            RichProgressReporter(no_color=True),
+        )
+    )
+
+    err = capsys.readouterr().err
+    assert "Publish" in err
+    assert err.count("declined") == 1
+    assert "Declined" not in err
+
+
+def test_execute_phases_plain_skip_line_is_unchanged(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_publish(_: RunContext) -> None:
+        return None
+
+    asyncio.run(
+        execute_phases(
+            [
+                Phase(
+                    name="publish",
+                    execute=phase_publish,
+                    skip_condition=lambda config: True,
+                    skip_detail="Declined",
+                )
+            ],
+            context,
+            PlainProgressReporter(),
+        )
+    )
+
+    assert capsys.readouterr().err == "[SKIP] PUBLISH  Declined\n"
+
+
+def test_execute_phases_unresolved_review_warns_and_keeps_summary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+
+    async def phase_align(_: RunContext) -> None:
+        return None
+
+    asyncio.run(
+        execute_phases(
+            [
+                Phase(
+                    name="align",
+                    execute=phase_align,
+                    success_summary="SCOPE needs visual confirmation",
+                    success_status=ProgressPhaseStatus.WARNED,
+                )
+            ],
+            context,
+            RichProgressReporter(no_color=True),
+        )
+    )
+
+    err = capsys.readouterr().err
+    assert "!" in err
+    assert "✓" not in err
+    assert "SCOPE needs visual confirmation" in err
+
+
+def test_timed_align_phase_with_unresolved_review_keeps_ok_on_plain_reporter(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    phase_timings: dict[str, float] = {}
+
+    async def _executor(_: RunContext) -> AlignPhaseOutput:
+        return AlignPhaseOutput(
+            reference=context.reference,
+            comparisons=[],
+            selected_frames=[],
+            success_summary="SCOPE needs visual confirmation",
+            review_unresolved=True,
+        )
+
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        _executor,
+        state,
+        monotonic,
+        phase_timings,
+        [],
+    )
+
+    asyncio.run(execute_phases([phase], context, PlainProgressReporter()))
+
+    assert phase.status is PhaseStatus.COMPLETED
+    err = capsys.readouterr().err
+    assert "[OK] ALIGN  Completed in " in err
+    assert "[WARN]" not in err
+
+
+def test_timed_align_phase_with_unresolved_review_keeps_completed_on_log_reporter(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    phase_timings: dict[str, float] = {}
+    reporter = LogProgressReporter()
+
+    async def _executor(_: RunContext) -> AlignPhaseOutput:
+        return AlignPhaseOutput(
+            reference=context.reference,
+            comparisons=[],
+            selected_frames=[],
+            success_summary="SCOPE needs visual confirmation",
+            review_unresolved=True,
+        )
+
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        _executor,
+        state,
+        monotonic,
+        phase_timings,
+        [],
+    )
+
+    with capture_logs() as captured:
+        asyncio.run(execute_phases([phase], context, reporter))
+
+    assert phase.status is PhaseStatus.COMPLETED
+    completed = [
+        event
+        for event in captured
+        if event.get("event") == "phase_completed" and event.get("phase") == "align"
+    ]
+    assert len(completed) == 1
+    assert completed[0].get("status") == "completed"
+
+
+def test_timed_align_phase_with_unresolved_review_completes_as_warned(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    phase_timings: dict[str, float] = {}
+
+    async def _executor(_: RunContext) -> AlignPhaseOutput:
+        return AlignPhaseOutput(
+            reference=context.reference,
+            comparisons=[],
+            selected_frames=[],
+            success_summary="SCOPE needs visual confirmation",
+            review_unresolved=True,
+        )
+
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        _executor,
+        state,
+        monotonic,
+        phase_timings,
+        [],
+    )
+
+    asyncio.run(execute_phases([phase], context, NullProgressReporter()))
+
+    assert phase.status is PhaseStatus.COMPLETED
+    assert phase.success_status is ProgressPhaseStatus.WARNED
+    assert phase.success_summary == "SCOPE needs visual confirmation"
+
+
+def test_timed_align_phase_with_unresolved_review_renders_warning_line(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    phase_timings: dict[str, float] = {}
+
+    async def _executor(_: RunContext) -> AlignPhaseOutput:
+        return AlignPhaseOutput(
+            reference=context.reference,
+            comparisons=[],
+            selected_frames=[],
+            success_summary="SCOPE needs visual confirmation",
+            review_unresolved=True,
+        )
+
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        _executor,
+        state,
+        monotonic,
+        phase_timings,
+        [],
+    )
+
+    asyncio.run(execute_phases([phase], context, RichProgressReporter(no_color=True)))
+
+    err = capsys.readouterr().err
+    assert "!" in err
+    assert "✓" not in err
+    assert "SCOPE needs visual confirmation" in err
 
 
 def test_execute_phases_preserves_internal_phase_name_for_log_progress(
@@ -285,7 +528,11 @@ def test_execute_phases_forwards_success_retention_hint(tmp_path: Path) -> None:
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
             *,
             retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del summary, duration_text
             self.complete_phase_calls.append((status, retain))
 
     reporter = SpyReporter()
@@ -391,7 +638,13 @@ def test_execute_phases_warn_only_failure_reports_warned_progress_status(
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -490,7 +743,13 @@ def test_execute_phases_fail_fast_failure_reports_failed_progress_status(
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -525,7 +784,13 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
         def complete_phase(
             self,
             status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
+            *,
+            retain: bool | None = None,
+            summary: str | None = None,
+            duration_text: str | None = None,
+            presentation: str | None = None,
         ) -> None:
+            del retain, summary, duration_text, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()

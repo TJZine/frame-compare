@@ -14,11 +14,11 @@ from fractions import Fraction
 from pathlib import Path
 
 import structlog
-from rich.console import Console
 from rich.markup import escape
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from frame_compare.services import alignment_audio, alignment_consensus, alignment_math
 from frame_compare.services.alignment_correlation import ALIGNMENT_ESTIMATOR_POLICY
@@ -46,10 +46,22 @@ from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
     AlignmentResult,
+    AlignmentReviewSummary,
     AudioAlignmentAttempt,
 )
 from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    BORDER_NEUTRAL,
+    BORDER_PENDING,
+    MUTED,
+    OK,
+    VALUE,
+    WARN,
+    glyphs_for_console,
+    human_console,
+)
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
@@ -1008,12 +1020,16 @@ def _stability_scope_line(attempt: AudioAlignmentAttempt) -> str | None:
     )
 
 
-def _alignment_evidence_row(line: str) -> tuple[str, str, str]:
+def _alignment_evidence_row(line: str, *, waiting_glyph: str = "›") -> tuple[str, str, str]:
     """Return the key, value, and style for one interactive evidence row."""
     stripped = line.strip()
     if stripped.startswith("Comparison ") and " - " in stripped:
         _comparison, value = stripped.split(" - ", 1)
-        return "  status", value, "yellow" if "not applied" in value.lower() else "bright_white"
+        if "not applied" in value.lower():
+            return "  status", value, WARN
+        if "applied" in value.lower():
+            return "  status", value, OK
+        return "  status", value, VALUE
     prefixes = {
         "Reason: ": "  reason",
         "Streams: ": "  streams",
@@ -1025,28 +1041,29 @@ def _alignment_evidence_row(line: str) -> tuple[str, str, str]:
     }
     for prefix, key in prefixes.items():
         if stripped.startswith(prefix):
-            return key, stripped.removeprefix(prefix), "bright_white"
+            return key, stripped.removeprefix(prefix), VALUE
     if stripped.startswith("Audio alignment automatic application"):
-        return "  authority", stripped, "yellow"
+        return "  authority", stripped, WARN
     if stripped.startswith(("Audio evidence", "Continuing without")):
-        return "  outcome", stripped, "yellow"
+        return "  outcome", stripped, WARN
     if "correlated windows agree" in stripped or "windows planned" in stripped:
-        return "  evidence", stripped, "bright_white"
+        return "  evidence", stripped, VALUE
     if stripped.startswith("Opening VSView"):
-        return "  review", stripped, "magenta"
+        return "  review", f"{waiting_glyph} {stripped}", ACCENT
     if stripped.startswith("Audio diagnostics: "):
-        return "diagnostics", stripped.removeprefix("Audio diagnostics: "), "bright_white"
+        return "diagnostics", stripped.removeprefix("Audio diagnostics: "), VALUE
     if "warning" in stripped.lower() or "not applied" in stripped.lower():
-        return "  warning", stripped, "yellow"
-    return "  detail", stripped, "bright_white"
+        return "  warning", stripped, WARN
+    return "  detail", stripped, MUTED
 
 
 def _render_alignment_evidence_panel(
     *,
-    entries: list[tuple[str, list[str]]],
+    entries: list[tuple[str, list[str], list[str], list[str]]],
     diagnostics_written: bool,
     no_color: bool,
     actionable: bool,
+    needs_review_count: int = 0,
 ) -> None:
     table = Table(
         show_header=False,
@@ -1055,27 +1072,47 @@ def _render_alignment_evidence_panel(
         padding=(0, 2, 0, 0),
         expand=True,
     )
-    table.add_column("key", style="blue", no_wrap=True, min_width=14, overflow="fold")
+    table.add_column("key", style="dim", no_wrap=True, min_width=14, overflow="fold")
     table.add_column("value", overflow="fold")
-    for index, (comparison_name, lines) in enumerate(entries):
+    console = human_console(stderr=True, no_color=no_color, height=1000)
+    waiting_glyph = glyphs_for_console(console).waiting
+    for index, (comparison_name, lines, verbose_lines, review_lines) in enumerate(entries):
         if index:
             table.add_row("", "")
-        table.add_row("comparison", f"[bright_white]{escape(comparison_name)}[/]")
+        table.add_row("", f"[bold]{escape(comparison_name)}[/]")
         for line in lines:
-            key, value, style = _alignment_evidence_row(line)
-            table.add_row(key, f"[{style}]{escape(value)}[/]")
+            _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
+            if style:
+                table.add_row("", f"[{style}]{escape(value)}[/]")
+            else:
+                table.add_row("", escape(value))
+        for line in verbose_lines:
+            key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
+            if style:
+                table.add_row(key, f"[{style}]{escape(value)}[/]")
+            else:
+                table.add_row(key, escape(value))
+        for line in review_lines:
+            _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
+            if style:
+                glyph, _, text = value.partition(" ")
+                table.add_row("", f"[{style}]{escape(glyph)}[/] [{style}]{escape(text)}[/]")
+            else:
+                table.add_row("", escape(value))
     if diagnostics_written:
         table.add_row("", "")
-        table.add_row("diagnostics", "[bright_white]alignment_diagnostics/[/]")
+        table.add_row("diagnostics", "alignment_diagnostics/")
 
-    marker = "[bold yellow][WARN][/] " if actionable else ""
-    console = Console(stderr=True, no_color=no_color, height=1000)
+    title = f"[bold {ACCENT} not dim]Audio alignment[/]"
+    if actionable:
+        title += f" [dim]· {needs_review_count} needs review[/]"
     console.print(
         Padding(
             Panel(
                 table,
-                title=f"{marker}[bold cyan]Audio Alignment[/]",
-                border_style="cyan",
+                title=title,
+                title_align="left",
+                border_style=BORDER_PENDING if actionable else BORDER_NEUTRAL,
             ),
             (0, 0, 0, 2),
         ),
@@ -1168,6 +1205,44 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
     return lines
 
 
+def _print_pre_review_summary(
+    *,
+    request: AlignmentRequest,
+    results_map: dict[str, AlignmentResult],
+    progress: ProgressReporter | None,
+    no_color: bool,
+) -> None:
+    """Print the Rich-only Align summary line before native review."""
+    if not isinstance(progress, RichProgressReporter):
+        return
+    states: list[tuple[str, bool]] = []
+    for comparison in request.comparisons:
+        key = _alignment_key(request.reference.path, comparison.path)
+        result = results_map[key]
+        short = comparison.short_name or comparison.label or comparison.path.name
+        states.append((short, result.applied))
+    actionable = any(not applied for _, applied in states)
+    console = human_console(stderr=True, no_color=no_color)
+    glyphs = glyphs_for_console(console)
+    if actionable:
+        glyph, style = glyphs.warning, WARN
+    else:
+        glyph, style = glyphs.ok, OK
+    line = Text.assemble((glyph, style), f" {'Align':<9} ")
+    for index, (short, applied) in enumerate(states):
+        if index:
+            line.append(" · ", style="dim")
+        if applied:
+            line.append(f"{short} audio applied")
+        else:
+            line.append(f"{short} needs visual confirmation", style=WARN)
+    progress.suspend()
+    try:
+        console.print(line)
+    finally:
+        progress.resume()
+
+
 def _present_alignment_evidence(
     *,
     request: AlignmentRequest,
@@ -1181,8 +1256,9 @@ def _present_alignment_evidence(
     diagnostics_written: bool,
 ) -> None:
     lines: list[str] = []
-    entries: list[tuple[str, list[str]]] = []
+    entries: list[tuple[str, list[str], list[str], list[str]]] = []
     has_actionable_result = False
+    needs_review_count = 0
     for ordinal, comparison in enumerate(request.comparisons, start=1):
         key = _alignment_key(request.reference.path, comparison.path)
         result = results_map[key]
@@ -1209,29 +1285,39 @@ def _present_alignment_evidence(
             continue
         if quiet and not human_actionable:
             continue
-        comparison_lines = _normal_evidence_lines(
+        normal_lines = _normal_evidence_lines(
             ordinal=ordinal,
             result=result,
             provenance=provenance,
         )
+        verbose_lines: list[str] = []
         if verbose and not quiet and result.audio_attempt is not None:
-            comparison_lines.extend(_verbose_evidence_lines(result.audio_attempt))
+            verbose_lines = _verbose_evidence_lines(result.audio_attempt)
+        review_lines: list[str] = []
         if human_actionable and (config.use_vsview or config.force_interactive):
             if decision is not None and decision.candidate is not None:
-                comparison_lines.append(
+                review_lines.append(
                     "Opening VSView for manual review. The candidate is a hint, not a "
                     "confirmed alignment."
                 )
             else:
-                comparison_lines.append(
+                review_lines.append(
                     "Opening VSView for manual review. No automatic candidate is available; "
                     "align the sources manually."
                 )
+        comparison_lines = [*normal_lines, *verbose_lines, *review_lines]
         lines.extend(comparison_lines)
+        if human_actionable:
+            needs_review_count += 1
         entries.append(
             (
-                comparison.presentation_name or comparison.label or comparison.path.name,
-                comparison_lines,
+                comparison.compact_name
+                or comparison.presentation_name
+                or comparison.label
+                or comparison.path.name,
+                normal_lines,
+                verbose_lines,
+                review_lines,
             )
         )
     if diagnostics_written and not quiet and not json_output:
@@ -1247,6 +1333,7 @@ def _present_alignment_evidence(
                 diagnostics_written=diagnostics_written,
                 no_color=config.no_color,
                 actionable=has_actionable_result,
+                needs_review_count=needs_review_count,
             )
         else:
             print("\n".join(lines), file=sys.stderr)
@@ -1316,6 +1403,7 @@ async def align_clips_from_request(
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
+    review_summary: AlignmentReviewSummary | None = None,
 ) -> list[AlignmentResult]:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     reference = request.reference.path
@@ -1405,6 +1493,13 @@ async def align_clips_from_request(
         review_outcome=initial_outcome,
         emit_success_log=json_output,
     )
+    if initial_outcome == "pending" and not quiet and not json_output:
+        _print_pre_review_summary(
+            request=request,
+            results_map=results_map,
+            progress=progress,
+            no_color=config.no_color,
+        )
     _present_alignment_evidence(
         request=request,
         results_map=results_map,
@@ -1443,6 +1538,7 @@ async def align_clips_from_request(
         progress=progress,
         frame_props_by_stem=frame_props_by_stem,
         verbose=verbose,
+        review_summary=review_summary,
     )
     confirmed_offsets = review.confirmed_offsets
     fps_reference = _apply_confirmed_vsview_offsets(
@@ -1469,6 +1565,8 @@ async def align_clips_from_request(
             only_keys=diagnostic_keys,
             confirmed_frame_pairs=review.confirmed_frame_pairs,
         )
+        if review_summary is not None and not review_summary.review_ran:
+            review_summary.review_unresolved = True
 
     if config.cache_results and shared_write_is_service_eligible(
         request=request,

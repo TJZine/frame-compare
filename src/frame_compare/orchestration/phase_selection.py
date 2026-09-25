@@ -275,6 +275,7 @@ def run_analyze_phase(
             *recovery_warnings,
         ],
         replaces_frame_plan_selection=True,
+        success_summary=_selected_frames_summary(len(output.selected_frames)),
     )
 
 
@@ -344,7 +345,15 @@ def _run_analyze_phase_once(
         metrics_cache_hit=metrics_cache_hit,
         analysis_metrics=metrics,
         selection_details_by_source_frame=dict(selection.selection_details),
+        success_summary=_selected_frames_summary(len(selection.frames)),
     )
+
+
+def _selected_frames_summary(count: int) -> str:
+    """Return the durable Analyze summary for a selected frame count."""
+    if count == 1:
+        return "1 frame selected"
+    return f"{count} frames selected"
 
 
 def _require_cached_metrics(

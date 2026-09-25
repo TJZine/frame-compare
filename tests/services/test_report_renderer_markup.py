@@ -56,16 +56,40 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
     assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
-def test_build_html_keeps_distinct_release_identity_in_info_clip_card(
+def test_build_html_emits_empty_report_information_containers_for_viewer_fill(
     report_payload: ReportPayload,
 ) -> None:
-    document = parse_elements(build_html(report_payload))
-    clips = find_all(document, tag="li", class_name="rv-clip-meta-item")
+    html = build_html(report_payload)
+    document = parse_elements(html)
 
-    assert [require_first(clip, class_name="rv-clip-meta-release").text for clip in clips] == [
-        "Reference release",
-        "Encode release",
-    ]
+    assert find_all(document, tag="li", class_name="rv-clip-meta-item") == []
+    assert "rv-clip-meta-release" not in html
+    clips_mount = require_first(document, tag="ol", attr_name="data-info-clips", attr_value=None)
+    assert clips_mount.children == []
+    empty_mount = require_first(document, tag="p", attr_name="data-info-clips-empty")
+    assert "hidden" in empty_mount.attrs
+    shared_mount = require_first(document, tag="p", attr_name="data-info-clips-shared")
+    assert shared_mount.text == ""
+    require_first(document, tag="dd", attr_name="data-info-opens-in")
+    require_first(document, tag="dd", attr_name="data-info-default-pair")
+
+
+@pytest.mark.parametrize(
+    ("frame_count", "expected"),
+    [
+        (1, "1 frame · 2 sources"),
+        (2, "2 frames · 2 sources"),
+    ],
+)
+def test_build_html_report_information_content_counts_frames(
+    report_payload: ReportPayload, frame_count: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "stats": {"frame_count": frame_count, "clip_count": 2},
+    }
+    html = build_html(payload)
+    assert parse_info_modal(html).general["Content"] == expected
 
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
@@ -129,7 +153,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         "overlay": "Single clip view (O) — inspect one source",
         "diff": "Difference (D) — locate changed pixels",
         "blink": "Blink (B) — alternate the selected pair",
-        "grid": "Grid comparison — scan sources together",
+        "grid": "Grid (G) — scan sources together",
     }
     for button in mode_buttons:
         assert button.attrs["title"] == mode_purpose_titles[button.attrs["data-mode"]]
@@ -270,26 +294,38 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
 
 
 @pytest.mark.parametrize(
-    ("timestamp", "date_label"),
+    "timestamp",
     [
-        ("2026-09-04T14:29:22.256990+00:00", "2026-09-04"),
-        ("2026-09-04T23:59:59.123456-04:00", "2026-09-04"),
-        ("2026-09-04T00:00:00Z", "2026-09-04"),
-        ('unknown "<date>"', 'unknown "<date>"'),
+        "2026-09-04T14:29:22.256990+00:00",
+        "2026-09-04T23:59:59.123456-04:00",
+        "2026-09-04T00:00:00Z",
     ],
 )
-def test_build_html_shortens_header_date_and_preserves_exact_timestamp(
-    report_payload: ReportPayload, timestamp: str, date_label: str
+def test_build_html_emits_generated_time_element_and_preserves_exact_timestamp(
+    report_payload: ReportPayload, timestamp: str
 ) -> None:
     payload: ReportPayload = {**report_payload, "generated_at": timestamp}
     html = build_html(payload)
     metadata = require_first(parse_elements(html), class_name="rv-meta")
-    date = require_first(metadata, tag="span")
+    date = require_first(metadata, tag="time")
 
-    assert date.text == date_label
+    assert date.attrs["datetime"] == timestamp
     assert date.attrs["title"] == timestamp
     assert parse_info_modal(html).general["Generated"] == timestamp
     assert script_payload(html)["generated_at"] == timestamp
+
+
+def test_build_html_falls_back_to_plain_span_for_unparseable_timestamp(
+    report_payload: ReportPayload,
+) -> None:
+    payload: ReportPayload = {**report_payload, "generated_at": 'unknown "<date>"'}
+    html = build_html(payload)
+    metadata = require_first(parse_elements(html), class_name="rv-meta")
+    date = require_first(metadata, tag="span")
+
+    assert date.text == 'unknown "<date>"'
+    assert date.attrs["title"] == 'unknown "<date>"'
+    assert script_payload(html)["generated_at"] == 'unknown "<date>"'
 
 
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
@@ -306,7 +342,9 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
 
     metadata = require_first(elements, class_name="rv-meta")
     assert "• 2 frames • 2 clips" in metadata.text
-    assert require_first(metadata, tag="span").text == "2026-05-22"
+    generated = require_first(metadata, tag="time")
+    assert generated.attrs["datetime"] == "2026-05-22T12:00:00+00:00"
+    assert generated.attrs["title"] == "2026-05-22T12:00:00+00:00"
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report information"
@@ -324,51 +362,20 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
-    assert info_modal.section_headings == ["General", "Clips", "Rendering"]
+    assert info_modal.section_headings == ["General", "Sources", "Rendering"]
     assert info_modal.general == {
         "Title": "Renderer Contract",
         "Report ID": "report_0123456789abcdef0123456789abcdef",
         "Generated": "2026-05-22T12:00:00+00:00",
-        "Frames": "2",
-        "Clips": "2",
-        "Default Mode": "slider",
-        "Default Pair": "Reference control vs Encode control",
+        "Content": "2 frames · 2 sources",
+        "Opens in": "",
+        "Default pair": "",
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
         "Tonemap": "Not applied",
     }
-    assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
-        (
-            "Reference primary <unsafe>",
-            "SDR",
-            {
-                "Filename": "reference exact <unsafe>.mkv",
-                "Resolution": "1920x1080",
-                "FPS": "24 fps",
-                "Frames": "100",
-            },
-        ),
-        (
-            'Encode primary "unsafe"',
-            "HDR",
-            {
-                "Filename": 'encode exact "unsafe".mkv',
-                "Resolution": "1920x1080",
-                "FPS": "24 fps",
-                "Frames": "100",
-            },
-        ),
-    ]
-
-
-def test_build_html_displays_overlay_default_mode_as_single(
-    report_payload: ReportPayload,
-) -> None:
-    payload: ReportPayload = {**report_payload, "default_mode": "overlay"}
-    html = build_html(payload)
-    info_modal = parse_info_modal(html)
-
-    assert script_payload(html)["default_mode"] == "overlay"
-    assert info_modal.general["Default Mode"] == "Single"
+    # Source cards, the shared fps line, Opens in, and Default pair are filled
+    # at startup by the viewer's Inspector clip-card builder; Python emits
+    # only the containers (covered in the Node inspector harness).
 
 
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
@@ -407,8 +414,71 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     pairs = parse_definition_pairs(details)
     assert pairs["Dynamic peak detection"] == "On"
     assert pairs["Gamma lift"] == "Off"
-    assert pairs["Source peak"] == "Auto"
+    assert pairs["Source peak"] == "Automatic"
+    assert pairs["Smoothing period"] == "45 frames"
+    assert pairs["Scene thresholds"] == "0.8 low · 2.4 high"
+    assert pairs["Gamut mapping"] == "Perceptual"
+    assert pairs["Metadata mode"] == "Automatic selection"
+    assert "Scene threshold low" not in pairs
+    assert "Scene threshold high" not in pairs
     assert pairs["Dolby Vision metadata use"] == "Off"
+
+
+@pytest.mark.parametrize(
+    ("gamut", "expected"),
+    [
+        (0, "Clip"),
+        (1, "Perceptual"),
+        (2, "Soft clip"),
+        (3, "Relative"),
+        (4, "Saturation"),
+        (5, "Absolute"),
+        (6, "Desaturate"),
+        (7, "Darken"),
+        (8, "Highlight"),
+        (9, "Linear"),
+        (42, "42"),
+    ],
+)
+def test_build_html_labels_gamut_mapping_values(
+    report_payload: ReportPayload, gamut: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": {"gamut_mapping": gamut}},
+        },
+    }
+    html = build_html(payload)
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert parse_definition_pairs(details)["Gamut mapping"] == expected
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (0, "Automatic selection"),
+        (1, "None"),
+        (2, "HDR10 (static)"),
+        (3, "HDR10+ (MaxRGB)"),
+        (4, "Luminance (CIE Y)"),
+        (9, "9"),
+    ],
+)
+def test_build_html_labels_metadata_modes(
+    report_payload: ReportPayload, metadata: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": {"metadata": metadata}},
+        },
+    }
+    html = build_html(payload)
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert parse_definition_pairs(details)["Metadata mode"] == expected
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
@@ -578,6 +648,7 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert palette.attrs["role"] == "toolbar"
     assert palette.attrs["aria-label"] == "Viewport controls"
     assert palette.attrs["data-orientation"] == "horizontal"
+    assert palette.attrs["data-proximity"] == "near"
     assert controls.attrs["role"] == "toolbar"
     assert stage.attrs["aria-label"] == "Comparison viewer"
 
@@ -622,6 +693,8 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert overlays_button.attrs["title"] == "Hide source labels (H)"
     assert overlays_button.text == "Source labels"
     assert "HUD" not in html
+    lens_button = require_first(palette, tag="button", element_id="btn-lens")
+    assert lens_button.attrs["aria-label"] == "Turn lens on"
     blink_controls = require_first(
         palette, tag="div", attr_name="data-control-scope", attr_value="blink"
     )
@@ -671,8 +744,11 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
         panel = require_first(inspector, element_id=f"inspector-panel-{tab}")
         assert panel.attrs["tabindex"] == "-1"
 
-    assert "data-inspector-frame-label" in html
+    assert "data-inspector-frame-identity" in html
+    assert "data-inspector-frame-detail-row" in html
     assert "data-inspector-frame-position" in html
+    assert "data-inspector-source-frames" in html
+    assert "data-inspector-clips-shared" in html
     assert "data-inspector-clips" in html
     assert "data-inspector-align-pair" in html
     live = require_first(document, tag="div", element_id="viewer-live")
@@ -744,8 +820,8 @@ def test_build_html_renders_lens_stage_controls(
     lens = require_first(stage, tag="aside", element_id="rv-lens")
     assert lens.attrs["aria-label"] == "Image magnification lens"
     assert lens.attrs["data-size"] == "medium"
-    assert lens.attrs["data-comparison"] == "false"
-    for image_role in ("active", "difference", "comparison"):
+    assert "data-comparison" not in lens.attrs
+    for image_role in ("active", "difference"):
         assert (
             len(
                 find_all(
@@ -757,20 +833,15 @@ def test_build_html_renders_lens_stage_controls(
             )
             == 1
         )
-    active_role = require_first(lens, tag="span", attr_name="data-lens-role", attr_value="active")
-    assert active_role.text == "ACTIVE"
+    assert find_all(lens, tag="img", attr_name="data-lens-image", attr_value="comparison") == []
+    assert find_all(lens, tag="span", attr_name="data-lens-role") == []
+    assert find_all(lens, tag="span", class_name="rv-lens-fixed-status") == []
+    assert "COMPARE" not in html
+    assert ">Fixed<" not in html
     assert require_first(lens, tag="span", attr_name="data-lens-status", attr_value="active")
     assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="active")
-    comparison_role = require_first(
-        lens, tag="span", attr_name="data-lens-role", attr_value="comparison"
-    )
-    assert comparison_role.text == "COMPARE"
-    comparison_status = require_first(
-        lens, tag="span", attr_name="data-lens-status", attr_value="comparison"
-    )
-    assert "hidden" in comparison_status.attrs
-    assert comparison_status.text == ""
-    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="comparison")
+    caption = require_first(lens, tag="div", class_name="rv-lens-caption")
+    assert "hidden" in caption.attrs
     grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
     assert grip.attrs["aria-label"] == "Move lens window"
     assert not find_all(lens, tag="div", class_name="rv-lens-titlebar")
@@ -783,11 +854,27 @@ def test_build_html_renders_lens_stage_controls(
     assert settings_trigger.attrs["aria-controls"] == "lens-settings-popover"
     assert not find_all(palette, tag="div", element_id="lens-settings-popover")
     assert not find_all(lens, tag="div", element_id="lens-settings-popover")
-    assert require_first(settings, tag="input", element_id="lens-comparison-enabled")
-    assert require_first(settings, tag="button", attr_name="data-lens-marker", attr_value="off")
-    current_source = require_first(settings, tag="output", attr_name="data-lens-current-source")
-    assert current_source.text == "Lens is off."
-    assert current_source.attrs["aria-live"] == "off"
+    assert find_all(settings, tag="input", element_id="lens-comparison-enabled") == []
+    assert find_all(settings, attr_name="data-lens-current-source") == []
+    assert find_all(settings, attr_name="data-lens-comparison-settings") == []
+    assert (
+        require_first(
+            settings, tag="button", attr_name="data-lens-marker", attr_value="ring"
+        ).attrs["aria-checked"]
+        == "true"
+    )
+    assert (
+        require_first(
+            settings, tag="button", attr_name="data-lens-caption", attr_value="off"
+        ).attrs["aria-checked"]
+        == "true"
+    )
+    assert (
+        require_first(settings, tag="button", attr_name="data-lens-caption", attr_value="on").attrs[
+            "aria-checked"
+        ]
+        == "false"
+    )
     assert not find_all(stage, attr_name="data-lens-behavior")
     assert not find_all(lens, tag="canvas")
     assert 'id="btn-inspect"' not in html

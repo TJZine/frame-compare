@@ -217,6 +217,32 @@ def test_handle_json_output_failure_exits_processing_error(
     assert json.loads(capsys.readouterr().out)["errors"] == ["failed"]
 
 
+def test_handle_json_output_omits_memory_only_review_wait(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    handle_json_output(
+        RunResult(
+            success=True,
+            duration_seconds=60.0,
+            phase_timings={"align": 50.0},
+            vsview_review_seconds=42.5,
+        )
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "cache_hit": False,
+        "clips_processed": 0,
+        "duration_seconds": 60.0,
+        "errors": [],
+        "frame_count": 0,
+        "report_path": None,
+        "screenshots_dir": None,
+        "slowpics_url": None,
+        "success": True,
+    }
+
+
 def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> None:
     runner = RecordingRunner()
     written_paths: list[Path] = []

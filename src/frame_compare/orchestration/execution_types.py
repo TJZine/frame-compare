@@ -73,6 +73,7 @@ class AnalyzePhaseOutput:
     )
     warnings: list[str] = field(default_factory=list[str])
     replaces_frame_plan_selection: bool = False
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,11 +84,18 @@ class AlignPhaseOutput:
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
     warnings: list[str] = field(default_factory=list[str])
+    success_summary: str | None = None
+    # Measured VSView review wait for the human summary (memory only).
+    review_seconds: float = 0.0
+    # True when review was pending but VSView never ran: the durable Align
+    # line keeps the pre-review summary and warns instead of succeeding.
+    review_unresolved: bool = False
 
 
 @dataclass(frozen=True)
 class RenderPhaseOutput:
     render: RenderArtifacts
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +108,7 @@ class PublishPhaseOutput:
     slowpics_url: str | None
     uploaded_file_paths: tuple[Path, ...] = ()
     post_upload_actions: PostUploadActionResults = ()
+    success_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +166,9 @@ class ExecutionState:
     selected_frames: list[int] = field(default_factory=list[int])
     frame_plan_warnings: list[str] = field(default_factory=list[str])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
+    # Measured VSView review wait for the human summary (memory only: never a
+    # phase timing, never persisted to the run record or JSON output).
+    vsview_review_seconds: float = 0.0
 
     @property
     def warnings(self) -> list[str]:

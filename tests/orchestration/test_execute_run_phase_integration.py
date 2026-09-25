@@ -24,7 +24,7 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.run_result_record import read_run_result
-from frame_compare.services.types import AlignmentResult, TmdbMetadata
+from frame_compare.services.types import AlignmentResult, AlignmentReviewSummary, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import (
@@ -81,6 +81,7 @@ enable = false
         verbose=False,
         quiet=False,
         json_output=False,
+        review_summary: AlignmentReviewSummary | None = None,
     ):
         assert verbose is False
         assert quiet is False

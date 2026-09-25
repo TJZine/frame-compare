@@ -102,6 +102,7 @@ root = "src"
 
 [[tool.pyright.executionEnvironments]]
 root = "tests"
+extraPaths = ["src", "."]
 reportMissingParameterType = false
 reportUnknownParameterType = false
 reportUnknownArgumentType = false
