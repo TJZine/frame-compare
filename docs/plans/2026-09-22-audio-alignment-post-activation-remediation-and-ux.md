@@ -3,11 +3,13 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Repair post-activation audio alignment findings AA-01–AA-06 and clarify terminal and VSView review UX without changing authority or wire schemas.
 Owner: Audio alignment remediation orchestrator; sequential user-visible Codex tasks, controller-owned integration and plan records.
 
 # Audio alignment post-activation remediation and UX
+
+> Superseded on 2026-09-25 by [the whole-track estimator and video check plan](2026-09-25-audio-alignment-whole-track-and-video-check.md); W1 is no longer required.
 
 ## Baseline and authority
 
