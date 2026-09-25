@@ -504,8 +504,9 @@ unchanged.
   when `--skip-analysis` is active. Rich phase labels are title case (`Plan`,
   `Analyze`, `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`,
   `Cleanup`); the plain and log reporters keep uppercase labels.
-- The Run plan workspace paths show `root`, `config`, `input`, and the resolved
-  `generated` data root. The constant run-folder policy and derived screenshot path
+- The Run plan `Workspace` section row shows the resolved workspace root, with
+  `config`, `input`, and `output` sub-rows; `output` is the resolved
+  generated-data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.
 - Human Rich progress uses title-case product phase labels: `Plan`, `Analyze`,
   `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`, and `Cleanup`,
@@ -539,12 +540,13 @@ unchanged.
   one-step phases remain simple activity lines without a bar. The nested screenshot
   bar uses the stable aggregate description `Screenshots` and advances as each
   screenshot completes; an FFmpeg batch advances together when the batch completes.
-  A successful top-level phase leaves a durable ASCII status line with elapsed time
-  when it runs for at least 10.0 seconds. Successful nested tasks remain transient,
-  while skipped,
+  A successful top-level phase leaves a durable status line with elapsed time
+  when it runs for at least 10.0 seconds (Rich: `{glyph} {Label:<9} {summary}`;
+  the plain and log reporters keep their uppercase ASCII markers). Successful
+  nested tasks remain transient, while skipped,
   warned, and failed phases always remain visible. A successful slow.pics upload
-  also leaves a durable `PUBLISH` line regardless of duration. The report-confirmed
-  prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
+  also leaves a durable `Publish` line regardless of duration. The report-confirmed
+  prompt is recorded by its confirmation panel; it does not add a redundant
   generic successful completion line. Progress is suspended around that blocking
   prompt and restored afterward. Rich status color is confined to the semantic
   marker: the running `…` is the accent colour, `✓` green, `!` yellow, and `✗`
@@ -918,7 +920,7 @@ Report-confirmed slow.pics upload is the exception to that precedence rule. In
 that opted-in workflow, the CLI presents the local report before prompting for
 upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
-opened. A compact `[WAIT] Publishing confirmation` panel shows the visibility and,
+opened. A compact `› Publish to slow.pics?` panel (`>` on non-UTF consoles) shows the visibility and,
 if the report was not opened, its path exactly once before the visibility-specific
 default-No question. The confirmation seam receives the literal
 four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</code>, where
