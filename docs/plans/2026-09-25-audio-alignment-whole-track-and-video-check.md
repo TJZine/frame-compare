@@ -319,6 +319,20 @@ Confirmed with the maintainer on 2026-09-25.
   `reference/commands-and-configuration.md`, `supported-media-runtime.md`,
   `docs/api.md` (generated), `CHANGELOG.md`.
 - Import direction must keep passing `lint-imports`.
+- Structure amendments (2026-09-25, controller, per the maintainer's architecture
+  guidance):
+  - The audio-evidence dataclasses move to a new
+    `utils/alignment_evidence.py`, with one strict payload parser. The VSView
+    contract validates the embedded attempt through that parser instead of
+    re-describing the schema by hand, so the schema is defined once.
+  - `services/alignment_decision.py` replaces `alignment_consensus.py` and absorbs
+    `alignment_stability.py`.
+  - Terminal evidence presentation moves from `alignment.py` to
+    `services/alignment_presentation.py`.
+  - `alignment_streaming.py` stays one module with a `_ChildStream` per-side class
+    (U2 review).
+
+  These refine the owners above; they add no product behaviour.
 
 ## Units
 
