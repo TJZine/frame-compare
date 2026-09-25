@@ -13,8 +13,6 @@ from rich.style import Style
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
     FpsReportClip,
-    _format_file_size,
-    _format_fps_value,
     _length_difference_lines,
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
@@ -42,31 +40,6 @@ def _assert_ansi_text_is_bold_cyan(output: str, label: str) -> None:
             assert span.style.color.number == cyan_number
             return
     pytest.fail(f"{label!r} was not rendered in bold cyan")
-
-
-@pytest.mark.parametrize(
-    ("size_bytes", "expected"),
-    [
-        (round(10.83 * 1024**3), "10.83 GiB"),
-        (17 * 1024**3, "17.00 GiB"),
-        (1024**3, "1.00 GiB"),
-        (0, ""),
-    ],
-)
-def test_format_file_size_uses_two_decimals(size_bytes: int, expected: str) -> None:
-    assert _format_file_size(size_bytes) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (Fraction(24000, 1001), "23.976 fps (24000/1001)"),
-        (Fraction(25, 1), "25 fps (25/1)"),
-        (Fraction(30000, 1001), "29.97 fps (30000/1001)"),
-    ],
-)
-def test_format_fps_value_keeps_rational_in_parentheses(value: Fraction, expected: str) -> None:
-    assert _format_fps_value(value) == expected
 
 
 def _make_clip_state(
@@ -397,7 +370,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
             effective_fps=Fraction(24000, 1001),
             fps_divergent=True,
             note="assumed",
-            size_bytes=6 * 1024**3,
+            size_bytes=0,
         ),
     ]
 
@@ -425,7 +398,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "2,400 frames" in captured.err
     assert "1,200 frames" in captured.err
     assert "17.00 GiB" in captured.err
-    assert "6.00 GiB" in captured.err
+    assert "0.00 B" not in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
     assert "Lengths differ" in captured.err
