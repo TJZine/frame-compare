@@ -292,6 +292,83 @@ def test_execute_phases_unresolved_review_warns_and_keeps_summary(
     assert "SCOPE needs visual confirmation" in err
 
 
+def test_timed_align_phase_with_unresolved_review_keeps_ok_on_plain_reporter(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    phase_timings: dict[str, float] = {}
+
+    async def _executor(_: RunContext) -> AlignPhaseOutput:
+        return AlignPhaseOutput(
+            reference=context.reference,
+            comparisons=[],
+            selected_frames=[],
+            success_summary="SCOPE needs visual confirmation",
+            review_unresolved=True,
+        )
+
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        _executor,
+        state,
+        monotonic,
+        phase_timings,
+        [],
+    )
+
+    asyncio.run(execute_phases([phase], context, PlainProgressReporter()))
+
+    assert phase.status is PhaseStatus.COMPLETED
+    err = capsys.readouterr().err
+    assert "[OK] ALIGN  Completed in " in err
+    assert "[WARN]" not in err
+
+
+def test_timed_align_phase_with_unresolved_review_keeps_completed_on_log_reporter(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    phase_timings: dict[str, float] = {}
+    reporter = LogProgressReporter()
+
+    async def _executor(_: RunContext) -> AlignPhaseOutput:
+        return AlignPhaseOutput(
+            reference=context.reference,
+            comparisons=[],
+            selected_frames=[],
+            success_summary="SCOPE needs visual confirmation",
+            review_unresolved=True,
+        )
+
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        _executor,
+        state,
+        monotonic,
+        phase_timings,
+        [],
+    )
+
+    with capture_logs() as captured:
+        asyncio.run(execute_phases([phase], context, reporter))
+
+    assert phase.status is PhaseStatus.COMPLETED
+    completed = [
+        event
+        for event in captured
+        if event.get("event") == "phase_completed" and event.get("phase") == "align"
+    ]
+    assert len(completed) == 1
+    assert completed[0].get("status") == "completed"
+
+
 def test_timed_align_phase_with_unresolved_review_completes_as_warned(
     tmp_path: Path,
 ) -> None:

@@ -14,7 +14,11 @@ import structlog
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.progress import phase_display_label, start_phase_progress
+from frame_compare.orchestration.progress import (
+    phase_display_label,
+    start_phase_progress,
+    uses_rich_progress,
+)
 from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
@@ -146,6 +150,7 @@ async def execute_phases(
             if (
                 resolved_status == ProgressPhaseStatus.COMPLETED
                 and phase.success_status is not None
+                and uses_rich_progress(reporter)
             ):
                 resolved_status = phase.success_status
             if phase.retain_on_success is None:

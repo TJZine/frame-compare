@@ -126,7 +126,7 @@ def _render_human_selection_report(
     console.print(
         Panel(
             table,
-            title=f"[bold {ACCENT}]Final Selection[/] [dim]After Alignment[/]",
+            title=f"[bold {ACCENT} not dim]Final Selection[/] [dim]After Alignment[/]",
             border_style=BORDER_NEUTRAL,
         )
     )

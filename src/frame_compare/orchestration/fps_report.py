@@ -196,24 +196,13 @@ def _format_file_size(size_bytes: int) -> str:
     raise AssertionError("unreachable")
 
 
-def _display_path(path: Path, *, input_dir: Path | None, verbose: bool) -> str:
-    absolute = path.resolve()
-    if verbose:
-        return str(absolute)
-    if input_dir is None:
-        return str(path)
-
-    try:
-        relative = absolute.relative_to(input_dir.resolve())
-    except ValueError:
-        return str(absolute)
-    return str(relative) if relative != Path(".") else "."
+def _display_path(path: Path) -> str:
+    return str(path.resolve())
 
 
 def _render_clip_overview(
     clips: Sequence[FpsReportClip],
     *,
-    input_dir: Path | None,
     verbose: bool,
 ) -> Table:
     table = Table(
@@ -258,9 +247,7 @@ def _render_clip_overview(
         table.add_row("", _source_detail_line(clip))
         table.add_row("", f"[dim]{escape(filename)}[/]")
         if verbose:
-            table.add_row(
-                "", f"[dim]{escape(_display_path(clip.path, input_dir=input_dir, verbose=True))}[/]"
-            )
+            table.add_row("", f"[dim]{escape(_display_path(clip.path))}[/]")
 
     return table
 
@@ -332,10 +319,9 @@ def _render_load_sources_overview(
     *,
     clips: Sequence[FpsReportClip],
     diagnostics: Sequence[str],
-    input_dir: Path | None,
     verbose: bool,
 ) -> Table:
-    table = _render_clip_overview(clips, input_dir=input_dir, verbose=verbose)
+    table = _render_clip_overview(clips, verbose=verbose)
     short_names = _clip_short_names(clips)
     other_diagnostics = [
         diagnostic
@@ -377,7 +363,6 @@ def _fps_status(clip: FpsReportClip, *, reference_fps: Fraction) -> str:
 def _render_fps_table(
     clips: Sequence[FpsReportClip],
     *,
-    input_dir: Path | None,
     verbose: bool,
 ) -> Table:
     table = Table(
@@ -418,7 +403,7 @@ def _render_fps_table(
             status_text,
         ]
         if verbose:
-            cells.append(escape(_display_path(clip.path, input_dir=input_dir, verbose=True)))
+            cells.append(escape(_display_path(clip.path)))
         table.add_row(*cells)
 
     return table
@@ -437,7 +422,6 @@ def _render_human_fps_report(
     clips: Sequence[FpsReportClip],
     diagnostics: Sequence[str],
     no_color: bool,
-    input_dir: Path | None,
     verbose: bool,
 ) -> None:
     console = human_console(
@@ -447,11 +431,10 @@ def _render_human_fps_report(
         height=1000,
     )
     if stage == "after_load_sources":
-        title = f"[bold {ACCENT}]Sources[/] [dim]· {len(clips)} loaded[/]"
+        title = f"[bold {ACCENT} not dim]Sources[/] [dim]· {len(clips)} loaded[/]"
         table = _render_load_sources_overview(
             clips=clips,
             diagnostics=diagnostics,
-            input_dir=input_dir,
             verbose=verbose,
         )
     else:
@@ -465,10 +448,9 @@ def _render_human_fps_report(
                 )
             )
             return
-        title = f"[bold {ACCENT}]Frame rates[/] [dim]{escape(_stage_label(stage))}[/]"
+        title = f"[bold {ACCENT} not dim]Frame rates[/] [dim]{escape(_stage_label(stage))}[/]"
         table = _render_fps_table(
             clips,
-            input_dir=input_dir,
             verbose=verbose,
         )
 
@@ -491,7 +473,6 @@ def emit_consolidated_fps_report(
     rich_output: bool,
     no_color: bool = False,
     diagnostics: Sequence[str] = (),
-    input_dir: Path | None = None,
     verbose: bool = False,
 ) -> None:
     """Emit the consolidated FPS report in JSON or human-readable form."""
@@ -508,6 +489,5 @@ def emit_consolidated_fps_report(
         clips=clips,
         diagnostics=diagnostics,
         no_color=no_color,
-        input_dir=input_dir,
         verbose=verbose,
     )

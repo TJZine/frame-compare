@@ -252,7 +252,7 @@ def _render_human_alignment_report(
                 alignment_warnings=alignment_warnings,
                 verbose=verbose,
             ),
-            title=f"[bold {ACCENT}]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
+            title=f"[bold {ACCENT} not dim]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
             border_style=BORDER_NEUTRAL,
         )
     )

@@ -42,13 +42,6 @@ _DURABLE_STATUS_MARKERS = {
     ProgressPhaseStatus.WARNED: "[WARN]",
     ProgressPhaseStatus.FAILED: "[FAIL]",
 }
-_STATUS_STYLES = {
-    "[OK]": "green",
-    "[WAIT]": ACCENT,
-    "[WARN]": "yellow",
-    "[SKIP]": "dim yellow",
-    "[FAIL]": "red",
-}
 _DURABLE_STATUS_GLYPHS = {
     ProgressPhaseStatus.COMPLETED: "ok",
     ProgressPhaseStatus.SKIPPED: "skipped",

@@ -171,7 +171,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             quiet=request.quiet,
             rich_output=uses_rich_progress(reporter),
             no_color=request.no_color,
-            input_dir=context.workspace.input_dir,
             verbose=request.verbose,
         )
         state.phase_timings["load_sources"] = max(
@@ -219,7 +218,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 quiet=request.quiet,
                 rich_output=uses_rich_progress(reporter),
                 no_color=request.no_color,
-                input_dir=context.workspace.input_dir,
                 verbose=request.verbose,
             )
             emit_frame_alignment_report(

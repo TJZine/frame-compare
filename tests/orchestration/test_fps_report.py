@@ -498,7 +498,6 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
         quiet=False,
         rich_output=True,
         no_color=True,
-        input_dir=input_dir,
     )
 
     captured = capsys.readouterr()
@@ -514,7 +513,6 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
         quiet=False,
         rich_output=True,
         no_color=True,
-        input_dir=input_dir,
         verbose=True,
     )
 
@@ -797,7 +795,6 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
         quiet=False,
         rich_output=True,
         no_color=True,
-        input_dir=Path("/workspace/comparison_videos"),
     )
 
     captured = capsys.readouterr()

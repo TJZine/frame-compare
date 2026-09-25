@@ -128,7 +128,7 @@ def _group_table() -> Table:
 
 def _add_section(table: Table, name: str, value: str) -> None:
     """Add a section row with the name in accent and the value on the same row."""
-    table.add_row(f"[bold {ACCENT}]{name}[/]", value)
+    table.add_row(f"[bold {ACCENT} not dim]{name}[/]", value)
 
 
 def _dot_join(parts: Sequence[str]) -> str:
@@ -452,7 +452,7 @@ def print_at_a_glance(
     console.print(
         Panel(
             table,
-            title=f"[bold {ACCENT}]Run plan[/]",
+            title=f"[bold {ACCENT} not dim]Run plan[/]",
             title_align="left",
             border_style=BORDER_NEUTRAL,
         )
@@ -470,7 +470,7 @@ def _add_time_rows(table: Table, *, result: RunResult) -> None:
     """
     timings = result.phase_timings
     review_seconds = max(0.0, result.vsview_review_seconds)
-    table.add_row("time", f"{format_duration(result.duration_seconds)} total")
+    _add_kv(table, "time", f"{format_duration(result.duration_seconds)} total")
 
     machine_items: list[str] = []
     setup_seconds = timings.get("preflight", 0.0) + timings.get("load_sources", 0.0)

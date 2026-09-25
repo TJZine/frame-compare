@@ -913,6 +913,44 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
     assert "failed to copy URL" not in output
 
 
+def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows() -> None:
+    console = _console()
+    shortcut_warning = "slow.pics shortcut: failed to write URL shortcut Example.url: boom"
+    webhook_warning = "slow.pics webhook: delivery failed"
+
+    print_result_summary(
+        console,
+        result=RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            warnings=[shortcut_warning, webhook_warning],
+        ),
+        quiet=False,
+        post_upload_actions=(
+            PostUploadActionResult(
+                kind="shortcut",
+                success=False,
+                warning=shortcut_warning,
+            ),
+            PostUploadActionResult(
+                kind="webhook",
+                success=False,
+                warning=webhook_warning,
+            ),
+        ),
+    )
+
+    output = _render(console)
+    assert "Comparison complete · 2 warnings" in output
+    assert "not created" in output
+    assert "delivery failed" in output
+    assert "Warnings" not in output
+    assert output.count("failed to write URL shortcut Example.url: boom") == 1
+    assert output.count("delivery failed") == 1
+    assert "slow.pics shortcut:" not in output
+    assert "slow.pics webhook:" not in output
+
+
 def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
     stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
     console = Console(file=stream, force_terminal=True, no_color=True, width=200)
@@ -940,21 +978,24 @@ def test_result_summary_uses_singular_warning_title() -> None:
     assert "Warnings" in output
 
 
-def test_result_summary_upload_failure_shows_failed_title() -> None:
+def test_result_summary_upload_failure_shows_warning_title() -> None:
     console = _console()
 
     print_result_summary(
         console,
         result=RunResult(
-            success=False,
-            warnings=["slow.pics upload failed: connection reset"],
+            success=True,
+            warnings=["publish: connection reset"],
         ),
         quiet=False,
     )
 
     output = _render(console)
-    assert "Comparison failed" in output
-    assert "slow.pics" in output
+    assert "Comparison complete · 1 warning" in output
+    assert "Comparison failed" not in output
+    assert "Warnings" in output
+    assert "publish: connection reset" in output
+    assert "https://" not in output
 
 
 def test_result_summary_automatic_upload_without_confirmation() -> None:

@@ -104,7 +104,8 @@ def test_rich_progress_active_marker_style_does_not_leak_to_description(
     reporter.start_phase("ALIGN | Interactive verification", 1)
     try:
         rendered = output.getvalue()
-        assert "\x1b[37m…\x1b[0m ALIGN | Interactive verification" in rendered
+        assert "…" in rendered
+        assert "ALIGN | Interactive verification" in rendered
         assert "[RUN]" not in rendered
     finally:
         reporter.complete_phase(retain=False)

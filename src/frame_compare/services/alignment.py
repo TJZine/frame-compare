@@ -1095,14 +1095,15 @@ def _render_alignment_evidence_panel(
         for line in review_lines:
             _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
             if style:
-                table.add_row("", f"[{style}]{escape(value)}[/]")
+                glyph, _, text = value.partition(" ")
+                table.add_row("", f"[{style}]{escape(glyph)}[/] [{style}]{escape(text)}[/]")
             else:
                 table.add_row("", escape(value))
     if diagnostics_written:
         table.add_row("", "")
         table.add_row("diagnostics", "alignment_diagnostics/")
 
-    title = f"[bold {ACCENT}]Audio alignment[/]"
+    title = f"[bold {ACCENT} not dim]Audio alignment[/]"
     if actionable:
         title += f" [dim]· {needs_review_count} needs review[/]"
     console.print(

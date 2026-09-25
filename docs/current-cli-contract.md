@@ -481,11 +481,13 @@ unchanged.
   Durations use human units.
 - Final warnings are grouped by source in a `Warnings` panel. Existing runtime
   warning strings and slow.pics post-upload action warnings are bridged into
-  presentation rows with source, severity, message, and optional action context,
-  then de-duplicated for display. A `because ...` reason is shown once as detail.
+  presentation rows with source, severity, message, and optional detail, then
+  de-duplicated for display. A warning tied to one of the follow-up rows
+  (clipboard, browser, shortcut, webhook) is shown on that row and removed from
+  the separate warnings panel. A `because ...` reason is shown once as detail.
   Normal output shows at most eight warning rows and summarizes hidden rows by
-  source; `--verbose` shows every warning. Status text uses ASCII `[OK]`, `[WARN]`,
-  `[SKIP]`, `[FAIL]`, and `[WAIT]` markers, with color only reinforcing meaning.
+  source; `--verbose` shows every warning. Panel rows use the `!` (warning) and
+  `–` (skipped) glyphs, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
@@ -528,7 +530,8 @@ unchanged.
   evidence and blocking-decision panels remain panels, with nested decision
   questions using a four-space inset immediately below their panel. JSON, quiet,
   and non-TTY output do not gain the band or inset.
-- Every Rich phase remains live while active with an ASCII `[RUN]` marker. Meaningful
+- Every Rich phase remains live while active with the `…` running glyph in the
+  accent colour. The plain and log reporters keep their existing markers. Meaningful
   measurable tasks use a Rich progress bar separated from preceding
   durable output by one blank line and report completed/total work with a labeled
   `ETA` once Rich has an estimate; before then, only completed/total work is shown.
@@ -544,9 +547,10 @@ unchanged.
   prompt is the durable `[WAIT] CONFIRM` record; it does not add a redundant
   generic successful completion line. Progress is suspended around that blocking
   prompt and restored afterward. Rich status color is confined to the semantic
-  marker: `[RUN]` is bright cyan, `[OK]` green, `[WAIT]` magenta, `[WARN]` yellow,
-  `[SKIP]` subdued yellow, and `[FAIL]` red. The description remains normally styled,
-  and no-color output retains the same literal markers.
+  marker: the running `…` is the accent colour, `✓` green, `!` yellow, and `✗`
+  red; the skipped `–` carries no color. The description remains normally styled,
+  and no-color output retains the same literal glyphs. The plain and log
+  reporters keep their existing ASCII markers.
 - Audio alignment remains one coherent `Align` phase in Rich output (`ALIGN`
   in plain/log output). Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task. Fresh

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -10,6 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
+from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_vsview import (
     AlignmentVSViewOutcome,
@@ -29,9 +33,11 @@ from frame_compare.vsview.errors import VSViewError
 from tests.services.alignment_request_test_support import (
     VSVIEW_SESSION_ID as _SESSION_ID,
 )
+from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
+from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def _clip(path: Path, *, frame_count: int = 200) -> AlignmentClipRequest:
@@ -255,6 +261,65 @@ def test_disabled_launch_leaves_review_summary_empty(
     ) == AlignmentVSViewOutcome(None, "no_result")
     assert summary.review_ran is False
     assert summary.review_seconds == 0.0
+
+
+def test_pending_review_without_launch_marks_review_unresolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        alignment_vsview,
+        "check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.MISSING_RUNTIME, message="missing"
+        ),
+    )
+    monkeypatch.setattr(
+        alignment_vsview,
+        "_current_tty_status",
+        lambda: SimpleNamespace(stdin=False, stdout=True, stderr=False),
+    )
+    attempt = audio_attempt()
+    consensus = AlignmentConsensus(
+        None,
+        0.99,
+        False,
+        "insufficient_consensus",
+        5,
+        4,
+        0.8,
+        2.0,
+        window_records=attempt.windows,
+        decision=attempt.decision,
+        audio_attempt=attempt,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair",
+        lambda *_args, **_kwargs: consensus,
+    )
+    config = AlignmentConfig(cache_results=False, no_color=True, use_vsview=True)
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    summary = AlignmentReviewSummary()
+
+    asyncio.run(
+        align_clips_from_request(
+            request,
+            config,
+            reference_fps=Fraction(24),
+            review_summary=summary,
+        )
+    )
+
+    assert summary.review_ran is False
+    assert summary.review_unresolved is True
 
 
 @pytest.mark.parametrize(

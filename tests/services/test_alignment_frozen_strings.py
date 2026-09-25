@@ -16,10 +16,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request as _align_async
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_vsview import format_vsview_review_message
 from frame_compare.services.types import AlignmentConfig
+from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
 
@@ -106,6 +108,18 @@ def test_opening_vsview_review_lines_frozen_verbatim(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     config = AlignmentConfig(cache_results=False, no_color=True, use_vsview=True)
+    monkeypatch.setattr(
+        alignment_vsview,
+        "check_vsview_availability",
+        lambda: VSViewAvailability(
+            status=VSViewAvailabilityStatus.MISSING_RUNTIME, message="missing"
+        ),
+    )
+    monkeypatch.setattr(
+        alignment_vsview,
+        "_current_tty_status",
+        lambda: SimpleNamespace(stdin=False, stdout=True, stderr=False),
+    )
     attempt = audio_attempt()
     if not has_candidate:
         attempt = replace(
