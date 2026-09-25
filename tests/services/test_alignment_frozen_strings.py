@@ -56,9 +56,7 @@ def test_align_pre_review_summary_uses_frozen_fragments(capsys) -> None:
 
     err = capsys.readouterr().err
     assert "Align" in err
-    assert "Alpha audio applied" in err
-    assert "Beta needs visual confirmation" in err
-    assert " · " in err
+    assert "Alpha audio applied · Beta needs visual confirmation" in err
 
 
 def test_vsview_review_message_singular_pair_and_kept() -> None:

@@ -83,7 +83,7 @@ def test_completed_record_omits_memory_only_review_wait(tmp_path: Path) -> None:
     from frame_compare.services.run_result_record import read_run_result
 
     record = read_run_result(run_dir / "run_result.toml")
-    assert "vsview_review_seconds" not in record.phase_timings
+    assert record.phase_timings == {"align": 50.0}
     assert not hasattr(record, "vsview_review_seconds")
 
 
