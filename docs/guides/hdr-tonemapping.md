@@ -35,8 +35,9 @@ VapourSynth, source-plugin, or vs-placebo change.
 
 ## Configure the result
 
-The wizard is the safest way to select a tonemapping preset and target luminance. For a
-manual configuration, use the fields documented in the
+The wizard does not configure tonemapping. Select a preset and target luminance in the
+configuration file, with a saved preset, or for one run with `--tm-preset` and
+`--tm-target`, using the fields documented in the
 [color and tonemapping contract](../current-cli-contract.md#tonemap-preset-and-target-resolution).
 
 A representative shape is:

@@ -25,6 +25,7 @@ from frame_compare.services.errors import (
 )
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
 from frame_compare.services.types import SlowpicsCollectionMetadata
+from frame_compare.utils.progress import UPLOAD_PRESENTATION
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
@@ -484,6 +485,7 @@ async def publish_to_slowpics(
         progress.start_phase(
             f"Uploading {collection_metadata.title} to slow.pics",
             total=len(files),
+            presentation=UPLOAD_PRESENTATION,
         )
 
     publisher = SlowpicsPublisher(config, client, progress)

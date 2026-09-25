@@ -13,7 +13,7 @@ search:
 
 ## Release Identity Presentation Follow-Ups
 
-- Consider dedicated release-identity display fields for the HTML report/HUD, baked
+- Consider dedicated release-identity display fields for the HTML report source labels, baked
   screenshot overlays, wizard/dry-run exact-file presentation, and warnings where
   useful. Exclude run-folder/history names, the slow.pics collection title, and all
   internal identities.

@@ -356,7 +356,10 @@ def test_emit_frame_alignment_report_shows_material_stability_concisely(
     )
 
     output = capsys.readouterr().err
-    assert "possible discontinuity; +178..+202 frames; change near 00:47:12" in output
+    assert (
+        "possible discontinuity; +178..+202 frames; scoped to 4 qualified observed windows; "
+        "approximate interval between observations around 00:47:12"
+    ) in output
     assert "valid windows" not in output
 
 

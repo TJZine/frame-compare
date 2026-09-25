@@ -18,6 +18,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.strip().splitlines()[-1])
 
+    assert (
+        summary["viewerStorageKey"]
+        == "frame-compare:report-viewer:report_viewer_state_contract:viewport"
+    )
     assert summary["clipDisplayProfiles"] == {
         "requiredPayloadProfiles": True,
         "stableInspectorRoles": True,
@@ -50,7 +54,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
 
     inspector_state = summary["inspectorBlinkKeyboardState"]
     assert inspector_state["inspectorOpen"] is False
-    assert inspector_state["inspectorTab"] == "export"
+    assert inspector_state["inspectorTab"] == "clips"
     assert inspector_state["lensExcludedFromViewport"] is True
     assert inspector_state["rovingTabWrapped"] is True
     assert inspector_state["blinkPausedPersisted"] is False
@@ -69,13 +73,27 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "helpFocusTrappedAndRestored": True,
         "infoFocusTrappedAndRestored": True,
     }
-    assert summary["inspectorSlowpics"]["safeLinkTag"] == "A"
-    assert summary["inspectorSlowpics"]["unsafeAsText"] is True
-    assert summary["inspectorSlowpics"]["missingStatus"] == "Not uploaded"
     assert summary["inspectorFrameSources"] == [
-        "Clip 1 — 10 / 100 · B-frame · DV RPU",
-        "Clip 2 — 10 / 100 · B-frame",
+        "Clip 1 Shown left | 10 / 100 | B · DV RPU",
+        "Clip 2 Shown right | 10 / 100 | B",
     ]
+    assert summary["inspectorClipMetadata"] == {
+        "heading": "Reference · shown left",
+        "badge": "SDR",
+        "standardName": "Clip 1",
+        "fileName": "clip-1.mkv",
+        "rows": [
+            ["Picture", "1920×1080 · full frame"],
+            ["Length", "100 frames · 0:00:04"],
+            ["Size", "17.00 GiB"],
+            ["Signal", "SDR · BT.709 / BT.709 / BT.2020c · Limited"],
+        ],
+    }
+    assert summary["inspectorFrameIdentity"] == {
+        "identity": "10 · Selected",
+        "position": "1 / 2 in All",
+        "defaultDetailHidden": True,
+    }
 
     single_mode = summary["singleModeAlignment"]
     assert single_mode["mode"] == "overlay"
@@ -117,13 +135,11 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     }
     assert summary["activeFilterBadge"]["badgeHiddenByDefault"] is True
     assert summary["activeFilterBadge"]["badgeClearedToHidden"] is True
-    assert summary["sourceOverlayLabels"] == {
-        "single": "Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
-        "slider": "LEFT: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
-        "diff": "BASE: Title.2160p.WEB-DL.Service-GROUP • 3840×2160 • HDR • 17.00 GiB",
-    }
     assert summary["blinkLabels"] == {
-        "labels": {"left": "FIRST: Clip 1", "right": "SECOND: Clip 2"},
+        "labels": {
+            "left": "Clip 1 · 1920×1080 · SDR · 17.00 GiB",
+            "right": "Clip 2 · 1920×1080 · SDR · 17.00 GiB",
+        },
         "activeLabelMoved": False,
         "activeStateMoved": True,
     }
@@ -151,4 +167,44 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert summary["lazyReviewController"] == {
         "opensOnFirstVisibleUse": True,
         "createsOnce": True,
+    }
+    assert summary["restoredWidthFitNoVisibleRadio"] == {
+        "fitModeRestored": True,
+        "zoomUsedWidthMath": True,
+        "noRadioChecked": True,
+        "exactlyOneKeyboardReachable": True,
+    }
+    assert summary["gridShortcut"] == {
+        "lowerSelectsGrid": True,
+        "upperSelectsGrid": True,
+    }
+    assert summary["proximityStateMachine"] == {
+        "thresholds": True,
+        "hysteresis": True,
+        "overrides": True,
+    }
+    assert summary["paletteProximityWiring"] == {
+        "startsNear": True,
+        "loadOverride": True,
+        "farWhenDistant": True,
+        "hysteresisHoldsFar": True,
+        "nearWhenClose": True,
+        "dragOverride": True,
+        "alignPopoverOverride": True,
+        "lensPopoverOverride": True,
+        "pointerLeaveSetsFar": True,
+        "coarseStaysNear": True,
+        "coarseLeaveStaysNear": True,
+        "mediaInitFine": True,
+        "mediaChangeGates": True,
+        "loadHoldsNear": True,
+        "loadExpiryRecomputes": True,
+        "rafDefers": True,
+        "leaveCancelsQueuedFrame": True,
+        "rafFlushApplies": True,
+        "nanHoldsFar": True,
+        "reinitCancelsQueuedFrame": True,
+        "leaveDuringLoadHoldsNear": True,
+        "leaveDuringLoadFadesAfterLoad": True,
+        "noPointerFadesAfterLoad": True,
     }

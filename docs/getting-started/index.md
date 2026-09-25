@@ -74,7 +74,9 @@ Use the same sequence on every route:
 4. Run a dry run to inspect source discovery and output intent.
 5. Run the comparison and open the generated report.
 
-Continue with [Your First Comparison](../guides/first-comparison.md).
+Continue with [Your First Comparison](../guides/first-comparison.md). Later
+comparisons with an established configuration and runtime usually need only the dry
+run and run; see [Repeat comparisons](../guides/first-comparison.md#repeat-comparisons).
 
 !!! note "Publishing remains off by default"
     The first-use configuration keeps slow.pics automatic upload disabled. Local

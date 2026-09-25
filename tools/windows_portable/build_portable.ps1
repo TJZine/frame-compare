@@ -626,11 +626,11 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 
-  # R79 wheels carry the runtime DLL inside the vapoursynth package directory.
+  # R80 wheels carry the runtime DLL inside the vapoursynth package directory.
   # The launcher and validation PATH include this directory for Windows DLL lookup.
   $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
   if (!(Test-Path -LiteralPath $vsDllPackage)) {
-    throw "libvapoursynth.dll not found after wheel install in expected R79 package layout: $vsDllPackage"
+    throw "libvapoursynth.dll not found after wheel install in expected R80 package layout: $vsDllPackage"
   }
 
   Install-ProjectDistributionMetadata -BundleRoot $BundleRoot
@@ -872,8 +872,7 @@ function Invoke-VSViewOffscreenLaunchProof(
     throw "VSView offscreen proof exited before the expected steady-state GUI timeout."
   }
   foreach ($marker in @(
-    "[RUN] VSView Bootstrap",
-    "[OK] VSView Ready",
+    "VSView is open",
     "Script execution completed",
     "Switching to video output",
     "Frame 0 rendered"
@@ -934,6 +933,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import os
 import subprocess
 import sys
@@ -966,10 +966,10 @@ def prove_vsview_distribution_contract() -> None:
         "pyside6-addons": "6.11.2",
         "pyside6-essentials": "6.11.2",
         "shiboken6": "6.11.2",
-        "vapoursynth-bestsource": "21.0",
+        "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "1.4.0",
-        "vsview": "0.10.3",
+        "vsview": "0.11.0",
         "vsview-cli": "1.2.0",
         "vsjetengine": "1.7.0",
     }
@@ -1090,9 +1090,9 @@ def prove_vapoursynth_environment() -> None:
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
-    assert_true(version_major == 79 and version_minor == 0, f"expected VapourSynth R79, got {version!r}")
+    assert_true(version_major == 80 and version_minor == 0, f"expected VapourSynth R80, got {version!r}")
     assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
-    assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_version!r}")
+    assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
     assert_true("vapoursynth" in str(plugin_dir).replace("\\", "/"), f"unexpected plugin dir: {plugin_dir}")
     canonical_lsmas_plugin = plugin_dir / "LSMASHSource.dll"
@@ -1255,6 +1255,24 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             f"{media_path.stem}:{comparison_one_media_path.stem}": 0,
             f"{media_path.stem}:{comparison_two_media_path.stem}": 0,
         },
+        audio_review_by_key={
+            key: json.dumps(
+                {
+                    "current_authority": {
+                        "origin": "shared_computed_offsets",
+                        "frame_offset": 0,
+                    },
+                    "evidence_availability": "historical_details_unavailable",
+                    "audio_attempt": None,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for key in (
+                f"{media_path.stem}:{comparison_one_media_path.stem}",
+                f"{media_path.stem}:{comparison_two_media_path.stem}",
+            )
+        },
         cache_dir=cache_dir,
         frame_props_by_stem={
             media_path.stem: {"_Matrix": 2, "_Range": 2},
@@ -1337,7 +1355,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             active_panel.on_workspace_loaded()
             app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "0 / 3 sources ready",
+                active_panel.progress_label.text() == "0/3 positions captured",
                 "alignment panel did not start with an empty three-source lineup",
             )
             for output_index, frame in enumerate((1, 0, 2)):
@@ -1346,7 +1364,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                 active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
                 app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "3 / 3 sources ready",
+                active_panel.progress_label.text() == "3/3 positions captured \u2014 ready to confirm",
                 "alignment panel did not record every source position",
             )
             assert_true(

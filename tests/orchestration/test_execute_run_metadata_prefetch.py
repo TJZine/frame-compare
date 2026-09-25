@@ -293,6 +293,7 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
     prefetch_calls: list[list[str]] = []
     phase_calls: list[list[str]] = []
     captured_configs: list[MetadataConfig] = []
+    warning_fields: list[dict[str, object]] = []
 
     async def _resolve_metadata(
         *,
@@ -310,6 +311,11 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
         return expected_metadata
 
     monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
+    monkeypatch.setattr(
+        preparation.log,
+        "warning",
+        lambda event, **fields: warning_fields.append({"event": event, **fields}),
+    )
 
     result = asyncio.run(
         execute_run(
@@ -335,6 +341,14 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
         category_preference="movie",
     )
     assert captured_configs == [expected_config, expected_config]
+    assert warning_fields == [
+        {
+            "event": "metadata_prefetch_degraded",
+            "filenames": ["source.mkv"],
+            "error_type": "TmdbError",
+            "error": "[FC-5005] TMDB error: temporary metadata failure\nHint: Check API key",
+        }
+    ]
     run_info = tomllib.loads(
         (tmp_path / "generated" / "source" / "run_info.toml").read_text(encoding="utf-8")
     )

@@ -83,6 +83,12 @@ def reset_structlog_state() -> Iterator[None]:
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    """Pin anyio tests to asyncio; the async tests use asyncio APIs directly."""
+    return "asyncio"
+
+
+@pytest.fixture
 def repo_root() -> Path:
     """Return repository root directory."""
     return Path(__file__).resolve().parents[1]

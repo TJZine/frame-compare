@@ -532,7 +532,6 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         no_color: bool
         rich_output: bool
         clip_labels: tuple[str, ...]
-        input_dir: Path
         verbose: bool
 
     class AlignmentCall(NamedTuple):
@@ -552,7 +551,6 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
         no_color: bool,
         rich_output: bool,
         clips: Any,
-        input_dir: Path,
         verbose: bool,
         **_kwargs: Any,
     ) -> None:
@@ -563,7 +561,6 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
                 no_color=no_color,
                 rich_output=rich_output,
                 clip_labels=clip_labels,
-                input_dir=input_dir,
                 verbose=verbose,
             )
         )
@@ -600,7 +597,6 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
             no_color=True,
             rich_output=False,
             clip_labels=("comp", "source"),
-            input_dir=tmp_path / "comparison_videos",
             verbose=False,
         ),
         FpsCall(
@@ -608,7 +604,6 @@ def test_execute_run_emits_reports_after_load_sources_and_after_align(
             no_color=True,
             rich_output=False,
             clip_labels=("comp", "source"),
-            input_dir=tmp_path / "comparison_videos",
             verbose=False,
         ),
     ]

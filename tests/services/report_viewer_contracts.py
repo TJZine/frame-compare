@@ -24,19 +24,11 @@ class ParsedSelect:
 
 
 @dataclass
-class ParsedClipMetadata:
-    label: str = ""
-    dynamic_range: str = ""
-    fields: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
 class ParsedInfoModal:
     attrs: dict[str, str | None]
     section_headings: list[str] = field(default_factory=list)
     general: dict[str, str] = field(default_factory=dict)
     links: dict[str, str] = field(default_factory=dict)
-    clips: list[ParsedClipMetadata] = field(default_factory=list)
 
 
 @dataclass
@@ -157,9 +149,6 @@ class InfoModalParser(HTMLParser):
         self._capture_kind: str | None = None
         self._capture_text: list[str] = []
         self._current_term: str | None = None
-        self._current_clip: ParsedClipMetadata | None = None
-        self._in_clip_heading = False
-        self._clip_heading_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
@@ -171,22 +160,14 @@ class InfoModalParser(HTMLParser):
         if not self._in_info_modal:
             return
 
-        classes = set((attr_map.get("class") or "").split())
         if tag == "div":
             self._info_div_depth += 1
-            if "rv-clip-meta-heading" in classes:
-                self._in_clip_heading = True
-                self._clip_heading_parts = []
-        elif tag == "li" and "rv-clip-meta-item" in classes:
-            self._current_clip = ParsedClipMetadata()
         elif tag == "h3":
             self._start_capture("section")
         elif tag == "dt":
             self._start_capture("term")
         elif tag == "dd":
             self._start_capture("definition")
-        elif tag == "span" and self._in_clip_heading:
-            self._start_capture("clip-heading")
         elif tag == "a" and self._capture_kind == "definition" and self._current_term is not None:
             href = attr_map.get("href")
             if href is not None and self.modal is not None:
@@ -212,21 +193,7 @@ class InfoModalParser(HTMLParser):
             self._store_definition(definition)
             self._current_term = None
             self._stop_capture()
-        elif tag == "span" and self._capture_kind == "clip-heading":
-            self._clip_heading_parts.append(normalize_text(self._capture_text))
-            self._stop_capture()
-        elif tag == "li" and self._current_clip is not None:
-            if self.modal is not None:
-                self.modal.clips.append(self._current_clip)
-            self._current_clip = None
         elif tag == "div":
-            if self._in_clip_heading:
-                self._in_clip_heading = False
-                if self._current_clip is not None:
-                    if self._clip_heading_parts:
-                        self._current_clip.label = self._clip_heading_parts[0]
-                    if len(self._clip_heading_parts) > 1:
-                        self._current_clip.dynamic_range = self._clip_heading_parts[1]
             self._info_div_depth -= 1
             if self._info_div_depth == 0:
                 self._in_info_modal = False
@@ -241,9 +208,6 @@ class InfoModalParser(HTMLParser):
 
     def _store_definition(self, definition: str) -> None:
         if self._current_term is None or self.modal is None:
-            return
-        if self._current_clip is not None:
-            self._current_clip.fields[self._current_term] = definition
             return
         self.modal.general[self._current_term] = definition
 

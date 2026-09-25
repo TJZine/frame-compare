@@ -181,7 +181,12 @@ def test_browser_dump_does_not_retry_non_timeout_failure(
     assert calls == 1
 
 
-def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
+def _generated_report(
+    tmp_path: Path,
+    *,
+    tonemapped: bool = False,
+    encoded_image_paths: bool = False,
+) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
         "reference": RenderedGeometryFacts(
@@ -206,8 +211,12 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
         ("encode", _COMPARISON_LABEL),
     ):
         geometry = geometry_by_name[name]
-        screenshot = tmp_path / "screenshots" / name / "10.png"
-        screenshot.parent.mkdir(parents=True)
+        screenshot = (
+            tmp_path / "screenshots # %20 Ü" / f"{name} # %20 Ü.png"
+            if encoded_image_paths
+            else tmp_path / "screenshots" / name / "10.png"
+        )
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
         screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
             ClipInfo(
@@ -269,6 +278,44 @@ def _generated_report(tmp_path: Path, *, tonemapped: bool = False) -> Path:
     )
 
 
+def _append_encoded_image_load_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<img id="encoded-screenshot-probe" src="screenshots%20%23%20%2520%20%C3%9C/reference%20%23%20%2520%20%C3%9C.png" alt="" hidden>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const image = document.getElementById('encoded-screenshot-probe');
+    const mark = () => {
+        document.documentElement.dataset.encodedImagesLoaded = String(
+            image.complete && image.naturalWidth > 0
+        );
+    };
+    image.addEventListener('load', mark, { once: true });
+    image.addEventListener('error', mark, { once: true });
+    mark();
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_generated_report_loads_percent_encoded_screenshot_paths(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+
+    report_path = _generated_report(tmp_path, encoded_image_paths=True)
+    _append_encoded_image_load_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+
+    assert "screenshots%20%23%20%2520%20%C3%9C" in completed.stdout
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-encoded-images-loaded"] == "true"
+
+
 def _append_screenshot_load_probe(report_path: Path) -> None:
     """Add a test-only DOM marker that proves a sibling file actually loaded."""
     html = report_path.read_text(encoding="utf-8")
@@ -283,6 +330,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const stage = document.querySelector('.rv-viewer-stage');
         const stageLabels = document.querySelector('.rv-stage-labels');
         const palette = document.querySelector('.rv-viewport-palette');
+        document.documentElement.dataset.selectAffordances = String(
+            Array.from(document.querySelectorAll('select')).every(select => {
+                const style = window.getComputedStyle(select);
+                return style.backgroundImage !== 'none'
+                    && parseFloat(style.paddingRight) >= 24;
+            })
+        );
         const rectanglesIntersect = (first, second) => !(
             first.right <= second.left
             || second.right <= first.left
@@ -304,8 +358,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.diffSourceHudVisible = String(
             window.getComputedStyle(label).display !== 'none'
             && window.getComputedStyle(rightLabel).display !== 'none'
-            && label.textContent.startsWith('BASE:')
-            && rightLabel.textContent.startsWith('COMPARE:')
+            && label.textContent.startsWith(__REFERENCE_HUD_LABEL__)
+            && rightLabel.textContent.startsWith(__COMPARISON_HUD_LABEL__)
         );
         document.documentElement.dataset.diffHudsSeparate = String(
             !rectanglesIntersect(label.getBoundingClientRect(), frameHud.getBoundingClientRect())
@@ -313,16 +367,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const expectedStageHudPrefixes = {
             overlay: [__REFERENCE_HUD_LABEL__],
             slider: [
-                `LEFT: ${__REFERENCE_HUD_LABEL__}`,
-                `RIGHT: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
             diff: [
-                `BASE: ${__REFERENCE_HUD_LABEL__}`,
-                `COMPARE: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
             blink: [
-                `FIRST: ${__REFERENCE_HUD_LABEL__}`,
-                `SECOND: ${__COMPARISON_HUD_LABEL__}`,
+                __REFERENCE_HUD_LABEL__,
+                __COMPARISON_HUD_LABEL__,
             ],
         };
         const stageHudAccessible = Object.entries(expectedStageHudPrefixes).every(
@@ -376,6 +430,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const paletteInset = window.innerWidth <= 768 ? 8 : (window.innerWidth <= 992 ? 12 : 16);
         const labelInset = window.innerWidth <= 768 ? 8 : 12;
         const approximately = (first, second) => Math.abs(first - second) <= 1;
+        const originalFilmstripSize = ReportViewer.state.filmstripSize;
+        document.documentElement.dataset.filmstripImageSpace = String(
+            [['compact', 120], ['normal', 150], ['large', 210]].every(([size, width]) => {
+                ReportViewer.setFilmstripSize(size, { save: false });
+                const item = document.querySelector('.rv-filmstrip-item');
+                const thumb = item.querySelector('.rv-filmstrip-thumb');
+                const caption = item.querySelector('.rv-filmstrip-caption');
+                const cardRect = item.getBoundingClientRect();
+                const thumbRect = thumb.getBoundingClientRect();
+                const captionRect = caption.getBoundingClientRect();
+                return approximately(cardRect.width, width)
+                    && approximately(cardRect.height, cardRect.width * 10 / 16)
+                    && approximately(thumbRect.width, item.clientWidth)
+                    && approximately(thumbRect.height, item.clientHeight)
+                    && approximately(captionRect.width, thumbRect.width)
+                    && approximately(captionRect.bottom, thumbRect.bottom)
+                    && captionRect.top >= thumbRect.top
+                    && window.getComputedStyle(caption).position === 'absolute';
+            })
+        );
+        ReportViewer.setFilmstripSize(originalFilmstripSize, { save: false });
         const primaryControls = document.querySelector('.rv-primary-controls');
         const frameControls = document.querySelector('.rv-frame-controls');
         const modeControls = document.querySelector('.rv-mode-controls');
@@ -471,8 +546,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         stage.style.transition = 'none';
-        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setOpen(true, { focus: false, save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         ReportViewer.updateInspectorData();
         const inspectorStageRect = stage.getBoundingClientRect();
         const inspectorPaletteRect = palette.getBoundingClientRect();
@@ -492,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
             panel.hidden = wasHidden;
             return safe;
         });
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.inspectorWidthPolicy = String(
             approximately(inspector.getBoundingClientRect().width, expectedInspectorWidth)
@@ -511,10 +586,9 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         document.documentElement.dataset.inspectorIdentityComplete = String(
             inspectorText.includes('Reference')
-            && inspectorText.includes('Comparison 1')
-            && inspectorText.includes('View role')
+            && inspectorText.includes('Comparison')
+            && inspectorText.includes('shown left')
             && inspectorText.includes(__REFERENCE_FILENAME__)
-            && inspectorText.includes(__REFERENCE_PRIMARY__)
             && inspectorText.includes(__REFERENCE_RELEASE__)
             && inspectorText.includes('1920×1080')
             && ['2160p', 'PMTP', 'WEB-DL', 'DV HDR10+', 'REPACK', 'Kitsune']
@@ -531,7 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
             && approximately(inspectorPaletteRect.bottom, inspectorStageRect.bottom - paletteInset)
             && approximately(inspectorPaletteRect.right, inspectorStageRect.right - paletteInset)
         );
-        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(false, { focus: false, save: false });
         const infoButton = document.getElementById('btn-info');
         infoButton?.focus();
         infoButton?.click();
@@ -550,15 +624,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.dataset.infoModalIdentityComplete = String(
             infoText.includes(__REFERENCE_FILENAME__)
             && infoText.includes(__COMPARISON_FILENAME__)
-            && infoText.includes(__REFERENCE_PRIMARY__)
-            && infoText.includes(__COMPARISON_PRIMARY__)
             && infoText.includes(__REFERENCE_RELEASE__)
             && infoText.includes(__COMPARISON_RELEASE__)
             && infoCards.length === 2
             && infoCards[0].textContent.includes(__REFERENCE_FILENAME__)
             && infoCards[0].textContent.includes(__REFERENCE_RELEASE__)
             && infoCards[1].textContent.includes(__COMPARISON_FILENAME__)
-            && infoCards[1].textContent.includes(__COMPARISON_PRIMARY__)
             && infoCards[1].textContent.includes(__COMPARISON_RELEASE__)
             && infoClipHeadings.every(heading => {
                 const style = window.getComputedStyle(heading);
@@ -597,7 +668,7 @@ document.addEventListener('DOMContentLoaded', () => {
         inspectorButton?.click();
         document.documentElement.dataset.infoInspectorSemanticsStable = String(
             infoBefore.label === 'Report information'
-            && infoBefore.title === 'Report Info'
+            && infoBefore.title === 'Report information'
             && infoBefore.pressed === null
             && JSON.stringify(infoBefore) === JSON.stringify(infoAfter)
         );
@@ -611,6 +682,9 @@ document.addEventListener('DOMContentLoaded', () => {
             && inspector?.getAttribute('aria-hidden') === 'true'
             && inspectorButton?.getAttribute('aria-expanded') === 'false'
             && document.activeElement === inspectorButton
+            && document.getElementById('inspector-tab-export') === null
+            && document.getElementById('inspector-panel-export') === null
+            && document.querySelectorAll('[data-inspector-tab]').length === 4
         );
 
         const filmstripAnchored = [false, true].every(collapsed => {
@@ -681,28 +755,28 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceHudStyle.whiteSpace === 'normal'
             && sourceHudStyle.textOverflow !== 'ellipsis'
         );
-        ReportViewer.setInspectorOpen(true, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(true, { focus: false, save: false });
         const sourceRowsByMode = {};
         ['overlay', 'slider', 'diff', 'blink', 'grid'].forEach(mode => {
             ReportViewer.setMode(mode);
-            ReportViewer.setInspectorTab('frame');
+            ReportViewer.inspector.setTab('frame');
             ReportViewer.updateInspectorData();
             sourceRowsByMode[mode] = Array.from(
-                document.querySelectorAll('[data-inspector-source-frames] .rv-inspector-source')
+                document.querySelectorAll('[data-inspector-source-frames] tr')
             ).map(row => row.textContent.trim());
         });
         document.documentElement.dataset.frameSourceRows = JSON.stringify(sourceRowsByMode);
-        ReportViewer.setInspectorTab('clips');
+        ReportViewer.inspector.setTab('clips');
         ReportViewer.updateInspectorData();
         document.documentElement.dataset.clipsMetadata = String(
-            document.querySelector('[data-inspector-clips]')?.textContent.includes('File size')
+            document.querySelector('[data-inspector-clips]')?.textContent.includes('Size')
             && document.querySelector('[data-inspector-clips]')?.textContent.includes('Signal')
-            && document.querySelector('[data-inspector-clips]')?.textContent.includes('Presentation')
+            && (document.querySelector('[data-inspector-clips-shared]')?.textContent ?? '').includes('All sources:')
             && !document.querySelector('[data-inspector-clips]')?.textContent.includes('Advanced tonemap')
         );
         let reviewTabUsable = false;
         try {
-            ReportViewer.setInspectorTab('review', { save: false });
+            ReportViewer.inspector.setTab('review', { save: false });
             const bookmark = document.querySelector('[data-review-bookmark]');
             const note = document.querySelector('[data-review-note]');
             bookmark.checked = true;
@@ -714,14 +788,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 && bookmark.checked
                 && note.value === 'Browser integration proof'
                 && document.querySelector('[data-review-status]')?.textContent.includes(
-                    'saved locally'
+                    'saved in this browser'
                 )
             );
         } catch (error) {
             document.documentElement.dataset.reviewTabError = String(error);
         }
         document.documentElement.dataset.reviewTabUsable = String(reviewTabUsable);
-        ReportViewer.setInspectorTab('clips', { save: false });
+        ReportViewer.inspector.setTab('clips', { save: false });
         document.documentElement.dataset.renderingDisclosure = String(
             document.querySelector('[data-rendering-tonemap-summary]')?.textContent === 'Not applied'
             && !document.querySelector('[data-rendering-details]')
@@ -730,7 +804,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.documentElement.scrollWidth <= window.innerWidth
             && document.body.scrollWidth <= window.innerWidth
         );
-        ReportViewer.setInspectorOpen(false, { focus: false, save: false });
+        ReportViewer.inspector.setOpen(false, { focus: false, save: false });
         ReportViewer.setMode('diff');
     };
     probeHud();
@@ -770,7 +844,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const advancedLabels = [
         'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
         'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
-        'Scene threshold low', 'Scene threshold high', 'Gamut mapping',
+        'Scene thresholds', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
     ];
     document.getElementById('btn-info')?.click();
@@ -861,6 +935,132 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
         )
 
 
+def _append_width_fit_restore_probe(report_path: Path) -> None:
+    """Prove the removed Fit width control, its restored-state fallback, and H.
+
+    The floating palette exposes only actual-size and fit-height radios, but a
+    returning viewer's saved `fitMode: 'width'` must still compute a real zoom
+    and leave the fit radio group keyboard reachable even though neither
+    visible radio is checked. The H shortcut must still toggle the renamed
+    source-labels control in both directions.
+    """
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fitButtons = Array.from(document.querySelectorAll('[data-fit]'));
+    document.documentElement.dataset.fitWidthButtonAbsent = String(
+        fitButtons.length === 2
+        && fitButtons.every(btn => btn.dataset.fit !== 'width')
+        && Boolean(document.getElementById('btn-palette-orientation'))
+    );
+
+    localStorage.setItem(
+        ReportViewer.viewerStorageKey(),
+        JSON.stringify({ fitMode: 'width' }),
+    );
+    ReportViewer.restorePersistedState();
+    ReportViewer.viewport.applyFitMode({ resetPan: true });
+    ReportViewer.viewport.updateFitButtons();
+
+    const zoomAfterRestore = ReportViewer.state.zoom;
+    const checkedStates = fitButtons.map(btn => btn.getAttribute('aria-checked'));
+    const tabIndexes = fitButtons.map(btn => btn.tabIndex);
+    const reachableButton = fitButtons[tabIndexes.indexOf(0)];
+    reachableButton?.focus();
+    document.documentElement.dataset.restoredWidthFitState = String(
+        ReportViewer.state.fitMode === 'width'
+        && Number.isFinite(zoomAfterRestore)
+        && zoomAfterRestore > 0
+        && checkedStates.every(state => state === 'false')
+        && tabIndexes.filter(value => value === 0).length === 1
+        && document.activeElement === reachableButton
+    );
+
+    const btnOverlays = document.getElementById('btn-overlays');
+    const startedHidden = ReportViewer.state.overlaysHidden;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+    const firstPressHidLabels = ReportViewer.state.overlaysHidden === !startedHidden
+        && btnOverlays?.getAttribute('aria-label') === 'Show source labels'
+        && btnOverlays?.getAttribute('title') === 'Show source labels (H)';
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'H', bubbles: true }));
+    const secondPressRestoredLabels = ReportViewer.state.overlaysHidden === startedHidden
+        && btnOverlays?.getAttribute('aria-label') === 'Hide source labels'
+        && btnOverlays?.getAttribute('title') === 'Hide source labels (H)';
+    document.documentElement.dataset.hShortcutTogglesSourceLabels = String(
+        firstPressHidLabels && secondPressRestoredLabels
+    );
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+def _append_saved_fit_mode_init_probe(report_path: Path, fit_mode: str) -> None:
+    """Seed a saved fit mode before initialization and record the fit radios after it."""
+    html = report_path.read_text(encoding="utf-8")
+    probe = f"""
+<script>
+const savedFitReportId = JSON.parse(document.getElementById('report-data').textContent).report_id;
+localStorage.setItem(
+    `frame-compare:report-viewer:${{savedFitReportId}}:viewport`,
+    JSON.stringify({{ fitMode: '{fit_mode}' }}),
+);
+document.addEventListener('DOMContentLoaded', () => {{
+    const fitButtons = Array.from(document.querySelectorAll('[data-fit]'));
+    document.documentElement.dataset.savedFitState = JSON.stringify({{
+        fitMode: ReportViewer.state.fitMode,
+        checked: fitButtons.map(btn => [btn.dataset.fit, btn.getAttribute('aria-checked')]),
+        tabStops: fitButtons.filter(btn => btn.tabIndex === 0).length,
+    }});
+}});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("fit_mode", "expected_checked"),
+    [
+        ("height", [["actual", "false"], ["height", "true"]]),
+        ("width", [["actual", "false"], ["height", "false"]]),
+    ],
+)
+def test_saved_fit_mode_is_reflected_by_fit_radios_on_page_load(
+    tmp_path: Path, fit_mode: str, expected_checked: list[list[str]]
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_saved_fit_mode_init_probe(report_path, fit_mode)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    state = json.loads(parser.document_attributes["data-saved-fit-state"])
+    assert state == {"fitMode": fit_mode, "checked": expected_checked, "tabStops": 1}
+
+
+@pytest.mark.integration
+def test_report_omits_fit_width_keeps_restored_state_reachable_and_h_toggles_labels(
+    tmp_path: Path,
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_width_fit_restore_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    assert parser.document_attributes["data-fit-width-button-absent"] == "true"
+    assert parser.document_attributes["data-restored-width-fit-state"] == "true"
+    assert parser.document_attributes["data-h-shortcut-toggles-source-labels"] == "true"
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("width", "height", "scale"),
@@ -896,6 +1096,8 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert 'src="screenshots/reference/10.png"' in completed.stdout
     assert parser.document_attributes is not None
     assert parser.document_attributes["data-sibling-screenshot-loaded"] == "true"
+    assert parser.document_attributes["data-select-affordances"] == "true"
+    assert parser.document_attributes["data-filmstrip-image-space"] == "true"
     assert parser.document_attributes["data-source-hud-viewport-stable"] == "true"
     assert parser.document_attributes["data-source-hud-wraps"] == "true"
     assert parser.document_attributes["data-diff-source-hud-visible"] == "true"
@@ -945,7 +1147,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-narrow-palette-horizontal"] == "true"
     assert parser.document_attributes["data-grid-hud-anchored"] == "true"
     assert parser.document_attributes["data-source-hud-text"] == (
-        f"{_REFERENCE_RELEASE} • 1920×1080 • SDR • {_FIXTURE_SIZE_LABEL}"
+        f"{_REFERENCE_RELEASE} · 1920×1080 · {_FIXTURE_SIZE_LABEL}"
     )
     assert parser.document_attributes["data-clips-metadata"] == "true"
     assert parser.document_attributes["data-review-tab-usable"] == "true", (
@@ -954,14 +1156,18 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-rendering-disclosure"] == "true"
     assert parser.document_attributes["data-no-horizontal-overflow"] == "true"
     source_rows = json.loads(parser.document_attributes["data-frame-source-rows"] or "{}")
-    assert source_rows["overlay"] == [f"{_REFERENCE_RELEASE} — 10 / 20 · B-frame"]
+    assert source_rows["overlay"] == ["PMTP DVShown10 / 20B", "ATV HDR1012 / 20B"]
     assert source_rows["slider"] == [
-        f"{_REFERENCE_RELEASE} — 10 / 20 · B-frame",
-        f"{_COMPARISON_RELEASE} — 12 / 20 · B-frame",
+        "PMTP DVShown left10 / 20B",
+        "ATV HDR10Shown right12 / 20B",
     ]
     assert source_rows["diff"] == source_rows["slider"]
     assert source_rows["blink"] == source_rows["slider"]
-    expected_grid_rows = source_rows["slider"][:1] if width <= 768 else source_rows["slider"]
+    expected_grid_rows = (
+        ["PMTP DVShown10 / 20B", "ATV HDR1012 / 20B"]
+        if width <= 768
+        else ["PMTP DVShown10 / 20B", "ATV HDR10Shown12 / 20B"]
+    )
     assert source_rows["grid"] == expected_grid_rows
     assert parser.stage_attributes is not None
     stage_classes = (parser.stage_attributes["class"] or "").split()

@@ -107,6 +107,12 @@ assert.throws(
     /unknown or missing/,
 );
 
+// Pin the user-facing copy once; every warning check below compares against this constant.
+assert.equal(
+    R.constants.PERSISTENCE_WARNING,
+    'Changes are kept only for this session. Export review JSON to keep them.',
+);
+
 const quotaStorage = new Storage();
 const quota = R.create({ ...context, storage: quotaStorage });
 quota.mutate(5, { bookmark: true });
@@ -116,7 +122,7 @@ quota.mutate(5, { note: 'kept in memory' });
 assert.equal(quota.get(5).note, 'kept in memory');
 assert.equal(quotaStorage.value, quotaBytes);
 assert.equal(quota.status().unsaved, true);
-assert.match(quota.status().warning, /could not be saved/);
+assert.equal(quota.status().warning, R.constants.PERSISTENCE_WARNING);
 
 const memory = R.create({ ...context, storage: null });
 assert.equal(memory.apply(memory.preview([record(8)], 'replace')), true);

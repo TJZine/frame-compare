@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal, Protocol, cast, override
@@ -40,13 +41,26 @@ from frame_compare.vsview.alignment_review_contract import (
 _TIMELINE_GROUP = "frame_compare_alignment_review"
 type _InputBasis = Literal["positions", "offsets"]
 type _FrameOrigin = Literal["Viewer", "Manual"]
+_MANUAL_AUTHORITY_ORIGINS = frozenset(
+    {
+        "interactive_confirmed_this_run",
+        "shared_previous_offsets",
+        "preexisting_manual_override",
+    }
+)
 _POSITIONS_GUIDANCE = (
-    "Unlink playheads, then visit every source and position each on the same "
-    "visible moment."
+    "To confirm a new alignment, unlink the playheads and position each source on the same "
+    "visible moment. Or keep the current alignment."
 )
 _OFFSETS_GUIDANCE = (
-    "Enter one known signed offset for every comparison; viewer visits are not required."
+    "Enter the signed reference-minus-comparison offsets, then confirm. Or keep the current "
+    "alignment."
 )
+_KEEP_HELP = (
+    "Keeps existing alignment. Provisional candidates are not confirmed; unresolved "
+    "comparisons remain unresolved."
+)
+_SAVED_GUIDANCE = "Close VSView to resume Frame Compare."
 
 
 @dataclass(slots=True)
@@ -93,6 +107,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._basis: _InputBasis = "positions"
         self._saved = False
         self._kept_current = False
+        self._saved_offsets: tuple[int, ...] | None = None
         self._build_ui()
         self._show_inactive(clear_marker=False)
 
@@ -101,6 +116,15 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
+        self.progress_label = QLabel(self)
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setAccessibleName("Alignment review status")
+        self.progress_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        progress_font = self.progress_label.font()
+        progress_font.setBold(True)
+        self.progress_label.setFont(progress_font)
+        layout.addWidget(self.progress_label)
+
         self.guidance_label = QLabel(_POSITIONS_GUIDANCE, self)
         self.guidance_label.setWordWrap(True)
         layout.addWidget(self.guidance_label)
@@ -108,12 +132,6 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.basis_status_label = QLabel("Input basis: Source frames", self)
         self.basis_status_label.setWordWrap(True)
         layout.addWidget(self.basis_status_label)
-
-        self.progress_label = QLabel(self)
-        self.progress_label.setWordWrap(True)
-        self.progress_label.setAccessibleName("Alignment review status")
-        self.progress_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        layout.addWidget(self.progress_label)
 
         self.body_scroll = QScrollArea(self)
         self.body_scroll.setWidgetResizable(True)
@@ -133,6 +151,12 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         body_layout.addWidget(self.lineup_group)
         self.source_status_labels = list[QLabel]()
         self.source_outcome_labels = list[QLabel]()
+
+        self.audio_group = QGroupBox("Audio evidence", self.body_widget)
+        self.audio_layout = QVBoxLayout(self.audio_group)
+        body_layout.addWidget(self.audio_group)
+        self.audio_summary_labels = list[QLabel]()
+        self.audio_detail_groups = list[QGroupBox]()
 
         self.manual_toggle = QPushButton("Enter alignment manually...", self.body_widget)
         self.manual_toggle.setCheckable(True)
@@ -170,18 +194,14 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         body_layout.addStretch()
         layout.addWidget(self.error_label)
 
-        self.use_positions_button = QPushButton("Use these aligned positions", self)
+        self.use_positions_button = QPushButton("Confirm these aligned positions", self)
         self.use_positions_button.clicked.connect(self._save_positions)
         layout.addWidget(self.use_positions_button)
 
-        self.keep_help_label = QLabel(
-            "Keeps the alignment Frame Compare entered with. If no trusted suggestion "
-            "exists, that comparison remains unchanged.",
-            self,
-        )
+        self.keep_help_label = QLabel(_KEEP_HELP, self)
         self.keep_help_label.setWordWrap(True)
         layout.addWidget(self.keep_help_label)
-        self.keep_button = QPushButton("Keep audio-derived alignment", self)
+        self.keep_button = QPushButton("Keep current alignment", self)
         self.keep_button.clicked.connect(self._save_keep_current)
         layout.addWidget(self.keep_button)
         layout.addStretch()
@@ -208,6 +228,13 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         if self.api.file_path is None:
             return
         try:
+            outputs = tuple(self.api.voutputs)
+            if not any(
+                isinstance(getattr(output, "kwargs", None), Mapping)
+                and "frame_compare_contract_version" in output.kwargs
+                for output in outputs
+            ):
+                return
             workspace = parse_alignment_review_workspace_metadata(
                 tuple(
                     AlignmentReviewOutputCandidate(
@@ -215,7 +242,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                         source_frame_count=_source_frame_count(output),
                         metadata=output.kwargs,
                     )
-                    for output in self.api.voutputs
+                    for output in outputs
                 )
             )
             session = alignment_review_session_from_script(
@@ -224,7 +251,11 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             if session.session_id != workspace.session_id:
                 raise AlignmentReviewContractError("alignment review session identity mismatch")
         except AlignmentReviewContractError as exc:
-            self.error_label.setText(f"Alignment review rejected: {exc}")
+            message = str(exc)
+            if message.startswith("Alignment review requires a newly generated session."):
+                self.error_label.setText(message)
+            else:
+                self.error_label.setText(f"Alignment review rejected: {message}")
             return
         except (OSError, AttributeError, TypeError) as exc:
             self.error_label.setText(
@@ -254,6 +285,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         ]
         self._offset_drafts = [_OffsetDraft() for _comparison in workspace.comparisons]
         self._populate_source_controls()
+        self._populate_audio_evidence()
         self.manual_toggle.setEnabled(True)
         self.keep_button.setEnabled(True)
         self.basis_selector.setEnabled(True)
@@ -281,8 +313,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             status.setAccessibleName(f"{draft.role_label} position status")
             outcome.setAccessibleName(f"{draft.role_label} alignment outcome")
             self.lineup_layout.addWidget(name)
-            self.lineup_layout.addWidget(status)
             self.lineup_layout.addWidget(outcome)
+            self.lineup_layout.addWidget(status)
             self.source_status_labels.append(status)
             self.source_outcome_labels.append(outcome)
 
@@ -301,6 +333,41 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             field.textChanged.connect(partial(self._offset_changed, index))
             self.offset_inputs_form.addRow(f"Comparison {comparison.comparison_ordinal}:", field)
             self.offset_inputs.append(field)
+
+    def _populate_audio_evidence(self) -> None:
+        self._clear_layout(self.audio_layout)
+        self.audio_summary_labels.clear()
+        self.audio_detail_groups.clear()
+        if self._workspace is None:
+            return
+        for comparison in self._workspace.comparisons:
+            summary = QLabel(_audio_summary(comparison), self.audio_group)
+            summary.setWordWrap(True)
+            summary.setAccessibleName(
+                f"Comparison {comparison.comparison_ordinal} audio evidence summary"
+            )
+            self.audio_layout.addWidget(summary)
+            details = QGroupBox(
+                f"Audio evidence details — Comparison {comparison.comparison_ordinal}",
+                self.audio_group,
+            )
+            details.setCheckable(True)
+            details.setChecked(False)
+            details.setAccessibleName(
+                f"Comparison {comparison.comparison_ordinal} audio evidence details"
+            )
+            details_layout = QVBoxLayout(details)
+            detail_label = QLabel(
+                _audio_details(comparison, self._workspace.reference.source_frame_count),
+                details,
+            )
+            detail_label.setWordWrap(True)
+            details_layout.addWidget(detail_label)
+            detail_label.setVisible(False)
+            details.toggled.connect(detail_label.setVisible)
+            self.audio_layout.addWidget(details)
+            self.audio_summary_labels.append(summary)
+            self.audio_detail_groups.append(details)
 
     def _manual_input(self, accessible_name: str) -> QLineEdit:
         field = QLineEdit(self.manual_group)
@@ -329,6 +396,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._basis = "positions"
         self._saved = False
         self._kept_current = False
+        self._saved_offsets = None
         self.guidance_label.setText(_POSITIONS_GUIDANCE)
         self.progress_label.setText("Inactive — not a Frame Compare alignment session")
         self.basis_status_label.setText("Input basis: Source frames")
@@ -348,12 +416,17 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._clear_layout(self.lineup_layout)
         self._clear_layout(self.frame_inputs_form)
         self._clear_layout(self.offset_inputs_form)
+        self._clear_layout(self.audio_layout)
         self.source_status_labels.clear()
         self.source_outcome_labels.clear()
         self.frame_inputs.clear()
         self.offset_inputs.clear()
-        self.use_positions_button.setText("Use these aligned positions")
+        self.audio_summary_labels.clear()
+        self.audio_detail_groups.clear()
+        self.use_positions_button.setText("Confirm these aligned positions")
         self.use_positions_button.setEnabled(False)
+        self.keep_help_label.setText(_KEEP_HELP)
+        self.keep_help_label.show()
         self.keep_button.setEnabled(False)
 
     def _toggle_manual(self, visible: bool) -> None:
@@ -361,6 +434,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.manual_toggle.setText(
             "Hide manual alignment" if visible else "Enter alignment manually..."
         )
+        self._refresh_ui()
 
     def _basis_changed(self, index: int) -> None:
         self._basis = "positions" if index == 0 else "offsets"
@@ -431,7 +505,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         markers = list[tuple[int, str, str]]()
         if source_index == 0:
             for comparison in self._workspace.comparisons:
-                suggestion = _suggested_pair(comparison.suggested_offset)[0]
+                marker_offset = _marker_offset(comparison)
+                suggestion = _suggested_pair(marker_offset)[0]
                 if (
                     suggestion is not None
                     and suggestion < self._source_drafts[0].source_frame_count
@@ -439,19 +514,20 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                     markers.append(
                         (
                             suggestion,
-                            "#3daee9",
-                            f"{comparison.presentation_name}: suggested reference frame {suggestion}",
+                            _marker_color(comparison, "reference"),
+                            _marker_text(comparison, suggestion, "reference"),
                         )
                     )
         else:
             comparison = self._workspace.comparisons[source_index - 1]
-            suggestion = _suggested_pair(comparison.suggested_offset)[1]
+            marker_offset = _marker_offset(comparison)
+            suggestion = _suggested_pair(marker_offset)[1]
             if suggestion is not None and suggestion < comparison.source_frame_count:
                 markers.append(
                     (
                         suggestion,
-                        "#d79b35",
-                        f"{comparison.presentation_name}: suggested comparison frame {suggestion}",
+                        _marker_color(comparison, "comparison"),
+                        _marker_text(comparison, suggestion, "comparison"),
                     )
                 )
         self.api.timeline.clear_notches(_TIMELINE_GROUP, update=not markers)
@@ -466,29 +542,37 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             if self._basis == "positions"
             else "Input basis: Known offsets"
         )
+        manual_source_basis = self._basis == "positions" and (
+            self.manual_toggle.isChecked()
+            or any(draft.origin == "Manual" for draft in self._source_drafts)
+        )
         if self._basis == "positions":
             self.guidance_label.setText(_POSITIONS_GUIDANCE)
-            self.use_positions_button.setText("Use these aligned positions")
+            self.use_positions_button.setText("Confirm these aligned positions")
             ready = sum(
                 draft.frame is not None and draft.error is None for draft in self._source_drafts
             )
             total = len(self._source_drafts)
-            progress_unit = "sources"
+            progress_unit = "source frames entered" if manual_source_basis else "positions captured"
             complete = ready == total
         else:
             self.guidance_label.setText(_OFFSETS_GUIDANCE)
-            self.use_positions_button.setText("Use these known offsets")
+            self.use_positions_button.setText("Confirm these known offsets")
             ready = sum(
                 draft.value is not None and draft.error is None for draft in self._offset_drafts
             )
             total = len(self._offset_drafts)
-            progress_unit = "comparisons"
+            progress_unit = "offsets entered"
             complete = ready == total
 
         if self._saved:
-            self.progress_label.setText("Alignment saved — close VSView to continue Frame Compare")
+            self.progress_label.setText("Alignment choices saved")
+            self.guidance_label.setText(_SAVED_GUIDANCE)
+            self.keep_help_label.hide()
         else:
-            self.progress_label.setText(f"{ready} / {total} {progress_unit} ready")
+            suffix = " — ready to confirm" if complete else ""
+            self.progress_label.setText(f"{ready}/{total} {progress_unit}{suffix}")
+            self.keep_help_label.show()
 
         first_error: str | None = None
         reference_frame = self._source_drafts[0].frame
@@ -500,30 +584,45 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 strict=True,
             )
         ):
-            if self._kept_current:
-                status = "Saved — audio-derived alignment retained"
-            elif self._basis == "offsets" and index == 0:
-                status = "Reference anchor"
-            elif self._basis == "offsets":
+            frame_error = draft.error if self._basis == "positions" else None
+            offset_error = (
+                self._offset_drafts[index - 1].error
+                if self._basis == "offsets" and index > 0
+                else None
+            )
+            if frame_error is not None:
+                status = f"Needs attention — {frame_error}"
+                first_error = first_error or frame_error
+            elif offset_error is not None:
+                status = f"Needs attention — {offset_error}"
+                first_error = first_error or offset_error
+            elif self._basis == "offsets" and index > 0:
                 offset_draft = self._offset_drafts[index - 1]
-                if offset_draft.error is not None:
-                    status = f"Needs attention — {offset_draft.error}"
-                    first_error = first_error or offset_draft.error
-                elif offset_draft.value is None:
-                    status = "Not entered"
-                else:
-                    status = f"Manual offset — {offset_draft.value:+d} frames"
-            elif draft.error is not None:
-                status = f"Needs attention — {draft.error}"
-                first_error = first_error or draft.error
+                status = (
+                    f"Entered offset: {offset_draft.value:+d}f"
+                    if offset_draft.value is not None
+                    else "Offset not entered"
+                )
             elif draft.frame is None:
-                status = "Not visited"
-            elif draft.origin == "Manual":
-                status = f"Ready (manual) — frame {draft.frame}"
-            elif draft.output_id == self._active_output_id and not self._saved:
-                status = f"Viewing — frame {draft.frame} — Viewer"
+                status = (
+                    "Entered source frame: not entered"
+                    if manual_source_basis
+                    else "Captured position: not captured"
+                )
+            elif (
+                not self._saved
+                and draft.output_id == self._active_output_id
+                and draft.origin == "Viewer"
+            ):
+                captured_label = (
+                    "Entered source frame" if manual_source_basis else "Captured position"
+                )
+                captured_value = str(draft.frame) if manual_source_basis else f"frame {draft.frame}"
+                status = f"Viewing: frame {draft.frame}\n{captured_label}: {captured_value}"
+            elif manual_source_basis or draft.origin == "Manual":
+                status = f"Entered source frame: {draft.frame}"
             else:
-                status = f"Ready — frame {draft.frame} — Viewer"
+                status = f"Captured position: frame {draft.frame}"
             status_label.setText(status)
 
             if index == 0:
@@ -536,12 +635,14 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                     offset = reference_frame - draft.frame
                 else:
                     offset = None
-                if offset is not None:
-                    outcome = f"{offset:+d} frames — {_trim_explanation(offset)}"
-                elif comparison.suggested_offset is None:
-                    outcome = "Suggestion unavailable"
+                if self._saved_offsets is not None:
+                    outcome = _manual_saved_text(comparison, self._saved_offsets[index - 1])
+                elif self._kept_current:
+                    outcome = _keep_saved_text(comparison)
+                elif offset is not None:
+                    outcome = f"{offset:+d}f — {_trim_explanation(offset)}"
                 else:
-                    outcome = f"Audio suggestion: {comparison.suggested_offset:+d} frames"
+                    outcome = _audio_summary(comparison).splitlines()[0]
             outcome_label.setText(outcome)
 
         if not self._saved:
@@ -586,7 +687,14 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                         comparison_source_frame=comparison_frame,
                     )
                 )
+        self._saved_offsets = tuple(
+            decision.reference_source_frame - decision.comparison_source_frame
+            for decision in decisions
+            if isinstance(decision, ConfirmedAlignmentReviewDecision)
+        )
         self._write_result(tuple(decisions))
+        if not self._saved:
+            self._saved_offsets = None
 
     def _save_keep_current(self) -> None:
         if self._workspace is None:
@@ -620,6 +728,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             return
         self._saved = True
         self.error_label.clear()
+        for label in self.audio_summary_labels:
+            label.hide()
         self.use_positions_button.setEnabled(False)
         self.keep_button.setEnabled(False)
         self.manual_toggle.setEnabled(False)
@@ -685,6 +795,272 @@ def _suggested_pair(offset: int | None) -> tuple[int | None, int | None]:
     return _canonical_pair(offset)
 
 
+def _attempt(comparison: AlignmentReviewComparisonMetadata) -> dict[str, object] | None:
+    raw = comparison.audio_review.audio_attempt
+    return dict(raw) if raw is not None else None
+
+
+def _decision(comparison: AlignmentReviewComparisonMetadata) -> dict[str, object] | None:
+    attempt = _attempt(comparison)
+    return None if attempt is None else cast(dict[str, object], attempt["decision"])
+
+
+def _candidate_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
+    decision = _decision(comparison)
+    if decision is None or decision["candidate"] is None:
+        return None
+    candidate = cast(dict[str, object], decision["candidate"])
+    return cast(int, candidate["frame_offset"])
+
+
+def _marker_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
+    if comparison.audio_review.current_authority.frame_offset is not None:
+        return comparison.suggested_offset
+    decision = _decision(comparison)
+    if decision is not None and decision["state"] == "provisional":
+        return _candidate_offset(comparison)
+    return comparison.suggested_offset
+
+
+def _marker_color(comparison: AlignmentReviewComparisonMetadata, role: str) -> str:
+    origin = comparison.audio_review.current_authority.origin
+    if origin in _MANUAL_AUTHORITY_ORIGINS:
+        return "#8e6ccf"
+    decision = _decision(comparison)
+    if decision is not None and decision["state"] == "provisional":
+        return "#d79b35"
+    return "#3daee9" if role == "reference" else "#d79b35"
+
+
+def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role: str) -> str:
+    offset = _marker_offset(comparison)
+    if offset is None:
+        return ""
+    decision = _decision(comparison)
+    if comparison.audio_review.current_authority.origin in _MANUAL_AUTHORITY_ORIGINS:
+        prefix = "[MANUAL ALIGNMENT]"
+    elif decision is not None and decision["state"] == "provisional":
+        prefix = "[PROVISIONAL — NOT APPLIED]"
+    elif comparison.audio_review.evidence_availability == "historical_details_unavailable":
+        prefix = "[REUSED ACCEPTED AUDIO]"
+    else:
+        prefix = "[ACCEPTED AUDIO]"
+    return f"{prefix} {offset:+d}f — {role} frame {frame}"
+
+
+def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
+    authority = comparison.audio_review.current_authority
+    lines: list[str] = []
+    decision = _decision(comparison)
+    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
+        lines.extend(
+            (
+                f"Manually confirmed alignment: {authority.frame_offset:+d}f — APPLIED",
+                "No additional confirmation needed.",
+            )
+        )
+    elif authority.origin == "shared_computed_offsets" and authority.frame_offset is not None:
+        lines.extend(
+            (
+                f"Accepted audio alignment reused: {authority.frame_offset:+d}f — APPLIED",
+                "No additional confirmation needed.",
+            )
+        )
+    elif authority.origin == "computed_this_run" and authority.frame_offset is not None:
+        lines.extend(
+            (
+                f"Accepted audio alignment: {authority.frame_offset:+d}f — APPLIED",
+                "No additional confirmation needed.",
+            )
+        )
+    elif decision is not None and decision["state"] == "provisional":
+        candidate = _candidate_offset(comparison)
+        if candidate is not None:
+            lines.extend(
+                (
+                    f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",
+                    "Visual confirmation required to use this hint.",
+                )
+            )
+    if not lines:
+        lines.append("Unresolved comparison — no usable audio candidate")
+
+    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and decision is not None:
+        original = _original_audio_summary(decision)
+        if original is not None:
+            lines.append(f"Original evidence: {original}")
+    return "\n".join(lines)
+
+
+def _original_audio_summary(decision: dict[str, object]) -> str | None:
+    state = decision["state"]
+    candidate = _candidate_from_decision(decision)
+    if state == "trusted_automatic" and candidate is not None:
+        return f"Accepted audio alignment: {candidate:+d}f — APPLIED"
+    if state == "provisional" and candidate is not None:
+        return f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED"
+    if state == "unavailable":
+        return "Unresolved comparison — no usable audio candidate"
+    return None
+
+
+def _candidate_from_decision(decision: dict[str, object]) -> int | None:
+    candidate = decision["candidate"]
+    if candidate is None:
+        return None
+    return cast(int, cast(dict[str, object], candidate)["frame_offset"])
+
+
+def _audio_details(
+    comparison: AlignmentReviewComparisonMetadata,
+    reference_source_frame_count: int,
+) -> str:
+    attempt = _attempt(comparison)
+    if attempt is None:
+        lines = ["Historical audio details unavailable."]
+        _append_marker_bounds_detail(
+            lines,
+            comparison,
+            reference_source_frame_count,
+        )
+        return "\n".join(lines)
+    decision = cast(dict[str, object], attempt["decision"])
+    lines = [
+        f"Runtime/policy: {attempt['media_runtime_fingerprint']}; {attempt['estimator_policy']}; "
+        f"diagnostic={attempt['diagnostic_policy']}",
+        f"Decision: {decision['state']}; reason={decision['primary_reason']}; "
+        f"failed={','.join(cast(list[str], decision['failed_gates'])) or 'none'}; "
+        f"unassessed={','.join(cast(list[str], decision['unassessed_gates'])) or 'none'}",
+        f"Evidence: raw={decision['raw_correlated_windows']}; "
+        f"credible={decision['credible_windows']}; voting={decision['voting_windows']}; "
+        f"winning={decision['winning_windows']}; independent={decision['independent_windows']}; "
+        f"consensus={decision['consensus_windows']}; ratio={decision['consensus_ratio']}; "
+        f"score={decision['aggregate_score']}; peak={decision['minimum_peak_ratio']}",
+        f"Thresholds: score={attempt['confidence_threshold']}; peak={attempt['ambiguity_peak_ratio']}; "
+        f"minimum windows={attempt['minimum_valid_windows']}; "
+        f"consensus={attempt['consensus_minimum_ratio']}",
+        f"Work: planned={attempt['planned_window_count']}; analysis rate={attempt['analysis_rate']}; "
+        f"FFT peak/total={attempt['peak_fft_points']}/{attempt['total_fft_points']}; "
+        f"planning={attempt['planning_reason'] or 'complete'}",
+        f"Collection: {attempt['collection_observation']}",
+    ]
+    for collection in cast(list[dict[str, object]], attempt["collection_summaries"]):
+        lines.append(
+            f"{collection['phase']}/{collection['role']}: rate={collection['output_rate']}; "
+            f"horizon={collection['requested_horizon']}; emitted="
+            f"{collection['emitted_sample_count']} samples/{collection['emitted_byte_count']} bytes; "
+            f"retained={collection['retained_sample_count']} samples/"
+            f"{collection['retained_byte_count']} bytes; "
+            f"status={collection['status']}/{collection['end_category']}; "
+            f"EOF={collection['observed_eof_sample']}; elapsed={collection['elapsed_seconds']}; "
+            f"cleanup_failures={collection['cleanup_failure_count']}; "
+            f"failures={collection['failure_count']}"
+        )
+    channel = attempt["channel_corroboration"]
+    if isinstance(channel, dict):
+        channel_data = cast(dict[str, object], channel)
+        lines.append(
+            "Channel-view evidence: "
+            f"status={channel_data['status']}; reason={channel_data['reason']}; "
+            f"independent temporal observations={channel_data['independent_windows']}"
+        )
+        for window in cast(list[dict[str, object]], channel_data["windows"]):
+            lines.append(
+                f"{window['logical_id']}/channel: corroborated={window['corroborated']}; "
+                f"representative={window['representative_sample_lag']}/"
+                f"{window['representative_frame_candidate']}; "
+                f"agreeing={window['agreeing_views']}; "
+                f"score={window['minimum_credible_score']}; "
+                f"peak={window['minimum_peak_ratio']}; "
+                f"contradiction={window['contradiction']}; reason={window['reason']}"
+            )
+    for stream in cast(list[dict[str, object]], attempt["selected_streams"]):
+        lines.append(
+            f"{stream['role']}: a:{stream['audio_stream_index']} (absolute {stream['absolute_stream_index']}), "
+            f"codec={stream['codec_name'] or 'unknown'}, language={stream['language'] or 'unknown'}, "
+            f"channels={stream['channels'] or 'unknown'}/{stream['channel_layout'] or 'unknown'}, "
+            f"rate={stream['sample_rate'] or 'unknown'}, selection={stream['selection_method']}, "
+            f"rank={stream['selection_rank']}, start={stream['stream_start_num']}/{stream['stream_start_den']} "
+            f"({stream['stream_start_basis']}), input={stream['input_start_num']}/{stream['input_start_den']} "
+            f"({stream['input_start_basis']}), duration={stream['duration_num']}/{stream['duration_den']} "
+            f"({stream['duration_basis']}), language-match={stream['language_match']}, "
+            f"commentary-match={stream['commentary_match']}"
+        )
+    stability = attempt["stability"]
+    if isinstance(stability, dict):
+        stability_data = cast(dict[str, object], stability)
+        valid_windows = cast(int, stability_data["valid_windows"])
+        planned_windows = cast(int, attempt["planned_window_count"])
+        scope = f"{valid_windows}/{planned_windows} qualified observed windows"
+        if valid_windows < planned_windows:
+            scope += "; rejected or unobserved planned intervals remain unassessed"
+        lines.append(
+            "Offset variation: "
+            f"{cast(str, stability_data['classification'])} "
+            f"(diagnostic only; scoped to {scope})"
+        )
+    for window in cast(list[dict[str, object]], attempt["windows"]):
+        lines.append(
+            f"{window['logical_id']}: ref={window['planned_reference_start']}+{window['planned_reference_count']}, "
+            f"cmp={window['planned_comparison_start']}+{window['planned_comparison_count']}, "
+            f"discovery={window['discovery_reference_count']}/"
+            f"{window['discovery_comparison_count']}, "
+            f"verification={window['verification_reference_count']}/"
+            f"{window['verification_comparison_count']}, "
+            f"overlap={window['effective_aligned_overlap']}, origin={window['origin_basis']}, "
+            f"continuous={window['continuous_sample_count']}@"
+            f"{window['continuous_sample_count_origin']}, "
+            f"useful={window['actual_useful_reference_start']}-"
+            f"{window['actual_useful_reference_end']}, "
+            f"expected_overlap={window['pre_eof_expected_overlap']}, "
+            f"coverage={window['actual_coverage']} ({window['coverage_state']}), "
+            f"rates={window['analysis_rate']}/{window['requested_rate']}, "
+            f"lag={window['local_lag']}/{window['global_analysis_lag']}/{window['requested_sample_lag']}, "
+            f"frame={window['requested_frame_candidate']}, score={window['requested_score']} "
+            f"({window['score_stage']}), peak={window['peak_ratio']} "
+            f"({window['peak_stage']}@{window['peak_rate']}), "
+            f"quality={window['quality_disposition']}/{window['configured_quality']}, "
+            f"vote={window['vote_disposition']}, review={window['review_qualified']}, "
+            f"result={window['terminal_stage']}/{window['terminal_category']}, "
+            f"relation={window['purpose']}/{window['parent_id'] or 'root'}"
+        )
+    _append_marker_bounds_detail(lines, comparison, reference_source_frame_count)
+    return "\n".join(lines)
+
+
+def _append_marker_bounds_detail(
+    lines: list[str],
+    comparison: AlignmentReviewComparisonMetadata,
+    reference_source_frame_count: int,
+) -> None:
+    reference_frame, comparison_frame = _suggested_pair(_marker_offset(comparison))
+    if reference_frame is not None and reference_frame >= reference_source_frame_count:
+        lines.append("Origin hint marker omitted: reference frame is outside raw source bounds.")
+    if comparison_frame is not None and comparison_frame >= comparison.source_frame_count:
+        lines.append("Origin hint marker omitted: comparison frame is outside raw source bounds.")
+
+
+def _keep_saved_text(comparison: AlignmentReviewComparisonMetadata) -> str:
+    authority = comparison.audio_review.current_authority
+    decision = _decision(comparison)
+    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
+        return f"Current alignment retained: {authority.frame_offset:+d}f — manually confirmed"
+    if authority.frame_offset is not None:
+        return f"Accepted alignment retained: {authority.frame_offset:+d}f"
+    candidate = _candidate_offset(comparison)
+    if decision is not None and decision["state"] == "provisional" and candidate is not None:
+        return (
+            f"Current alignment retained. Provisional candidate {candidate:+d}f not confirmed "
+            "— NOT APPLIED. Comparison unresolved."
+        )
+    return "Current alignment retained. Comparison unresolved — no accepted alignment."
+
+
+def _manual_saved_text(comparison: AlignmentReviewComparisonMetadata, offset: int) -> str:
+    del comparison
+    return f"Alignment confirmed: {offset:+d}f — manually confirmed"
+
+
 def _canonical_pair(offset: int) -> tuple[int, int]:
     return (offset, 0) if offset >= 0 else (0, abs(offset))
 
@@ -694,7 +1070,7 @@ def _trim_explanation(offset: int) -> str:
         return f"Trim {offset} frame(s) from reference"
     if offset < 0:
         return f"Trim {abs(offset)} frame(s) from this comparison"
-    return "No starting trim"
+    return "No additional trim from this raw offset"
 
 
 @hookimpl(tryfirst=True)

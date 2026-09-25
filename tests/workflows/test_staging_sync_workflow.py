@@ -45,7 +45,9 @@ def test_sync_staging_is_non_destructive_and_fail_closed(repo_root: Path) -> Non
     assert "--force" not in source
 
 
-def test_staging_check_triggers_do_not_change_release_please_scope(repo_root: Path) -> None:
+def test_integration_check_triggers_do_not_change_release_please_scope(
+    repo_root: Path,
+) -> None:
     ci = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     docs = _load_workflow(repo_root / ".github" / "workflows" / "docs.yml")
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
@@ -54,14 +56,18 @@ def test_staging_check_triggers_do_not_change_release_please_scope(repo_root: Pa
     assert ci["on"]["push"]["branches"] == ["main", "staging"]
     assert ci["on"]["pull_request"]["branches"] == [
         "main",
-        "cleanup",
+        "pre-release",
         "staging",
     ]
     assert docs["on"]["push"]["branches"] == ["main", "staging"]
-    assert docs["on"]["pull_request"]["branches"] == ["main", "cleanup", "staging"]
+    assert docs["on"]["pull_request"]["branches"] == [
+        "main",
+        "pre-release",
+        "staging",
+    ]
     assert docker["on"]["pull_request"]["branches"] == [
         "main",
-        "cleanup",
+        "pre-release",
         "staging",
     ]
     assert release_please["on"]["push"]["branches"] == ["main"]

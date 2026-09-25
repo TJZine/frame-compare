@@ -87,7 +87,7 @@ def test_libplacebo_tonemap_succeeds_in_docker():
     """Exercise tonemap in Docker; require libplacebo only when configured.
 
     By default, Docker Desktop environments (macOS/Windows) may not have a usable
-    Vulkan device. In that case, `_apply_libplacebo` may return None and
+    Vulkan device. In that case, `apply_libplacebo` may return None and
     `apply_tonemap` must fall back without raising.
 
     Set `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1` to require libplacebo to succeed.
@@ -108,7 +108,8 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         import vapoursynth as vs
 
         from frame_compare.vs import HDRMetadata, TonemapSettings, apply_tonemap
-        from frame_compare.vs.tonemap import _apply_libplacebo, detect_plugins
+        from frame_compare.vs.env import detect_plugins
+        from frame_compare.vs.tonemap_libplacebo import apply_libplacebo
 
         core = vs.core
         require_libplacebo = os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1"
@@ -144,9 +145,9 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         )
 
         if require_libplacebo:
-            libplacebo_out = _apply_libplacebo(clip, settings, core, hdr_metadata)
+            libplacebo_out = apply_libplacebo(clip, settings, core, hdr_metadata)
             assert libplacebo_out is not None, (
-                "_apply_libplacebo returned None while FRAME_COMPARE_REQUIRE_LIBPLACEBO=1; "
+                "apply_libplacebo returned None while FRAME_COMPARE_REQUIRE_LIBPLACEBO=1; "
                 "Vulkan/libplacebo backend is not usable in this environment."
             )
             _ = libplacebo_out.get_frame(0)

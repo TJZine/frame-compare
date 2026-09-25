@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging]
   pull_request:
-    branches: [main, cleanup, staging]
+    branches: [main, pre-release, staging]
   workflow_dispatch:
 
 permissions:
@@ -31,9 +31,9 @@ jobs:
           restore-keys: uv-${{ runner.os }}-
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -43,6 +43,9 @@ jobs:
 
       - name: Run Ruff
         run: uv run --no-sync ruff check .
+
+      - name: Check formatting
+        run: uv run --no-sync ruff format --check .
 
   security:
     name: Security (Bandit)
@@ -60,9 +63,9 @@ jobs:
           restore-keys: uv-${{ runner.os }}-
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -87,9 +90,9 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -125,15 +128,15 @@ jobs:
           restore-keys: uv-${{ runner.os }}-
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --group dev --frozen
+        run: uv sync --group dev --extra vsview --frozen
 
       - name: Run Pyright
         run: uv run --no-sync pyright --warnings
@@ -154,9 +157,9 @@ jobs:
           restore-keys: uv-${{ runner.os }}-
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -183,9 +186,9 @@ jobs:
           restore-keys: uv-${{ runner.os }}-
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -205,9 +208,9 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -237,9 +240,9 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.7"
+          version: "0.12.17"
 
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}

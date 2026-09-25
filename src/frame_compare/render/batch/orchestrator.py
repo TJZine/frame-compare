@@ -205,7 +205,7 @@ def _render_batch_parallel(
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit] = {}
     next_unit_index = 0
     next_progress_index = 0
-    first_exception: Exception | None = None
+    first_exception: tuple[int, Exception] | None = None
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
         while next_unit_index < min(parallelism, len(units)):
@@ -220,8 +220,9 @@ def _render_batch_parallel(
                 try:
                     completed.append((unit, future.result()))
                 except Exception as exc:
-                    if first_exception is None:
-                        first_exception = exc
+                    failure = (unit[0], exc)
+                    if first_exception is None or failure[0] < first_exception[0]:
+                        first_exception = failure
 
             for unit, rendered in sorted(completed, key=lambda item: item[0][0]):
                 _store_work_unit_results(unit, rendered, results)
@@ -253,7 +254,7 @@ def _render_batch_parallel(
             for index in range(next_progress_index, len(results)):
                 if results[index] is not None:
                     _record_render_progress(reporter, requests[index])
-        raise first_exception
+        raise first_exception[1]
 
 
 def render_batch(
@@ -271,10 +272,10 @@ def render_batch(
         List of paths to rendered files in input order
 
     Raises:
-        Exception: The first exception encountered during rendering (fail-fast).
-            Once a failure occurs, no new tasks are scheduled. Any work already
-            submitted to the executor is allowed to finish before the first
-            exception is re-raised.
+        Exception: The exception from the lowest-index failed work unit
+            (fail-fast). Once a failure occurs, no new tasks are scheduled. Any
+            work already submitted to the executor is allowed to finish before
+            the deterministic exception is re-raised.
     """
     return [result.path for result in render_batch_detailed(requests, parallelism, reporter)]
 

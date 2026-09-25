@@ -2,8 +2,13 @@ from fractions import Fraction
 
 import pytest
 
+from frame_compare.analysis import selection
 from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.selection import preferred_frame_gap, select_frames
+from frame_compare.analysis.selection import (
+    preferred_frame_gap,
+    select_frames,
+    select_random_frames,
+)
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config.schema import AnalysisConfig
 
@@ -251,6 +256,26 @@ def test_random_count_same_seed_deterministic() -> None:
     result2 = select_frames(metrics, config)
 
     assert result1.frames == result2.frames
+
+
+def test_zero_random_count_skips_seeded_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            selection.hashlib,
+            "blake2b",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("zero random frames must not hash a seeded ordering")
+            ),
+        )
+        assert select_random_frames(100, 0, 42, selection_fps=Fraction(24)) == []
+
+    result = select_frames(
+        make_metrics(LUMINANCE_100, MOTION_100),
+        AnalysisConfig(user_frames=[0], random_frame_count=0),
+    )
+
+    assert result.frames == [0]
+    assert result.breakdown.random == []
 
 
 def test_random_count_different_seed_changes_output() -> None:

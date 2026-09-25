@@ -1,6 +1,7 @@
 """Typed, presentation-only identities derived from release filenames."""
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -45,7 +46,7 @@ def format_content_identity(content: ContentIdentity) -> str:
     return label
 
 
-def format_release_descriptor(identity: ReleaseIdentity) -> str:
+def format_release_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
     """Format release facts without repeating content identity."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
     parts = [identity.resolution, source or None]
@@ -53,22 +54,25 @@ def format_release_descriptor(identity: ReleaseIdentity) -> str:
     parts.extend(identity.revision_tags)
     parts.extend(identity.variant_tags)
     parts.append(identity.release_group)
-    return " | ".join(part for part in parts if part)
+    return separator.join(part for part in parts if part)
 
 
-def format_compact_identity(identity: ReleaseIdentity) -> str:
+def format_compact_identity(identity: ReleaseIdentity, separator: str = " | ") -> str:
     """Format content and release facts in one compact line."""
-    return " | ".join(
+    return separator.join(
         part
-        for part in (format_content_identity(identity.content), format_release_descriptor(identity))
+        for part in (
+            format_content_identity(identity.content),
+            format_release_descriptor(identity, separator),
+        )
         if part
     )
 
 
-def format_micro_descriptor(identity: ReleaseIdentity) -> str:
+def format_micro_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
     """Format the smallest useful release descriptor for constrained surfaces."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
-    return " | ".join(
+    return separator.join(
         part
         for part in (
             source or None,
@@ -78,6 +82,54 @@ def format_micro_descriptor(identity: ReleaseIdentity) -> str:
         )
         if part
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ShortNameSource:
+    """Per-source facts needed for the terminal short name (S1)."""
+
+    identity: ReleaseIdentity | None
+    label: str
+    label_is_explicit: bool
+
+
+def short_source_names(sources: Sequence[ShortNameSource], *, roles: Sequence[str]) -> list[str]:
+    """Return one short name per source in clip order for terminal output.
+
+    A source uses its release group when it has one and no other source has
+    the same group (case-insensitive); otherwise it uses its compact
+    (``micro``) name. Explicit labels are used as given. Any remaining
+    collision is resolved with :func:`unique_presentation_names`.
+    """
+    groups = [
+        source.identity.release_group if source.identity is not None else None for source in sources
+    ]
+    names: list[str] = []
+    protected: list[bool] = []
+    for source, group in zip(sources, groups, strict=True):
+        label = source.label.strip()
+        if source.label_is_explicit and label:
+            names.append(source.label)
+            protected.append(True)
+            continue
+        if group and _release_group_is_unique(group, groups):
+            names.append(group)
+            protected.append(False)
+            continue
+        micro = (
+            format_micro_descriptor(source.identity, separator=" · ")
+            if source.identity is not None
+            else ""
+        )
+        names.append(micro or label)
+        protected.append(False)
+    return unique_presentation_names(names, roles=list(roles), protected=protected)
+
+
+def _release_group_is_unique(group: str, groups: Sequence[str | None]) -> bool:
+    """Return whether no other source claims the same release group."""
+    folded = group.casefold()
+    return sum(1 for other in groups if other is not None and other.casefold() == folded) == 1
 
 
 def unique_presentation_names(
@@ -135,10 +187,12 @@ def _shared_value(
 __all__ = [
     "ContentIdentity",
     "ReleaseIdentity",
+    "ShortNameSource",
     "common_content_identity",
     "format_compact_identity",
     "format_content_identity",
     "format_micro_descriptor",
     "format_release_descriptor",
+    "short_source_names",
     "unique_presentation_names",
 ]

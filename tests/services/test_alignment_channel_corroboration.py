@@ -1,0 +1,1009 @@
+"""Production-service coverage for held corresponding-channel corroboration."""
+
+from __future__ import annotations
+
+import asyncio
+import gc
+import threading
+import weakref
+from dataclasses import replace
+from fractions import Fraction
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import frame_compare.services.alignment as alignment_service
+from frame_compare.services import alignment_audio, alignment_consensus
+from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment_correlation import CorrelationEstimate
+from frame_compare.services.errors import AudioAlignmentCancellationError, AudioAlignmentError
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AudioAlignmentCandidate,
+    AudioAlignmentCollectionRecord,
+    AudioAlignmentDecision,
+    AudioAlignmentWindowRecord,
+)
+from tests.services.alignment_request_test_support import alignment_request
+
+
+def _stream(*, layout: str = "5.1") -> alignment_audio.AudioStreamInfo:
+    return alignment_audio.AudioStreamInfo(
+        audio_stream_index=0,
+        absolute_stream_index=0,
+        codec_name="pcm_f32le",
+        channels=6,
+        channel_layout=layout,
+        sample_rate=8_000,
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        timeline=alignment_audio.AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=Fraction(95),
+            time_base=Fraction(1, 8_000),
+            duration_basis="stream_duration",
+        ),
+    )
+
+
+def _summary(
+    role: str,
+    windows: tuple[alignment_audio.AudioWindow, ...],
+    *,
+    phase: str,
+) -> AudioAlignmentCollectionRecord:
+    horizon = max(
+        (
+            window.reference_start_sample + window.reference.size
+            if role == "reference"
+            else window.comparison_start_sample + window.comparison.size
+        )
+        for window in windows
+    )
+    retained = sum(
+        window.reference.size if role == "reference" else window.comparison.size
+        for window in windows
+    )
+    return AudioAlignmentCollectionRecord(
+        phase=phase,  # type: ignore[arg-type]
+        role=role,  # type: ignore[arg-type]
+        output_rate=8_000,
+        requested_horizon=horizon,
+        emitted_sample_count=horizon,
+        emitted_byte_count=horizon * 4,
+        retained_sample_count=retained,
+        retained_byte_count=retained * 4,
+        status="complete",
+        end_category="planned_end_reached",
+        observed_eof_sample=None,
+        elapsed_seconds=0.01,
+        cleanup_failure_count=0,
+        failure_count=0,
+    )
+
+
+def _phase(
+    specs: tuple[alignment_audio.AudioWindowSpec, ...],
+    reference_source: np.ndarray,
+    comparison_source: np.ndarray,
+    *,
+    offset: int,
+    phase: str,
+) -> alignment_audio.CollectedAudioPhase:
+    windows = tuple(
+        alignment_audio.AudioWindow(
+            reference=reference_source[
+                spec.reference_start_sample : spec.reference_start_sample
+                + spec.reference_sample_count
+            ],
+            comparison=comparison_source[
+                spec.comparison_start_sample + offset : spec.comparison_start_sample
+                + offset
+                + spec.comparison_sample_count
+            ],
+            reference_start_sample=spec.reference_start_sample,
+            comparison_start_sample=spec.comparison_start_sample,
+        )
+        for spec in specs
+    )
+    return alignment_audio.CollectedAudioPhase(
+        windows=windows,
+        summaries=(
+            _summary("reference", windows, phase=phase),
+            _summary("comparison", windows, phase=phase),
+        ),
+    )
+
+
+def _offset_timeline(signal: np.ndarray, offset: int) -> np.ndarray:
+    shifted = np.zeros_like(signal)
+    if offset > 0:
+        shifted[:-offset] = signal[offset:]
+    elif offset < 0:
+        shifted[-offset:] = signal[:offset]
+    else:
+        shifted[:] = signal
+    return shifted
+
+
+@pytest.mark.parametrize(
+    (
+        "mono_strength",
+        "channel_strategy",
+        "expected_decodes",
+        "expected_channel",
+        "expected_reason",
+        "view_case",
+        "expected_status",
+        "offset",
+        "expected_frame",
+    ),
+    [
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "positive",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support_strict",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support_latch_disabled",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support",
+            "corroborated",
+            400,
+            1,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "mixed_support",
+            "corroborated",
+            -400,
+            -1,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "latch_disabled",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "positive",
+            "corroborated",
+            400,
+            1,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "positive",
+            "corroborated",
+            -400,
+            -1,
+        ),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "unrelated", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "silence", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "repeated", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "permuted", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "conflicting", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "localized", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "one_window", "rejected", 0, None),
+        (0.55, "mono_downmix", 8, True, "no_voting_windows", "two_windows", "rejected", 0, None),
+        (
+            0.55,
+            "mono_downmix",
+            2,
+            False,
+            "no_unique_candidate",
+            "mixed_mono_conflict",
+            None,
+            0,
+            None,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "channel_corroboration_provisional",
+            "strict_user_thresholds",
+            "corroborated",
+            0,
+            0,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "source_identity_changed",
+            "identity_changed_last_view",
+            "rejected",
+            0,
+            None,
+        ),
+        (
+            0.55,
+            "mono_downmix",
+            8,
+            True,
+            "source_identity_changed",
+            "identity_removed_last_view",
+            "rejected",
+            0,
+            None,
+        ),
+        (1.0, "mono_downmix", 2, False, "accepted", "positive", None, 0, 0),
+        (0.55, "best_channel", 2, False, "no_voting_windows", "positive", None, 0, None),
+    ],
+)
+def test_channel_corroboration_is_provisional_only_and_mono_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mono_strength: float,
+    channel_strategy: str,
+    expected_decodes: int,
+    expected_channel: bool,
+    expected_reason: str,
+    view_case: str,
+    expected_status: str | None,
+    offset: int,
+    expected_frame: int | None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reference = tmp_path / "reference.mka"
+    comparison = tmp_path / "comparison.mka"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(
+        sample_rate=8_000,
+        max_offset_seconds=1,
+        channel_strategy=channel_strategy,  # type: ignore[arg-type]
+        window_length_seconds=2,
+        window_stride_seconds=24,
+        minimum_valid_windows=3,
+        confidence_threshold=1.0 if "strict" in view_case else 0.0,
+        ambiguity_peak_ratio=100.0 if "strict" in view_case else 1.0,
+        cache_results="latch_disabled" in view_case,
+    )
+    stream = _stream()
+    plan = alignment_audio.plan_audio_analysis(stream, stream, config=config)
+    assert isinstance(plan, alignment_audio.AudioAnalysisPlan)
+    assert len(plan.windows) >= 5
+    sample_count = 96 * config.sample_rate
+    rng = np.random.default_rng(6020)
+    sources = {
+        view: rng.standard_normal(sample_count).astype(np.float32) for view in ("FL", "FR", "FC")
+    }
+    noise = rng.standard_normal(sample_count).astype(np.float32)
+    mono_reference = sources["FL"]
+    mono_comparison_unshifted = (
+        mono_strength * mono_reference + np.sqrt(max(0.0, 1.0 - mono_strength**2)) * noise
+    ).astype(np.float32)
+    if view_case.startswith("mixed_support"):
+        for spec in plan.windows[:2]:
+            start = spec.reference_start_sample
+            end = start + spec.reference_sample_count
+            mono_comparison_unshifted[start:end] = mono_reference[start:end]
+    elif view_case == "mixed_mono_conflict":
+        first, second = plan.windows[:2]
+        first_end = first.reference_start_sample + first.reference_sample_count
+        mono_comparison_unshifted[first.reference_start_sample : first_end] = mono_reference[
+            first.reference_start_sample : first_end
+        ]
+        second_end = second.reference_start_sample + second.reference_sample_count
+        mono_comparison_unshifted[second.reference_start_sample : second_end] = mono_reference[
+            second.reference_start_sample + 400 : second_end + 400
+        ]
+    mono_comparison = _offset_timeline(
+        mono_comparison_unshifted,
+        offset,
+    )
+    comparison_views = dict(sources)
+    if view_case == "unrelated":
+        comparison_views = {
+            view: rng.standard_normal(sample_count).astype(np.float32) for view in sources
+        }
+    elif view_case == "silence":
+        comparison_views = {view: np.zeros(sample_count, dtype=np.float32) for view in sources}
+    elif view_case == "repeated":
+        repeated = np.sin(2 * np.pi * 100 * np.arange(sample_count) / 8000).astype(np.float32)
+        sources = dict.fromkeys(sources, repeated)
+        comparison_views = dict(sources)
+    elif view_case == "permuted":
+        comparison_views = {
+            "FL": sources["FR"],
+            "FR": sources["FC"],
+            "FC": sources["FL"],
+        }
+    elif view_case == "conflicting":
+        comparison_views["FR"] = _offset_timeline(comparison_views["FR"], 400)
+    elif view_case == "localized":
+        comparison_views = {
+            view: (0.55 * source + np.sqrt(1 - 0.55**2) * noise).astype(np.float32)
+            for view, source in sources.items()
+        }
+    elif view_case in {"one_window", "two_windows"}:
+        comparison_views = {
+            view: rng.standard_normal(sample_count).astype(np.float32) for view in sources
+        }
+        window_count = 1 if view_case == "one_window" else 2
+        for spec in plan.windows[:window_count]:
+            for view, source in sources.items():
+                comparison_views[view][
+                    spec.reference_start_sample : spec.reference_start_sample
+                    + spec.reference_sample_count
+                ] = source[
+                    spec.reference_start_sample : spec.reference_start_sample
+                    + spec.reference_sample_count
+                ]
+    comparison_views = {
+        view: _offset_timeline(source, offset) for view, source in comparison_views.items()
+    }
+    decode_count = 0
+
+    monkeypatch.setattr(alignment_audio, "select_reference_audio_stream", lambda *_a, **_k: stream)
+    monkeypatch.setattr(alignment_audio, "select_matching_audio_stream", lambda *_a, **_k: stream)
+    monkeypatch.setattr(alignment_audio, "plan_audio_analysis", lambda *_a, **_k: plan)
+
+    def discovery(*_args: object, **_kwargs: object) -> alignment_audio.CollectedAudioPhase:
+        nonlocal decode_count
+        decode_count += 2
+        return _phase(
+            plan.windows,
+            mono_reference,
+            mono_comparison,
+            offset=0,
+            phase="discovery",
+        )
+
+    def channel(
+        _reference: Path,
+        _comparison: Path,
+        _reference_stream: alignment_audio.AudioStreamInfo,
+        _comparison_stream: alignment_audio.AudioStreamInfo,
+        channel_plan: alignment_audio.AudioChannelViewPlan,
+        view: str,
+        **_kwargs: object,
+    ) -> alignment_audio.CollectedAudioPhase:
+        nonlocal decode_count
+        decode_count += 2
+        if view == "FC" and view_case == "identity_changed_last_view":
+            comparison.write_bytes(b"replaced")
+        elif view == "FC" and view_case == "identity_removed_last_view":
+            comparison.unlink()
+        return _phase(
+            channel_plan.windows,
+            sources[view],
+            comparison_views[view],
+            offset=0,
+            phase="verification",
+        )
+
+    monkeypatch.setattr(alignment_audio, "collect_discovery_phase", discovery)
+    monkeypatch.setattr(alignment_audio, "collect_channel_view_phase", channel)
+    if "latch_disabled" in view_case:
+        monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+        monkeypatch.setattr(
+            "frame_compare.services.alignment.save_reusable_offsets",
+            lambda *_args, **_kwargs: pytest.fail(
+                "channel-only provisional evidence must not authorize a cache write"
+            ),
+        )
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+
+    result = asyncio.run(
+        align_clips_from_request(
+            request,
+            config,
+            reference_fps=Fraction(24),
+            verbose=True,
+        )
+    )
+    presented = capsys.readouterr().err
+
+    assert decode_count == expected_decodes
+    if expected_reason == "accepted":
+        assert result[0].applied is True
+        assert result[0].frame_offset == expected_frame
+        assert result[0].time_offset_seconds == pytest.approx(offset / config.sample_rate)
+    else:
+        assert result[0].applied is False
+        assert result[0].frame_offset is None
+        assert result[0].time_offset_seconds is None
+    assert result[0].audio_attempt is not None
+    attempt = result[0].audio_attempt
+    assert (attempt.channel_corroboration is not None) is expected_channel
+    if expected_channel:
+        assert attempt.channel_corroboration is not None
+        assert attempt.channel_corroboration.status == expected_status
+        assert len(attempt.channel_corroboration.collections) == 6
+        if expected_status == "corroborated":
+            assert attempt.decision.state == "provisional", attempt.channel_corroboration
+            assert attempt.decision.primary_reason == expected_reason
+            assert attempt.decision.candidate is not None
+
+            assert attempt.decision.candidate.frame_offset == expected_frame
+            assert attempt.channel_corroboration.independent_windows == 3
+            if view_case.startswith("mixed_support"):
+                corroborated = [
+                    window
+                    for window in attempt.channel_corroboration.windows
+                    if window.corroborated
+                ]
+                assert len(corroborated) == 3
+                support_ids = attempt.decision.candidate.supporting_window_ids
+                assert support_ids == tuple(window.logical_id for window in corroborated)
+                assert all(
+                    window.actual_useful_reference_start is not None
+                    and window.actual_useful_reference_end is not None
+                    for window in corroborated
+                )
+                channel_ids = set(support_ids)
+                mono_ids = {
+                    window.logical_id
+                    for window in attempt.windows
+                    if window.review_qualified and window.actual_coverage == 1.0
+                }
+                assert mono_ids.isdisjoint(channel_ids)
+                assert len(mono_ids | channel_ids) == 5
+            assert "Evidence:" in presented
+            assert "Channel-view evidence:" in presented
+            assert all(
+                not window.views[0].contradiction
+                for window in attempt.channel_corroboration.windows
+            )
+        else:
+            assert attempt.channel_corroboration.candidate is None
+            assert attempt.decision.primary_reason == expected_reason
+            if expected_reason == "source_identity_changed":
+                assert result[0].diagnostic == expected_reason
+                assert attempt.decision.state == "unavailable"
+                assert attempt.decision.candidate is None
+                assert attempt.channel_corroboration.reason == expected_reason
+                assert attempt.channel_corroboration.windows == ()
+            if view_case == "conflicting":
+                assert attempt.channel_corroboration.reason == "credible_cross_frame_veto"
+                assert all(
+                    window.reason == "credible_cross_frame_veto"
+                    for window in attempt.channel_corroboration.windows
+                )
+                assert all(
+                    window.agreeing_views == ()
+                    and not any(view.agrees for view in window.views)
+                    and any(view.contradiction for view in window.views)
+                    for window in attempt.channel_corroboration.windows
+                )
+            if view_case in {"one_window", "two_windows"}:
+                assert sum(
+                    window.corroborated for window in attempt.channel_corroboration.windows
+                ) == (1 if view_case == "one_window" else 2)
+    else:
+        assert attempt.decision.primary_reason == expected_reason
+        if view_case == "mixed_mono_conflict":
+            assert "credible_contradiction" in attempt.decision.failed_gates
+
+
+@pytest.mark.parametrize("eligible", [True, False])
+def test_alignment_channel_fallback_callback_tracks_plan_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    eligible: bool,
+) -> None:
+    reference = tmp_path / "reference.mka"
+    comparison = tmp_path / "comparison.mka"
+    reference.touch()
+    comparison.touch()
+    stream = _stream()
+    config = AlignmentConfig(sample_rate=8_000, max_offset_seconds=1)
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=8_000,
+        requested_sample_rate=8_000,
+        windows=(alignment_audio.AudioWindowSpec(0, 100, 0, 100),),
+        peak_fft_points=256,
+        total_fft_points=256,
+    )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR"),
+        window_indices=(0,),
+        windows=plan.windows,
+        retained_samples_per_view=200,
+    )
+    consensus = alignment_consensus.AlignmentConsensus(
+        sample_offset=None,
+        score=0.0,
+        applied=False,
+        diagnostic="insufficient_independent_support",
+        valid_windows=0,
+        consensus_windows=0,
+        consensus_ratio=0.0,
+        ambiguity_ratio=None,
+    )
+    callback_calls: list[str] = []
+    loader_calls: list[str] = []
+
+    monkeypatch.setattr(alignment_audio, "select_reference_audio_stream", lambda *_a, **_k: stream)
+    monkeypatch.setattr(alignment_audio, "select_matching_audio_stream", lambda *_a, **_k: stream)
+    monkeypatch.setattr(alignment_audio, "plan_audio_analysis", lambda *_a, **_k: plan)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_staged_consensus_offset",
+        lambda *_a, **_k: consensus,
+    )
+    monkeypatch.setattr(
+        alignment_consensus,
+        "channel_corroboration_window_indices",
+        lambda _result: (0,) if eligible else (),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "common_named_channel_views",
+        lambda *_a, **_k: ("FL", "FR"),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "plan_channel_view_corroboration",
+        lambda *_a, **_k: (
+            channel_plan
+            if eligible
+            else alignment_audio.AudioAnalysisBudgetExceeded("channel_views_unavailable")
+        ),
+    )
+
+    def collect_channel_view(*args: object, **_kwargs: object):
+        view = args[5]
+        assert isinstance(view, str)
+        loader_calls.append(view)
+        return alignment_audio.CollectedAudioPhase(windows=(), summaries=())
+
+    monkeypatch.setattr(alignment_audio, "collect_channel_view_phase", collect_channel_view)
+
+    def corroborate(result: alignment_consensus.AlignmentConsensus, **kwargs: object):
+        assert callback_calls == (["started"] if eligible else [])
+        phase_loader = kwargs["phase_loader"]
+        assert callable(phase_loader)
+        for view in channel_plan.views:
+            phase_loader(view)  # type: ignore[operator]
+        return result
+
+    monkeypatch.setattr(alignment_consensus, "corroborate_channel_views", corroborate)
+
+    result = alignment_service._estimate_audio_pair(
+        reference,
+        comparison,
+        config=config,
+        fps_reference=Fraction(24),
+        on_channel_fallback_started=lambda: callback_calls.append("started"),
+    )
+
+    assert result is consensus
+    assert callback_calls == (["started"] if eligible else [])
+    assert loader_calls == (["FL", "FR"] if eligible else [])
+
+
+def _synthetic_mono_result(
+    plan: alignment_audio.AudioAnalysisPlan,
+) -> alignment_consensus.AlignmentConsensus:
+    records = tuple(
+        AudioAlignmentWindowRecord(
+            logical_id=f"primary-{index + 1:02d}",
+            purpose="primary",
+            attempt_number=1,
+            parent_id=None,
+            planned_reference_start=spec.reference_start_sample,
+            planned_reference_count=spec.reference_sample_count,
+            planned_comparison_start=spec.comparison_start_sample,
+            planned_comparison_count=spec.comparison_sample_count,
+            analysis_rate=plan.sample_rate,
+            requested_rate=plan.requested_sample_rate,
+            actual_reference_count=spec.reference_sample_count,
+            actual_comparison_count=spec.comparison_sample_count,
+            actual_useful_reference_start=spec.reference_start_sample,
+            actual_useful_reference_end=spec.reference_start_sample + spec.reference_sample_count,
+            actual_coverage=1.0,
+            coverage_state="complete",
+            quality_disposition="rejected",
+            requested_sample_lag=0,
+            requested_frame_candidate=0,
+            requested_score=0.55,
+            score_stage="requested_rate",
+            peak_ratio=1.1,
+            peak_stage="requested_rate",
+            peak_rate=plan.requested_sample_rate,
+            terminal_stage="correlation",
+            terminal_category="correlated",
+        )
+        for index, spec in enumerate(plan.windows)
+    )
+    return alignment_consensus.AlignmentConsensus(
+        sample_offset=None,
+        score=0.55,
+        applied=False,
+        diagnostic="insufficient_independent_support",
+        valid_windows=len(records),
+        consensus_windows=0,
+        consensus_ratio=0.0,
+        ambiguity_ratio=1.1,
+        window_records=records,
+        decision=AudioAlignmentDecision(
+            state="unavailable",
+            candidate=None,
+            primary_reason="insufficient_independent_support",
+            raw_correlated_windows=len(records),
+            consensus_windows=0,
+            consensus_ratio=0.0,
+            aggregate_score=0.55,
+            minimum_peak_ratio=1.1,
+            failed_gates=("insufficient_independent_support",),
+        ),
+    )
+
+
+def _synthetic_channel_case(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    dissent_index: int | None = None,
+    dissent_offset: int = 0,
+    weak_dissent: bool = False,
+    mono_candidate: bool = False,
+    identity_change_view: str | None = None,
+) -> alignment_consensus.AlignmentConsensus:
+    specs = tuple(
+        alignment_audio.AudioWindowSpec(index * 10_000, 10_000, index * 10_000, 10_000)
+        for index in range(5)
+    )
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=1_000,
+        requested_sample_rate=1_000,
+        windows=specs,
+        peak_fft_points=1_024,
+        total_fft_points=5_120,
+        reference_duration_samples=50_000,
+        comparison_duration_samples=50_000,
+    )
+    mono_result = _synthetic_mono_result(plan)
+    if mono_candidate:
+        assert mono_result.decision is not None
+        mono_result = replace(
+            mono_result,
+            decision=replace(
+                mono_result.decision,
+                state="provisional",
+                candidate=AudioAlignmentCandidate(
+                    sample_offset=0,
+                    sample_rate=1_000,
+                    frame_offset=0,
+                    supporting_window_ids=("primary-01",),
+                    median_score=0.55,
+                    minimum_peak_ratio=1.1,
+                ),
+            ),
+        )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR", "FC"),
+        window_indices=tuple(range(len(specs))),
+        windows=specs,
+        retained_samples_per_view=100_000,
+    )
+    scores: list[float] = []
+    estimate_index = 0
+
+    def estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        nonlocal estimate_index
+        view_index, window_index = divmod(estimate_index, len(specs))
+        estimate_index += 1
+        is_dissent = window_index == dissent_index and (not weak_dissent or view_index == 2)
+        scores.append(0.5 if weak_dissent and is_dissent and view_index == 2 else 1.0)
+        return CorrelationEstimate(dissent_offset if is_dissent else 0, 1.0, 2.0)
+
+    def refine(*_args: object, **_kwargs: object) -> tuple[int, float]:
+        return 0, scores.pop(0)
+
+    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
+    monkeypatch.setattr(alignment_consensus, "refine_aligned_score", refine)
+
+    def phase_loader(view: str) -> alignment_audio.CollectedAudioPhase:
+        windows = tuple(
+            alignment_audio.AudioWindow(
+                np.ones(spec.reference_sample_count, dtype=np.float32),
+                np.ones(spec.comparison_sample_count, dtype=np.float32),
+                spec.reference_start_sample,
+                spec.comparison_start_sample,
+            )
+            for spec in specs
+        )
+        if view == identity_change_view:
+            raise AudioAlignmentError(
+                "source identity changed during staged audio collection",
+                category="source_identity_changed",
+                stage="collection",
+                collection_summaries=(_summary("comparison", windows, phase="discovery"),),
+            )
+        return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
+
+    return alignment_consensus.corroborate_channel_views(
+        mono_result,
+        plan=plan,
+        channel_plan=channel_plan,
+        config=AlignmentConfig(sample_rate=1_000, max_offset_seconds=10),
+        fps=Fraction(24),
+        phase_loader=phase_loader,
+    )
+
+
+@pytest.mark.parametrize("dissent_index", range(5))
+@pytest.mark.parametrize("dissent_offset", [-50, 50])
+def test_global_credible_channel_dissent_vetoes_provisional_hint(
+    monkeypatch: pytest.MonkeyPatch,
+    dissent_index: int,
+    dissent_offset: int,
+) -> None:
+    result = _synthetic_channel_case(
+        monkeypatch,
+        dissent_index=dissent_index,
+        dissent_offset=dissent_offset,
+    )
+
+    assert result.channel_corroboration is not None
+    assert result.channel_corroboration.status == "rejected"
+    assert result.channel_corroboration.reason == "credible_cross_frame_veto"
+    assert result.channel_corroboration.candidate is None
+    assert all(not window.contradiction for window in result.channel_corroboration.windows)
+
+
+def test_weak_named_channel_dissent_does_not_veto_provisional_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _synthetic_channel_case(
+        monkeypatch,
+        dissent_index=2,
+        dissent_offset=-50,
+        weak_dissent=True,
+    )
+
+    assert result.channel_corroboration is not None
+    assert result.channel_corroboration.status == "corroborated"
+    assert result.channel_corroboration.candidate is not None
+    assert result.channel_corroboration.candidate.frame_offset == 0
+
+
+@pytest.mark.parametrize("identity_change_view", ["FL", "FR", "FC"])
+def test_source_identity_change_withdraws_every_pair_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    identity_change_view: str,
+) -> None:
+    result = _synthetic_channel_case(
+        monkeypatch,
+        mono_candidate=True,
+        identity_change_view=identity_change_view,
+    )
+
+    assert result.applied is False
+    assert result.sample_offset is None
+    assert result.diagnostic == "source_identity_changed"
+    assert result.decision is not None
+    assert result.decision.state == "unavailable"
+    assert result.decision.candidate is None
+    assert result.decision.primary_reason == "source_identity_changed"
+    assert "source_identity_changed" in result.decision.failed_gates
+    channel = result.channel_corroboration
+    assert channel is not None
+    assert channel.status == "rejected"
+    assert channel.reason == "source_identity_changed"
+    assert channel.candidate is None
+    assert channel.windows == ()
+    assert [(item.view, item.summary.role) for item in channel.collections] == [
+        (identity_change_view, "comparison")
+    ]
+
+
+def test_unchanged_sources_keep_provisional_channel_corroboration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _synthetic_channel_case(monkeypatch, mono_candidate=True)
+
+    assert result.decision is not None
+    assert result.decision.state == "provisional"
+    assert result.decision.primary_reason == alignment_consensus.CHANNEL_CORROBORATION_REASON
+    assert result.channel_corroboration is not None
+    assert result.channel_corroboration.status == "corroborated"
+
+
+@pytest.mark.parametrize("first_view_failure", [False, True])
+def test_channel_view_arrays_are_released_before_next_loader(
+    monkeypatch: pytest.MonkeyPatch,
+    first_view_failure: bool,
+) -> None:
+    spec = alignment_audio.AudioWindowSpec(0, 32, 0, 32)
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=1_000,
+        requested_sample_rate=1_000,
+        windows=(spec,),
+        peak_fft_points=64,
+        total_fft_points=64,
+        reference_duration_samples=32,
+        comparison_duration_samples=32,
+    )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR"),
+        window_indices=(0,),
+        windows=(spec,),
+        retained_samples_per_view=64,
+    )
+    mono_result = _synthetic_mono_result(plan)
+    first_array_refs: list[weakref.ReferenceType[np.ndarray]] = []
+    loader_calls = 0
+    estimate_calls = 0
+
+    def phase() -> alignment_audio.CollectedAudioPhase:
+        windows = (
+            alignment_audio.AudioWindow(
+                np.ones(32, dtype=np.float32),
+                np.ones(32, dtype=np.float32),
+                0,
+                0,
+            ),
+        )
+        first_array_refs.extend(
+            weakref.ref(array)
+            for window in windows
+            for array in (window.reference, window.comparison)
+        )
+        return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
+
+    def phase_loader(_view: str) -> alignment_audio.CollectedAudioPhase:
+        nonlocal loader_calls
+        loader_calls += 1
+        if loader_calls == 1:
+            return phase()
+        gc.collect()
+        assert all(reference() is None for reference in first_array_refs)
+        return phase()
+
+    def estimate(*_args: object, **_kwargs: object) -> CorrelationEstimate:
+        nonlocal estimate_calls
+        estimate_calls += 1
+        if first_view_failure and estimate_calls == 1:
+            raise AudioAlignmentError("channel correlation failed")
+        return CorrelationEstimate(0, 1.0, 2.0)
+
+    monkeypatch.setattr(alignment_consensus, "estimate_alignment_offset", estimate)
+    monkeypatch.setattr(
+        alignment_consensus,
+        "refine_aligned_score",
+        lambda *_args, **_kwargs: (0, 1.0),
+    )
+
+    result = alignment_consensus.corroborate_channel_views(
+        mono_result,
+        plan=plan,
+        channel_plan=channel_plan,
+        config=AlignmentConfig(sample_rate=1_000, max_offset_seconds=1),
+        fps=Fraction(24),
+        phase_loader=phase_loader,
+    )
+
+    assert loader_calls == 2
+    assert result.applied is False
+
+
+def test_channel_view_arrays_are_released_before_cancellation_rethrows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = alignment_audio.AudioWindowSpec(0, 32, 0, 32)
+    plan = alignment_audio.AudioAnalysisPlan(
+        sample_rate=1_000,
+        requested_sample_rate=1_000,
+        windows=(spec,),
+        peak_fft_points=64,
+        total_fft_points=64,
+        reference_duration_samples=32,
+        comparison_duration_samples=32,
+    )
+    channel_plan = alignment_audio.AudioChannelViewPlan(
+        views=("FL", "FR"),
+        window_indices=(0,),
+        windows=(spec,),
+        retained_samples_per_view=64,
+    )
+    mono_result = _synthetic_mono_result(plan)
+    cancellation = threading.Event()
+    array_refs: list[weakref.ReferenceType[np.ndarray]] = []
+
+    def phase_loader(_view: str) -> alignment_audio.CollectedAudioPhase:
+        windows = (
+            alignment_audio.AudioWindow(
+                np.ones(32, dtype=np.float32),
+                np.ones(32, dtype=np.float32),
+                0,
+                0,
+            ),
+        )
+        array_refs.extend(
+            weakref.ref(array)
+            for window in windows
+            for array in (window.reference, window.comparison)
+        )
+        cancellation.set()
+        return alignment_audio.CollectedAudioPhase(windows=windows, summaries=())
+
+    with pytest.raises(AudioAlignmentCancellationError):
+        try:
+            alignment_consensus.corroborate_channel_views(
+                mono_result,
+                plan=plan,
+                channel_plan=channel_plan,
+                config=AlignmentConfig(sample_rate=1_000, max_offset_seconds=1),
+                fps=Fraction(24),
+                phase_loader=phase_loader,
+                cancellation=cancellation,
+            )
+        except AudioAlignmentCancellationError:
+            gc.collect()
+            assert all(reference() is None for reference in array_refs)
+            raise

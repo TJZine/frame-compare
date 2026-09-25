@@ -6,7 +6,15 @@ const vm = require('node:vm');
 const viewportPath = path.join(
     __dirname, '..', '..', 'src', 'frame_compare', 'services', 'report', 'assets', 'viewport.js'
 );
-const context = {};
+const context = {
+    document: {
+        createElement(tagName) {
+            const node = element();
+            node.tagName = String(tagName).toUpperCase();
+            return node;
+        },
+    },
+};
 vm.runInNewContext(
     `${fs.readFileSync(viewportPath, 'utf8')}\nglobalThis.__Viewport = Viewport;`,
     context,
@@ -19,7 +27,9 @@ function element(rect = { left: 0, top: 0, width: 200, height: 100, right: 200 }
         textContent: '',
         dataset: {},
         attributes: {},
+        children: [],
         classes: new Set(),
+        replaceChildren(...children) { this.children = children; },
         style: {
             values: {},
             setProperty(name, value) { this.values[name] = value; },
@@ -44,7 +54,7 @@ function makeViewer() {
     const sizer = element({ left: 0, top: 0, width: 200, height: 100, right: 200 });
     const refresh = { grid: 0, lens: 0 };
     const persistence = { calls: 0 };
-    const fitButtons = ['actual', 'width', 'height'].map(fit => {
+    const fitButtons = ['actual', 'height'].map(fit => {
         const button = element();
         button.dataset.fit = fit;
         return button;
@@ -95,7 +105,7 @@ function makeViewer() {
         },
         clipCount() { return this.state.data.clips.length; },
         syncRadioGroupTabStops() {},
-        persistViewportState() {
+        persistViewerState() {
             persistence.calls += 1;
             this.viewport.storeCurrentPairAlignment();
         },

@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 import frame_compare.services.tmdb_resolution as tmdb_resolution
+from frame_compare.services.errors import TmdbRateLimitedError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.tmdb_resolution import resolve_tmdb_match
@@ -413,6 +414,63 @@ async def test_resolve_tmdb_match_searches_variants_with_bounded_concurrency(
     assert outcome.candidates == []
     assert request_count > tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
     assert 1 < max_active_requests <= tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_resolve_tmdb_match_preserves_results_when_search_variant_fails(
+    async_client_factory: AsyncClientFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search/movie"):
+            return httpx.Response(503)
+        if request.url.path.endswith("/search/tv"):
+            return httpx.Response(200, json={"results": []})
+        if request.url.path.endswith("/alternative_titles"):
+            return httpx.Response(200, json={"titles": []})
+        return httpx.Response(
+            200,
+            json={"results": [_movie_result(329865, "Arrival", "2016-11-10")]},
+        )
+
+    monkeypatch.setattr(
+        tmdb_resolution.log,
+        "warning",
+        lambda event, **fields: warnings.append({"event": event, **fields}),
+    )
+    config = MetadataConfig(api_key="a" * 32)
+    parsed = ParsedMetadata(title="Arrival", year=2016)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        outcome = await resolve_tmdb_match(parsed, config, client)
+
+    assert outcome.selected is not None
+    assert outcome.selected.tmdb_id == 329865
+    assert warnings == [
+        {
+            "event": "tmdb_search_variants_degraded",
+            "failed_request_count": 2,
+            "total_request_count": 6,
+            "error_types": ["TmdbError"],
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_resolve_tmdb_match_raises_first_error_when_all_variants_fail(
+    async_client_factory: AsyncClientFactory,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search/multi") and request.url.params.get("year"):
+            return httpx.Response(429)
+        return httpx.Response(503)
+
+    config = MetadataConfig(api_key="a" * 32)
+    parsed = ParsedMetadata(title="Arrival", year=2016)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        with pytest.raises(TmdbRateLimitedError):
+            await resolve_tmdb_match(parsed, config, client)
 
 
 @pytest.mark.anyio

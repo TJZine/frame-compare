@@ -6,11 +6,21 @@ import json
 from typing import TYPE_CHECKING, Protocol, cast
 
 import typer
-from rich.console import Console
 from rich.markup import escape
+from rich.table import Table
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.errors import FrameCompareError, JSONValue
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    FAIL,
+    MUTED,
+    OK,
+    WARN,
+    GlyphSet,
+    glyphs_for_console,
+    human_console,
+)
 
 from .cli_helpers import HandleErrorFn
 
@@ -70,7 +80,7 @@ def handle_doctor(
         payload = doctor_report_json(report)
         typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     else:
-        print_doctor_report(report)
+        print_doctor_report(report, no_color=no_color)
 
     if report.critical_failures:
         raise typer.Exit(code=int(ExitCode.DEPENDENCY_ERROR))
@@ -113,38 +123,35 @@ def doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
     return payload
 
 
-def print_doctor_report(report: DoctorReport) -> None:
-    """Print the readiness outcome and grouped human-readable doctor results."""
-    console = Console()
+def print_doctor_report(report: DoctorReport, *, no_color: bool = False) -> None:
+    """Print the grouped human-readable doctor results and the readiness verdict."""
+    console = human_console(no_color=no_color)
+    glyphs = glyphs_for_console(console)
     critical_failures = set(report.critical_failures)
-    needs_attention = any(
-        check.name not in critical_failures
-        and (not result.passed or (check.category == "optional" and result.available is False))
-        for check, result in report.checks
-    )
-    if critical_failures:
-        readiness_status = "FAIL"
-        readiness_message = "Runtime is not ready for comparisons."
-    elif needs_attention:
-        readiness_status = "WARN"
-        readiness_message = (
-            "Ready for local comparisons; optional or network checks need attention."
+
+    rendered_groups = [
+        (
+            heading,
+            [(check, result) for check, result in report.checks if check.category == category],
         )
-    else:
-        readiness_status = "OK"
-        readiness_message = "Runtime is ready for comparisons."
-
-    console.print(f"{_doctor_status_marker(readiness_status)} {readiness_message}")
-
-    for category, heading in _DOCTOR_GROUPS:
-        grouped_checks = [
-            (check, result) for check, result in report.checks if check.category == category
-        ]
+        for category, heading in _DOCTOR_GROUPS
+    ]
+    started = False
+    name_width = max(
+        [len(_doctor_display_label(check.name)) for check, _ in report.checks],
+        default=0,
+    )
+    for heading, grouped_checks in rendered_groups:
         if not grouped_checks:
             continue
-
-        console.print()
-        console.print(escape(heading))
+        if started:
+            console.print()
+        started = True
+        console.print(f"[bold {ACCENT}]{escape(heading)}[/]")
+        table = Table(box=None, show_header=False, padding=(0, 1, 0, 2), show_edge=False)
+        table.add_column("status", width=1)
+        table.add_column("check", style="bold", width=name_width)
+        table.add_column("message", overflow="fold")
         for check, result in grouped_checks:
             status = _doctor_status(
                 check_name=check.name,
@@ -153,12 +160,42 @@ def print_doctor_report(report: DoctorReport) -> None:
                 available=result.available,
                 critical_failures=critical_failures,
             )
-            label = _doctor_display_label(check.name)
-            console.print(
-                f"  {_doctor_status_marker(status)} {escape(label)} — {escape(result.message)}"
+            table.add_row(
+                _doctor_status_glyph(glyphs, status),
+                escape(_doctor_display_label(check.name)),
+                escape(result.message),
             )
             if result.hint:
-                console.print(f"    Hint: {escape(result.hint)}")
+                table.add_row("", "", f"[{MUTED}]hint[/] {escape(result.hint)}")
+        console.print(table)
+
+    failed_count = len(critical_failures)
+    warning_count = sum(
+        _doctor_status(
+            check_name=check.name,
+            category=check.category,
+            passed=result.passed,
+            available=result.available,
+            critical_failures=critical_failures,
+        )
+        == "WARN"
+        for check, result in report.checks
+    )
+    if critical_failures:
+        verdict = f"[bold {FAIL}]{glyphs.failed} Runtime is not ready for comparisons.[/]"
+    else:
+        verdict = f"[bold {OK}]{glyphs.ok} Runtime is ready for comparisons.[/]"
+    parts: list[str] = []
+    if failed_count:
+        noun = "check" if failed_count == 1 else "checks"
+        parts.append(f"{failed_count} required {noun} failed")
+    if warning_count:
+        noun = "warning" if warning_count == 1 else "warnings"
+        parts.append(f"{warning_count} {noun}")
+    if parts:
+        verdict += f" [{MUTED}]{escape(' · '.join(parts))}[/]"
+    console.print()
+    console.print(verdict)
 
 
 def _doctor_display_label(check_name: str) -> str:
@@ -182,5 +219,11 @@ def _doctor_status(
     return "OK"
 
 
-def _doctor_status_marker(status: str) -> str:
-    return escape(f"[{status}]")
+def _doctor_status_glyph(glyphs: GlyphSet, status: str) -> str:
+    if status == "FAIL":
+        return f"[{FAIL}]{glyphs.failed}[/]"
+    if status == "WARN":
+        return f"[{WARN}]{glyphs.warning}[/]"
+    if status == "SKIP":
+        return f"[{MUTED}]{glyphs.skipped}[/]"
+    return f"[{OK}]{glyphs.ok}[/]"

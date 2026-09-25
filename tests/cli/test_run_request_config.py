@@ -14,6 +14,7 @@ from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from .cli_helpers import (
     MINIMAL_CONFIG,
     _invoke_run_with_minimal_workspace,
+    _normalize_cli_help,
     isolated_cli_filesystem,
     runner,
 )
@@ -399,8 +400,93 @@ def test_run_negative_metric_count_uses_owned_human_error_contract(
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stdout == ""
     assert "--motion-frame-count must be a non-negative integer" in result.stderr
+    assert "Hint: Example: --motion-frame-count 3" in _normalize_cli_help(result.stderr)
     assert "Usage:" not in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_run_invalid_frames_names_option_and_example(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid frame selectors")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        ["--frames", "abc"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "--frames must contain only non-negative integers" in result.stderr
+    assert "Hint: Example: --frames 12,48,100" in _normalize_cli_help(result.stderr)
+
+
+def test_run_invalid_overlay_names_flag_and_choices_without_verbose(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        ["--overlay", "banana"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    stderr = _normalize_cli_help(result.stderr)
+    assert "Invalid value for --overlay: banana" in stderr
+    expected_choices = ", ".join(member.value for member in OverlayMode)
+    assert f"Choose one of: {expected_choices}." in stderr
+    assert "Usage:" not in stderr
+    assert "Traceback" not in stderr
+
+
+def test_run_invalid_tm_preset_names_flag_and_choices_without_verbose(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        ["--tm-preset", "bogus"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    stderr = _normalize_cli_help(result.stderr)
+    assert "Invalid value for --tm-preset: bogus" in stderr
+    expected_choices = ", ".join(member.value for member in TonemapPreset)
+    assert f"Choose one of: {expected_choices}." in stderr
+
+
+def test_run_invalid_tm_curve_names_flag_and_choices_without_verbose(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        ["--tm-curve", "bogus"], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    stderr = _normalize_cli_help(result.stderr)
+    assert "Invalid value for --tm-curve: bogus" in stderr
+    expected_choices = ", ".join(member.value for member in ToneCurve)
+    assert f"Choose one of: {expected_choices}." in stderr
 
 
 def test_run_skip_analysis_metric_count_uses_owned_human_error_contract(

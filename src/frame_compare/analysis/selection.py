@@ -363,6 +363,8 @@ def _select_random(
     total_frames: int, count: int, seed: int, exclude: set[int], preferred_gap: int
 ) -> list[int]:
     """Select temporally stratified frames via a stable seeded ordering."""
+    if count <= 0:
+        return []
     candidates = sorted(range(total_frames), key=lambda idx: _stable_seeded_order(seed, idx))
     return _select_stratified(candidates, count, exclude, total_frames, preferred_gap)
 

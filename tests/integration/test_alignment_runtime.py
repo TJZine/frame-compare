@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services import alignment_consensus
+from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
+from frame_compare.services.alignment_math import samples_to_frames
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
@@ -16,6 +20,10 @@ _DURATION_SECONDS = 3
 _SAMPLE_RATE = 48000
 _FPS = 10
 _VIDEO_SIZE = "32x32"
+
+
+def align_clips_from_request(*args: object, **kwargs: object):
+    return asyncio.run(_align_clips_from_request(*args, **kwargs))
 
 
 def _run_ffmpeg(argv: list[str]) -> None:
@@ -168,12 +176,17 @@ def _write_multi_stream_clip(
     )
 
 
-def _assert_applied_offset(result: AlignmentResult, *, frame_offset: int) -> None:
+def _assert_accepted_offset(result: AlignmentResult, *, frame_offset: int) -> None:
     assert result.applied is True
     assert result.source == "computed"
     assert result.frame_offset == frame_offset
-    assert result.time_offset_seconds == pytest.approx(frame_offset / _FPS, abs=1 / _SAMPLE_RATE)
+    assert result.time_offset_seconds is not None
+    assert result.diagnostic == "accepted"
     assert result.correlation_score > 0.9
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.decision.state == "trusted_automatic"
+    assert result.audio_attempt.decision.candidate is not None
+    assert result.audio_attempt.decision.candidate.frame_offset == frame_offset
 
 
 @pytest.mark.integration
@@ -214,7 +227,7 @@ def test_alignment_recovers_known_offset_from_generated_media(
     results = align_clips_from_request(request, config)
 
     assert len(results) == 1
-    _assert_applied_offset(results[0], frame_offset=-2)
+    _assert_accepted_offset(results[0], frame_offset=-2)
     downmix_request = alignment_request(
         reference=reference,
         comparisons=[comparison],
@@ -224,7 +237,151 @@ def test_alignment_recovers_known_offset_from_generated_media(
     )
     downmix_results = align_clips_from_request(downmix_request, downmix_config)
     assert downmix_results[0].applied is False
-    assert downmix_results[0].diagnostic == "low_confidence"
+    assert downmix_results[0].diagnostic == "no_voting_windows"
+
+
+_LONG_CLIP_SECONDS = 65
+
+
+def _write_long_clip(path: Path, *, delay_ms: int = 0, packet_samples: int = 960) -> None:
+    if packet_samples == 960 and delay_ms % 20:
+        raise ValueError("delay_ms must align to the 20 ms packet framing")
+    # 65 s of audio forces the planner past the full-rate FFT budget, so
+    # analysis runs downsampled while fallback windows are scored at the
+    # requested 48 kHz rate.
+    #
+    # The default 960-sample framing produces exact 20 ms Matroska timestamps.
+    # The non-packet-aligned regression deliberately passes 1001 instead, making
+    # millisecond timestamp quantization produce deterministic subframe variance
+    # between post-seek windows. The delay remains exactly two video frames.
+    noise = (
+        f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}"
+        f":duration={_LONG_CLIP_SECONDS}:seed=917,asetnsamples={packet_samples}"
+    )
+    argv = [
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=black:s=16x16:r={_FPS}:d={_LONG_CLIP_SECONDS}",
+        "-f",
+        "lavfi",
+        "-i",
+        noise,
+    ]
+    if delay_ms:
+        argv += [
+            "-filter_complex",
+            f"[1:a]adelay={delay_ms}:all=1,atrim=0:{_LONG_CLIP_SECONDS},"
+            f"asetnsamples={packet_samples}[delayed]",
+            "-map",
+            "0:v:0",
+            "-map",
+            "[delayed]",
+        ]
+    else:
+        argv += ["-map", "0:v:0", "-map", "1:a:0"]
+    argv += [
+        "-c:v",
+        "ffv1",
+        "-c:a",
+        "pcm_s16le",
+        "-shortest",
+        str(path),
+    ]
+    _run_ffmpeg(argv)
+
+
+@pytest.mark.integration
+def test_long_48k_alignment_scores_fallback_windows_at_requested_rate(
+    tmp_path: Path,
+    require_ffmpeg: None,
+) -> None:
+    reference = tmp_path / "long-reference.mkv"
+    comparison = tmp_path / "long-comparison.mkv"
+    generated_dir = tmp_path / "cache"
+    generated_dir.mkdir()
+    _write_long_clip(reference)
+    _write_long_clip(comparison, delay_ms=200)
+    config = AlignmentConfig(
+        cache_results=False,
+        sample_rate=48000,
+        max_offset_seconds=1.0,
+        confidence_threshold=0.9,
+    )
+
+    request = alignment_request(
+        reference=reference,
+        # The self pair pins the fallback path at zero offset while the
+        # delayed pair proves the requested-rate result is genuinely
+        # discriminating: a constant-zero implementation fails the second
+        # assertion. Both are deterministic because _write_long_clip aligns
+        # audio packetization to exact millisecond timestamps (see above).
+        comparisons=[reference, comparison],
+        config=config,
+        generated_dir=generated_dir,
+        fps_num=_FPS,
+    )
+    results = align_clips_from_request(request, config)
+
+    assert len(results) == 2
+    by_clip = {result.comparison_clip: result for result in results}
+    _assert_accepted_offset(by_clip[reference.name], frame_offset=0)
+    _assert_accepted_offset(by_clip[comparison.name], frame_offset=-2)
+    for result in by_clip.values():
+        assert result.stability is not None
+        assert result.stability.valid_windows == 2
+
+
+@pytest.mark.integration
+def test_long_non_packet_aligned_media_accepts_frame_equivalent_window_offsets(
+    tmp_path: Path,
+    require_ffmpeg: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "unaligned-reference.mkv"
+    comparison = tmp_path / "unaligned-comparison.mkv"
+    generated_dir = tmp_path / "cache"
+    generated_dir.mkdir()
+    _write_long_clip(reference, packet_samples=1001)
+    _write_long_clip(comparison, delay_ms=200, packet_samples=1001)
+    config = AlignmentConfig(
+        cache_results=False,
+        sample_rate=48000,
+        max_offset_seconds=1.0,
+        confidence_threshold=0.9,
+    )
+    captured: list[alignment_consensus.AlignmentConsensus] = []
+    estimate_consensus = alignment_consensus.estimate_staged_consensus_offset
+
+    def capture_consensus(**kwargs: object) -> alignment_consensus.AlignmentConsensus:
+        result = estimate_consensus(**kwargs)  # type: ignore[arg-type]
+        captured.append(result)
+        return result
+
+    monkeypatch.setattr(
+        alignment_consensus,
+        "estimate_staged_consensus_offset",
+        capture_consensus,
+    )
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=generated_dir,
+        fps_num=_FPS,
+    )
+
+    results = align_clips_from_request(request, config)
+
+    assert len(results) == 1
+    _assert_accepted_offset(results[0], frame_offset=-2)
+    assert len(captured) == 1
+    sample_offsets = [item.sample_offset for item in captured[0].window_evidence]
+    assert len(sample_offsets) == 2
+    assert set(sample_offsets) == {-9600}
+    assert {
+        samples_to_frames(offset, config.sample_rate, Fraction(_FPS)) for offset in sample_offsets
+    } == {-2}
 
 
 @pytest.mark.integration
@@ -268,7 +425,7 @@ def test_alignment_selects_runtime_streams_and_keeps_cache_config_distinct(
     )
     default_results = align_clips_from_request(default_request, default_config)
 
-    _assert_applied_offset(default_results[0], frame_offset=-2)
+    _assert_accepted_offset(default_results[0], frame_offset=-2)
 
     override_request = alignment_request(
         reference=reference,
@@ -279,7 +436,7 @@ def test_alignment_selects_runtime_streams_and_keeps_cache_config_distinct(
     )
     override_results = align_clips_from_request(override_request, override_config)
 
-    _assert_applied_offset(override_results[0], frame_offset=-1)
+    _assert_accepted_offset(override_results[0], frame_offset=-1)
 
 
 @pytest.mark.integration
@@ -313,7 +470,7 @@ def test_typed_alignment_writes_shared_reuse_when_previous_offsets_disabled(
     results = align_clips_from_request(request, config)
 
     assert len(results) == 1
-    _assert_applied_offset(results[0], frame_offset=-2)
+    _assert_accepted_offset(results[0], frame_offset=-2)
     assert (shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME).exists()
     assert not (generated_dir / "audio_offsets.toml").exists()
 
@@ -348,4 +505,4 @@ def test_alignment_rejects_weak_signal_without_applying_or_caching(
     assert results[0].applied is False
     assert results[0].frame_offset is None
     assert results[0].time_offset_seconds is None
-    assert results[0].diagnostic == "insufficient_valid_windows"
+    assert results[0].diagnostic == "no_voting_windows"

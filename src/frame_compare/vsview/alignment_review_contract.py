@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeGuard, cast
+from typing import Literal, TypeGuard, cast, get_args
 
 from frame_compare.utils.atomic_write import write_text_atomic
 
-ALIGNMENT_REVIEW_SCHEMA_VERSION = 1
+ALIGNMENT_REVIEW_METADATA_VERSION = 4
+ALIGNMENT_REVIEW_RESULT_VERSION = 1
 ALIGNMENT_REVIEW_RESULT_SUFFIX = ".alignment-result.json"
 VSVIEW_SESSIONS_DIR_NAME = "vsview_sessions"
 
@@ -23,6 +25,7 @@ ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY = "frame_compare_comparison_ordinal"
 ALIGNMENT_REVIEW_METADATA_ROLE_KEY = "frame_compare_output_role"
 ALIGNMENT_REVIEW_METADATA_NAME_KEY = "frame_compare_presentation_name"
 ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY = "frame_compare_suggested_offset"
+ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY = "frame_compare_audio_review"
 ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS = frozenset(
     {
         ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
@@ -40,12 +43,26 @@ ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS = frozenset(
         ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
         ALIGNMENT_REVIEW_METADATA_NAME_KEY,
         ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+        ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     }
 )
 
 
 class AlignmentReviewContractError(ValueError):
     """Raised when an alignment review session or result is untrusted."""
+
+
+type _AuthorityOrigin = Literal[
+    "computed_this_run",
+    "shared_computed_offsets",
+    "interactive_confirmed_this_run",
+    "shared_previous_offsets",
+    "preexisting_manual_override",
+    "none",
+]
+type _EvidenceAvailabilityLiteral = Literal[
+    "current_attempt", "historical_details_unavailable", "not_computed"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +108,19 @@ class AlignmentReviewReferenceMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class AlignmentReviewCurrentAuthority:
+    origin: _AuthorityOrigin
+    frame_offset: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewAudioReview:
+    current_authority: AlignmentReviewCurrentAuthority
+    evidence_availability: _EvidenceAvailabilityLiteral
+    audio_attempt: Mapping[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
 class AlignmentReviewComparisonMetadata:
     output_id: int
     source_frame_count: int
@@ -99,6 +129,7 @@ class AlignmentReviewComparisonMetadata:
     comparison_ordinal: int
     presentation_name: str
     suggested_offset: int | None
+    audio_review: AlignmentReviewAudioReview
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +215,10 @@ type AlignmentReviewDecision = ConfirmedAlignmentReviewDecision | KeepCurrentAli
 class AlignmentReviewResult:
     session_id: str
     decisions: tuple[AlignmentReviewDecision, ...]
-    schema_version: Literal[1] = ALIGNMENT_REVIEW_SCHEMA_VERSION
+    schema_version: Literal[1] = ALIGNMENT_REVIEW_RESULT_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
+        if self.schema_version != ALIGNMENT_REVIEW_RESULT_VERSION:
             raise ValueError("unsupported alignment review result schema")
         _validated_session_id(self.session_id)
 
@@ -326,6 +357,13 @@ def _parse_output_metadata(
     if not _is_int(candidate.source_frame_count) or candidate.source_frame_count <= 0:
         raise AlignmentReviewContractError("alignment review output frame count must be positive")
     metadata = candidate.metadata
+    version = metadata.get(ALIGNMENT_REVIEW_METADATA_VERSION_KEY)
+    if not _is_int(version) or version != ALIGNMENT_REVIEW_METADATA_VERSION:
+        rendered = str(version) if _is_int(version) else "unknown"
+        raise AlignmentReviewContractError(
+            "Alignment review requires a newly generated session. "
+            f"This session uses metadata v{rendered}; this version requires v4."
+        )
     role = metadata.get(ALIGNMENT_REVIEW_METADATA_ROLE_KEY)
     if role == "reference":
         expected_keys = ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS
@@ -335,11 +373,8 @@ def _parse_output_metadata(
         raise AlignmentReviewContractError("alignment review output role is invalid")
     if set(metadata) != set(expected_keys):
         raise AlignmentReviewContractError("alignment review output metadata fields are invalid")
-    version = metadata[ALIGNMENT_REVIEW_METADATA_VERSION_KEY]
     session_id = metadata[ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY]
     name = metadata[ALIGNMENT_REVIEW_METADATA_NAME_KEY]
-    if not _is_int(version) or version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
-        raise AlignmentReviewContractError("unsupported alignment review output metadata version")
     if not isinstance(session_id, str):
         raise AlignmentReviewContractError("alignment review output session identifier is invalid")
     session_id = _validated_session_id(session_id)
@@ -355,12 +390,18 @@ def _parse_output_metadata(
     comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
     ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
     suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
+    audio_review_raw = metadata[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY]
     if not isinstance(comparison_key, str) or not comparison_key:
         raise AlignmentReviewContractError("alignment review output comparison key is invalid")
     if not _is_int(ordinal) or ordinal <= 0:
         raise AlignmentReviewContractError("alignment review output ordinal is invalid")
     if suggested_offset is not None and not _is_int(suggested_offset):
         raise AlignmentReviewContractError("alignment review suggested offset is invalid")
+    audio_review = _parse_audio_review(
+        audio_review_raw,
+        suggested_offset=suggested_offset,
+        comparison_ordinal=ordinal,
+    )
     return AlignmentReviewComparisonMetadata(
         output_id=candidate.output_id,
         source_frame_count=candidate.source_frame_count,
@@ -369,7 +410,1025 @@ def _parse_output_metadata(
         comparison_ordinal=ordinal,
         presentation_name=name,
         suggested_offset=suggested_offset,
+        audio_review=audio_review,
     )
+
+
+_CURRENT_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
+    get_args(_AuthorityOrigin.__value__)
+)
+_EVIDENCE_AVAILABILITY: frozenset[_EvidenceAvailabilityLiteral] = frozenset(
+    get_args(_EvidenceAvailabilityLiteral.__value__)
+)
+_ATTEMPT_KEYS = {
+    "reference_identity_digest",
+    "comparison_identity_digest",
+    "comparison_ordinal",
+    "status",
+    "estimator_policy",
+    "diagnostic_policy",
+    "media_runtime_fingerprint",
+    "ffmpeg_version",
+    "ffprobe_version",
+    "extraction_recipe",
+    "sample_rate",
+    "fps_num",
+    "fps_den",
+    "confidence_threshold",
+    "ambiguity_peak_ratio",
+    "minimum_valid_windows",
+    "consensus_minimum_ratio",
+    "selected_streams",
+    "analysis_rate",
+    "planned_window_count",
+    "peak_fft_points",
+    "total_fft_points",
+    "planning_reason",
+    "windows",
+    "decision",
+    "stability",
+    "collection_observation",
+    "collection_summaries",
+    "channel_corroboration",
+}
+_STREAM_KEYS = {
+    "role",
+    "source_identity_digest",
+    "audio_stream_index",
+    "absolute_stream_index",
+    "selection_method",
+    "selection_rank",
+    "codec_name",
+    "sample_rate",
+    "channels",
+    "channel_layout",
+    "language",
+    "is_default",
+    "is_original",
+    "is_commentary",
+    "language_match",
+    "commentary_match",
+    "stream_start_num",
+    "stream_start_den",
+    "stream_start_basis",
+    "input_start_num",
+    "input_start_den",
+    "input_start_basis",
+    "time_base_num",
+    "time_base_den",
+    "duration_num",
+    "duration_den",
+    "duration_basis",
+}
+_WINDOW_KEYS = {
+    "logical_id",
+    "purpose",
+    "attempt_number",
+    "parent_id",
+    "planned_reference_start",
+    "planned_reference_count",
+    "planned_comparison_start",
+    "planned_comparison_count",
+    "analysis_rate",
+    "requested_rate",
+    "actual_reference_count",
+    "actual_comparison_count",
+    "scoring_reference_count",
+    "scoring_comparison_count",
+    "discovery_reference_count",
+    "discovery_comparison_count",
+    "verification_reference_count",
+    "verification_comparison_count",
+    "continuous_sample_count",
+    "continuous_sample_count_origin",
+    "actual_useful_reference_start",
+    "actual_useful_reference_end",
+    "pre_eof_expected_overlap",
+    "actual_coverage",
+    "coverage_state",
+    "quality_disposition",
+    "effective_aligned_overlap",
+    "origin_basis",
+    "local_lag",
+    "global_analysis_lag",
+    "requested_sample_lag",
+    "requested_frame_candidate",
+    "requested_score",
+    "score_stage",
+    "peak_ratio",
+    "peak_stage",
+    "peak_rate",
+    "review_qualified",
+    "configured_quality",
+    "vote_disposition",
+    "terminal_stage",
+    "terminal_category",
+    "failed_role",
+}
+_DECISION_KEYS = {
+    "state",
+    "candidate",
+    "primary_reason",
+    "raw_correlated_windows",
+    "consensus_windows",
+    "consensus_ratio",
+    "aggregate_score",
+    "minimum_peak_ratio",
+    "credible_windows",
+    "voting_windows",
+    "winning_windows",
+    "independent_windows",
+    "failed_gates",
+    "unassessed_gates",
+}
+_CANDIDATE_KEYS = {
+    "sample_offset",
+    "sample_rate",
+    "frame_offset",
+    "supporting_window_ids",
+    "median_score",
+    "minimum_peak_ratio",
+}
+_STABILITY_KEYS = {
+    "classification",
+    "valid_windows",
+    "offset_min_frames",
+    "offset_max_frames",
+    "first_offset_frames",
+    "last_offset_frames",
+    "largest_adjacent_jump_frames",
+    "change_position_seconds",
+}
+_COLLECTION_KEYS = {
+    "phase",
+    "role",
+    "output_rate",
+    "requested_horizon",
+    "emitted_sample_count",
+    "emitted_byte_count",
+    "retained_sample_count",
+    "retained_byte_count",
+    "status",
+    "end_category",
+    "observed_eof_sample",
+    "elapsed_seconds",
+    "cleanup_failure_count",
+    "failure_count",
+}
+_CHANNEL_CORROBORATION_KEYS = {
+    "status",
+    "reason",
+    "candidate",
+    "independent_windows",
+    "windows",
+    "collections",
+}
+_CHANNEL_COLLECTION_KEYS = {"view", "summary"}
+_CHANNEL_WINDOW_KEYS = {
+    "logical_id",
+    "mono_sample_lag",
+    "corroborated",
+    "representative_sample_lag",
+    "representative_frame_candidate",
+    "actual_useful_reference_start",
+    "actual_useful_reference_end",
+    "agreeing_views",
+    "minimum_credible_score",
+    "minimum_peak_ratio",
+    "contradiction",
+    "reason",
+    "views",
+}
+_CHANNEL_VIEW_KEYS = {
+    "view",
+    "requested_sample_lag",
+    "requested_frame_candidate",
+    "requested_score",
+    "peak_ratio",
+    "actual_reference_count",
+    "actual_comparison_count",
+    "actual_useful_reference_start",
+    "actual_useful_reference_end",
+    "actual_coverage",
+    "activity_valid",
+    "coverage_valid",
+    "base_credible",
+    "agrees",
+    "contradiction",
+    "rejection_reason",
+}
+
+
+def _is_authority_origin(value: object) -> TypeGuard[_AuthorityOrigin]:
+    return isinstance(value, str) and value in _CURRENT_AUTHORITY_ORIGINS
+
+
+def _is_evidence_availability(value: object) -> TypeGuard[_EvidenceAvailabilityLiteral]:
+    return isinstance(value, str) and value in _EVIDENCE_AVAILABILITY
+
+
+def _parse_audio_review(
+    raw: object, *, suggested_offset: int | None, comparison_ordinal: int
+) -> AlignmentReviewAudioReview:
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 128 * 1024:
+        raise AlignmentReviewContractError("alignment review audio evidence is invalid")
+    try:
+        decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
+    root = _strict_dict(
+        decoded,
+        {"current_authority", "evidence_availability", "audio_attempt"},
+        "audio evidence",
+    )
+    authority_raw = _strict_dict(
+        root["current_authority"], {"origin", "frame_offset"}, "current authority"
+    )
+    origin = authority_raw["origin"]
+    frame_offset = authority_raw["frame_offset"]
+    if not _is_authority_origin(origin):
+        raise AlignmentReviewContractError("alignment review current authority origin is invalid")
+    if frame_offset is not None and not _is_int(frame_offset):
+        raise AlignmentReviewContractError("alignment review current authority offset is invalid")
+    if (origin == "none") != (frame_offset is None):
+        raise AlignmentReviewContractError("alignment review current authority is inconsistent")
+    if suggested_offset != frame_offset:
+        raise AlignmentReviewContractError("alignment review trusted offset is inconsistent")
+    availability = root["evidence_availability"]
+    if not _is_evidence_availability(availability):
+        raise AlignmentReviewContractError("alignment review evidence availability is invalid")
+    attempt = root["audio_attempt"]
+    if availability == "current_attempt":
+        _validate_audio_attempt(
+            attempt,
+            suggested_offset=suggested_offset,
+            authority_origin=origin,
+            comparison_ordinal=comparison_ordinal,
+        )
+    else:
+        if attempt is not None:
+            raise AlignmentReviewContractError(
+                "historical alignment evidence must not invent an attempt"
+            )
+        if origin == "computed_this_run":
+            raise AlignmentReviewContractError(
+                "current computed authority requires its trusted attempt"
+            )
+    return AlignmentReviewAudioReview(
+        current_authority=AlignmentReviewCurrentAuthority(origin=origin, frame_offset=frame_offset),
+        evidence_availability=availability,
+        audio_attempt=cast(Mapping[str, object] | None, attempt),
+    )
+
+
+def _validate_audio_attempt(
+    raw: object,
+    *,
+    suggested_offset: int | None,
+    authority_origin: _AuthorityOrigin,
+    comparison_ordinal: int,
+) -> None:
+    attempt = _strict_dict(raw, _ATTEMPT_KEYS, "audio attempt")
+    _bounded_text_fields(
+        attempt,
+        (
+            "estimator_policy",
+            "diagnostic_policy",
+            "media_runtime_fingerprint",
+            "ffmpeg_version",
+            "ffprobe_version",
+            "extraction_recipe",
+        ),
+    )
+    _require_int_fields(
+        attempt,
+        (
+            "comparison_ordinal",
+            "sample_rate",
+            "fps_num",
+            "fps_den",
+            "minimum_valid_windows",
+            "planned_window_count",
+        ),
+    )
+    if attempt["comparison_ordinal"] != comparison_ordinal:
+        raise AlignmentReviewContractError("alignment review attempt ordinal is inconsistent")
+    for digest_name in ("reference_identity_digest", "comparison_identity_digest"):
+        digest = attempt[digest_name]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            raise AlignmentReviewContractError("alignment review source identity is invalid")
+    status = attempt["status"]
+    if status not in {"complete", "preanalysis_rejection", "aborted"}:
+        raise AlignmentReviewContractError("alignment review attempt status is invalid")
+    if (
+        cast(int, attempt["sample_rate"]) <= 0
+        or cast(int, attempt["fps_num"]) <= 0
+        or cast(int, attempt["fps_den"]) <= 0
+        or cast(int, attempt["minimum_valid_windows"]) <= 0
+        or not 0 <= cast(int, attempt["planned_window_count"]) <= 16
+    ):
+        raise AlignmentReviewContractError("alignment review attempt bounds are invalid")
+    _require_number_fields(
+        attempt,
+        ("confidence_threshold", "ambiguity_peak_ratio", "consensus_minimum_ratio"),
+    )
+    _require_nullable_int_fields(attempt, ("analysis_rate", "peak_fft_points", "total_fft_points"))
+    observation = attempt["collection_observation"]
+    if observation not in {"observed", "not_observed"}:
+        raise AlignmentReviewContractError("alignment review collection observation is invalid")
+    collections = attempt["collection_summaries"]
+    if not isinstance(collections, list):
+        raise AlignmentReviewContractError("alignment review collection summaries are invalid")
+    typed_collections = cast(list[object], collections)
+    if len(typed_collections) > 4:
+        raise AlignmentReviewContractError("alignment review collection summaries are invalid")
+    if observation == "not_observed" and typed_collections:
+        raise AlignmentReviewContractError("unobserved alignment collection facts must be absent")
+    collection_keys: set[tuple[object, object]] = set()
+    for collection in typed_collections:
+        data = _strict_dict(collection, _COLLECTION_KEYS, "collection summary")
+        _validate_collection_summary(data, collection_keys)
+    if observation == "observed" and not typed_collections:
+        raise AlignmentReviewContractError("observed alignment collection facts are absent")
+    streams = attempt["selected_streams"]
+    windows = attempt["windows"]
+    if not isinstance(streams, list):
+        raise AlignmentReviewContractError("alignment review selected streams are invalid")
+    typed_streams = cast(list[object], streams)
+    if len(typed_streams) != 2:
+        raise AlignmentReviewContractError("alignment review selected streams are invalid")
+    typed_stream_data: list[dict[str, object]] = []
+    for stream in typed_streams:
+        data = _strict_dict(stream, _STREAM_KEYS, "selected stream")
+        typed_stream_data.append(data)
+        _require_int_fields(
+            data,
+            (
+                "audio_stream_index",
+                "absolute_stream_index",
+                "stream_start_num",
+                "stream_start_den",
+                "input_start_num",
+                "input_start_den",
+            ),
+        )
+        _require_nullable_int_fields(
+            data,
+            (
+                "sample_rate",
+                "channels",
+                "time_base_num",
+                "time_base_den",
+                "duration_num",
+                "duration_den",
+            ),
+        )
+        _require_bool_fields(data, ("is_default", "is_original", "is_commentary"))
+        if (
+            cast(int, data["audio_stream_index"]) < 0
+            or cast(int, data["absolute_stream_index"]) < 0
+            or cast(int, data["stream_start_den"]) <= 0
+            or cast(int, data["input_start_den"]) <= 0
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review selected stream bounds are invalid"
+            )
+        if data["selection_method"] not in {"explicit_override", "automatic_metadata"}:
+            raise AlignmentReviewContractError("alignment review stream selection is invalid")
+        if data["stream_start_basis"] not in {"metadata", "default_zero"} or data[
+            "input_start_basis"
+        ] not in {"metadata", "default_zero"}:
+            raise AlignmentReviewContractError("alignment review stream timing basis is invalid")
+        for match_name in ("language_match", "commentary_match"):
+            if data[match_name] not in {"match", "mismatch", "unknown", "not_applicable"}:
+                raise AlignmentReviewContractError("alignment review stream match is invalid")
+        _validate_scalar_tree(data)
+    if tuple(stream["role"] for stream in typed_stream_data) != ("reference", "comparison"):
+        raise AlignmentReviewContractError("alignment review selected stream roles are invalid")
+    if (
+        typed_stream_data[0]["source_identity_digest"] != attempt["reference_identity_digest"]
+        or typed_stream_data[1]["source_identity_digest"] != attempt["comparison_identity_digest"]
+    ):
+        raise AlignmentReviewContractError("alignment review selected stream identity is invalid")
+    if not isinstance(windows, list):
+        raise AlignmentReviewContractError("alignment review windows are invalid")
+    typed_windows = cast(list[object], windows)
+    if len(typed_windows) > 18:
+        raise AlignmentReviewContractError("alignment review windows are invalid")
+    window_ids: list[str] = []
+    primary_window_ids: set[str] = set()
+    primary_count = 0
+    correlated_count = 0
+    for window in typed_windows:
+        data = _strict_dict(window, _WINDOW_KEYS, "window")
+        logical_id = data["logical_id"]
+        if not isinstance(logical_id, str) or not logical_id:
+            raise AlignmentReviewContractError("alignment review window identifier is invalid")
+        window_ids.append(logical_id)
+        if data["purpose"] == "primary":
+            primary_count += 1
+            primary_window_ids.add(logical_id)
+        elif data["purpose"] not in {"disputed_recheck", "zero_check"}:
+            raise AlignmentReviewContractError("alignment review window purpose is invalid")
+        if data["terminal_category"] == "correlated":
+            correlated_count += 1
+        _require_int_fields(
+            data,
+            (
+                "attempt_number",
+                "planned_reference_start",
+                "planned_reference_count",
+                "planned_comparison_start",
+                "planned_comparison_count",
+                "analysis_rate",
+                "requested_rate",
+            ),
+        )
+        _require_nullable_int_fields(
+            data,
+            (
+                "actual_reference_count",
+                "actual_comparison_count",
+                "scoring_reference_count",
+                "scoring_comparison_count",
+                "discovery_reference_count",
+                "discovery_comparison_count",
+                "verification_reference_count",
+                "verification_comparison_count",
+                "continuous_sample_count",
+                "actual_useful_reference_start",
+                "actual_useful_reference_end",
+                "pre_eof_expected_overlap",
+                "effective_aligned_overlap",
+                "peak_rate",
+            ),
+            minimum=0,
+        )
+        _require_nullable_int_fields(data, ("requested_sample_lag", "requested_frame_candidate"))
+        _require_bool_fields(data, ("review_qualified", "configured_quality"))
+        if (
+            cast(int, data["attempt_number"]) <= 0
+            or cast(int, data["planned_reference_start"]) < 0
+            or cast(int, data["planned_reference_count"]) < 0
+            or cast(int, data["planned_comparison_start"]) < 0
+            or cast(int, data["planned_comparison_count"]) < 0
+            or cast(int, data["analysis_rate"]) <= 0
+            or cast(int, data["requested_rate"]) <= 0
+        ):
+            raise AlignmentReviewContractError("alignment review window bounds are invalid")
+        if data["origin_basis"] not in {"planned_assumption", "not_measured"}:
+            raise AlignmentReviewContractError("alignment review window origin is invalid")
+        if data["continuous_sample_count_origin"] not in {
+            "discovery",
+            "verification",
+            "not_observed",
+        }:
+            raise AlignmentReviewContractError(
+                "alignment review continuous sample origin is invalid"
+            )
+        continuous_count = data["continuous_sample_count"]
+        if continuous_count is None and data["continuous_sample_count_origin"] != "not_observed":
+            raise AlignmentReviewContractError(
+                "alignment review continuous sample origin is inconsistent"
+            )
+        if (
+            continuous_count is not None
+            and data["continuous_sample_count_origin"] == "not_observed"
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review continuous sample origin is inconsistent"
+            )
+        useful_start = data["actual_useful_reference_start"]
+        useful_end = data["actual_useful_reference_end"]
+        if (useful_start is None) != (useful_end is None):
+            raise AlignmentReviewContractError(
+                "alignment review useful reference interval is inconsistent"
+            )
+        if (
+            useful_start is not None
+            and useful_end is not None
+            and cast(int, useful_end) < cast(int, useful_start)
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review useful reference interval is invalid"
+            )
+        _require_nullable_number_fields(data, ("actual_coverage",))
+        coverage = data["actual_coverage"]
+        if coverage is not None and not 0 <= cast(float, coverage) <= 1:
+            raise AlignmentReviewContractError("alignment review actual coverage is invalid")
+        if data["coverage_state"] not in {"complete", "short", "empty", "not_observed"}:
+            raise AlignmentReviewContractError("alignment review coverage state is invalid")
+        if data["coverage_state"] == "not_observed" and any(
+            value is not None
+            for value in (
+                coverage,
+                data["actual_useful_reference_start"],
+                data["actual_useful_reference_end"],
+                data["pre_eof_expected_overlap"],
+            )
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review unobserved coverage includes observed facts"
+            )
+        if data["quality_disposition"] not in {"qualified", "rejected", "not_observed"}:
+            raise AlignmentReviewContractError("alignment review quality disposition is invalid")
+        if data["vote_disposition"] not in {"voted", "abstained", "failed"}:
+            raise AlignmentReviewContractError("alignment review window vote is invalid")
+        _require_nullable_number_fields(
+            data,
+            ("local_lag", "global_analysis_lag", "requested_score", "peak_ratio"),
+        )
+        _validate_scalar_tree(data)
+    if len(set(window_ids)) != len(window_ids):
+        raise AlignmentReviewContractError("alignment review window identifiers are duplicated")
+    if primary_count != attempt["planned_window_count"]:
+        raise AlignmentReviewContractError("alignment review planned window count is inconsistent")
+    _validate_channel_corroboration(
+        attempt["channel_corroboration"],
+        primary_window_ids=primary_window_ids,
+    )
+    decision = _strict_dict(attempt["decision"], _DECISION_KEYS, "audio decision")
+    _validate_scalar_tree(decision, skip=("candidate",))
+    state = decision["state"]
+    candidate = decision["candidate"]
+    if state not in {"trusted_automatic", "provisional", "unavailable"}:
+        raise AlignmentReviewContractError("alignment review audio decision is invalid")
+    if status != "complete" and state != "unavailable":
+        raise AlignmentReviewContractError(
+            "non-complete alignment attempts require an unavailable decision"
+        )
+    if state != "trusted_automatic" and authority_origin in {
+        "computed_this_run",
+        "shared_computed_offsets",
+    }:
+        raise AlignmentReviewContractError("untrusted audio evidence became authoritative")
+    _require_int_fields(
+        decision,
+        (
+            "raw_correlated_windows",
+            "consensus_windows",
+            "credible_windows",
+            "voting_windows",
+            "winning_windows",
+            "independent_windows",
+        ),
+    )
+    if decision["raw_correlated_windows"] != correlated_count:
+        raise AlignmentReviewContractError(
+            "alignment review correlated window count is inconsistent"
+        )
+    if not 0 <= cast(int, decision["consensus_windows"]) <= correlated_count:
+        raise AlignmentReviewContractError("alignment review consensus window count is invalid")
+    if not 0 <= cast(int, decision["credible_windows"]) <= correlated_count:
+        raise AlignmentReviewContractError("alignment review credible window count is invalid")
+    if not 0 <= cast(int, decision["voting_windows"]) <= cast(int, decision["credible_windows"]):
+        raise AlignmentReviewContractError("alignment review voting window count is invalid")
+    if not 0 <= cast(int, decision["winning_windows"]) <= cast(int, decision["voting_windows"]):
+        raise AlignmentReviewContractError("alignment review winning window count is invalid")
+    if not 0 <= cast(int, decision["independent_windows"]) <= cast(int, decision["voting_windows"]):
+        raise AlignmentReviewContractError("alignment review independent window count is invalid")
+    _require_nullable_number_fields(
+        decision, ("consensus_ratio", "aggregate_score", "minimum_peak_ratio")
+    )
+    if state == "unavailable":
+        if candidate is not None:
+            raise AlignmentReviewContractError("unavailable audio evidence has a candidate")
+    else:
+        candidate_data = _strict_dict(candidate, _CANDIDATE_KEYS, "audio candidate")
+        _require_int_fields(candidate_data, ("sample_offset", "sample_rate", "frame_offset"))
+        _require_number_fields(candidate_data, ("median_score",))
+        _require_peak_ratio(candidate_data, "minimum_peak_ratio", nullable=False)
+        _validate_scalar_tree(candidate_data)
+        supporting = candidate_data["supporting_window_ids"]
+        if not isinstance(supporting, list):
+            raise AlignmentReviewContractError("alignment review candidate support is invalid")
+        typed_supporting = cast(list[object], supporting)
+        if not typed_supporting or any(not isinstance(item, str) for item in typed_supporting):
+            raise AlignmentReviewContractError("alignment review candidate support is invalid")
+        supporting_ids = cast(list[str], typed_supporting)
+        if len(set(supporting_ids)) != len(supporting_ids) or not set(supporting_ids) <= set(
+            window_ids
+        ):
+            raise AlignmentReviewContractError("alignment review candidate support is invalid")
+        candidate_offset = candidate_data["frame_offset"]
+        if not _is_int(candidate_offset):
+            raise AlignmentReviewContractError("alignment review candidate offset is invalid")
+        if state == "trusted_automatic" and (
+            authority_origin != "computed_this_run" or suggested_offset != candidate_offset
+        ):
+            raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
+    stability = attempt["stability"]
+    if stability is not None:
+        stability_data = _strict_dict(stability, _STABILITY_KEYS, "stability")
+        _require_int_fields(stability_data, ("valid_windows",))
+        _require_nullable_int_fields(
+            stability_data,
+            (
+                "offset_min_frames",
+                "offset_max_frames",
+                "first_offset_frames",
+                "last_offset_frames",
+                "largest_adjacent_jump_frames",
+            ),
+        )
+        _require_nullable_number_fields(stability_data, ("change_position_seconds",))
+        _validate_scalar_tree(stability_data)
+    _validate_scalar_tree(
+        attempt,
+        skip=(
+            "selected_streams",
+            "windows",
+            "decision",
+            "stability",
+            "collection_summaries",
+            "channel_corroboration",
+        ),
+    )
+
+
+def _validate_channel_corroboration(
+    raw: object,
+    *,
+    primary_window_ids: set[str],
+) -> None:
+    if raw is None:
+        return
+    data = _strict_dict(raw, _CHANNEL_CORROBORATION_KEYS, "channel corroboration")
+    if data["status"] not in {"corroborated", "rejected"}:
+        raise AlignmentReviewContractError("channel corroboration status is invalid")
+    if not isinstance(data["reason"], str) or not data["reason"]:
+        raise AlignmentReviewContractError("channel corroboration reason is invalid")
+    _require_int_fields(data, ("independent_windows",))
+    if cast(int, data["independent_windows"]) < 0:
+        raise AlignmentReviewContractError("channel corroboration support is invalid")
+    candidate = data["candidate"]
+    if (data["status"] == "corroborated") != (candidate is not None):
+        raise AlignmentReviewContractError("channel corroboration candidate is inconsistent")
+    if candidate is not None:
+        candidate_data = _strict_dict(candidate, _CANDIDATE_KEYS, "channel candidate")
+        _require_int_fields(candidate_data, ("sample_offset", "sample_rate", "frame_offset"))
+        _require_number_fields(candidate_data, ("median_score",))
+        _require_peak_ratio(candidate_data, "minimum_peak_ratio", nullable=False)
+        supporting = candidate_data["supporting_window_ids"]
+        if not isinstance(supporting, list):
+            raise AlignmentReviewContractError("channel candidate support is invalid")
+        typed_supporting = cast(list[object], supporting)
+        if not typed_supporting or any(
+            not isinstance(item, str) or not item for item in typed_supporting
+        ):
+            raise AlignmentReviewContractError("channel candidate support is invalid")
+        if len(set(cast(list[str], typed_supporting))) != len(typed_supporting):
+            raise AlignmentReviewContractError("channel candidate support is invalid")
+    collections = data["collections"]
+    if not isinstance(collections, list):
+        raise AlignmentReviewContractError("channel collection summaries are invalid")
+    typed_collections = cast(list[object], collections)
+    if len(typed_collections) > 6:
+        raise AlignmentReviewContractError("channel collection summaries are invalid")
+    collection_keys: set[tuple[object, object]] = set()
+    for collection in typed_collections:
+        collection_data = _strict_dict(collection, _CHANNEL_COLLECTION_KEYS, "channel collection")
+        view = collection_data["view"]
+        if view not in {"FL", "FR", "FC"}:
+            raise AlignmentReviewContractError("channel collection view is invalid")
+        summary = _strict_dict(
+            collection_data["summary"], _COLLECTION_KEYS, "channel collection summary"
+        )
+        role = summary["role"]
+        key = (view, role)
+        if key in collection_keys:
+            raise AlignmentReviewContractError("channel collection summaries are duplicated")
+        collection_keys.add(key)
+        _validate_collection_summary(summary, set())
+    windows = data["windows"]
+    if not isinstance(windows, list):
+        raise AlignmentReviewContractError("channel corroboration windows are invalid")
+    typed_windows = cast(list[object], windows)
+    if len(typed_windows) > 16:
+        raise AlignmentReviewContractError("channel corroboration windows are invalid")
+    window_ids: set[str] = set()
+    for window in typed_windows:
+        window_data = _strict_dict(window, _CHANNEL_WINDOW_KEYS, "channel window")
+        logical_id = window_data["logical_id"]
+        if (
+            not isinstance(logical_id, str)
+            or not logical_id
+            or logical_id in window_ids
+            or logical_id not in primary_window_ids
+        ):
+            raise AlignmentReviewContractError("channel window identifier is invalid")
+        window_ids.add(logical_id)
+        _require_int_fields(window_data, ("mono_sample_lag",))
+        _require_nullable_int_fields(
+            window_data,
+            ("representative_sample_lag", "representative_frame_candidate"),
+        )
+        _require_nullable_int_fields(
+            window_data,
+            ("actual_useful_reference_start", "actual_useful_reference_end"),
+            minimum=0,
+        )
+        _require_bool_fields(window_data, ("corroborated", "contradiction"))
+        _require_nullable_number_fields(window_data, ("minimum_credible_score",))
+        _require_peak_ratio(window_data, "minimum_peak_ratio", nullable=True)
+        reason = window_data["reason"]
+        if not isinstance(reason, str) or not reason:
+            raise AlignmentReviewContractError("channel window reason is invalid")
+        agreeing = window_data["agreeing_views"]
+        if not isinstance(agreeing, list):
+            raise AlignmentReviewContractError("channel agreeing views are invalid")
+        typed_agreeing = cast(list[object], agreeing)
+        if any(view not in {"FL", "FR", "FC"} for view in typed_agreeing) or len(
+            set(typed_agreeing)
+        ) != len(typed_agreeing):
+            raise AlignmentReviewContractError("channel agreeing views are invalid")
+        views = window_data["views"]
+        if not isinstance(views, list):
+            raise AlignmentReviewContractError("channel window views are invalid")
+        typed_views = cast(list[object], views)
+        if len(typed_views) not in {2, 3}:
+            raise AlignmentReviewContractError("channel window views are invalid")
+        view_names: list[object] = []
+        agreeing_view_names: list[object] = []
+        for view in typed_views:
+            view_data = _strict_dict(view, _CHANNEL_VIEW_KEYS, "channel view")
+            view_names.append(view_data["view"])
+            if view_data["view"] not in {"FL", "FR", "FC"}:
+                raise AlignmentReviewContractError("channel view name is invalid")
+            _require_nullable_int_fields(
+                view_data,
+                (
+                    "actual_reference_count",
+                    "actual_comparison_count",
+                    "actual_useful_reference_start",
+                    "actual_useful_reference_end",
+                ),
+                minimum=0,
+            )
+            _require_nullable_int_fields(
+                view_data,
+                ("requested_sample_lag", "requested_frame_candidate"),
+            )
+            _require_nullable_number_fields(view_data, ("requested_score", "actual_coverage"))
+            _require_peak_ratio(view_data, "peak_ratio", nullable=True)
+            _require_bool_fields(
+                view_data,
+                (
+                    "activity_valid",
+                    "coverage_valid",
+                    "base_credible",
+                    "agrees",
+                    "contradiction",
+                ),
+            )
+            rejection = view_data["rejection_reason"]
+            if rejection is not None and not isinstance(rejection, str):
+                raise AlignmentReviewContractError("channel view rejection is invalid")
+            useful_start = view_data["actual_useful_reference_start"]
+            useful_end = view_data["actual_useful_reference_end"]
+            if (useful_start is None) != (useful_end is None) or (
+                useful_start is not None
+                and useful_end is not None
+                and cast(int, useful_end) < cast(int, useful_start)
+            ):
+                raise AlignmentReviewContractError("channel view useful interval is invalid")
+            coverage = view_data["actual_coverage"]
+            if coverage is not None and not 0 <= cast(float, coverage) <= 1:
+                raise AlignmentReviewContractError("channel view coverage is invalid")
+            coverage_valid = cast(bool, view_data["coverage_valid"])
+            peak_valid = _peak_ratio_at_least(view_data["peak_ratio"], 1.50)
+            if coverage_valid and (coverage is None or cast(float, coverage) < 0.90):
+                raise AlignmentReviewContractError("coverage-valid channel view is inconsistent")
+            if cast(bool, view_data["base_credible"]) and (
+                not cast(bool, view_data["activity_valid"])
+                or not coverage_valid
+                or view_data["requested_score"] is None
+                or cast(float, view_data["requested_score"]) < 0.90
+                or not peak_valid
+            ):
+                raise AlignmentReviewContractError("base-credible channel view is inconsistent")
+            if cast(bool, view_data["agrees"]):
+                agreeing_view_names.append(view_data["view"])
+                if (
+                    not cast(bool, view_data["activity_valid"])
+                    or not coverage_valid
+                    or view_data["requested_sample_lag"] is None
+                    or view_data["requested_frame_candidate"] is None
+                    or not peak_valid
+                ):
+                    raise AlignmentReviewContractError("agreeing channel view is inconsistent")
+        if tuple(view_names) not in {("FL", "FR"), ("FL", "FR", "FC")}:
+            raise AlignmentReviewContractError("channel views are out of fixed order")
+        if tuple(typed_agreeing) != tuple(agreeing_view_names):
+            raise AlignmentReviewContractError("channel agreeing views are inconsistent")
+        complete = all(
+            window_data[name] is not None
+            for name in (
+                "representative_sample_lag",
+                "representative_frame_candidate",
+                "actual_useful_reference_start",
+                "actual_useful_reference_end",
+                "minimum_credible_score",
+                "minimum_peak_ratio",
+            )
+        )
+        corroborated = cast(bool, window_data["corroborated"])
+        if corroborated != (complete and len(typed_agreeing) >= 2):
+            raise AlignmentReviewContractError("corroborated channel window is inconsistent")
+        if corroborated and (
+            cast(bool, window_data["contradiction"])
+            or cast(float, window_data["minimum_credible_score"]) < 0.90
+            or not _peak_ratio_at_least(window_data["minimum_peak_ratio"], 1.50)
+        ):
+            raise AlignmentReviewContractError("corroborated channel window is inconsistent")
+    if candidate is not None:
+        candidate_data = cast(dict[str, object], candidate)
+        supporting = cast(list[object], candidate_data["supporting_window_ids"])
+        corroborated_ids = {
+            cast(str, window["logical_id"])
+            for window in cast(list[dict[str, object]], typed_windows)
+            if window["corroborated"] is True
+        }
+        if not set(cast(list[str], supporting)) <= corroborated_ids:
+            raise AlignmentReviewContractError("channel candidate support is invalid")
+
+
+def _bounded_text_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if not isinstance(value, str) or len(value) > 512:
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _validate_collection_summary(
+    data: Mapping[str, object], collection_keys: set[tuple[object, object]]
+) -> None:
+    _require_int_fields(
+        data,
+        (
+            "output_rate",
+            "requested_horizon",
+            "emitted_sample_count",
+            "emitted_byte_count",
+            "retained_sample_count",
+            "retained_byte_count",
+            "cleanup_failure_count",
+            "failure_count",
+        ),
+    )
+    _require_nullable_int_fields(data, ("observed_eof_sample",), minimum=0)
+    _require_number_fields(data, ("elapsed_seconds",))
+    if data["phase"] not in {"discovery", "verification"}:
+        raise AlignmentReviewContractError("alignment review collection phase is invalid")
+    if data["role"] not in {"reference", "comparison"}:
+        raise AlignmentReviewContractError("alignment review collection role is invalid")
+    collection_key = (data["phase"], data["role"])
+    if collection_key in collection_keys:
+        raise AlignmentReviewContractError("alignment review collection summaries are duplicated")
+    collection_keys.add(collection_key)
+    if (
+        cast(int, data["output_rate"]) <= 0
+        or cast(int, data["requested_horizon"]) <= 0
+        or cast(int, data["emitted_sample_count"]) < 0
+        or cast(int, data["emitted_byte_count"]) < 0
+        or cast(int, data["retained_sample_count"]) < 0
+        or cast(int, data["retained_byte_count"]) < 0
+        or cast(int, data["cleanup_failure_count"]) < 0
+        or cast(int, data["failure_count"]) < 0
+        or cast(float, data["elapsed_seconds"]) < 0
+    ):
+        raise AlignmentReviewContractError("alignment review collection bounds are invalid")
+    complete_bytes = cast(int, data["emitted_sample_count"]) * 4
+    emitted_bytes = cast(int, data["emitted_byte_count"])
+    if not complete_bytes <= emitted_bytes <= complete_bytes + 3:
+        raise AlignmentReviewContractError("alignment review emitted byte count is inconsistent")
+    if cast(int, data["retained_byte_count"]) != cast(int, data["retained_sample_count"]) * 4:
+        raise AlignmentReviewContractError("alignment review retained byte count is inconsistent")
+    status = data["status"]
+    end_category = data["end_category"]
+    observed_eof = data["observed_eof_sample"]
+    if status not in {"complete", "failed"}:
+        raise AlignmentReviewContractError("alignment review collection status is invalid")
+    if status == "complete" and emitted_bytes != complete_bytes:
+        raise AlignmentReviewContractError("alignment review complete collection has byte carry")
+    if status == "complete" and (data["cleanup_failure_count"] != 0 or data["failure_count"] != 0):
+        raise AlignmentReviewContractError("alignment review complete collection has failures")
+    if status == "failed":
+        if cast(int, data["failure_count"]) < 1:
+            raise AlignmentReviewContractError("alignment review failed collection has no failure")
+        if cast(int, data["cleanup_failure_count"]) > cast(int, data["failure_count"]):
+            raise AlignmentReviewContractError(
+                "alignment review cleanup failures exceed collection failures"
+            )
+    if end_category not in {"planned_end_reached", "observed_eof", "not_observed"}:
+        raise AlignmentReviewContractError("alignment review collection end is invalid")
+    if end_category == "planned_end_reached":
+        if (
+            status != "complete"
+            or observed_eof is not None
+            or data["emitted_sample_count"] != data["requested_horizon"]
+        ):
+            raise AlignmentReviewContractError(
+                "alignment review planned-end facts are inconsistent"
+            )
+    elif end_category == "observed_eof":
+        if status != "complete" or observed_eof is None:
+            raise AlignmentReviewContractError(
+                "alignment review observed-EOF facts are inconsistent"
+            )
+        if not 0 <= cast(int, observed_eof) < cast(int, data["requested_horizon"]):
+            raise AlignmentReviewContractError("alignment review observed EOF is out of bounds")
+        if data["emitted_sample_count"] != observed_eof:
+            raise AlignmentReviewContractError("alignment review observed EOF is inconsistent")
+    elif status != "failed" or observed_eof is not None:
+        raise AlignmentReviewContractError("alignment review unobserved collection is inconsistent")
+    _validate_scalar_tree(data)
+
+
+def _require_int_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        if not _is_int(data[name]):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_nullable_int_fields(
+    data: Mapping[str, object], names: tuple[str, ...], *, minimum: int | None = None
+) -> None:
+    for name in names:
+        value = data[name]
+        if value is None:
+            continue
+        if not _is_int(value) or (minimum is not None and value < minimum):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_bool_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        if not isinstance(data[name], bool):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_number_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+        if not math.isfinite(value):
+            raise AlignmentReviewContractError(f"alignment review {name} is invalid")
+
+
+def _require_nullable_number_fields(data: Mapping[str, object], names: tuple[str, ...]) -> None:
+    for name in names:
+        value = data[name]
+        if value is None:
+            continue
+        if name in {"peak_ratio", "minimum_peak_ratio"}:
+            _require_peak_ratio(data, name, nullable=True)
+        else:
+            _require_number_fields(data, (name,))
+
+
+def _require_peak_ratio(data: Mapping[str, object], name: str, *, nullable: bool) -> None:
+    value = data[name]
+    if nullable and value is None:
+        return
+    if value == "unbounded":
+        return
+    _require_number_fields(data, (name,))
+
+
+def _peak_ratio_at_least(value: object, floor: float) -> bool:
+    return value == "unbounded" or (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= floor
+    )
+
+
+def _validate_scalar_tree(data: Mapping[str, object], *, skip: tuple[str, ...] = ()) -> None:
+    for key, value in data.items():
+        if key in skip or value is None or isinstance(value, bool):
+            continue
+        if isinstance(value, str):
+            if len(value) > 512 or any(ord(char) < 32 for char in value):
+                raise AlignmentReviewContractError("alignment review text evidence is invalid")
+            continue
+        if _is_int(value):
+            continue
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise AlignmentReviewContractError("alignment review numeric evidence is invalid")
+            continue
+        if isinstance(value, list) and all(
+            isinstance(item, str) or _is_int(item) for item in cast(list[object], value)
+        ):
+            continue
+        raise AlignmentReviewContractError(f"alignment review {key} is invalid")
 
 
 def _validated_session_id(value: str) -> str:

@@ -19,7 +19,7 @@ from ._helpers import write_valid_config_json as _write_valid_config_json
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
 _NEW_VERSION_CONTENT = '__version__ = "1.0.1"\n'
 _REQ_HASH = "3a0058b73f8a4872c3d0b27b99c017d9a8c087cf283d5f9923b0df35b44bfd82"
-_RUNTIME_HASH = "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7"
+_RUNTIME_HASH = "a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8"
 _POWERSHELL_KEYGEN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
@@ -113,10 +113,10 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
                 "platform": "windows-x64",
                 "media_runtime_fingerprint": _RUNTIME_HASH,
                 "media_runtime_fingerprints": {
-                    "analysis": "312f6703ff00e5f518f6c768d74bbe30c17fd07ee5f7079b71aec0f78e7ca039",
-                    "probe": "2165b8dd875be09a5631f612a683c32106b65f74398db6eec68e37839e471c77",
-                    "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
-                    "index": "56c451f754fda35c6f39c1ec4d698e596b580660ca08c6cf40f45114d15a7e1c",
+                    "analysis": "739628f62807a9267454596340da845715d6002e8e9db49b04a948ee1a1fde1d",
+                    "probe": "c65f5a36b64e5e2b00890fdb84650b7d6ef3f36fe0f5633cad710142d80fb10e",
+                    "alignment": "04a8dfb581214e976bfa011132006c819169f1ce3ca00176711801df84941464",
+                    "index": "097c1b9d605b9a303c4f0cffaca993e30280c1b2f55ededa677595492800c234",
                     "full": _RUNTIME_HASH,
                 },
             }
@@ -154,6 +154,7 @@ def _build_update_zip(
     runtime_fingerprint: str = _RUNTIME_HASH,
     requirements_fingerprint: str = _REQ_HASH,
     archive_name: str = "update.zip",
+    payload_content: str = _NEW_VERSION_CONTENT,
 ) -> Path:
     update_staging = tmp_path / f"{Path(archive_name).stem}_staging"
     update_staging.mkdir()
@@ -161,7 +162,7 @@ def _build_update_zip(
     new_version_py_rel = "app/src/frame_compare/version.py"
     payload_version_py = update_staging / "payload" / new_version_py_rel
     payload_version_py.parent.mkdir(parents=True)
-    payload_version_py.write_text(_NEW_VERSION_CONTENT, encoding="utf-8")
+    payload_version_py.write_text(payload_content, encoding="utf-8")
 
     file_sha256 = hashlib.sha256(payload_version_py.read_bytes()).hexdigest()
     manifest_data = {
@@ -187,7 +188,11 @@ def _build_update_zip(
     manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
 
     update_zip_path = tmp_path / archive_name
-    with zipfile.ZipFile(update_zip_path, mode="w") as archive:
+    with zipfile.ZipFile(
+        update_zip_path,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as archive:
         archive.write(manifest_path, arcname="update-manifest.json")
         archive.write(payload_version_py, arcname="payload/" + new_version_py_rel)
     return update_zip_path
@@ -346,6 +351,19 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     )
     version_py = _write_mock_bundle(bundle_dir=bundle_dir)
     update_zip_path = _build_update_zip(tmp_path=tmp_path)
+
+    unsigned_rejection = _apply_update(
+        exe=exe,
+        env=os.environ.copy(),
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=update_zip_path,
+    )
+    assert unsigned_rejection.returncode != 0
+    assert "Canonical update-manifest.sig not found" in unsigned_rejection.stderr
+    assert version_py.read_text(encoding="utf-8") == _OLD_VERSION_CONTENT
+    assert not (bundle_dir / "app" / ".update_backups").exists()
+
     env = _sign_update_zip(
         exe=exe,
         repo_root=repo_root,
@@ -356,6 +374,52 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
 
     installed_tree = bundle_dir / "app" / "src" / "frame_compare"
     original_snapshot = _snapshot_tree(installed_tree)
+
+    bundle_launcher = bundle_dir / "frame-compare.ps1"
+    original_launcher = bundle_launcher.read_text(encoding="utf-8")
+    python_exe = bundle_dir / "python" / "python.exe"
+    disabled_python_exe = python_exe.with_suffix(".disabled")
+    bundle_launcher.write_text("exit 1\n", encoding="utf-8")
+    python_exe.rename(disabled_python_exe)
+    try:
+        missing_version_rejection = _apply_update(
+            exe=exe,
+            env=env,
+            bundle_dir=bundle_dir,
+            shim_update_ps1=shim_update_ps1,
+            update_zip_path=update_zip_path,
+        )
+    finally:
+        disabled_python_exe.rename(python_exe)
+        bundle_launcher.write_text(original_launcher, encoding="utf-8")
+    assert missing_version_rejection.returncode != 0
+    assert "Installed app version could not be determined" in missing_version_rejection.stderr
+    assert _snapshot_tree(installed_tree) == original_snapshot
+    assert not (bundle_dir / "app" / ".update_backups").exists()
+
+    high_compression_zip = _build_update_zip(
+        tmp_path=tmp_path,
+        archive_name="high-compression.zip",
+        payload_content=_NEW_VERSION_CONTENT + ("#" + ("A" * (1024 * 1024))),
+    )
+    _sign_update_zip(
+        exe=exe,
+        repo_root=repo_root,
+        update_zip_path=high_compression_zip,
+        private_key_path=private_key_path,
+        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+    )
+    high_compression_rejection = _apply_update(
+        exe=exe,
+        env=env,
+        bundle_dir=bundle_dir,
+        shim_update_ps1=shim_update_ps1,
+        update_zip_path=high_compression_zip,
+    )
+    assert high_compression_rejection.returncode != 0
+    assert "maximum compression ratio" in high_compression_rejection.stderr
+    assert _snapshot_tree(installed_tree) == original_snapshot
+    assert not (bundle_dir / "app" / ".update_backups").exists()
 
     runtime_mismatch_zip = _build_update_zip(
         tmp_path=tmp_path,
@@ -436,7 +500,7 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
         source_zip=update_zip_path,
         target_zip=payload_tampered_zip,
         entry_name="payload/app/src/frame_compare/version.py",
-        transform=lambda content: content + b"# tampered\n",
+        transform=lambda content: content.replace(b"1.0.1", b"9.9.9", 1),
     )
     payload_rejection = _apply_update(
         exe=exe,

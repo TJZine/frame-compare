@@ -20,6 +20,7 @@ from frame_compare.services.types import AlignmentResult, AlignmentStabilitySumm
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
+    _run_align_phase,
 )
 
 
@@ -67,9 +68,12 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=selected_frames)
+    output = _run_align_phase(ctx, selected_frames=selected_frames)
 
     assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert captured["verbose"] is False
+    assert captured["quiet"] is False
+    assert captured["json_output"] is False
     assert captured["frame_props_by_stem"] == {
         "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
         "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
@@ -128,6 +132,8 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert alignment_request.presentation_content is None
     assert alignment_request.generated_dir == ctx.workspace.generated_dir
     assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
+    assert alignment_request.alignment_diagnostics_dir == ctx.workspace.alignment_diagnostics_dir
+    assert alignment_request.alignment_diagnostics_root == ctx.workspace.generated_root
     assert alignment_request.selected_reference_relationship == "auto"
     assert alignment_request.previous_offsets == "disabled"
     assert alignment_request.settings.sample_rate == 12000
@@ -178,13 +184,13 @@ def test_run_align_phase_warns_without_changing_material_variable_alignment(
         ],
     )
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[2, 50])
+    output = _run_align_phase(ctx, selected_frames=[2, 50])
 
     assert output.comparisons[0].alignment is not None
     assert output.comparisons[0].alignment.relative_offset_frames == 2
     assert output.comparisons[0].alignment.stability == summary
     assert output.warnings == [
-        "align: Encode 1 alignment varies across the source. "
+        "align: Encode 1 alignment varies across qualified observed windows. "
         "The applied constant offset was retained and should be verified."
     ]
 
@@ -228,15 +234,18 @@ def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_bas
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[2, 4, 52])
+    output = _run_align_phase(ctx, selected_frames=[10, 20, 52])
 
-    assert output.reference.trim.trim_start_frames == 5
+    assert output.reference.trim.trim_start_frames == 9
     assert output.reference.trim.trim_end_frame_inclusive == 80
     assert output.comparisons[0].trim.trim_start_frames == 7
-    assert output.comparisons[0].trim.trim_end_frame_inclusive == 82
-    assert output.reference.effective_num_frames() == 76
-    assert output.comparisons[0].effective_num_frames() == 76
-    assert output.selected_frames == [0, 2, 50]
+    assert output.comparisons[0].trim.trim_end_frame_inclusive == 78
+    assert (
+        output.reference.trim.trim_start_frames - output.comparisons[0].trim.trim_start_frames == 2
+    )
+    assert output.reference.effective_num_frames() == 72
+    assert output.comparisons[0].effective_num_frames() == 72
+    assert output.selected_frames == [4, 14, 46]
 
 
 def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
@@ -263,7 +272,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 50])
+    output = _run_align_phase(ctx, selected_frames=[0, 50])
 
     assert output.reference.trim.trim_start_frames == 2
     assert output.selected_frames == [48]
@@ -320,7 +329,7 @@ def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
         _capture_select_random_frames,
     )
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
+    output = _run_align_phase(ctx, selected_frames=[0, 66])
 
     assert output.reference.trim.trim_start_frames == 80
     assert output.selected_frames == [16]
@@ -366,7 +375,7 @@ def test_run_align_phase_does_not_substitute_after_full_window_retry(
     )
 
     with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry"):
-        phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
+        _run_align_phase(ctx, selected_frames=[0, 66])
 
 
 def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop_labels(
@@ -416,7 +425,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=selected_frames)
+    output = _run_align_phase(ctx, selected_frames=selected_frames)
 
     assert output.selected_frames == [0, 12]
     assert output.selection_breakdown is not None
@@ -470,7 +479,7 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 1])
+    output = _run_align_phase(ctx, selected_frames=[0, 1])
 
     assert output.reference.trim.trim_start_frames == 60
     assert output.selected_frames == [15, 30]
@@ -522,7 +531,7 @@ def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(SelectionError) as exc_info:
-        phase_alignment.run_align_phase(ctx, selected_frames=[0, 1])
+        _run_align_phase(ctx, selected_frames=[0, 1])
 
     assert exc_info.value.context.details == {
         "reason": "insufficient_candidates",
@@ -566,7 +575,7 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(SelectionError) as exc_info:
-        phase_alignment.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+        _run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
     assert exc_info.value.context.details == {
         "reason": "insufficient generated candidates after alignment",
@@ -620,7 +629,7 @@ def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fal
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(
+    output = _run_align_phase(
         ctx,
         selected_frames=list(initial_selection.frames),
     )
@@ -676,7 +685,7 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[98, 0])
+    output = _run_align_phase(ctx, selected_frames=[98, 0])
 
     assert output.selected_frames == [0, 1]
     assert output.selection_breakdown is not None
@@ -731,7 +740,7 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
+    output = _run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
     assert output.selection_details_by_source_frame is not None
     selected_source_frames = {
@@ -769,7 +778,7 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
     with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
-        phase_alignment.run_align_phase(ctx, selected_frames=selected_frames)
+        _run_align_phase(ctx, selected_frames=selected_frames)
 
 
 def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rejected(
@@ -806,7 +815,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=selected_frames)
+    output = _run_align_phase(ctx, selected_frames=selected_frames)
 
     assert output.reference.trim.trim_start_frames == 2
     assert output.reference.trim.trim_end_frame_inclusive == 99
@@ -827,13 +836,19 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     assert "without accepted alignment" in warning
 
 
-def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_fallback(
+def test_run_align_phase_preserves_mixed_authority_with_unequal_base_trims(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
     comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
     comp_c = _clip(tmp_path / "comparison_videos" / "encode_c.mkv", label="Encode C")
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b, comp_c])
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=99)
+    ctx.comparisons = [
+        comp_a.with_trim(trim_start_frames=7, trim_end_frame_inclusive=99),
+        comp_b.with_trim(trim_start_frames=11, trim_end_frame_inclusive=99),
+        comp_c.with_trim(trim_start_frames=13, trim_end_frame_inclusive=99),
+    ]
 
     def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
         return [
@@ -855,7 +870,7 @@ def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_
                 algorithm="cross_correlation",
                 source="computed",
                 applied=False,
-                diagnostic="low_confidence",
+                diagnostic="channel_corroboration_provisional",
             ),
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -870,22 +885,26 @@ def test_run_align_phase_normalizes_three_comparisons_with_rejected_zero_offset_
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[2, 50, 96])
+    output = _run_align_phase(ctx, selected_frames=[20, 50, 80])
 
     assert output.reference.alignment is None
     assert [
         None if comparison.alignment is None else comparison.alignment.relative_offset_frames
         for comparison in output.comparisons
     ] == [2, None, -3]
-    assert output.reference.trim.trim_start_frames == 2
-    assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2, 5]
-    assert output.selected_frames == [0, 48, 94]
+    assert output.reference.trim.trim_start_frames == 10
+    assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [8, 18, 13]
+    assert [
+        output.reference.trim.trim_start_frames - output.comparisons[index].trim.trim_start_frames
+        for index in (0, 2)
+    ] == [2, -3]
+    assert output.selected_frames == [13, 43, 73]
     assert len(output.warnings) == 1
     assert "align: Encode B alignment" in output.warnings[0]
     assert "encode_b" not in output.warnings[0]
 
 
-def test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_with_base_trims(
+def test_run_align_phase_preserves_raw_source_offsets_with_unequal_base_trims(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
@@ -932,28 +951,36 @@ def test_run_align_phase_legacy_normalizes_positive_negative_and_zero_offsets_wi
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[10, 57, 81])
+    output = _run_align_phase(ctx, selected_frames=[20, 57, 81])
 
-    assert output.reference.trim.trim_start_frames == 13
+    assert [
+        comparison.alignment.relative_offset_frames if comparison.alignment is not None else None
+        for comparison in output.comparisons
+    ] == [10, -5, 0]
+    assert output.reference.trim.trim_start_frames == 17
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [
         7,
-        26,
-        23,
+        22,
+        17,
     ]
-    assert output.reference.trim.trim_end_frame_inclusive == 86
+    assert [
+        output.reference.trim.trim_start_frames - comparison.trim.trim_start_frames
+        for comparison in output.comparisons
+    ] == [10, -5, 0]
+    assert output.reference.trim.trim_end_frame_inclusive == 90
     assert [comparison.trim.trim_end_frame_inclusive for comparison in output.comparisons] == [
         80,
-        99,
-        96,
+        95,
+        90,
     ]
     assert [
         output.reference.effective_num_frames(),
         *[comparison.effective_num_frames() for comparison in output.comparisons],
     ] == [74, 74, 74, 74]
-    assert output.selected_frames == [0, 47, 71]
+    assert output.selected_frames == [6, 43, 67]
 
 
-def test_run_align_phase_normalizes_manual_source_frame_pair_offsets_globally(
+def test_run_align_phase_preserves_manual_and_cached_source_frame_pair_offsets_globally(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
@@ -970,7 +997,7 @@ def test_run_align_phase_normalizes_manual_source_frame_pair_offsets_globally(
                 time_offset_seconds=0.5,
                 correlation_score=1.0,
                 algorithm=None,
-                source="manual",
+                source="cached",
             ),
             AlignmentResult(
                 reference_clip="reference.mkv",
@@ -986,7 +1013,7 @@ def test_run_align_phase_normalizes_manual_source_frame_pair_offsets_globally(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[12, 40, 95])
+    output = _run_align_phase(ctx, selected_frames=[12, 40, 95])
 
     assert [
         comparison.alignment.relative_offset_frames if comparison.alignment is not None else None
@@ -1030,7 +1057,7 @@ def test_map_aligned_to_source_frame_after_positive_negative_and_zero_offsets(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 20, 40])
+    output = _run_align_phase(ctx, selected_frames=[0, 20, 40])
 
     assert (
         phase_selection.map_aligned_to_source_frame(
@@ -1094,7 +1121,7 @@ def test_run_align_phase_rejects_applied_result_without_frame_offset_even_when_m
     with pytest.raises(
         AudioAlignmentError, match="Applied alignment result is missing frame offset."
     ):
-        phase_alignment.run_align_phase(ctx, selected_frames=[0, 2, 50, 99])
+        _run_align_phase(ctx, selected_frames=[0, 2, 50, 99])
 
 
 def test_run_align_phase_no_comparisons_is_noop(
@@ -1108,7 +1135,7 @@ def test_run_align_phase_no_comparisons_is_noop(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _unexpected_align)
 
-    output = phase_alignment.run_align_phase(ctx, selected_frames=selected_frames)
+    output = _run_align_phase(ctx, selected_frames=selected_frames)
 
     assert output.selected_frames == [2, 4]
     assert output.comparisons == []

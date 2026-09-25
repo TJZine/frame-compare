@@ -20,6 +20,7 @@ from frame_compare.config.errors import ConfigWriteError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.utils.terminal_theme import human_console
 
 
 class RecordingRunner:
@@ -65,7 +66,9 @@ def _base_args() -> RunCliRawArgs:
 
 
 def _console_factory(*, stderr: bool, no_color: bool) -> Console:
-    return Console(file=StringIO(), stderr=stderr, no_color=no_color)
+    # Match production human consoles (highlight off) so number-heavy output
+    # renders the same under test as in real runs.
+    return human_console(file=StringIO(), stderr=stderr, no_color=no_color)
 
 
 def _raise_unexpected_load(

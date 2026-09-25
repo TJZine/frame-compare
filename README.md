@@ -55,7 +55,9 @@ Every route follows the same safe sequence:
 5. Run the comparison and open the generated `report.html`.
 
 The exact commands and expected output are in
-[Your First Comparison](docs/guides/first-comparison.md).
+[Your First Comparison](docs/guides/first-comparison.md). Later comparisons with an
+established configuration and runtime usually need only the dry run and run; see
+[Repeat comparisons](docs/guides/first-comparison.md#repeat-comparisons).
 
 ## Documentation map
 

@@ -48,6 +48,7 @@ def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseO
             ctx.comparisons = phase_output.comparisons
             state.selected_frames[:] = phase_output.selected_frames
             state.warnings.extend(phase_output.warnings)
+            state.vsview_review_seconds = max(0.0, phase_output.review_seconds)
             if phase_output.selection_breakdown is not None:
                 ctx.selection_breakdown = phase_output.selection_breakdown
             if phase_output.selection_details_by_source_frame is not None:

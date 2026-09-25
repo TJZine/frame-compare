@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from dataclasses import replace
 from datetime import datetime
 
 import httpx
@@ -57,6 +58,7 @@ def _assemble_run_result(
     preflight_warnings: list[str],
     phase_timings: dict[str, float],
     duration_seconds: float,
+    vsview_review_seconds: float = 0.0,
 ) -> RunResult:
     """Helper to assemble a RunResult from collected state."""
     return RunResult(
@@ -72,6 +74,7 @@ def _assemble_run_result(
         cache_hit=artifacts.metrics_cache_hit,
         metrics_cache_status=artifacts.metrics_cache_status,
         phase_timings=phase_timings,
+        vsview_review_seconds=max(0.0, vsview_review_seconds),
         warnings=[*preflight_warnings, *sorted(artifacts.warnings)],
     )
 
@@ -100,19 +103,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         preflight_warnings = capture.preflight_warnings
         artifacts = RunArtifacts(warnings=capture.run_warnings)
 
-    if deps is None:
-        local_deps = RunDependencies()
-    else:
-        local_deps = RunDependencies(
-            vs_loader=deps.vs_loader,
-            ffmpeg_runner=deps.ffmpeg_runner,
-            http_client=deps.http_client,
-            progress=deps.progress,
-            confirm_slowpics_upload=deps.confirm_slowpics_upload,
-            confirm_full_window_retry=deps.confirm_full_window_retry,
-            clock=deps.clock,
-            monotonic_timer=deps.monotonic_timer,
-        )
+    local_deps = RunDependencies() if deps is None else replace(deps)
 
     local_deps.capture_reserved_run = _capture_reserved_run
 
@@ -180,7 +171,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             quiet=request.quiet,
             rich_output=uses_rich_progress(reporter),
             no_color=request.no_color,
-            input_dir=context.workspace.input_dir,
             verbose=request.verbose,
         )
         state.phase_timings["load_sources"] = max(
@@ -228,7 +218,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 quiet=request.quiet,
                 rich_output=uses_rich_progress(reporter),
                 no_color=request.no_color,
-                input_dir=context.workspace.input_dir,
                 verbose=request.verbose,
             )
             emit_frame_alignment_report(
@@ -262,6 +251,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             preflight_warnings=prep.preflight_warnings,
             phase_timings=state.phase_timings,
             duration_seconds=duration_seconds,
+            vsview_review_seconds=state.vsview_review_seconds,
         )
         return record_completed_run_result(
             workspace=reserved_workspace,
