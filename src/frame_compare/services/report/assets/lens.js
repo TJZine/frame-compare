@@ -87,7 +87,7 @@ const Lens = (() => {
         };
     }
 
-    function normalizeReportState(value, clipCount = 0) {
+    function normalizeReportState(value) {
         const source = value && typeof value === 'object' ? value : {};
         return {
             enabled: typeof source.enabled === 'boolean'
@@ -195,10 +195,7 @@ const Lens = (() => {
         const storedReportState = readStored(reportKey);
         const state = {
             preferences: normalizePreferences(storedPreferences),
-            report: normalizeReportState(
-                storedReportState,
-                viewer.state.data?.clips?.length || 0,
-            ),
+            report: normalizeReportState(storedReportState),
             point: null,
             activeClipIdx: null,
             activeImage: null,

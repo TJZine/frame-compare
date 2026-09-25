@@ -326,7 +326,6 @@ assert.deepEqual(
 assert.deepEqual(
     JSON.parse(JSON.stringify(Lens.normalizeReportState(
         { enabled: true, comparisonEnabled: true, comparisonTarget: 1 },
-        3,
     ))),
     { enabled: true, parkedPosition: { u: 0.82, v: 0.12 } },
 );
