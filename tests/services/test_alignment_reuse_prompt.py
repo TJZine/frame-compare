@@ -67,7 +67,7 @@ def _clip(path: Path, *, label: str) -> AlignmentClipRequest:
 def _request(tmp_path: Path) -> AlignmentRequest:
     return AlignmentRequest(
         reference=_clip(tmp_path / "ref [bold red].mkv", label="Reference [bold]"),
-        selected_reference_relationship="explicit",
+        selected_reference_relationship="configured",
         comparisons=[
             _clip(
                 tmp_path / "comp [green]/A [red].mkv",
@@ -527,7 +527,8 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
         ],
     )
     monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", _TTYStringIO("", is_tty=True))
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
 
     accepted = prompt_for_previous_offset_reuse(
         prompt_input=prompt_input,
@@ -537,7 +538,7 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
 
     captured = capsys.readouterr()
     assert accepted is False
-    stderr_output = reuse_prompt.sys.stderr.getvalue()
+    stderr_output = stderr.getvalue()
     assert captured.out == ""
     assert request.reference.path.name in stderr_output
     assert request.comparisons[0].path.name in stderr_output

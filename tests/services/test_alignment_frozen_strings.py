@@ -20,7 +20,7 @@ import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request as _align_async
 from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_vsview import format_vsview_review_message
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_diagnostics import audio_attempt
@@ -32,19 +32,38 @@ def _alignment_key(reference: Path, comparison: Path) -> str:
     return real_key(reference, comparison)
 
 
-def test_align_pre_review_summary_uses_frozen_fragments(capsys) -> None:
+def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) -> None:
     from frame_compare.services.alignment import _print_pre_review_summary
     from frame_compare.utils.progress import RichProgressReporter
 
-    reference = SimpleNamespace(path=Path("ref.mkv"))
-    comparisons = [
-        SimpleNamespace(path=Path("alpha.mkv"), short_name="Alpha", label="Alpha"),
-        SimpleNamespace(path=Path("beta.mkv"), short_name="Beta", label="Beta"),
-    ]
-    request = SimpleNamespace(reference=reference, comparisons=comparisons)
+    reference, alpha, beta = (tmp_path / name for name in ("ref.mkv", "alpha.mkv", "beta.mkv"))
+    for path in (reference, alpha, beta):
+        path.touch()
+    request = alignment_request(
+        reference=reference,
+        comparisons=[alpha, beta],
+        config=AlignmentConfig(),
+        generated_dir=tmp_path,
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(comparison, short_name=short_name)
+            for comparison, short_name in zip(request.comparisons, ("Alpha", "Beta"), strict=True)
+        ],
+    )
     results_map = {
-        _alignment_key(Path("ref.mkv"), Path("alpha.mkv")): SimpleNamespace(applied=True),
-        _alignment_key(Path("ref.mkv"), Path("beta.mkv")): SimpleNamespace(applied=False),
+        _alignment_key(reference, comparison): AlignmentResult(
+            reference.name,
+            comparison.name,
+            None,
+            None,
+            0.0,
+            None,
+            "computed",
+            applied=applied,
+        )
+        for comparison, applied in ((alpha, True), (beta, False))
     }
 
     _print_pre_review_summary(
