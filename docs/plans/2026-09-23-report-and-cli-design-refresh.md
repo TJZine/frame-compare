@@ -1106,7 +1106,7 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   not launch VSView, a colour assertion, contract drift, dead code, and three
   visual items: accent review line, `time` label alignment, full-accent section
   names).
-- Track B terminal final fixes U1–U10 (September 25, implementation session):
+- Track B terminal final fixes U1–U10 (September 24, implementation session):
   one commit `bf6b9361` on `dev/v0.6.0-design-refresh`, no pushes. U1 gates
   `phase.success_status` on `uses_rich_progress` (plain keeps `[OK] ALIGN`,
   log keeps `completed`; service flag test added). U2 rebuilds the
