@@ -8,7 +8,7 @@ construction with Rich's automatic number highlighting disabled.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import IO, Literal
 
 from rich.console import Console
 
@@ -24,6 +24,8 @@ BORDER_NEUTRAL = "dim"
 BORDER_PENDING = "yellow"
 BORDER_SUCCESS = "green"
 BORDER_FAILED = "red"
+
+_ColorSystem = Literal["auto", "standard", "256", "truecolor", "windows"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,10 +61,27 @@ def glyphs_for_stream(stream: object) -> GlyphSet:
     return glyphs_for_encoding(getattr(stream, "encoding", None))
 
 
-def human_console(**kwargs: Any) -> Console:
+def human_console(
+    *,
+    file: IO[str] | None = None,
+    stderr: bool = False,
+    no_color: bool | None = None,
+    force_terminal: bool | None = None,
+    color_system: _ColorSystem | None = "auto",
+    width: int | None = None,
+    height: int | None = None,
+) -> Console:
     """Build a Rich console for human output with highlighting disabled."""
-    kwargs.setdefault("highlight", False)
-    return Console(**kwargs)
+    return Console(
+        file=file,
+        stderr=stderr,
+        no_color=no_color,
+        force_terminal=force_terminal,
+        color_system=color_system,
+        width=width,
+        height=height,
+        highlight=False,
+    )
 
 
 def format_duration(seconds: float) -> str:
