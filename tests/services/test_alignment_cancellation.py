@@ -478,23 +478,32 @@ request = alignment_request(
     generated_dir=reference.parent,
 )
 
+worker_reached_block = threading.Event()
+
 def block(**kwargs):
+    worker_reached_block.set()
     cancellation = kwargs["cancellation"]
     while not cancellation.is_set():
         time.sleep(0.001)
     raise_if_alignment_cancelled(cancellation)
 
 alignment._compute_requested_alignments = block
-timer = threading.Timer(0.1, os.kill, args=(os.getpid(), signal.SIGINT))
-timer.start()
+
+def interrupt_once_worker_ready():
+    if worker_reached_block.wait(timeout=5):
+        os.kill(os.getpid(), signal.SIGINT)
+        return
+    print("ctrl_c_setup=worker-never-reached-block", file=sys.stderr, flush=True)
+    os._exit(42)
+
+helper = threading.Thread(target=interrupt_once_worker_ready, daemon=True)
+helper.start()
 try:
     asyncio.run(alignment.align_clips_from_request(request, config))
 except KeyboardInterrupt:
     print("ctrl_c_cleanup=ok")
 else:
     raise SystemExit("SIGINT did not become KeyboardInterrupt")
-finally:
-    timer.cancel()
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(reference), str(comparison)],
