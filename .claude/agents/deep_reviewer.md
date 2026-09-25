@@ -3,7 +3,7 @@ name: deep_reviewer
 description: "Deep read-only reviewer for high-risk, broad, or hard-to-prove changes; same focus as reviewer with more reasoning depth."
 model: opus
 effort: high
-disallowedTools: Agent, Edit, Write, NotebookEdit
+tools: Read, Grep, Glob, WebFetch, WebSearch
 ---
 
 <!-- Claude Code counterpart of Codex role `deep_reviewer` (.codex/agents/deep-reviewer.toml). Keep role semantics in sync with that file; model/effort/tools here are Claude-specific. -->
@@ -17,4 +17,5 @@ Flag speculative layers, duplicated policy, and ceremony that does not improve o
 For touched hotspots, composition roots, or production files over the repo attention thresholds, verify that the change preserves one cohesive owner or extracts a distinct present-day responsibility. Reject both responsibility accumulation and line-count-driven pass-through abstractions.
 
 Read-only role: do not create, edit, or delete files, including through shell commands, and do not mutate Git.
+Ask the controller for diffs, command output, and test results; shell execution and Git operations stay with the controller.
 Do not spawn subagents (the repository's `max_depth = 1`).
