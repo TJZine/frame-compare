@@ -740,7 +740,7 @@ const Viewport = {
         const y = proximity.lastY;
         const distance = (Number.isFinite(x) && Number.isFinite(y) && rect)
             ? this.proximityDistanceToRect(rect, x, y)
-            : 0;
+            : Number.POSITIVE_INFINITY;
         this.applyPaletteProximity(this.resolvePaletteProximity({
             current: proximity.current || 'near',
             distance,
@@ -783,6 +783,8 @@ const Viewport = {
     handleStagePointerLeave() {
         this.cancelQueuedPaletteProximity();
         const proximity = this.viewer.paletteProximity || {};
+        proximity.lastX = undefined;
+        proximity.lastY = undefined;
         this.applyPaletteProximity(this.resolvePaletteProximity({
             current: proximity.current || 'near',
             distance: Number.POSITIVE_INFINITY,

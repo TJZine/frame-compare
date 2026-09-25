@@ -204,4 +204,7 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "rafFlushApplies": True,
         "nanHoldsFar": True,
         "reinitCancelsQueuedFrame": True,
+        "leaveDuringLoadHoldsNear": True,
+        "leaveDuringLoadFadesAfterLoad": True,
+        "noPointerFadesAfterLoad": True,
     }

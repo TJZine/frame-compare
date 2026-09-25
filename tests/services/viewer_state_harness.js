@@ -1718,6 +1718,17 @@ const summary = {};
     viewer.paletteProximity.loadUntil = Date.now() - 1;
     flushRaf();
     const reinitCancelsQueuedFrame = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewport.initPaletteProximity();
+    viewport.updatePaletteProximity(150, 622);
+    viewport.handleStagePointerLeave();
+    const leaveDuringLoadHoldsNear = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'near';
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushTimeouts();
+    const leaveDuringLoadFadesAfterLoad = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
+    viewport.initPaletteProximity();
+    viewer.paletteProximity.loadUntil = Date.now() - 1;
+    flushTimeouts();
+    const noPointerFadesAfterLoad = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
     summary.paletteProximityWiring = {
         startsNear,
         loadOverride,
@@ -1739,6 +1750,9 @@ const summary = {};
         rafFlushApplies,
         nanHoldsFar,
         reinitCancelsQueuedFrame,
+        leaveDuringLoadHoldsNear,
+        leaveDuringLoadFadesAfterLoad,
+        noPointerFadesAfterLoad,
     };
 }
 
