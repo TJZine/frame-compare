@@ -1106,3 +1106,20 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   not launch VSView, a colour assertion, contract drift, dead code, and three
   visual items: accent review line, `time` label alignment, full-accent section
   names).
+- Track B terminal final fixes U1–U10 (September 25, implementation session):
+  one commit `bf6b9361` on `dev/v0.6.0-design-refresh`, no pushes. U1 gates
+  `phase.success_status` on `uses_rich_progress` (plain keeps `[OK] ALIGN`,
+  log keeps `completed`; service flag test added). U2 rebuilds the
+  upload-failure summary test on the real state; U3 adds the production-shape
+  shortcut/webhook dedup test. U4 stubs VSView availability in the
+  frozen-strings test. U5 drops the ANSI assertion. U6 updates the Warnings
+  and running-marker contract text. U7 removes `_STATUS_STYLES` and the
+  `_display_path`/`input_dir` dead code (plus mechanical caller updates in
+  three tests). U8–U10 are Rich-only visual items (accent review spans, `time`
+  indent, `not dim` sections/titles; no tests). One plan-conformance reviewer
+  pass: U1–U3 and U5–U10 verified, invariants and Test scope clean, 0
+  blockers/majors, 1 minor (U8 pixel-identical to baseline; retained pending
+  the controller visual check). Full gate: pyright 0/0, ruff check + format
+  clean, bandit exit 0, lint-imports 2 kept / 0 broken, strict docs clean,
+  pytest 3568 passed / 86 environment (Windows/pwsh) skips / 0 failed. No real
+  media run on this host.
