@@ -66,11 +66,13 @@ Duplicate explicit labels fail. Derived collisions are qualified deterministical
 presentation remains unambiguous.
 
 Streaming services are identified from release filename tokens using the TRaSH
-Guides *Streaming Services General* and *Streaming Services Anime* sets. Apple TV+
-displays as `ATVP`, HBO Max displays as `HMAX`, and `MAX` alone stays `MAX`. The
-services `CC`, `PLAY`, `HBO`, `HMAX`, `iT`, `MAX`, `SHO`, and `STAN` are only
-recognized when the token immediately after the service is `WEB`, `WEBDL`, or
-`WEBRIP`, so `IT` without a following web token yields no service.
+Guides *Streaming Services General* and *Streaming Services Anime* sets, with
+guessit's streaming-service detection as a fallback. Apple TV+ displays as `ATVP`,
+HBO Max displays as `HMAX`, and `MAX` alone stays `MAX`. The filename tokens `CC`,
+`PLAY`, `HBO`, `HMAX`, `iT`, `MAX`, `SHO`, and `STAN` only match directly when the
+next token is `WEB`, `WEBDL`, or `WEBRIP`. Without that token, the service comes
+from guessit when it recognizes the name, so `iT` or `MAX` can still resolve, while
+`IT` alone yields no service.
 
 For live render progress, automatic labels become unique role-prefixed compact release
 descriptors. For slow.pics, automatic labels become unique full release descriptors.

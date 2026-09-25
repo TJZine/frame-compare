@@ -967,9 +967,9 @@ Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
 clip selection, viewport/zoom/reveal, pair alignments, source-labels visibility, filmstrip
 collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
-best-effort browser-global v2 key for magnification, size, and sample-marker style,
-whose default is Off. Report-scoped lens state stores enabled state, fixed normalized
-window position, and Single comparison selection. Grip drag end and keyboard movement
+best-effort browser-global v2 key for magnification, size, sample-marker style
+(default Ring), and caption (default Off). Report-scoped lens state stores only
+enabled state and fixed normalized window position. Grip drag end and keyboard movement
 persist that normalized position so size and responsive layout changes preserve its
 relative placement. Pointer/sample position and Blink paused state are
 transient. Storage failure leaves the lens usable for the current session and is
