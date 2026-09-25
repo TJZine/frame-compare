@@ -1123,3 +1123,17 @@ toolbar rows; suppressing L-SMASH indexing output; regional streaming-service se
   clean, bandit exit 0, lint-imports 2 kept / 0 broken, strict docs clean,
   pytest 3568 passed / 86 environment (Windows/pwsh) skips / 0 failed. No real
   media run on this host.
+- Checkpoint B-terminal closed (September 24, controller): U1–U10 (`bf6b9361`)
+  verified. U1 applies the Align warning override on the Rich path only (plain
+  `[OK] ALIGN` and log `completed` kept, tested). Render check with a truecolor
+  terminal: accent review line (U8; the earlier white rendering was the
+  controller's 16-colour capture, not the code), full-accent section names and
+  panel titles (U10), aligned `time` row (U9). The controller fixed one U9 side
+  effect directly: `machine`/`you` sub-rows re-indented under `time`
+  (`fix(terminal): indent summary time sub-rows under time`). Gate: pyright 0/0,
+  ruff, lint-imports, strict docs, pytest 3567 passed / 86 environment skips plus
+  the known pre-existing flake in tests/services/test_alignment_cancellation.py
+  (flagged as a separate task). Track B terminal accepted. All plan units (A1–A4,
+  B1–B7) are implemented and reviewed. Remaining outside this plan: documentation
+  image recapture (screenshot plan), the bootstrap/pyright runbook alignment
+  follow-up, and the flaky cancellation test.
