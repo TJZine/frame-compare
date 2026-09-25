@@ -48,7 +48,7 @@ Do not create a second runbook, second architecture summary, or second current C
 Bootstrap:
 
 ```bash
-uv sync --group dev --frozen
+uv sync --group dev --extra vsview --frozen
 ```
 
 Core local gates:
@@ -94,7 +94,7 @@ navigation, and built-in presentation features. Generated output belongs in the 
 toolchain before running Python gates after a docs-only sync:
 
 ```bash
-uv sync --group dev --group docs --locked
+uv sync --group dev --group docs --extra vsview --locked
 ```
 
 Docker integration gate:
