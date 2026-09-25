@@ -489,7 +489,7 @@ def _add_time_rows(table: Table, *, result: RunResult) -> None:
     if upload_seconds > 0.0:
         machine_items.append(f"upload {format_duration(upload_seconds)}")
     if machine_items:
-        table.add_row("  machine", Columns(machine_items, equal=False, padding=(0, 4)))
+        table.add_row("    machine", Columns(machine_items, equal=False, padding=(0, 4)))
 
     you_items: list[str] = []
     if review_seconds > 0.0:
@@ -498,7 +498,7 @@ def _add_time_rows(table: Table, *, result: RunResult) -> None:
     if prompts_seconds > 0.0:
         you_items.append(f"prompts {format_duration(prompts_seconds)}")
     if you_items:
-        table.add_row("  you", Columns(you_items, equal=False, padding=(0, 4)))
+        table.add_row("    you", Columns(you_items, equal=False, padding=(0, 4)))
 
 
 def print_result_summary(
