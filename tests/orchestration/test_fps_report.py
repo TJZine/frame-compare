@@ -6,9 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from rich.ansi import AnsiDecoder
-from rich.color import Color
-from rich.style import Style
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
@@ -26,20 +23,6 @@ def _stable_report_width(monkeypatch: pytest.MonkeyPatch) -> None:
         "frame_compare.orchestration.presentation.shutil.get_terminal_size",
         lambda **_: os.terminal_size((240, 24)),
     )
-
-
-def _assert_ansi_text_is_bold_cyan(output: str, label: str) -> None:
-    cyan_number = Color.parse("cyan").number
-    for line in AnsiDecoder().decode(output):
-        for span in line.spans:
-            if label not in line.plain[span.start : span.end]:
-                continue
-            assert isinstance(span.style, Style)
-            assert span.style.bold is True
-            assert span.style.color is not None
-            assert span.style.color.number == cyan_number
-            return
-    pytest.fail(f"{label!r} was not rendered in bold cyan")
 
 
 def _make_clip_state(
