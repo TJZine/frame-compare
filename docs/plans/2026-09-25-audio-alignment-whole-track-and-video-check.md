@@ -333,7 +333,7 @@ pointer here. Commit: `docs(plan): activate whole-track audio alignment plan`.
 
 ### U1 - Chunked audio estimator (pure numeric)
 
-Implement A1-A4, A1a-A1b and A6 in `alignment_correlation.py` over in-memory arrays
+Implement A1-A4 and A1a-A1b in `alignment_correlation.py` over in-memory arrays
 with a streaming-shaped interface (chunk in, running state out), so U2 can feed it
 incrementally. Track the synthetic program generator (seeded) as test support. Unit
 tests cover:
@@ -357,6 +357,11 @@ Risk: medium; pure code with direct proof.
 Implement A7-A8 in `alignment_streaming.py`: two children, bounded queues, a
 look-ahead window of `chunk + 2M` for the comparison side, and delivery of aligned
 (reference chunk, comparison window) pairs to a consumer callback, per A7-A7a-A8.
+The plan comes from probed durations, so decoded length can differ slightly. A
+reference that ends early zero-pads its final planned chunk to the planned count,
+and chunks with no decoded reference samples are fed as all-zero (inactive), which
+follows A1's rule that samples outside the stream are zero. Comparison windows must
+equal `comparison_window()` from U1 value for value.
 Preserve every existing lifetime guarantee: distinct reader errors, first-error
 precedence, cleanup failure as fatal, no usable evidence after failure. Tests extend
 the existing controlled-child suites:
@@ -383,7 +388,8 @@ independent `deep_reviewer` pass on U2's diff before U3 starts.
 
 ### U3 - Integrate the audio stage and compensation
 
-Wire U1+U2 into `_estimate_audio_pair` / workflow and add A5 start probing. Produce
+Wire U1+U2 into `_estimate_audio_pair` / workflow, add A5 start probing and the A6
+sub-frame estimate and rounding. Produce
 the full P3 schemas, with video fields `not_observed`, and the P2a stability and
 score derivation. Install the P2 token, remove the C2 fields (with the removal
 error), and perform the D1 deletions. Video is not wired yet: in this intermediate
@@ -506,3 +512,17 @@ Return to the controller or maintainer if:
 - 2026-09-25: the maintainer confirmed A1a and the replacement stance. The C2
   custom removal error and the P3 runs-only fallback were removed as unneeded
   code.
+- 2026-09-25: U1 implemented by the maintainer's external implementer, with two
+  adversarial self-reviews. The independent `reviewer` checkpoint (Opus, medium)
+  found no blockers, 1 major and 8 minor findings; all were accepted and fixed by the
+  controller:
+  - the PSR formula and MAD = 0 rules are pinned by hand-computed tests;
+  - the partial-chunk ceiling is tested with an odd C;
+  - the unused constant and generator options were removed;
+  - credibility is decided once;
+  - the remix gain now matches the spec.
+
+  Carried forward: A6 moves to U3, since it needs A5's start times, and U2
+  zero-pads a short final reference chunk (see U2). Verification: 31 focused tests,
+  `tests/services`, pyright, ruff check/format, lint-imports and `git diff --check`
+  all pass.
