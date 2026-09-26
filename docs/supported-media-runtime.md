@@ -172,7 +172,7 @@ fingerprints for:
 | --- | --- | --- |
 | `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
 | `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo |
-| `alignment` | Profile-specific standalone FFmpeg lineage | VapourSynth and tone mapping |
+| `alignment` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo and tone mapping |
 | `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, Docker OBUParse, and index policy | standalone FFmpeg and tone mapping |
 | `full` | Complete supported deployment profile | None |
 
@@ -181,10 +181,9 @@ does not discard metric arrays; a standalone FFmpeg update invalidates alignment
 without discarding L-SMASH-Works indexes.
 
 The R80 refresh changes the VapourSynth decoder identity for every profile, so
-`analysis`, `probe`, `index`, and `full` fingerprints change everywhere. The
-Windows portable `alignment` fingerprint also changes because the retained BtbN
-FFmpeg artifact moved to the August 2026 build; Debian and unmanaged `alignment`
-fingerprints are unchanged. Existing entries and indexes under the previous
+`analysis`, `probe`, `alignment`, `index`, and `full` fingerprints change everywhere.
+The Windows portable `alignment` fingerprint also changes because the retained BtbN
+FFmpeg artifact moved to the August 2026 build. Existing entries and indexes under the previous
 fingerprints miss and rebuild under the normal cache policy; there is no migration.
 
 The shared alignment reuse cache is schema v2 after the viewer migration. It stores

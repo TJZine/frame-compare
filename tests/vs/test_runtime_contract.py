@@ -219,11 +219,21 @@ def test_probe_fingerprint_tracks_standalone_ffmpeg_lineage(
     ) is analysis_changes
 
 
-def test_alignment_identity_is_owned_by_standalone_ffmpeg() -> None:
+def test_alignment_identity_includes_decoder_and_standalone_ffmpeg() -> None:
     identity = media_runtime_identity("alignment", profile="windows-x64")
 
-    assert set(identity["components"]) == {"standalone_ffmpeg"}
+    assert set(identity["components"]) == {"decoder", "standalone_ffmpeg"}
+    assert identity["components"]["decoder"]["vapoursynth"]["release"] == "R80"
+    assert "l_smash_works" in identity["components"]["decoder"]
     assert identity["components"]["standalone_ffmpeg"]["license_profile"] == "LGPL-only"
+
+
+def test_alignment_fingerprint_tracks_decoder_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = media_runtime_fingerprint("alignment", profile="windows-x64")
+    monkeypatch.setattr(runtime_contract, "VAPOURSYNTH_SOURCE_COMMIT", "f" * 40)
+    assert media_runtime_fingerprint("alignment", profile="windows-x64") != original
 
 
 def test_debian_ffmpeg_identity_records_gpl_enabled_license_profile() -> None:

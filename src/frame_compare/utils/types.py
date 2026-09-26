@@ -5,7 +5,7 @@ This module contains cross-cutting type definitions used by multiple layers.
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from frame_compare.utils.paths import (
     require_managed_descendant,
@@ -163,6 +163,10 @@ class AlignmentClipRequest:
     effective_fps_den: int
     source_frame_count: int
     selected_audio_stream: int | None = None
+    active_rect_x: int | None = None
+    active_rect_y: int | None = None
+    active_rect_width: int | None = None
+    active_rect_height: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
     compact_name: str | None = None
@@ -171,6 +175,23 @@ class AlignmentClipRequest:
     def __post_init__(self) -> None:
         if not _is_positive_int(self.source_frame_count):
             raise ValueError("source_frame_count must be a positive integer")
+        active_rect = (
+            self.active_rect_x,
+            self.active_rect_y,
+            self.active_rect_width,
+            self.active_rect_height,
+        )
+        if any(value is None for value in active_rect):
+            if any(value is not None for value in active_rect):
+                raise ValueError("active rectangle fields must be all present or all absent")
+        elif not all(isinstance(value, int) for value in active_rect):
+            raise ValueError("active rectangle fields must be integers")
+        else:
+            x, y, width, height = cast(tuple[int, int, int, int], active_rect)
+            if x < 0 or y < 0 or width <= 0 or height <= 0:
+                raise ValueError(
+                    "active rectangle fields must describe a positive source rectangle"
+                )
 
 
 def _is_positive_int(value: object) -> bool:

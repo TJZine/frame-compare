@@ -12,11 +12,13 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
-from frame_compare.services import alignment_audio, alignment_decision
+from frame_compare.services import alignment_audio, alignment_decision, alignment_video
 from frame_compare.services.alignment_correlation import (
+    ChunkedAudioEstimate,
     ChunkedCorrelation,
     ChunkPlan,
     plan_audio_chunks,
@@ -76,6 +78,9 @@ from frame_compare.utils.alignment_evidence import (
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 log = structlog.get_logger()
 
@@ -307,16 +312,22 @@ def _computed_result(
     decided: DecidedAudioStage,
     attempt: AudioAlignmentAttempt | None,
 ) -> AlignmentResult:
-    """Build the U3 computed result: never applied, with null offsets."""
+    """Build the computed result, applying only trusted automatic evidence."""
+    candidate = decided.decision.candidate
+    applied = decided.decision.state == "trusted_automatic"
+    if applied and candidate is None:
+        raise AudioAlignmentError("trusted automatic alignment is missing its candidate")
     return AlignmentResult(
         reference_clip=reference.name,
         comparison_clip=comparison.name,
-        frame_offset=None,
-        time_offset_seconds=None,
+        frame_offset=candidate.frame_offset if applied and candidate is not None else None,
+        time_offset_seconds=(
+            candidate.time_offset_seconds if applied and candidate is not None else None
+        ),
         correlation_score=decided.correlation_score,
         algorithm="cross_correlation",
         source="computed",
-        applied=False,
+        applied=applied,
         diagnostic=decided.decision.primary_reason,
         stability=decided.stability,
         audio_attempt=attempt,
@@ -421,7 +432,8 @@ def _build_audio_attempt(
         collection_observation=collection_observation,
         collection=collection,
         collection_failure=collection_failure,
-        video_check=VideoCheckObservation(
+        video_check=decided.video_check
+        or VideoCheckObservation(
             observation="not_observed",
             scored_offsets=(),
             confirmed_offset=None,
@@ -430,6 +442,26 @@ def _build_audio_attempt(
         ),
         decision=decided.decision,
         stability=decided.stability,
+        authority_recount=decided.authority_recount,
+    )
+
+
+def _video_clip_request(clip: AlignmentClipRequest) -> alignment_video.VideoClipRequest:
+    values = (
+        clip.active_rect_x,
+        clip.active_rect_y,
+        clip.active_rect_width,
+        clip.active_rect_height,
+    )
+    active_rect: alignment_video.ActiveRect | None = None
+    if any(value is not None for value in values):
+        if not all(isinstance(value, int) for value in values):
+            raise AudioAlignmentError("alignment active rectangle is incomplete")
+        active_rect = cast(alignment_video.ActiveRect, values)
+    return alignment_video.VideoClipRequest(
+        path=clip.path,
+        identity=clip.identity,
+        active_rect=active_rect,
     )
 
 
@@ -646,6 +678,7 @@ def _collect_and_decide_audio_pair(
     comparison_request: AlignmentClipRequest,
     comparison_ordinal: int,
     cancellation: threading.Event | None,
+    vs_loader: VSLoader | None,
 ) -> AlignmentResult:
     """Collect paired audio and map the outcome; raises on cancel/failed cleanup."""
     reference_selection = planned.reference_selection
@@ -660,6 +693,7 @@ def _collect_and_decide_audio_pair(
         collection_observation: AudioCollectionObservation,
         collection_facts: tuple[AudioCollectionFacts, ...],
         collection_failure: AudioCollectionFailure | None = None,
+        estimate: ChunkedAudioEstimate | None = None,
     ) -> AlignmentResult:
         attempt = _build_audio_attempt(
             reference=reference_request,
@@ -674,6 +708,35 @@ def _collect_and_decide_audio_pair(
             collection_observation=collection_observation,
             collection_failure=collection_failure,
         )
+        if estimate is not None and attempt.audio.global_lag is not None:
+            video_result = alignment_video.check_video_alignment(
+                reference=_video_clip_request(reference_request),
+                comparison=_video_clip_request(comparison_request),
+                attempt=attempt,
+                fps_reference=fps_reference,
+                loader=vs_loader,
+                cancellation=cancellation,
+            )
+            decided = alignment_decision.decide_after_video(
+                stage=decided,
+                estimate=estimate,
+                plan=plan,
+                video=video_result.observation,
+                fps_reference=fps_reference,
+            )
+            attempt = _build_audio_attempt(
+                reference=reference_request,
+                comparison=comparison_request,
+                comparison_ordinal=comparison_ordinal,
+                reference_selection=reference_selection,
+                comparison_selection=comparison_selection,
+                decided=decided,
+                config=config,
+                fps_reference=fps_reference,
+                collection=collection_facts,
+                collection_observation=collection_observation,
+                collection_failure=collection_failure,
+            )
         return _computed_result(
             reference=reference,
             comparison=comparison,
@@ -767,7 +830,7 @@ def _collect_and_decide_audio_pair(
         fps_reference=fps_reference,
     )
     facts, pair_failure = _evidence_collection_facts(collection)
-    return finish(decided, "observed", facts, pair_failure)
+    return finish(decided, "observed", facts, pair_failure, estimate=estimate)
 
 
 def _estimate_audio_pair(
@@ -781,6 +844,7 @@ def _estimate_audio_pair(
     comparison_request: AlignmentClipRequest,
     comparison_ordinal: int = 1,
     cancellation: threading.Event | None = None,
+    vs_loader: VSLoader | None = None,
 ) -> AlignmentResult:
     """Estimate one pair: pre-decode planning, then collection plus decision."""
     planned = _plan_audio_pair(
@@ -806,6 +870,7 @@ def _estimate_audio_pair(
         comparison_request=comparison_request,
         comparison_ordinal=comparison_ordinal,
         cancellation=cancellation,
+        vs_loader=vs_loader,
     )
 
 
@@ -819,6 +884,7 @@ def _compute_requested_alignments(
     fps_reference: Fraction | None,
     on_comparison_started: Callable[[AlignmentClipRequest], None] | None,
     cancellation: threading.Event,
+    vs_loader: VSLoader | None,
 ) -> Fraction:
     """Run only blocking probe, collection, and numeric work in the owned worker."""
     raise_if_alignment_cancelled(cancellation)
@@ -852,6 +918,7 @@ def _compute_requested_alignments(
             comparison_request=comp,
             comparison_ordinal=comparison_ordinals.get(comp.path, fallback_ordinal),
             cancellation=cancellation,
+            vs_loader=vs_loader,
         )
         raise_if_alignment_cancelled(cancellation)
         results_map[alignment_key(reference.path, comp.path)] = res
@@ -882,6 +949,7 @@ async def _await_audio_computation(
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
     progress: ProgressReporter | None,
+    vs_loader: VSLoader | None,
 ) -> Fraction:
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
@@ -905,6 +973,7 @@ async def _await_audio_computation(
             fps_reference=fps_reference,
             on_comparison_started=report_comparison_started,
             cancellation=cancellation,
+            vs_loader=vs_loader,
         ),
         name="alignment-audio-computation",
     )
@@ -1109,6 +1178,7 @@ async def align_clips_from_request(
     quiet: bool = False,
     json_output: bool = False,
     review_summary: AlignmentReviewSummary | None = None,
+    vs_loader: VSLoader | None = None,
 ) -> list[AlignmentResult]:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     reference = request.reference.path
@@ -1167,6 +1237,7 @@ async def align_clips_from_request(
             provenances=provenances,
             fps_reference=fps_reference,
             progress=progress,
+            vs_loader=vs_loader,
         )
         descriptions = _request_progress_descriptions(request)
         for comparison in requested_comparisons:

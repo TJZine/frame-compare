@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -60,11 +62,15 @@ from frame_compare.utils.types import (
 
 log = structlog.get_logger()
 
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
+
 
 async def run_align_phase(
     ctx: RunContext,
     *,
     selected_frames: list[int],
+    vs_loader: VSLoader | None = None,
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
@@ -96,19 +102,29 @@ async def run_align_phase(
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    results = await align_clips_from_request(
-        alignment_request,
-        alignment_config,
-        progress=ctx.reporter,
-        review_summary=review_summary,
-        reference_fps=ctx.reference.effective_fps,
-        frame_props_by_stem={
+    alignment_kwargs: dict[str, Any] = {
+        "progress": ctx.reporter,
+        "review_summary": review_summary,
+        "reference_fps": ctx.reference.effective_fps,
+        "frame_props_by_stem": {
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
-        verbose=verbose,
-        quiet=quiet,
-        json_output=json_output,
+        "verbose": verbose,
+        "quiet": quiet,
+        "json_output": json_output,
+    }
+    alignment_signature = inspect.signature(align_clips_from_request)
+    accepts_vs_loader = "vs_loader" in alignment_signature.parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in alignment_signature.parameters.values()
+    )
+    if vs_loader is not None and accepts_vs_loader:
+        alignment_kwargs["vs_loader"] = vs_loader
+    results = await align_clips_from_request(
+        alignment_request,
+        alignment_config,
+        **alignment_kwargs,
     )
 
     updated_comparisons: list[ClipState] = []
@@ -420,6 +436,10 @@ def _alignment_clip_request(
         effective_fps_den=clip.effective_fps.denominator,
         source_frame_count=clip.probe.num_frames,
         selected_audio_stream=selected_audio_stream,
+        active_rect_x=None if clip.active_rect is None else clip.active_rect.x,
+        active_rect_y=None if clip.active_rect is None else clip.active_rect.y,
+        active_rect_width=None if clip.active_rect is None else clip.active_rect.width,
+        active_rect_height=None if clip.active_rect is None else clip.active_rect.height,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
         presentation_name=presentation_name,
         compact_name=compact_name,
