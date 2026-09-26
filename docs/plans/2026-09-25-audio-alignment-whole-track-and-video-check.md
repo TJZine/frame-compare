@@ -5,13 +5,13 @@ search:
 
 Status: Active
 Scope: Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT correlation plus container start compensation, and add an L-SMASH video frame check that picks the exact applied frame.
-Owner: Audio alignment parity controller session; worktree `agent/audio-alignment-parity`, merged into `dev/v0.6.0-review-remediation`.
+Owner: Audio alignment parity controller session; branch `agent/audio-alignment-parity` in the main checkout, merged into `dev/v0.6.0-review-remediation`.
 
 # Audio alignment: whole-track estimator and video frame check
 
 ## Baseline
 
-- Worktree `/Users/tristan/Software/frame-compare-worktrees/audio-alignment-parity`,
+- Main checkout `/Users/tristan/Software/frame-compare`,
   branch `agent/audio-alignment-parity`, created from
   `origin/dev/v0.6.0-review-remediation` at `d7b069d5`. The branch merges back into
   `dev/v0.6.0-review-remediation`; no push, PR, release or signing is authorized by
@@ -33,7 +33,8 @@ Owner: Audio alignment parity controller session; worktree `agent/audio-alignmen
 The maintainer's bar: automatic alignment must be at least as accurate as v0.1.0
 (`57a11cbb`, one whole-track cross-correlation, no quality gates) and must not fail
 because releases have different mixes, downmixes, codecs or masters. It must also
-refuse, rather than apply, when no single constant offset exists or the audio is
+refuse, rather than apply, when it detects that no single constant offset exists
+(within the sampling contract and limits stated in V5a) or that the audio is
 unrelated. Memory stays bounded; the v0.1.0 whole-track FFT (several GB) is not
 reintroduced.
 
@@ -60,7 +61,7 @@ compared.
 | Music stem -8 dB (remix) | -5f | correct | provisional only | correct |
 | Remaster (EQ, limiter, noise) | -5f | correct | correct (score 0.91) | correct |
 | Foreign dub, same M&E | -2f | correct | provisional only | correct (PSR 88-120) |
-| Noise at about -15 dB SNR | -4f | correct | correct | correct |
+| Added noise at about +15 dB SNR (noise 15 dB below the signal; earlier mislabelled as -15 dB) | -4f | correct | correct | correct |
 | 20 s extra intro | -480f | correct | correct | correct |
 | Container audio delay 0.5 s, video identical | 0f | applied 12f | applied 12f | correct (start compensation) |
 | 4 s insert at 90 s | refuse | applied | refused | refused, located -3f / -99f segments |
@@ -106,6 +107,37 @@ alongside, adapted, migrated or given special error paths. Existing generic beha
 rejected) is sufficient. Every unit prefers deletion over adaptation and adds no
 abstraction, option or fallback that a current requirement doesn't need.
 
+## Refusal principle
+
+Added 2026-09-26 at the maintainer's direction. The previous implementation refused
+three sources with matching offsets because their audio differed in level and mix in
+places. That class of false refusal must not come back.
+
+- Automatic application requires sufficient **global** audio and video
+  confirmation: A4 agreement, V5 confirmation and, where relevant, the V5a
+  resolution. Unrelated audio or globally inconclusive video still cannot establish
+  an automatic offset.
+- **Local** weak or missing evidence does not independently veto an otherwise
+  confirmed offset. Examples: low PSR from mix, level or loudness differences; quiet
+  or inactive sections; a non-credible chunk; a `local_video_inconclusive` record at
+  a non-credible target. It is recorded and shown as context.
+- **Credible** evidence of another offset must be resolved before application:
+  coherent competing runs (A4a), and credible disagreeing chunks under V5a. An
+  unresolved credible disagreement blocks because the contradictory audio evidence
+  remains, not merely because the local video was inconclusive.
+- Credible audio disagreements are **resolved by video**, never vetoed
+  unconditionally. PHAT whitening removes level and spectral-shape differences
+  (loudness, dynamic range, EQ, codec), but not multipath content. When a mix
+  contains the same material at two lags (a delayed surround or effects copy, a
+  reverb tail) and a release changes which copy is louder, the audio peak can
+  genuinely move for a few chunks. Over identical video, the video resolves such a
+  disagreement in favour of the confirmed offset, and the result applies. A real
+  edit's frames match the competing offset instead, so it stays blocked. Avoiding
+  mix-caused false refusals of this kind is a primary goal of this redesign.
+- Disagreements that cannot change the compared frame never need resolving (A4b).
+- U4 tests pin all of this: level and mix changes, the multipath lag reversal, and
+  same-frame disagreements.
+
 ## Locked decisions
 
 Confirmed with the maintainer on 2026-09-25.
@@ -140,6 +172,54 @@ Confirmed with the maintainer on 2026-09-25.
   diagnostics report contiguous chunk runs grouped by lag (edit or drift diagnosis,
   never an applied value). A global lag within 2 ms of +/-M is `search_edge` and never
   applied. M bounds the PCM lag, not the compensated offset.
+- A4a. Coherent competing offset (added 2026-09-26 after external review). Majority
+  agreement alone does not prove one constant offset: a 4 s insert near either end
+  of a 10-minute program leaves 18/20 or 19/20 chunks agreeing, which passes A4.
+  - A competing run is at least 2 credible chunks with **consecutive** chunk indices
+    whose lags agree with each other within 2 ms and differ from the global lag by
+    more than 2 ms. That is about 60 s of continuous disagreement at `C = 30 s`, which
+    scattered measurement errors don't produce. U1's `ChunkRun` does not break at
+    non-credible gaps (it serves stability diagnostics and stays unchanged), so the
+    decision layer checks index adjacency itself.
+  - A competing run must be **resolved by the video** (V3a, V5a) before automatic
+    application. Resolved in favour of the confirmed offset `c`, it is recorded as
+    context and doesn't block. If the video confirms the run's own offset, the
+    result is `competing_offset_confirmed_by_video`. If it stays unresolved or
+    unexamined, the result is `competing_offset`. Both are provisional hints whose
+    evidence and copy name every run's frame offset and time range. A run is judged
+    against `c`, so it exists only for frame-distinct disagreements (A4b).
+  - Single credible disagreeing chunks, which can come from repeated music cues or
+    an edit inside the last or first chunk, don't block the audio stage. A competing
+    region interrupted by a quiet chunk also breaks into singles. Singles are
+    recorded and checked by the video stage (V3a, V5a).
+  - Implemented in `alignment_decision.py` from existing runs in U4; U1's numeric
+    outcome is unchanged. U3 applies nothing, so it needs no change.
+- A4b. Same-frame disagreements (added 2026-09-26). A credible chunk whose lag
+  differs from the global lag by more than 2 ms can still map to the same video
+  frame. At 24 fps half a frame is about 21 ms, and mix differences produce shifts
+  of that size. Video can never tell such a disagreement apart, so it must not
+  block.
+  - For each chunk, `x_chunk` is its compensated sub-frame position (A5/A6 applied
+    to the chunk's own lag) and `r_chunk = floor(x_chunk + 0.5)`.
+  - After the video confirms `c` (V5), a disagreement is **frame-distinct** only if
+    `r_chunk != c`.
+  - Chunks with `r_chunk == c` count as agreeing for authority purposes, are never
+    targets, and are recorded as sub-frame context in verbose output and the panel
+    details.
+  - A4a runs and V3a targets consider only frame-distinct disagreements.
+  - **Authority agreement gate.** A4b changes A4's pass/fail for authority, not only
+    targeting. After V5 confirms `c`, recompute the agreement count with
+    frame-level agreement: a credible chunk agrees when its lag is within 2 ms of
+    the global lag, or when `r_chunk == c`. Then apply A4's rules to that count:
+    - agreeing >= `min(3, analysed chunks)` (and at least 1);
+    - agreeing >= 0.8 x credible;
+    - not `search_edge`.
+
+    Several same-frame disagreements therefore can't fail the gate on their own.
+    U1's raw numeric outcome (the 2 ms agreement, `agreed` / `no_single_offset`) is
+    kept unchanged as evidence and shown in verbose output. The V6 trusted predicate
+    uses the recomputed authority gate. Without a confirmed `c` there is no
+    recount, and the result is provisional or unavailable as before.
 - A5. Container start compensation per source:
   `offset_seconds = lag_seconds + (audio_start_ref - video_start_ref) - (audio_start_cmp - video_start_cmp)`,
   with `lag_seconds = lag / 8000` under A1's definition. It uses ffprobe `start_time`
@@ -182,6 +262,31 @@ Confirmed with the maintainer on 2026-09-25.
   for all candidates. Each position compares reference frame `n` with comparison frame
   `n - candidate` in raw source frames (public sign convention; base trims do not
   enter).
+- V3a. Targeted positions (added 2026-09-26, revised the same day). In addition to
+  the V3 positions, sample positions inside the reference time range of each target
+  chunk: 4 evenly spaced positions for a credible disagreeing chunk, 2 for a
+  non-credible one. They are mapped to reference frames and kept only where valid
+  for every frame they are compared at.
+  - Targets are chosen after V5 confirms `c`, from frame-distinct disagreements
+    only (A4b), in priority order:
+    1. competing runs (A4a): 4 positions spread evenly across the run's time range;
+    2. single credible disagreeing chunks: 4 positions each, highest PSR first;
+    3. active non-credible disagreeing chunks: 2 positions each, highest PSR first.
+  - At most 12 targeted positions in total, in that priority order. A competing run
+    or credible chunk that gets no position because the budget ran out is
+    **unexamined**. It counts as unresolved and blocks automatic application
+    (`competing_offset` or `unresolved_audio_disagreement`); skipping a target
+    never counts as resolving it.
+  - Audio-to-video time conversion (A5's assumption that decoded PCM sample 0 sits
+    at the audio stream's `start_time`):
+    - reference video time for reference PCM sample `k` is
+      `t = k / 8000 + audio_start_ref - video_start_ref`;
+    - reference frame = `floor(t x fps_reference)`;
+    - positions are clipped to frames valid for every offset they are compared at.
+      A target with no valid position is unexamined.
+  - The P4a check points use the same conversion.
+  - Targeted positions never count toward V5's confirmation vote. They are judged
+    only by V5a.
 - V4. Frames: luma, crop to each clip's resolved active rect (resolved during
   preparation, before any phase), bilinear downscale to 320x180, rank-normalize with
   average ranks for ties, mean absolute difference.
@@ -192,9 +297,93 @@ Confirmed with the maintainer on 2026-09-25.
   confirms `c` when `c` is in `r - 1 ... r + 1`, there are >= 6 informative positions,
   `c` wins >= 75% of them, and the median margin is >= 1.5. A winner at `r +/- 2` is
   `video_check_inconclusive` (the audio is off by more than a frame).
+- V5a. Targeted hypothesis check (added 2026-09-26, revised the same day). At each
+  targeted position, compare two video hypotheses:
+  - the confirmed offset `c`;
+  - the alternative: the target's own audio lag, compensated and converted to frames
+    per A5/A6 (`r_chunk`; for a run, the run's median lag), scored at the distinct
+    offsets `{r_chunk - 1, r_chunk, r_chunk + 1}` minus `c`. The alternative set
+    never contains `c`, so a shared candidate can't create false ambiguity. A4b
+    guarantees `r_chunk != c`, so the set is never empty.
+
+  Each hypothesis takes its best (lowest) difference over its offsets. The better
+  hypothesis wins when the other's difference divided by its own is at least 1.5
+  (the V5 margin). Rules:
+  - exact ties count as neither;
+  - a best difference of 0 against a non-zero one is an infinite margin;
+  - both 0 counts as neither.
+  - **`c` wins:** consistent; the audio disagreement there is resolved as a false
+    audio match.
+  - **The chunk lag wins:** a video-confirmed competing offset, meaning a
+    length-changing edit. Blocks automatic application.
+  - **Neither wins:** `local_video_inconclusive`. This can mean replacement content,
+    low motion, a wrong alternative lag or weak visual discrimination; it is not
+    proof of a content difference. It is recorded with its time range and scores.
+    - For a **non-credible** target chunk it never blocks (weak audio evidence,
+      refusal principle).
+    - For a **credible** disagreeing chunk the disagreement stays unresolved. The
+      chunk is resolved only when `c` wins at one or more of its positions and the
+      alternative wins at none. An unresolved single credible chunk gives
+      `unresolved_audio_disagreement`.
+    - A **competing run** (A4a) is resolved only when `c` wins at 2 or more of the
+      run's positions and the alternative wins at none. An unresolved or unexamined
+      run gives `competing_offset`. Resolving a run resolves all of its member chunks
+      for V6: they are not separate targets and don't each need their own 4
+      positions.
+
+    Credible disagreement is positive audio evidence of another offset, so it has to
+    be explained by the video, not ignored.
+
+  Every decision is relative between hypotheses, so no absolute difference threshold
+  exists to calibrate. A garbage lag from a non-credible chunk almost never wins a
+  video comparison, which is why including those chunks is safe.
+
+  Stated contract and limits:
+  - Automatic application is withheld for every frame-distinct competing run (A4a)
+    and every frame-distinct credible disagreeing chunk that is unexamined or
+    unresolved under V5a, or whose own offset the video confirms.
+    This is the enforceable guarantee. It is not a claim that every length-changing
+    edit touching credible audio is refused: V5a resolves a chunk from sampled
+    positions, so a chunk straddling an edit (moving video confirms `c` before the
+    edit, low motion stays inconclusive after it) can resolve in favour of `c`. In
+    practice the following chunks usually carry the shifted lag and form a competing
+    run, but sampling doesn't prove it.
+  - An edit whose shifted part has only active but non-credible audio is refused
+    when a targeted position samples it and the video confirms the competing
+    offset. Sparse sampling can't guarantee this.
+  - An edit whose shifted part is entirely silent or inactive audio produces no
+    audio target and is outside this check. It is covered only by this documented
+    limit.
+  - Same-length replacements are applied by design: the constant offset is still
+    correct, and only content differs. Keeping comparison frames out of unverified
+    regions belongs to the region-limited follow-up in `docs/TODO.md`.
 - V6. Outcomes:
-  - Audio passes and video confirms `c`: `trusted_automatic`, applied frame `c`,
-    reason `audio_video_confirmed`.
+  - **Trusted predicate.** The result is `trusted_automatic` (applied frame `c`,
+    reason `audio_video_confirmed`) if and only if **all** of these hold:
+    - the audio stage passes the A4b authority agreement gate;
+    - the video confirms `c` (V5);
+    - every frame-distinct competing run (A4a) and every frame-distinct credible
+      disagreeing chunk is examined and resolved in favour of `c` under V5a;
+    - no V5a target of any kind has its alternative confirmed by the video.
+
+    Records that don't block (`local_video_inconclusive` at non-credible targets,
+    same-frame context, resolved disagreements) stay with the result and show in
+    verbose output and the panel details. The predicate is one function in
+    `alignment_decision.py`, never implied by branch order. Every other outcome
+    below is `provisional` or `unavailable`.
+  - A competing run that is unresolved or unexamined: `provisional` at `c`, reason
+    `competing_offset`; the regions are shown.
+  - Audio passes and video confirms `c`, but V5a confirms a competing offset at a
+    targeted position: `provisional` at `c`, reason
+    `competing_offset_confirmed_by_video`; the regions and their offsets are shown.
+  - Audio passes and video confirms `c`, but a credible disagreeing chunk stays
+    unresolved (V5a): `provisional` at `c`, reason `unresolved_audio_disagreement`;
+    the unresolved regions, their audio offsets and the local video scores are
+    shown.
+  - When several reasons apply, all of them are recorded, and the primary reason is
+    the first in this order: `competing_offset_confirmed_by_video`,
+    `competing_offset`, `unresolved_audio_disagreement`, `video_check_inconclusive`,
+    `video_check_unavailable`.
   - Audio passes and video is inconclusive: `provisional` at `r`, reason
     `video_check_inconclusive`.
   - Video cannot open or decode a source: `provisional` at `r`, reason
@@ -235,9 +424,18 @@ Confirmed with the maintainer on 2026-09-25.
   `correlation_score` becomes the agreement fraction (agreeing / credible, 0..1). The
   phase warning branches that can no longer fire for applied results ("applied but
   drifting") are removed.
-- P3. Diagnostic artifact schema v3 -> v4 and VSView metadata v4 -> v5, both defined
-  in full in U3 (video fields present as `not_observed` until U4 fills them), generated
-  and parsed together. Evidence: selected streams, start times and compensation, chunk
+- P3. Diagnostic artifact schema v3 -> v4 and VSView metadata v4 -> v5, generated
+  and parsed together. U3 defines them with a single five-offset video table
+  (`not_observed`). U4 extends them for the 2026-09-26 amendments:
+  - targeted positions with their target (chunk or run), the alternative offsets and
+    both hypotheses' scores;
+  - per-target resolution status (resolved, unresolved, unexamined, alternative
+    confirmed) and the same-frame context;
+  - the P4a check points.
+
+  The shared parser, diagnostics writer, VSView contract and panel are updated
+  together. The branch is unreleased, so U4 amends v4 and v5 in place without
+  another version bump. Evidence: selected streams, start times and compensation, chunk
   runs (always), per-chunk rows (start, lag, PSR, active/credible/agree flags), global
   lag, sub-frame estimate, the video table (per-position differences for each scored
   offset, index-build time), decision and reason. Per-chunk rows are stored as
@@ -248,7 +446,43 @@ Confirmed with the maintainer on 2026-09-25.
 - P4. Terminal and VSView copy keeps the existing decision-first hierarchy and adds
   the reasons from V6 and A4. Applied states read
   `Audio alignment accepted: {offset} - APPLIED`, with verbose evidence
-  `audio +146.23f, video confirmed +147f`.
+  `audio +146.23f, video confirmed +147f`. `competing_offset` and
+  `competing_offset_confirmed_by_video` name the regions in normal output, for
+  example `+147f from 0:00 to 9:00; +243f after 9:02`. Normal output keeps this to
+  one line per region, up to 3 lines, then `and N more regions`.
+- P4a. Review information (added 2026-09-26). When a result is not applied, the user
+  gets everything needed to confirm or reject it quickly, in plain language, in both
+  the terminal and the VSView panel:
+  1. **Outcome first:** the suggested offset, preferring the video-confirmed one,
+     and `NOT APPLIED`.
+  2. **Why, in one sentence per reason, in plain words.** For example: "Audio
+     suggests a different offset between 9:00 and 9:30 that the video could not
+     rule out." Never an internal reason token on its own.
+  3. **What was established:**
+     - how much of the track agreed, for example "38 of 40 audio sections agree on
+       +147f";
+     - whether the video confirmed the offset, and at how many points;
+     - the regions where evidence differs or was inconclusive, each with its time
+       range and suggested offset.
+  4. **Where to look:** a short list of check points (at most 5) with timestamp,
+     reference frame and suggested comparison frame. The list covers each
+     disagreeing or inconclusive region first, then one confirmed point for
+     contrast.
+  5. **What to do:** confirm this offset, enter another, or keep the current
+     alignment. This uses the existing panel actions; provisional values never
+     prefill inputs or satisfy readiness, as today.
+
+  Weak evidence (level or mix differences, quiet sections, inconclusive local
+  checks) is presented as context, never as an error or warning. Normal terminal
+  output keeps items 1, 2 and 5 plus the top check points; verbose output and the
+  panel's details show everything.
+
+  UI design is collaborative (maintainer rule): before implementing the panel and
+  terminal layout, U4 produces a short layout and copy mockup for the provisional,
+  competing-offset and unresolved states, using the `interface-design` skill within
+  the existing panel. It gets the maintainer's approval first. Whether a check point
+  offers a click-to-jump action in VSView is decided in that mockup, since it
+  touches the panel's captured-position semantics.
 
 ### Public configuration
 
@@ -435,6 +669,11 @@ fields of the U3 schemas (diagnostic v4 and metadata v5), and show the video tab
 the collapsed panel evidence details. Add the P2 fingerprint scope and replace
 `video_check_pending`.
 
+Also implement A4a and A4b (competing runs and same-frame disagreements, in
+`alignment_decision.py`), V3a and V5a (targeted positions, time conversion, the
+alternative set that excludes `c`), the V6 trusted predicate as one function, the
+new V6 outcomes, the P4 region copy, P4a, and the P3 schema extension.
+
 Tests use synthetic VapourSynth clips (generated frames with motion, known offset):
 
 - confirmation;
@@ -444,7 +683,86 @@ Tests use synthetic VapourSynth clips (generated frames with motion, known offse
 - a loader failure and a missing loader (unavailable);
 - cancellation after load and between positions;
 - a source identity change around loads;
-- an out-of-range overlap.
+- an out-of-range overlap;
+- A4a/V5a acceptance cases on synthetic A/V programs of at least 10 minutes:
+  - never automatically applied:
+    - a 4 s insert near the start (60 s), giving `competing_offset_confirmed_by_video`
+      over moving video, or `competing_offset` over low motion;
+    - a 4 s insert near the end (540 s), with the same outcomes;
+    - a 4 s insert inside the last chunk (570 s, a single disagreeing chunk), giving
+      `competing_offset_confirmed_by_video` when the video resolves it, otherwise
+      `unresolved_audio_disagreement`;
+  - applied (`trusted_automatic`), with any local inconclusive evidence observed
+    recorded; the assertion is on application, not on a difference being found:
+    - a 4 s and a 30 s same-length replacement at 300 s (different content, same
+      offset after it);
+  - still `trusted_automatic`: a single credible disagreeing chunk that is a false
+    audio match (a repeated music cue, with identical, moving video that resolves
+    it);
+  - provisional `unresolved_audio_disagreement`: a single credible disagreeing chunk
+    over low-motion video where neither hypothesis wins;
+  - budget exhaustion: 4 or more non-adjacent credible disagreeing chunks (no
+    competing run), where the chunks beyond the 12-position budget are unexamined.
+    The result is `unresolved_audio_disagreement` and must never be
+    `trusted_automatic`;
+  - insert whose shifted part has active, non-credible audio and a targeted position
+    sampling it: `competing_offset_confirmed_by_video` (or
+    `unresolved_audio_disagreement` if that audio turns out credible). A fully silent
+    shifted tail is covered by the documented limit only; no test pins a wrong
+    result as expected;
+  - mix-caused audio disagreement (these must all be `trusted_automatic`, since the
+    video resolves them):
+    - the multipath lag reversal: content mixed with its 30 ms-delayed copy, with
+      the copies' relative levels reversed over 2 consecutive chunks, over
+      identical moving video (the reviewer's reproduced case: global lag 0, 18/20
+      agreeing, a 2-chunk alternate run at PSR about 520);
+    - a same-frame disagreement: a credible chunk shifted by 10 ms at 24 fps, which
+      is never a target and is recorded as sub-frame context;
+    - many same-frame disagreements (the authority gate): 20 credible chunks, 6 at a
+      10 ms alternate lag, all rounding to the same frame. The raw U1 outcome is
+      `no_single_offset` (14/20); the A4b recount must pass and the result must be
+      `trusted_automatic`, with the raw outcome kept in the evidence;
+    - a run resolved by video: member chunks aren't separately targeted, and the
+      result applies;
+  - V5a mechanics:
+    - an alternative set overlapping `c` (`c = 147`, `r_chunk = 148`), where 147 is
+      excluded from the alternative and a clearly correct `c` resolves the target;
+    - exact ties and zero scores follow the V5a rules;
+    - a reference with a nonzero audio/video start delta plus a local disagreement,
+      where targeted frames land in the disagreeing region per the V3a conversion;
+    - a competing run over moving video that confirms its own offset, giving
+      `competing_offset_confirmed_by_video`;
+    - a run resolved in favour of `c` with only 1 winning position, which stays
+      `competing_offset` (the 2-position rule);
+  - trusted predicate: orchestration and cache tests show that each failing
+    conjunct alone (an unresolved run, an unexamined credible chunk, a confirmed
+    alternative at a non-credible target) prevents `trusted_automatic`, trims and
+    the computed-cache write, independent of evaluation order;
+  - schema: diagnostics and metadata round-trip with targeted evidence populated,
+    within the size bounds at the maximum target count;
+  - refusal principle (these must all be `trusted_automatic`):
+    - the same program with loudness changes of +/-10 dB in several places;
+    - dynamic-range compression over part of the track;
+    - a different surround level or downmix in places;
+    - a music-stem change over one section.
+
+    This is the class that the previous implementation wrongly refused.
+  - A4a adjacency: credible disagreeing chunks at the same lag but non-adjacent
+    indices (for example 2 and 15) are not a competing run; each goes to V3a;
+- video false-minimum cases:
+  - repeated or duplicated frames (cadence), where ties must be uninformative, never
+    a confirmation;
+  - periodic motion whose period aliases a neighbouring offset;
+  - an edit affecting a minority of V3 positions.
+
+  None may confirm a wrong frame.
+- The synthetic noise label is corrected (the "-15 dB SNR" helper is about
+  +15 dB SNR), and a genuine -15 dB SNR case (noise 15 dB above the signal) is added
+  and must still align.
+
+P4a presentation tests cover every non-applied reason in normal, verbose, JSON and
+panel output, including the check-point list. They follow the maintainer-approved
+mockup.
 
 An orchestration test proves `trusted_automatic` requires a confirmed video stage and
 that provisional results never reach trims or the computed cache. Docker integration
@@ -460,9 +778,31 @@ schema).
 - Real-media gate in Docker: `tools/alignment_benchmark.py` is reduced to production
   path plus labels (the v0.1.0 comparator stays local and untracked) and tracked. It
   takes a local, untracked label file. Every labelled pair must equal its visually
-  confirmed frame: currently the three Black Sails pairs above (0, 147, 147). Add any
-  further labelled sets the maintainer provides (different mix/master, HDR/DV,
-  different cut, track-delay MKV) before merge; a mismatch is a stop condition.
+  confirmed frame: currently the three Black Sails pairs above (0, 147, 147).
+- Independent real-media set (merge gate, added 2026-09-26). Besides the
+  development episode, at least one labelled pair from each of:
+  - a different title;
+  - real HDR vs SDR mastering (Dolby Vision profile 5 if available);
+  - a foreign-language dub;
+  - a different cut or extended edition (expected: never applied automatically);
+  - an MKV with a container track delay.
+
+  The maintainer supplies the pairs and their visually confirmed frames. If a
+  category can't be sourced, record it as missing in the execution record and get
+  the maintainer's explicit sign-off before merge; don't silently drop it.
+- Report outcomes in four separate counts, not one accuracy figure:
+  - correct and applied;
+  - wrong and applied (must be 0; any is a stop condition);
+  - provisional;
+  - unavailable.
+
+  Also record the provisional-plus-unavailable rate on true-positive pairs as the
+  refusal rate. **Every refusal on a labelled same-content pair is investigated
+  and adjudicated with the maintainer before merge.** Record its reason and
+  evidence; a refusal caused by local weak evidence (refusal principle) is a defect.
+  Such a failure is diagnosed to its cause first; it is never by itself a
+  justification to weaken a threshold (the threshold stop condition still applies). The v0.1.0 parity goal means a high refusal rate on same-content
+  pairs is a failure to report, even when nothing wrong was applied.
 - Record sanitized results (no paths or titles) in this plan's execution record.
 - One final independent review (`deep_reviewer`) of the integrated branch diff,
   focused on authority paths, config removal, schema coordination and U2 lifetimes.
@@ -472,8 +812,10 @@ schema).
 
 ## Invariants
 
-- Nothing is applied, trimmed or cached as computed authority unless the audio stage
-  passes and the video stage confirms, or the offset is manual or reused manual.
+- Nothing is applied, trimmed or cached as computed authority unless the V6 trusted
+  predicate holds (audio passes, video confirms `c`, every frame-distinct credible
+  disagreement and competing run is examined and resolved, and no alternative is
+  video-confirmed), or the offset is manual or reused manual.
 - `+0f` is a real result and is distinct from no candidate.
 - Public offset sign: reference source frame minus comparison source frame.
 - At most two FFmpeg children per comparison; memory does not grow with media
@@ -508,7 +850,11 @@ Return to the controller or maintainer if:
 - the video check needs a loader other than the run's L-SMASH source;
 - removing a C2 field breaks a surface not listed here;
 - short-source handling (A1a) cannot reach the v0.1.0 outcome on a labelled short
-  pair.
+  pair;
+- the A4a run length, the V3a position counts, or the V5a margin (1.5) need changing
+  to pass a case;
+- a refusal-principle case, or a labelled same-content real pair, is not
+  automatically applied.
 
 ## Execution record
 
@@ -566,3 +912,103 @@ Return to the controller or maintainer if:
   Verification: full pytest, paired resource tests, pyright, ruff, bandit,
   lint-imports and `git diff --check` pass natively; focused and paired resource
   tests pass in Docker. Windows handle-release proof is pending.
+- 2026-09-26: external direction review (GPT-6 Astra) adopted by the maintainer.
+  Its central finding was confirmed from the A4 arithmetic: majority agreement
+  admits edits near either end (18/20 and 19/20 pass). Changes:
+  - A4a blocks automatic application on a coherent competing run of at least 2
+    chunks;
+  - V3a/V5a check targeted video positions inside disagreeing chunks with an
+    absolute mismatch rule;
+  - new V6 outcomes (`competing_offset`, `video_mismatch_in_disagreeing_region`)
+    and region copy (P4);
+  - new U4 acceptance cases (early and late inserts, an insert in the last chunk, a
+    middle replacement, a false audio match, repeated frames, periodic motion,
+    minority edits);
+  - the SNR label correction plus a genuine -15 dB case;
+  - U5 gains an independent real-media set as a merge gate, and four-outcome
+    reporting with a refusal rate.
+
+  U1-U3 behaviour is unchanged: U3 applies nothing, and A4a lives in the decision
+  module. A region-limited automatic mode (apply the dominant offset and select
+  frames only where it is confirmed) is deliberately out of scope; it is specified
+  as a follow-up in `docs/TODO.md`.
+- 2026-09-26: second external review (GPT-6 Astra) adopted by the maintainer:
+  - A4a now requires consecutive chunk indices. U1 runs don't break at non-credible
+    gaps, so indices 2 and 15 could otherwise form a "run".
+  - V3a also targets active non-credible chunks, capped at 12 positions.
+  - V5a is replaced by a relative two-hypothesis check (the confirmed offset against
+    the chunk's own lag). This removes the uncalibrated absolute threshold, whose
+    0.05 floor sat above a measured 0.018 wrong-frame difference. It also tells a
+    length-changing edit (blocked, `competing_offset_confirmed_by_video`) apart
+    from a same-length replacement (applied, content difference recorded).
+  - The earlier acceptance case "middle replacement must not be applied" was wrong:
+    a same-length replacement keeps a constant offset. It is now an applied case.
+  - The plan states the detection limit for edits hidden in non-credible audio.
+- 2026-09-26: third external review (GPT-6 Astra), adjudicated with the maintainer:
+  - An unresolved credible disagreement no longer allows application: a credible
+    disagreeing chunk must be resolved by the video in favour of `c` (with 4
+    targeted positions), otherwise the result is `unresolved_audio_disagreement`.
+    That makes the stated guarantee true. Weakening the wording was rejected: it
+    would have left a known wrong-application path.
+  - "Neither wins" is recorded as `local_video_inconclusive`, not as a content
+    difference.
+  - Acceptance cases now respect sampling coverage, and the fully silent tail is a
+    documented limit only.
+
+  At the maintainer's direction, the refusal principle (withhold only on positive
+  evidence of a different offset; weak evidence never blocks, with refusal-principle
+  tests and a U5 stop condition) and P4a (the review-information spec with a
+  maintainer-approved mockup before the UI is implemented) were added.
+- 2026-09-26: fourth external review (GPT-6 Astra), all three points accepted:
+  - Credible disagreeing chunks the 12-position budget doesn't reach are
+    *unexamined* and block (`unresolved_audio_disagreement`), with an acceptance
+    case.
+  - The refusal principle is restated so global audio and video confirmation stay
+    required, and only local weak evidence loses its veto.
+  - The guarantee is narrowed to the enforceable contract (withhold on competing
+    runs and on any unexamined or unresolved credible disagreeing chunk), and the
+    straddling-chunk limit is stated.
+
+  Refusal failures are diagnosed rather than answered with threshold changes. The
+  reviewer supports proceeding with no further estimator, fallback or redesign.
+- 2026-09-26: fifth external review (GPT-6 Astra), full-plan read against the code.
+  Adjudicated with the maintainer:
+  - **1, accepted; maintainer: "one of the main problems we need to avoid".** The
+    universal PHAT mix-tolerance claim was false: multipath content with reversed
+    relative levels produces a credible 2-chunk alternate run at PSR about 520.
+    Coherent runs are now resolved by video instead of vetoed unconditionally. A4b
+    (added by the controller while checking this) makes same-frame disagreements
+    non-blocking, because video can't separate them and they were a second route to
+    mix-caused false refusals.
+  - **2, accepted.** The V5a alternative set excludes `c`.
+  - **3, accepted.** One explicit trusted predicate, mirrored in the invariants and
+    tests.
+  - **4, accepted.** The audio-to-video time conversion is specified for targets and
+    check points.
+  - **5, rejected.** Crop rectangles stay out of the computed-cache identity. The
+    cached value is the source relationship, which a crop change can't make wrong. A
+    bad crop yields uninformative (rank-tied) positions, not false confirmations.
+    The decoder identity stays in the key because it changes frame numbering itself.
+    Clearing the cache still forces re-verification.
+  - **6, accepted.** U4 extends the diagnostic v4 and metadata v5 schemas in place
+    (unreleased branch).
+  - **Cleanups:** the goal statement now says "refuse when it detects", and the
+    obsolete token in the TODO is replaced.
+- 2026-09-26: At the maintainer's direction, the branch moved from its separate
+  worktree into the main checkout (`/Users/tristan/Software/frame-compare`), so
+  every tool works in one folder on one branch; the uncommitted U3/U3-R state was
+  carried over intact. The maintainer authorized pushing the branch; it tracks
+  `origin/agent/audio-alignment-parity`. PR, release and signing remain
+  unauthorized.
+- 2026-09-26: sixth external review (GPT-6 Astra):
+  - A4b now also recomputes the A4 authority agreement gate after V5 (frame-level
+    agreement), because several same-frame disagreements could otherwise fail A4
+    before the exemption applied. Raw U1 numbers are kept as evidence, and there is
+    a new U4 case (6/20 same-frame shifts must apply).
+  - Resolving a run resolves its member chunks.
+  - An unresolved run consistently gives `competing_offset`.
+  - The point-5 rejection stands, on a corrected basis: an accepted source
+    relationship stays reusable across presentation crop changes, and clearing the
+    cache re-verifies. The earlier claim that removing information can't cause a
+    false confirmation was too strong: a crop can leave repeated motion or an
+    overlay that favours a wrong offset.
