@@ -13,14 +13,20 @@ from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
     AudioAnalysisFacts,
+    AudioAuthorityRecount,
     AudioChunkColumns,
     AudioChunkRun,
     AudioCollectionFacts,
     AudioCollectionFailure,
     AudioDecisionCandidate,
+    AudioSameFrameContext,
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
+    VideoCheckPoint,
+    VideoPositionDifference,
+    VideoTargetEvidence,
+    VideoTargetPosition,
     evidence_from_payload,
 )
 
@@ -157,6 +163,123 @@ def attempt_with_chunks(planned: int, *, lag: int = 1177) -> AudioAlignmentAttem
 
 def test_three_hour_attempt_serializes_within_128kib() -> None:
     payload = json.dumps(asdict(attempt_with_chunks(360)), allow_nan=False)
+    assert len(payload.encode("utf-8")) <= 128 * 1024
+
+
+def _populated_video_attempt() -> AudioAlignmentAttempt:
+    attempt = attempt_with_chunks(3)
+    confirmed = 146
+    targets = (
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=0,
+            last_chunk_index=0,
+            alternative_offsets=(147, 148),
+            resolution="resolved",
+            positions=(VideoTargetPosition(0, 100, 0.1, 1.0, "confirmed"),),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=1,
+            last_chunk_index=1,
+            alternative_offsets=(149, 150, 151),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(1, 200, 1.0, 1.0, "neither"),),
+        ),
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=2,
+            last_chunk_index=3,
+            alternative_offsets=(152, 153),
+            resolution="unexamined",
+            positions=(),
+        ),
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=4,
+            last_chunk_index=5,
+            alternative_offsets=(154, 155, 156),
+            resolution="alternative_confirmed",
+            positions=(VideoTargetPosition(2, 300, 1.0, 0.1, "alternative"),),
+        ),
+    )
+    return replace(
+        attempt,
+        authority_recount=AudioAuthorityRecount(
+            raw_status="agreed",
+            raw_agreeing_chunks=3,
+            authority_status="agreed",
+            authority_agreeing_chunks=3,
+            passed=True,
+        ),
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(144, 145, confirmed, 147, 148),
+            confirmed_offset=confirmed,
+            index_build_seconds=0.25,
+            positions=(VideoPositionDifference(0, 50, (2.0, 1.0, 0.1, 1.0, 2.0)),),
+            targets=targets,
+            same_frame_context=(AudioSameFrameContext(2, 120, 146.36, 146),),
+            check_points=(VideoCheckPoint(12.5, 300, 154),),
+        ),
+    )
+
+
+def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None:
+    attempt = _populated_video_attempt()
+    parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(attempt))
+    assert parsed == attempt
+    assert parsed.authority_recount is not None
+    assert parsed.video_check.targets[3].resolution == "alternative_confirmed"
+    assert parsed.video_check.same_frame_context[0].rounded_frame == 146
+    assert parsed.video_check.check_points[0].suggested_comparison_frame == 154
+
+
+def test_extended_video_evidence_rejects_bad_values() -> None:
+    payload = asdict(_populated_video_attempt())
+    payload["video_check"]["targets"][0]["resolution"] = "pending"
+    with pytest.raises(ValueError, match="must be one of"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(_populated_video_attempt())
+    payload["video_check"]["targets"][0]["alternative_offsets"] = [146]
+    with pytest.raises(ValueError, match="exclude"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(_populated_video_attempt())
+    payload["video_check"]["check_points"][0]["timestamp_seconds"] = -1
+    with pytest.raises(ValueError, match="non-negative"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
+    attempt = attempt_with_chunks(360)
+    targets = tuple(
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            alternative_offsets=(5, 6, 7),
+            resolution="resolved",
+            positions=(VideoTargetPosition(index, index * 100, 0.1, 1.0, "confirmed"),),
+        )
+        for index in range(12)
+    )
+    populated = replace(
+        attempt,
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(2, 3, 4, 5, 6),
+            confirmed_offset=4,
+            index_build_seconds=0.0,
+            positions=(),
+            targets=targets,
+            check_points=tuple(
+                VideoCheckPoint(float(index), index, index + 4) for index in range(5)
+            ),
+        ),
+    )
+    payload = json.dumps(asdict(populated), allow_nan=False)
     assert len(payload.encode("utf-8")) <= 128 * 1024
 
 
@@ -407,6 +530,9 @@ def test_parser_rejects_inconsistent_evidence() -> None:
         "confirmed_offset": None,
         "index_build_seconds": None,
         "positions": [],
+        "targets": [],
+        "same_frame_context": [],
+        "check_points": [],
     }
     with pytest.raises(ValueError, match="must not carry evidence"):
         evidence_from_payload(AudioAlignmentAttempt, payload)

@@ -515,6 +515,8 @@ def _parse_audio_attempt(
             or suggested_offset != candidate.frame_offset
         ):
             raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
+    if attempt.authority_recount is not None and attempt.video_check.observation != "observed":
+        raise AlignmentReviewContractError("alignment recount lacks observed video evidence")
     return attempt
 
 

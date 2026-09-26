@@ -19,6 +19,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioAlignmentDecision,
     AudioAnalysisFacts,
     AudioAttemptStatus,
+    AudioAuthorityRecount,
     AudioChunkColumns,
     AudioChunkRun,
     AudioCollectionFacts,
@@ -28,6 +29,9 @@ from frame_compare.utils.alignment_evidence import (
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
+    VideoCheckPoint,
+    VideoTargetEvidence,
+    VideoTargetPosition,
     evidence_from_payload,
 )
 
@@ -448,7 +452,38 @@ def test_failed_final_replacement_preserves_last_valid_snapshot(
 
 
 def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> None:
-    attempt = maximum_audio_attempt()
+    base = maximum_audio_attempt()
+    attempt = replace(
+        base,
+        authority_recount=AudioAuthorityRecount(
+            raw_status="agreed",
+            raw_agreeing_chunks=360,
+            authority_status="agreed",
+            authority_agreeing_chunks=360,
+            passed=True,
+        ),
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(2, 3, 4, 5, 6),
+            confirmed_offset=4,
+            index_build_seconds=0.01,
+            positions=(),
+            targets=tuple(
+                VideoTargetEvidence(
+                    kind="chunk",
+                    first_chunk_index=index,
+                    last_chunk_index=index,
+                    alternative_offsets=(5, 6, 7),
+                    resolution="resolved",
+                    positions=(VideoTargetPosition(index, index * 100, 0.1, 1.0, "confirmed"),),
+                )
+                for index in range(12)
+            ),
+            check_points=tuple(
+                VideoCheckPoint(float(index), index, index + 4) for index in range(5)
+            ),
+        ),
+    )
 
     path, _, size = alignment_diagnostics.write_alignment_diagnostic(
         generated_root=tmp_path.parent,

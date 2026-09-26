@@ -66,11 +66,24 @@ type CollectionFailureCategory = Literal[
 ]
 type AudioPairSide = Literal["reference", "comparison"]
 type EvidenceRowStyle = Literal["value", "warn", "muted"]
+type VideoTargetKind = Literal["chunk", "run"]
+type VideoTargetResolution = Literal[
+    "resolved",
+    "unresolved",
+    "unexamined",
+    "alternative_confirmed",
+]
+type VideoTargetWinner = Literal["confirmed", "alternative", "neither"]
 
 AUDIO_ANALYSIS_SAMPLE_RATE = 8000
 MAX_AUDIO_CHUNKS = 4096
 _MAX_TEXT = 256
 _MAX_VERSION_TEXT = 512
+MAX_VIDEO_POSITIONS = 12
+MAX_VIDEO_TARGET_POSITIONS = 12
+MAX_VIDEO_TARGETS = 12
+MAX_VIDEO_ALTERNATIVE_OFFSETS = 3
+MAX_VIDEO_CHECK_POINTS = 5
 
 #: Plain-words reason phrases for unavailable audio states (m4). Both the
 #: terminal presentation and the VSView panel render these; collection failure
@@ -105,78 +118,97 @@ def _unwrap(annotation: object) -> object:
     return annotation
 
 
-def _check_value(annotation: object, value: Any, what: str) -> None:
-    """Strictly check one constructed value against a field annotation.
-
-    Literal membership comes from :func:`typing.get_args` on the single alias
-    definition. Unions cover ``X | None`` and ``float | Literal["unbounded"]``.
-    """
+def _walk_value(annotation: object, value: Any, what: str, *, parse: bool) -> Any:
+    """Check or parse one value using the same type-driven walk."""
     annotation = _unwrap(annotation)
     if annotation is None or annotation is _NONE_TYPE:
         if value is None:
-            return
+            return None
         raise ValueError(f"{what} must be null")
     origin = get_origin(annotation)
     if origin is Literal:
         if value not in get_args(annotation):
             raise ValueError(f"{what} must be one of {sorted(get_args(annotation))}")
-        return
+        return value
     if origin is Union or isinstance(annotation, UnionType):
         args = get_args(annotation)
         if value is None:
             if _NONE_TYPE in args:
-                return
+                return None
             raise ValueError(f"{what} must not be null")
         errors: list[str] = []
         for member in args:
             if member is _NONE_TYPE:
                 continue
             try:
-                _check_value(member, value, what)
+                return _walk_value(member, value, what, parse=parse)
             except ValueError as exc:
                 errors.append(str(exc))
                 continue
-            return
         raise ValueError(f"{what} is invalid: {value!r} ({'; '.join(errors)})")
     if annotation is bool:
         if not isinstance(value, bool):
             raise ValueError(f"{what} must be a boolean")
-        return
+        return value
     if annotation is int:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{what} must be an integer")
-        return
+        return value
     if annotation is float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{what} must be a finite number")
         if not math.isfinite(float(value)):
             raise ValueError(f"{what} must be a finite number")
-        return
+        return float(value) if parse else value
     if annotation is str:
         if not isinstance(value, str):
             raise ValueError(f"{what} must be a string")
-        return
+        return value
     if origin is tuple:
         args: tuple[Any, ...] = get_args(annotation)
-        if not isinstance(value, tuple):
-            raise ValueError(f"{what} must be a tuple")
-        entries: tuple[Any, ...] = cast(tuple[Any, ...], value)
+        if parse:
+            if not isinstance(value, (list, tuple)):
+                raise ValueError(f"{what} must be an array")
+            entries: tuple[Any, ...] = tuple(cast(list[Any] | tuple[Any, ...], value))
+        else:
+            if not isinstance(value, tuple):
+                raise ValueError(f"{what} must be a tuple")
+            entries = cast(tuple[Any, ...], value)
         if len(args) == 2 and args[1] is Ellipsis:
+            if parse:
+                checked: tuple[Any, ...] = tuple(
+                    _walk_value(args[0], item, f"{what}[{index}]", parse=True)
+                    for index, item in enumerate(entries)
+                )
+                return checked
             for index, item in enumerate(entries):
-                _check_value(args[0], item, f"{what}[{index}]")
-            return
+                _walk_value(args[0], item, f"{what}[{index}]", parse=False)
+            return cast(Any, value)
         if args:
             if len(entries) != len(args):
                 raise ValueError(f"{what} must hold {len(args)} entries")
+            if parse:
+                checked = tuple(
+                    _walk_value(member, item, f"{what}[{index}]", parse=True)
+                    for index, (member, item) in enumerate(zip(args, entries, strict=True))
+                )
+                return checked
             for index, (member, item) in enumerate(zip(args, entries, strict=True)):
-                _check_value(member, item, f"{what}[{index}]")
-            return
-        return
+                _walk_value(member, item, f"{what}[{index}]", parse=False)
+            return cast(Any, value)
+        return tuple(entries) if parse else cast(Any, value)
     if isinstance(annotation, type) and is_dataclass(annotation):
+        if parse:
+            return evidence_from_payload(annotation, value)
         if not isinstance(value, annotation):
             raise ValueError(f"{what} must be {annotation.__name__}")
-        return
+        return value
     raise TypeError(f"unsupported evidence type for {what}: {annotation!r}")
+
+
+def _check_value(annotation: object, value: Any, what: str) -> None:
+    """Strictly check one constructed value against a field annotation."""
+    _walk_value(annotation, value, what, parse=False)
 
 
 def _check_shallow(obj: object) -> None:
@@ -216,71 +248,7 @@ def _check_digest(name: str, value: object) -> None:
 
 def _parse_value(annotation: object, value: Any, what: str) -> Any:
     """Parse one JSON value against a resolved dataclass field annotation."""
-    annotation = _unwrap(annotation)
-    if annotation is None or annotation is _NONE_TYPE:
-        if value is None:
-            return None
-        raise ValueError(f"{what} must be null")
-    origin = get_origin(annotation)
-    if origin is Literal:
-        if value not in get_args(annotation):
-            raise ValueError(f"{what} must be one of {sorted(get_args(annotation))}")
-        return value
-    if origin is Union or isinstance(annotation, UnionType):
-        args = get_args(annotation)
-        if value is None:
-            if _NONE_TYPE in args:
-                return None
-            raise ValueError(f"{what} must not be null")
-        errors: list[str] = []
-        for member in args:
-            if member is _NONE_TYPE:
-                continue
-            try:
-                return _parse_value(member, value, what)
-            except ValueError as exc:
-                errors.append(str(exc))
-                continue
-        raise ValueError(f"{what} is invalid: {value!r} ({'; '.join(errors)})")
-    if annotation is bool:
-        if not isinstance(value, bool):
-            raise ValueError(f"{what} must be a boolean")
-        return value
-    if annotation is int:
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f"{what} must be an integer")
-        return value
-    if annotation is float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{what} must be a finite number")
-        result = float(value)
-        if not math.isfinite(result):
-            raise ValueError(f"{what} must be a finite number")
-        return result
-    if annotation is str:
-        if not isinstance(value, str):
-            raise ValueError(f"{what} must be a string")
-        return value
-    if origin is tuple:
-        args: tuple[Any, ...] = get_args(annotation)
-        if not isinstance(value, (list, tuple)):
-            raise ValueError(f"{what} must be an array")
-        items: list[Any] = list(cast(list[Any] | tuple[Any, ...], value))
-        if len(args) == 2 and args[1] is Ellipsis:
-            return tuple(
-                _parse_value(args[0], item, f"{what}[{i}]") for i, item in enumerate(items)
-            )
-        if args:
-            if len(items) != len(args):
-                raise ValueError(f"{what} must hold {len(args)} entries")
-            return tuple(
-                _parse_value(m, v, f"{what}[{i}]")
-                for i, (m, v) in enumerate(zip(args, items, strict=True))
-            )
-        return tuple(items)
-    if isinstance(annotation, type) and is_dataclass(annotation):
-        return evidence_from_payload(annotation, value)
-    raise TypeError(f"unsupported evidence type for {what}: {annotation!r}")
+    return _walk_value(annotation, value, what, parse=True)
 
 
 def evidence_from_payload[T](cls: type[T], data: object) -> T:
@@ -554,6 +522,115 @@ class VideoPositionDifference:
 
 
 @dataclass(frozen=True, slots=True)
+class VideoTargetPosition:
+    """One V3a position's relative two-hypothesis result."""
+
+    position_index: int
+    reference_frame: int
+    confirmed_score: float
+    alternative_score: float
+    winner: VideoTargetWinner
+
+    def __post_init__(self) -> None:
+        _check_shallow(self)
+        _check_int("position_index", self.position_index, minimum=0)
+        _check_int("reference_frame", self.reference_frame, minimum=0)
+        if self.confirmed_score < 0 or self.alternative_score < 0:
+            raise ValueError("target hypothesis scores must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class VideoTargetEvidence:
+    """A chunk or competing run and its bounded V3a positions."""
+
+    kind: VideoTargetKind
+    first_chunk_index: int
+    last_chunk_index: int
+    alternative_offsets: tuple[int, ...]
+    resolution: VideoTargetResolution
+    positions: tuple[VideoTargetPosition, ...]
+
+    def __post_init__(self) -> None:
+        _check_shallow(self)
+        _check_int("first_chunk_index", self.first_chunk_index, minimum=0)
+        _check_int("last_chunk_index", self.last_chunk_index, minimum=0)
+        if self.last_chunk_index < self.first_chunk_index:
+            raise ValueError("video target ends before it starts")
+        if self.kind == "chunk" and self.first_chunk_index != self.last_chunk_index:
+            raise ValueError("chunk targets must name one chunk")
+        if not 1 <= len(self.alternative_offsets) <= MAX_VIDEO_ALTERNATIVE_OFFSETS:
+            raise ValueError("video targets must have 1..3 alternative offsets")
+        if len(set(self.alternative_offsets)) != len(self.alternative_offsets):
+            raise ValueError("video target alternative offsets must be unique")
+        if len(self.positions) > 4:
+            raise ValueError("video targets have at most four positions")
+        if self.resolution == "unexamined":
+            if self.positions:
+                raise ValueError("unexamined video targets must have no positions")
+            return
+        if not self.positions:
+            raise ValueError("examined video targets need a position")
+        winners = [position.winner for position in self.positions]
+        if self.resolution == "alternative_confirmed":
+            if "alternative" not in winners:
+                raise ValueError("alternative-confirmed targets need an alternative winner")
+        elif "alternative" in winners:
+            raise ValueError("only alternative-confirmed targets may have an alternative winner")
+        elif self.resolution == "resolved":
+            required = 2 if self.kind == "run" else 1
+            if winners.count("confirmed") < required:
+                raise ValueError("resolved targets need enough confirmed positions")
+        elif "confirmed" not in winners and "neither" not in winners:
+            raise ValueError("unresolved targets need an observed position")
+
+
+@dataclass(frozen=True, slots=True)
+class AudioSameFrameContext:
+    """A credible audio disagreement that rounds to the confirmed frame."""
+
+    chunk_index: int
+    lag_samples: int
+    subframe_estimate: float
+    rounded_frame: int
+
+    def __post_init__(self) -> None:
+        _check_shallow(self)
+        _check_int("chunk_index", self.chunk_index, minimum=0)
+
+
+@dataclass(frozen=True, slots=True)
+class AudioAuthorityRecount:
+    """The A4b frame-level recount alongside the untouched U1 outcome."""
+
+    raw_status: AudioOutcomeStatus
+    raw_agreeing_chunks: int
+    authority_status: AudioOutcomeStatus
+    authority_agreeing_chunks: int
+    passed: bool
+
+    def __post_init__(self) -> None:
+        _check_shallow(self)
+        _check_int("raw_agreeing_chunks", self.raw_agreeing_chunks, minimum=0)
+        _check_int("authority_agreeing_chunks", self.authority_agreeing_chunks, minimum=0)
+
+
+@dataclass(frozen=True, slots=True)
+class VideoCheckPoint:
+    """A bounded P4a frame pair for quick manual review."""
+
+    timestamp_seconds: float
+    reference_frame: int
+    suggested_comparison_frame: int
+
+    def __post_init__(self) -> None:
+        _check_shallow(self)
+        if self.timestamp_seconds < 0:
+            raise ValueError("video check-point timestamp must be non-negative")
+        _check_int("reference_frame", self.reference_frame, minimum=0)
+        _check_int("suggested_comparison_frame", self.suggested_comparison_frame, minimum=0)
+
+
+@dataclass(frozen=True, slots=True)
 class VideoCheckObservation:
     """Video frame-check evidence; ``not_observed`` until the video stage fills it."""
 
@@ -562,6 +639,9 @@ class VideoCheckObservation:
     confirmed_offset: int | None
     index_build_seconds: float | None
     positions: tuple[VideoPositionDifference, ...]
+    targets: tuple[VideoTargetEvidence, ...] = ()
+    same_frame_context: tuple[AudioSameFrameContext, ...] = ()
+    check_points: tuple[VideoCheckPoint, ...] = ()
 
     def __post_init__(self) -> None:
         _check_shallow(self)
@@ -573,19 +653,51 @@ class VideoCheckObservation:
                 or self.confirmed_offset is not None
                 or self.index_build_seconds is not None
                 or self.positions
+                or self.targets
+                or self.same_frame_context
+                or self.check_points
             ):
                 raise ValueError("an unobserved video check must not carry evidence")
             return
         if len(self.scored_offsets) != 5:
             raise ValueError("an observed video check scores five offsets")
+        if len(self.positions) > MAX_VIDEO_POSITIONS:
+            raise ValueError("video check has too many confirmation positions")
         if self.confirmed_offset is not None and self.confirmed_offset not in self.scored_offsets:
             raise ValueError("a confirmed video offset must be a scored offset")
+        if self.index_build_seconds is None:
+            raise ValueError("an observed video check needs index-build time")
         for position in self.positions:
             if len(position.score_by_offset) != len(self.scored_offsets):
                 raise ValueError("video position scores must cover every scored offset")
         indexes = [position.position_index for position in self.positions]
         if len(set(indexes)) != len(indexes):
             raise ValueError("video position indexes must be unique")
+        if len(self.targets) > MAX_VIDEO_TARGETS:
+            raise ValueError("video check has too many targets")
+        target_position_count = sum(len(target.positions) for target in self.targets)
+        if target_position_count > MAX_VIDEO_TARGET_POSITIONS:
+            raise ValueError("video check has too many targeted positions")
+        if self.targets and self.confirmed_offset is None:
+            raise ValueError("targeted video evidence needs a confirmed offset")
+        if self.same_frame_context and self.confirmed_offset is None:
+            raise ValueError("same-frame context needs a confirmed offset")
+        if self.same_frame_context and any(
+            item.rounded_frame != self.confirmed_offset for item in self.same_frame_context
+        ):
+            raise ValueError("same-frame context must round to the confirmed offset")
+        for target in self.targets:
+            if self.confirmed_offset in target.alternative_offsets:
+                raise ValueError("target alternatives must exclude the confirmed offset")
+        target_indexes = [
+            position.position_index for target in self.targets for position in target.positions
+        ]
+        if len(set(target_indexes)) != len(target_indexes):
+            raise ValueError("targeted video position indexes must be unique")
+        if len(self.same_frame_context) > MAX_VIDEO_TARGET_POSITIONS:
+            raise ValueError("video check has too much same-frame context")
+        if len(self.check_points) > MAX_VIDEO_CHECK_POINTS:
+            raise ValueError("video check has too many check points")
 
 
 @dataclass(frozen=True, slots=True)
@@ -668,6 +780,7 @@ class AudioAlignmentAttempt:
     decision: AudioAlignmentDecision
     stability: AlignmentStabilitySummary
     collection_failure: AudioCollectionFailure | None = None
+    authority_recount: AudioAuthorityRecount | None = None
 
     def __post_init__(self) -> None:
         _check_shallow(self)
@@ -717,6 +830,19 @@ class AudioAlignmentAttempt:
             raise ValueError("global lag exceeds the search radius")
         if self.audio.active_chunks > planned:
             raise ValueError("active chunks exceed the planned chunks")
+        if self.authority_recount is not None:
+            if self.video_check.confirmed_offset is None:
+                raise ValueError("authority recount needs a confirmed video offset")
+            if self.authority_recount.raw_status != self.audio.status:
+                raise ValueError("authority recount must retain the raw audio outcome")
+            if self.authority_recount.raw_agreeing_chunks != self.audio.agreeing_chunks:
+                raise ValueError("authority recount must retain raw agreeing chunks")
+            if self.authority_recount.authority_agreeing_chunks > self.audio.credible_chunks:
+                raise ValueError("authority recount exceeds credible chunks")
+            if self.authority_recount.passed != (
+                self.authority_recount.authority_status == "agreed"
+            ):
+                raise ValueError("authority recount pass flag is inconsistent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -865,6 +991,7 @@ __all__ = [
     "AlignmentStabilitySummary",
     "AudioAlignmentAttempt",
     "AudioAlignmentDecision",
+    "AudioAuthorityRecount",
     "AudioAnalysisFacts",
     "AudioAttemptStatus",
     "AudioCandidateBasis",
@@ -886,11 +1013,23 @@ __all__ = [
     "CollectionFailureCategory",
     "EvidenceRow",
     "EvidenceRowStyle",
+    "MAX_VIDEO_ALTERNATIVE_OFFSETS",
+    "MAX_VIDEO_CHECK_POINTS",
+    "MAX_VIDEO_POSITIONS",
+    "MAX_VIDEO_TARGET_POSITIONS",
+    "MAX_VIDEO_TARGETS",
     "MAX_AUDIO_CHUNKS",
     "SelectedAudioStreamEvidence",
+    "AudioSameFrameContext",
+    "VideoCheckPoint",
     "VideoCheckObservation",
     "VideoCheckObservationState",
     "VideoPositionDifference",
+    "VideoTargetEvidence",
+    "VideoTargetKind",
+    "VideoTargetPosition",
+    "VideoTargetResolution",
+    "VideoTargetWinner",
     "audio_evidence_rows",
     "audio_unavailable_phrase",
     "evidence_from_payload",
