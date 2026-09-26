@@ -1012,3 +1012,32 @@ Return to the controller or maintainer if:
     cache re-verifies. The earlier claim that removing information can't cause a
     false confirmation was too strong: a crop can leave repeated motion or an
     overlay that favours a wrong offset.
+- 2026-09-26: U3 implemented by an external implementer. Remediation U3-R was
+  completed by a Codex controller with Luna workers after the first implementer ran
+  out of usage.
+  - Checkpoint review: the independent `deep_reviewer` (Opus, high) found 1
+    blocker, 7 major and 15 minor findings. All were accepted and remediated:
+    - cleanup failure stays fatal ahead of cancellation;
+    - identity changes give per-comparison results;
+    - native metadata omits per-chunk rows;
+    - shared trusted replay stays write-eligible;
+    - A5 is implemented once;
+    - one generic evidence parser, with invariants in `__post_init__`;
+    - restored coverage;
+    - start-offset truths come from fixture construction, not the formula.
+  - A Codex stop on shared computed replay was overruled by the controller: P1
+    allows replaying trusted entries under the current token, and U3 never writes
+    same-run computed authority.
+  - A controller delta check by `reviewer` (Opus, medium) found a regression: the
+    run invariant required contiguous indices, although U1 runs skip non-credible
+    chunks, so real media with a quiet chunk would have failed the phase. It is
+    fixed, and a quiet-chunk test proves it. Three test gaps were also closed:
+    cancellation outranks identity, two-layer write eligibility, and a guarded
+    identity freeze.
+  - Evidence: every in-sync start-offset fixture gives r == 0 and the 5-frame case
+    gives r == 5, on native FFmpeg 9.0.2 and Docker FFmpeg 7.1.5. Full pytest,
+    pyright, ruff, bandit, lint-imports, the API-docs check, resource tests and the
+    strict docs build pass; the canonical Docker gate had zero skips.
+  - Known follow-up for U4: `utils/alignment_evidence.py` (about 890 lines) keeps
+    parallel `_check_value` and `_parse_value` type walkers. Unify them if U4's
+    schema extension touches that code.

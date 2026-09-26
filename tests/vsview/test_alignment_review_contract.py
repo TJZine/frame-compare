@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+from frame_compare.services.alignment import _build_audio_review_map
+from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
+from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.utils.alignment_evidence import (
+    AlignmentStabilitySummary,
+    AudioAlignmentAttempt,
+    AudioAlignmentDecision,
+    AudioAnalysisFacts,
+    AudioChunkColumns,
+    AudioChunkRun,
+    AudioCollectionFacts,
+    AudioDecisionCandidate,
+    AudioStageOutcome,
+    SelectedAudioStreamEvidence,
+    VideoCheckObservation,
+)
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
@@ -30,9 +47,380 @@ from frame_compare.vsview.alignment_review_contract import (
     read_alignment_review_result,
     write_alignment_review_result,
 )
-from tests.services.test_alignment_diagnostics import audio_attempt, maximum_audio_attempt
 
 _SESSION_ID = "12345678123456781234567812345678"
+
+_REFERENCE_DIGEST = "a" * 64
+_COMPARISON_DIGEST = "b" * 64
+_DIAGNOSTIC_POLICY = "retained-audio-evidence-v1"
+_FPS_NUM = 24
+_FPS_DEN = 1
+_CHUNK_SAMPLES = 40000
+_LAG_SAMPLES = 240000
+_MAX_OFFSET_SECONDS = 30.0
+_AGREE_PSR = 30.0
+
+
+def _frame_lag(frame_offset: int) -> int:
+    """Return the exact 8 kHz lag for the whole-frame offsets used by fixtures."""
+    lag = frame_offset * 8000 // _FPS_NUM
+    assert lag * _FPS_NUM == frame_offset * 8000
+    return lag
+
+
+def _subframe_estimate(lag: int) -> float:
+    return lag / 8000 * (_FPS_NUM / _FPS_DEN)
+
+
+def _stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
+    return SelectedAudioStreamEvidence(
+        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        source_identity_digest=digest,
+        audio_stream_index=0,
+        absolute_stream_index=1,
+        selection_method="automatic_metadata",
+        selection_rank=(0, 0, 0, 0),
+        codec_name="aac",
+        sample_rate=48000,
+        channels=2,
+        channel_layout="stereo",
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        language_match="not_applicable" if role == "reference" else "match",
+        commentary_match="not_applicable" if role == "reference" else "match",
+        stream_start_num=0,
+        stream_start_den=1,
+        stream_start_basis="metadata",
+        input_start_num=0,
+        input_start_den=1,
+        input_start_basis="metadata",
+        time_base_num=1,
+        time_base_den=48000,
+        duration_num=120,
+        duration_den=1,
+        duration_basis="duration_ts",
+        video_start_num=0,
+        video_start_den=1,
+        video_start_basis="metadata",
+    )
+
+
+def _analysis(*, planned_chunk_count: int) -> AudioAnalysisFacts:
+    planned = planned_chunk_count > 0
+    return AudioAnalysisFacts(
+        analysis_rate=8000,
+        max_offset_seconds=_MAX_OFFSET_SECONDS,
+        chunk_samples=_CHUNK_SAMPLES if planned else 0,
+        lag_samples=_LAG_SAMPLES if planned else 0,
+        planned_chunk_count=planned_chunk_count,
+    )
+
+
+def _agreed_columns(*, lag: int, chunk_count: int) -> AudioChunkColumns:
+    return AudioChunkColumns(
+        starts=tuple(index * _CHUNK_SAMPLES for index in range(chunk_count)),
+        counts=tuple(_CHUNK_SAMPLES for _ in range(chunk_count)),
+        active=tuple(True for _ in range(chunk_count)),
+        lags=tuple(lag for _ in range(chunk_count)),
+        psrs=tuple(_AGREE_PSR for _ in range(chunk_count)),
+        credible=tuple(True for _ in range(chunk_count)),
+        agrees=tuple(True for _ in range(chunk_count)),
+    )
+
+
+def _single_run(*, lag: int, chunk_count: int) -> tuple[AudioChunkRun, ...]:
+    return (
+        AudioChunkRun(
+            first_index=0,
+            last_index=chunk_count - 1,
+            lag=lag,
+            chunk_count=chunk_count,
+        ),
+    )
+
+
+def _agreed_audio(*, lag: int, frame_offset: int, chunk_count: int) -> AudioStageOutcome:
+    return AudioStageOutcome(
+        status="agreed",
+        global_lag=lag,
+        active_chunks=chunk_count,
+        credible_chunks=chunk_count,
+        agreeing_chunks=chunk_count,
+        compensation_seconds=0.0,
+        subframe_estimate=_subframe_estimate(lag),
+        rounded_frame=frame_offset,
+    )
+
+
+def _stable_summary(*, frame_offset: int, chunk_count: int) -> AlignmentStabilitySummary:
+    return AlignmentStabilitySummary(
+        classification="stable",
+        valid_windows=chunk_count,
+        offset_min_frames=frame_offset,
+        offset_max_frames=frame_offset,
+        first_offset_frames=frame_offset,
+        last_offset_frames=frame_offset,
+        largest_adjacent_jump_frames=0,
+        change_position_seconds=None,
+    )
+
+
+def _insufficient_summary() -> AlignmentStabilitySummary:
+    return AlignmentStabilitySummary(
+        classification="insufficient_evidence",
+        valid_windows=0,
+        offset_min_frames=None,
+        offset_max_frames=None,
+        first_offset_frames=None,
+        last_offset_frames=None,
+        largest_adjacent_jump_frames=None,
+        change_position_seconds=None,
+    )
+
+
+def _unobserved_video() -> VideoCheckObservation:
+    return VideoCheckObservation(
+        observation="not_observed",
+        scored_offsets=(),
+        confirmed_offset=None,
+        index_build_seconds=None,
+        positions=(),
+    )
+
+
+def _attempt_shell(
+    *,
+    ordinal: int,
+    status: str,
+    analysis: AudioAnalysisFacts,
+    chunks: AudioChunkColumns,
+    runs: tuple[AudioChunkRun, ...],
+    audio: AudioStageOutcome,
+    decision: AudioAlignmentDecision,
+    stability: AlignmentStabilitySummary,
+) -> AudioAlignmentAttempt:
+    return AudioAlignmentAttempt(
+        reference_identity_digest=_REFERENCE_DIGEST,
+        comparison_identity_digest=_COMPARISON_DIGEST,
+        comparison_ordinal=ordinal,  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]
+        estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
+        diagnostic_policy=_DIAGNOSTIC_POLICY,
+        media_runtime_fingerprint="alignment-runtime-test",
+        ffmpeg_version="not_observed",
+        ffprobe_version="not_observed",
+        extraction_recipe="ffmpeg -i <input> -map 0:a -f f32le -",
+        fps_num=_FPS_NUM,
+        fps_den=_FPS_DEN,
+        selected_streams=(
+            _stream("reference", _REFERENCE_DIGEST),
+            _stream("comparison", _COMPARISON_DIGEST),
+        ),
+        analysis=analysis,
+        chunks=chunks,
+        runs=runs,
+        audio=audio,
+        collection_observation="not_observed",
+        collection=(),
+        video_check=_unobserved_video(),
+        decision=decision,
+        stability=stability,
+    )
+
+
+def provisional_audio_attempt(
+    *, ordinal: int = 1, frame_offset: int = 0, chunk_count: int = 4
+) -> AudioAlignmentAttempt:
+    """Agreed audio stage awaiting video confirmation (the U3 applied-nothing state)."""
+    lag = _frame_lag(frame_offset)
+    subframe = _subframe_estimate(lag)
+    assert math.floor(subframe + 0.5) == frame_offset
+    return _attempt_shell(
+        ordinal=ordinal,
+        status="complete",
+        analysis=_analysis(planned_chunk_count=chunk_count),
+        chunks=_agreed_columns(lag=lag, chunk_count=chunk_count),
+        runs=_single_run(lag=lag, chunk_count=chunk_count),
+        audio=_agreed_audio(lag=lag, frame_offset=frame_offset, chunk_count=chunk_count),
+        decision=AudioAlignmentDecision(
+            state="provisional",
+            candidate=AudioDecisionCandidate(
+                frame_offset=frame_offset,
+                time_offset_seconds=lag / 8000,
+                subframe_estimate=subframe,
+                basis="audio_only",
+            ),
+            primary_reason="video_check_pending",
+            failed_gates=(),
+        ),
+        stability=_stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),
+    )
+
+
+def trusted_audio_attempt(
+    *, ordinal: int = 1, frame_offset: int = 0, chunk_count: int = 4
+) -> AudioAlignmentAttempt:
+    """Audio-plus-video confirmed attempt that may authorize an applied result."""
+    lag = _frame_lag(frame_offset)
+    subframe = _subframe_estimate(lag)
+    assert math.floor(subframe + 0.5) == frame_offset
+    return _attempt_shell(
+        ordinal=ordinal,
+        status="complete",
+        analysis=_analysis(planned_chunk_count=chunk_count),
+        chunks=_agreed_columns(lag=lag, chunk_count=chunk_count),
+        runs=_single_run(lag=lag, chunk_count=chunk_count),
+        audio=_agreed_audio(lag=lag, frame_offset=frame_offset, chunk_count=chunk_count),
+        decision=AudioAlignmentDecision(
+            state="trusted_automatic",
+            candidate=AudioDecisionCandidate(
+                frame_offset=frame_offset,
+                time_offset_seconds=lag / 8000,
+                subframe_estimate=subframe,
+                basis="audio_only",
+            ),
+            primary_reason="audio_video_confirmed",
+            failed_gates=(),
+        ),
+        stability=_stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),
+    )
+
+
+def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
+    """Two credible runs at different lags: no single offset, never applied."""
+    near_lag = _frame_lag(12)
+    far_lag = _frame_lag(24)
+    chunk_count = 4
+    return _attempt_shell(
+        ordinal=ordinal,
+        status="complete",
+        analysis=_analysis(planned_chunk_count=chunk_count),
+        chunks=AudioChunkColumns(
+            starts=tuple(index * _CHUNK_SAMPLES for index in range(chunk_count)),
+            counts=tuple(_CHUNK_SAMPLES for _ in range(chunk_count)),
+            active=(True, True, True, True),
+            lags=(near_lag, near_lag, far_lag, far_lag),
+            psrs=(_AGREE_PSR, _AGREE_PSR, _AGREE_PSR, _AGREE_PSR),
+            credible=(True, True, True, True),
+            agrees=(True, True, False, False),
+        ),
+        runs=(
+            AudioChunkRun(first_index=0, last_index=1, lag=near_lag, chunk_count=2),
+            AudioChunkRun(first_index=2, last_index=3, lag=far_lag, chunk_count=2),
+        ),
+        audio=AudioStageOutcome(
+            status="no_single_offset",
+            global_lag=near_lag,
+            active_chunks=chunk_count,
+            credible_chunks=chunk_count,
+            agreeing_chunks=2,
+            compensation_seconds=0.0,
+            subframe_estimate=_subframe_estimate(near_lag),
+            rounded_frame=12,
+        ),
+        decision=AudioAlignmentDecision(
+            state="unavailable",
+            candidate=None,
+            primary_reason="no_single_offset",
+            failed_gates=("no_single_offset",),
+        ),
+        stability=AlignmentStabilitySummary(
+            classification="possible_discontinuity",
+            valid_windows=chunk_count,
+            offset_min_frames=12,
+            offset_max_frames=24,
+            first_offset_frames=12,
+            last_offset_frames=24,
+            largest_adjacent_jump_frames=12,
+            change_position_seconds=10.0,
+        ),
+    )
+
+
+def rejected_audio_attempt(
+    *,
+    ordinal: int = 1,
+    status: str = "preanalysis_rejection",
+    reason: str = "selected_audio_timeline_unavailable",
+) -> AudioAlignmentAttempt:
+    """Empty-evidence refusal from before (rejection) or during (abort) collection."""
+    empty = AudioChunkColumns(
+        starts=(),
+        counts=(),
+        active=(),
+        lags=(),
+        psrs=(),
+        credible=(),
+        agrees=(),
+    )
+    return _attempt_shell(
+        ordinal=ordinal,
+        status=status,
+        analysis=_analysis(planned_chunk_count=0),
+        chunks=empty,
+        runs=(),
+        audio=AudioStageOutcome(
+            status="no_usable_audio",
+            global_lag=None,
+            active_chunks=0,
+            credible_chunks=0,
+            agreeing_chunks=0,
+            compensation_seconds=0.0,
+            subframe_estimate=None,
+            rounded_frame=None,
+        ),
+        decision=AudioAlignmentDecision(
+            state="unavailable",
+            candidate=None,
+            primary_reason=reason,
+            failed_gates=(reason,),
+        ),
+        stability=_insufficient_summary(),
+    )
+
+
+def _collection_facts(role: str) -> AudioCollectionFacts:
+    return AudioCollectionFacts(
+        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        emitted_samples=8000,
+        eof_sample=8000,
+        elapsed_seconds=0.25,
+        returncode=0,
+        stderr_bytes=512,
+        stderr_truncated=False,
+        cleanup_completed=True,
+    )
+
+
+def _mutable_attempt_dict(attempt: AudioAlignmentAttempt) -> dict[str, object]:
+    """Return the JSON-shape payload the contract parses (tuples become arrays)."""
+    return cast(dict[str, object], json.loads(json.dumps(asdict(attempt))))
+
+
+def _observed_attempt_dict() -> dict[str, object]:
+    attempt = _mutable_attempt_dict(provisional_audio_attempt())
+    attempt["collection_observation"] = "observed"
+    attempt["collection"] = [
+        asdict(_collection_facts("reference")),
+        asdict(_collection_facts("comparison")),
+    ]
+    return attempt
+
+
+def _provisional_review(*, ordinal: int = 1, frame_offset: int = 0) -> str:
+    return json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(
+                provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
+            ),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _audio_review(suggestion: int | None) -> str:
@@ -132,57 +520,25 @@ def test_workspace_metadata_accepts_one_reference_and_ordered_comparisons() -> N
 
 
 def test_workspace_metadata_accepts_provisional_attempt_without_trusted_offset() -> None:
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(audio_attempt()),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
     workspace = parse_alignment_review_workspace_metadata(
-        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        (
+            _reference_output(0),
+            _comparison_output(1, 1, suggestion=None, audio_review=_provisional_review()),
+        )
     )
 
-    decision = workspace.comparisons[0].audio_review.audio_attempt
-    assert decision is not None
-    assert cast(dict[str, object], decision["decision"])["state"] == "provisional"
+    attempt = workspace.comparisons[0].audio_review.audio_attempt
+    assert attempt is not None
+    assert attempt.decision.state == "provisional"
+    assert attempt.decision.candidate is not None
 
 
 def test_workspace_metadata_accepts_observed_collection_facts() -> None:
-    attempt = asdict(audio_attempt())
-    attempt["collection_observation"] = "observed"
-    attempt["collection_summaries"] = [
-        {
-            "phase": phase,
-            "role": role,
-            "output_rate": 8000,
-            "requested_horizon": 8000,
-            "emitted_sample_count": 8000,
-            "emitted_byte_count": 32000,
-            "retained_sample_count": 8000,
-            "retained_byte_count": 32000,
-            "status": "complete",
-            "end_category": "planned_end_reached",
-            "observed_eof_sample": None,
-            "elapsed_seconds": 0.25,
-            "cleanup_failure_count": 0,
-            "failure_count": 0,
-        }
-        for phase, role in (
-            ("discovery", "reference"),
-            ("discovery", "comparison"),
-            ("verification", "reference"),
-            ("verification", "comparison"),
-        )
-    ]
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
+            "audio_attempt": _observed_attempt_dict(),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -194,20 +550,19 @@ def test_workspace_metadata_accepts_observed_collection_facts() -> None:
 
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    assert parsed["collection_observation"] == "observed"
-    assert len(cast(list[object], parsed["collection_summaries"])) == 4
+    assert parsed.collection_observation == "observed"
+    assert [fact.role for fact in parsed.collection] == ["reference", "comparison"]
+    assert all(fact.cleanup_completed is True for fact in parsed.collection)
+    assert parsed.collection_failure is None
+    assert parsed.stability.classification == "stable"
 
 
-def test_workspace_metadata_accepts_signed_window_evidence() -> None:
-    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
-    window = cast(list[dict[str, object]], attempt["windows"])[0]
-    window["requested_sample_lag"] = -1
-    window["requested_frame_candidate"] = -2
+def test_workspace_metadata_accepts_signed_chunk_evidence() -> None:
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
+            "audio_attempt": asdict(provisional_audio_attempt(frame_offset=-12)),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -219,31 +574,14 @@ def test_workspace_metadata_accepts_signed_window_evidence() -> None:
 
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    parsed_window = cast(list[dict[str, object]], parsed["windows"])[0]
-    assert parsed_window["requested_sample_lag"] == -1
-    assert parsed_window["requested_frame_candidate"] == -2
+    assert parsed.chunks.lags == (_frame_lag(-12),) * 4
+    assert parsed.decision.candidate is not None
+    assert parsed.decision.candidate.frame_offset == -12
 
 
 def test_workspace_metadata_rejects_unobserved_collection_payload() -> None:
-    attempt = asdict(audio_attempt())
-    attempt["collection_summaries"] = [
-        {
-            "phase": "discovery",
-            "role": "reference",
-            "output_rate": 8000,
-            "requested_horizon": 8000,
-            "emitted_sample_count": 8000,
-            "emitted_byte_count": 32000,
-            "retained_sample_count": 8000,
-            "retained_byte_count": 32000,
-            "status": "complete",
-            "end_category": "planned_end_reached",
-            "observed_eof_sample": None,
-            "elapsed_seconds": 0.25,
-            "cleanup_failure_count": 0,
-            "failure_count": 0,
-        }
-    ]
+    attempt = _observed_attempt_dict()
+    attempt["collection_observation"] = "not_observed"
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -254,7 +592,7 @@ def test_workspace_metadata_rejects_unobserved_collection_payload() -> None:
         separators=(",", ":"),
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="unobserved alignment collection"):
+    with pytest.raises(AlignmentReviewContractError, match="unobserved collection facts"):
         parse_alignment_review_workspace_metadata(
             (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
         )
@@ -264,7 +602,7 @@ def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> Non
     payload = {
         "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
         "evidence_availability": "current_attempt",
-        "audio_attempt": asdict(audio_attempt()),
+        "audio_attempt": asdict(provisional_audio_attempt(frame_offset=0)),
     }
     review = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -276,7 +614,7 @@ def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> Non
 
 @pytest.mark.parametrize("status", ["preanalysis_rejection", "aborted"])
 def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) -> None:
-    attempt = asdict(audio_attempt())
+    attempt = cast(dict[str, object], asdict(provisional_audio_attempt()))
     attempt["status"] = status
     review = json.dumps(
         {
@@ -288,7 +626,7 @@ def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) 
         separators=(",", ":"),
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="non-complete alignment attempts"):
+    with pytest.raises(AlignmentReviewContractError, match="non-complete audio attempts"):
         parse_alignment_review_workspace_metadata(
             (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
         )
@@ -310,7 +648,7 @@ def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) 
 
     parsed_attempt = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed_attempt is not None
-    assert parsed_attempt["status"] == status
+    assert parsed_attempt.status == status
 
 
 def test_workspace_metadata_rejects_computed_authority_without_trusted_attempt() -> None:
@@ -331,12 +669,13 @@ def test_workspace_metadata_rejects_computed_authority_without_trusted_attempt()
 
 
 def test_workspace_metadata_rejects_unavailable_attempt_as_computed_authority() -> None:
-    attempt = asdict(audio_attempt())
+    attempt = cast(dict[str, object], asdict(unavailable_audio_attempt()))
     decision = cast(dict[str, object], attempt["decision"])
     decision.update(
         state="unavailable",
         candidate=None,
         primary_reason="analysis_budget_exceeded",
+        failed_gates=["analysis_budget_exceeded"],
     )
     review = json.dumps(
         {
@@ -354,7 +693,7 @@ def test_workspace_metadata_rejects_unavailable_attempt_as_computed_authority() 
         )
 
 
-@pytest.mark.parametrize("old_version", [1, 2, 3, 99])
+@pytest.mark.parametrize("old_version", [1, 2, 3, 4, 99])
 def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
     old_version: int,
 ) -> None:
@@ -371,7 +710,7 @@ def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
 
     with pytest.raises(
         AlignmentReviewContractError,
-        match=rf"newly generated session.*metadata v{old_version}.*requires v4",
+        match=rf"newly generated session.*metadata v{old_version}.*requires v5",
     ):
         parse_alignment_review_workspace_metadata((_reference_output(0), old_comparison))
 
@@ -384,7 +723,7 @@ def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
         metadata=dict(old_reference.metadata) | {ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1},
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v4"):
+    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v5"):
         parse_alignment_review_workspace_metadata((_comparison_output(1, 1), old_reference))
 
 
@@ -414,12 +753,12 @@ def test_workspace_metadata_rejects_nonfinite_or_inconsistent_attempt_evidence()
     payload = {
         "current_authority": {"origin": "none", "frame_offset": None},
         "evidence_availability": "current_attempt",
-        "audio_attempt": asdict(audio_attempt()),
+        "audio_attempt": asdict(provisional_audio_attempt()),
     }
     attempt = cast(dict[str, object], payload["audio_attempt"])
-    attempt["confidence_threshold"] = float("nan")
+    cast(dict[str, object], attempt["audio"])["compensation_seconds"] = float("nan")
 
-    with pytest.raises(AlignmentReviewContractError, match="confidence_threshold"):
+    with pytest.raises(AlignmentReviewContractError, match="compensation_seconds"):
         parse_alignment_review_workspace_metadata(
             (
                 _reference_output(0),
@@ -433,8 +772,52 @@ def test_workspace_metadata_rejects_nonfinite_or_inconsistent_attempt_evidence()
         )
 
 
+def test_build_audio_review_map_bounds_empty_projection_for_many_chunks() -> None:
+    attempt = provisional_audio_attempt(chunk_count=2160)
+    reference = Path("ref.mp4")
+    comparison = Path("a.mp4")
+    result = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=0.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        audio_attempt=attempt,
+    )
+    provenance = AlignmentProvenance(
+        result=result,
+        comparison_cache_key="ref:a",
+        provenance="computed_this_run",
+        evidence_availability="current_attempt",
+    )
+    payloads = _build_audio_review_map(
+        reference=reference,
+        comparisons=[comparison],
+        results_map={"ref:a": result},
+        provenances={"ref:a": provenance},
+    )
+
+    review = payloads["ref:a"]
+    assert len(review.encode("utf-8")) <= 128 * 1024
+
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+    parsed = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed is not None
+    assert parsed.chunks.rows_omitted
+    assert parsed.chunks.starts == ()
+    assert len(parsed.runs) == 1
+    assert parsed.audio.credible_chunks == 2160
+    assert parsed.audio.compensation_seconds == attempt.audio.compensation_seconds
+    assert parsed.audio.subframe_estimate == attempt.audio.subframe_estimate
+
+
 def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
-    attempt = asdict(maximum_audio_attempt())
+    attempt = asdict(provisional_audio_attempt(chunk_count=512))
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -454,61 +837,46 @@ def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
 
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    assert len(cast(list[object], parsed["windows"])) == 16
-    assert len(cast(list[object], parsed["collection_summaries"])) == 4
+    assert len(parsed.chunks.starts) == 512
+    assert parsed.audio.credible_chunks == 512
 
 
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("base_credible_without_facts", "base-credible channel view"),
-        ("agreeing_below_peak_floor", "agreeing channel view"),
-        ("agreeing_membership", "channel agreeing views are inconsistent"),
-        ("incomplete_corroborated_window", "corroborated channel window"),
-        ("candidate_supports_rejected_window", "channel candidate support"),
-        ("duplicate_agreeing_views", "channel agreeing views"),
-        ("foreign_channel_window", "channel window identifier"),
+        ("inactive_carries_lag", "inactive chunks cannot carry lag evidence"),
+        ("starts_not_increasing", "chunk starts must increase"),
+        ("agreeing_without_credible", "agreeing chunks must be credible"),
+        ("lag_beyond_search_radius", "chunk lag exceeds the search radius"),
+        ("run_exceeds_planned_chunks", "chunk run exceeds the planned chunks"),
+        ("run_count_exceeds_span", "chunk run count exceeds its index span"),
+        ("ragged_columns", "chunk columns must share one length"),
     ],
 )
-def test_workspace_metadata_rejects_inconsistent_channel_topology(
+def test_workspace_metadata_rejects_inconsistent_chunk_evidence(
     tamper: str,
     match: str,
 ) -> None:
-    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
-    channel = cast(dict[str, object], attempt["channel_corroboration"])
-    windows = cast(list[dict[str, object]], channel["windows"])
-    window = windows[0]
-    views = cast(list[dict[str, object]], window["views"])
-    if tamper == "base_credible_without_facts":
-        views[0]["requested_score"] = None
-        views[0]["peak_ratio"] = None
-    elif tamper == "agreeing_below_peak_floor":
-        views[0]["base_credible"] = False
-        views[0]["peak_ratio"] = 1.0
-    elif tamper == "agreeing_membership":
-        views[0]["agrees"] = False
-    elif tamper == "incomplete_corroborated_window":
-        window["representative_sample_lag"] = None
-    elif tamper == "candidate_supports_rejected_window":
-        window.update(
-            {
-                "corroborated": False,
-                "representative_sample_lag": None,
-                "representative_frame_candidate": None,
-                "actual_useful_reference_start": None,
-                "actual_useful_reference_end": None,
-                "agreeing_views": [],
-                "minimum_credible_score": None,
-                "minimum_peak_ratio": None,
-                "reason": "no_unique_corroboration",
-            }
-        )
-        for view in views:
-            view["agrees"] = False
-    elif tamper == "duplicate_agreeing_views":
-        window["agreeing_views"] = ["FL", "FL"]
+    attempt = _mutable_attempt_dict(provisional_audio_attempt())
+    chunks = cast(dict[str, object], attempt["chunks"])
+    if tamper == "inactive_carries_lag":
+        cast(list[bool], chunks["active"])[0] = False
+    elif tamper == "starts_not_increasing":
+        cast(list[int], chunks["starts"])[1] = cast(list[int], chunks["starts"])[0]
+    elif tamper == "agreeing_without_credible":
+        cast(list[bool], chunks["credible"])[0] = False
+        cast(list[bool], chunks["agrees"])[0] = True
+    elif tamper == "lag_beyond_search_radius":
+        cast(list[int], chunks["lags"])[0] = _LAG_SAMPLES + 8000
+    elif tamper == "run_exceeds_planned_chunks":
+        run = cast(list[dict[str, object]], attempt["runs"])[0]
+        run["last_index"] = 9
+        run["chunk_count"] = 10
+    elif tamper == "run_count_exceeds_span":
+        run = cast(list[dict[str, object]], attempt["runs"])[0]
+        run["chunk_count"] = cast(int, run["last_index"]) - cast(int, run["first_index"]) + 2
     else:
-        window["logical_id"] = "foreign-primary"
+        chunks["agrees"] = cast(list[bool], chunks["agrees"])[:-1]
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -528,38 +896,33 @@ def test_workspace_metadata_rejects_inconsistent_channel_topology(
 @pytest.mark.parametrize(
     ("section", "field", "value", "match"),
     [
-        ("attempt", "confidence_threshold", float("nan"), "confidence_threshold"),
-        ("collection", "output_rate", True, "output_rate"),
-        ("collection", "requested_horizon", 0, "collection bounds"),
-        ("collection", "failure_count", 0, "failed collection"),
-        ("collection", "cleanup_failure_count", 2, "cleanup failures"),
-        ("collection", "elapsed_seconds", float("nan"), "elapsed_seconds"),
-        ("window", "discovery_reference_count", -1, "discovery_reference_count"),
-        ("window", "actual_coverage", True, "actual_coverage"),
-        ("window", "actual_coverage", 0.5, "unobserved coverage"),
+        ("analysis", "analysis_rate", 44100, "analysis rate must be 8000"),
+        ("analysis", "max_offset_seconds", 0.5, "max_offset_seconds"),
+        ("collection", "elapsed_seconds", -1.0, "elapsed"),
+        ("collection_failure", "side", "bogus", "must be one of"),
+        ("collection_failure", "category", "boom", "must be one of"),
+        ("chunks", "counts", 0, "counts must be"),
+        ("chunks", "psrs", float("nan"), "psrs"),
+        ("audio", "compensation_seconds", float("nan"), "compensation_seconds"),
     ],
 )
-def test_workspace_metadata_rejects_malformed_retained_audio_facts(
+def test_workspace_metadata_rejects_malformed_audio_facts(
     section: str, field: str, value: object, match: str
 ) -> None:
-    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
-    if section == "attempt":
-        attempt[field] = value
+    attempt = _observed_attempt_dict()
+    attempt["collection_failure"] = {"category": "timeout", "side": None}
+    if section == "analysis":
+        cast(dict[str, object], attempt["analysis"])[field] = value
+    elif section == "collection_failure":
+        cast(dict[str, object], attempt["collection_failure"])[field] = value
     elif section == "collection":
-        collections = cast(list[dict[str, object]], attempt["collection_summaries"])
-        collection = collections[0]
-        if field == "failure_count":
-            collection["status"] = "failed"
-            collection["end_category"] = "not_observed"
-        if field == "cleanup_failure_count":
-            collection["status"] = "failed"
-            collection["end_category"] = "not_observed"
-            collection["failure_count"] = 1
-        collection[field] = value
+        fact = cast(list[dict[str, object]], attempt["collection"])[0]
+        fact[field] = value
+    elif section == "chunks":
+        column = cast(list[object], cast(dict[str, object], attempt["chunks"])[field])
+        column[0] = value
     else:
-        windows = cast(list[dict[str, object]], attempt["windows"])
-        window = windows[0]
-        window[field] = value
+        cast(dict[str, object], attempt["audio"])[field] = value
 
     review = json.dumps(
         {
@@ -577,11 +940,10 @@ def test_workspace_metadata_rejects_malformed_retained_audio_facts(
         )
 
 
-def test_workspace_metadata_rejects_duplicate_collection_summaries() -> None:
-    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
-    collections = cast(list[dict[str, object]], attempt["collection_summaries"])
-    collections[1]["phase"] = collections[0]["phase"]
-    collections[1]["role"] = collections[0]["role"]
+def test_workspace_metadata_rejects_duplicate_collection_facts() -> None:
+    attempt = _observed_attempt_dict()
+    facts = cast(list[dict[str, object]], attempt["collection"])
+    facts[1] = dict(facts[0])
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -592,23 +954,17 @@ def test_workspace_metadata_rejects_duplicate_collection_summaries() -> None:
         separators=(",", ":"),
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="duplicated"):
+    with pytest.raises(AlignmentReviewContractError, match="paired sides"):
         parse_alignment_review_workspace_metadata(
             (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
         )
 
 
-def test_workspace_metadata_rejects_all_unobserved_coverage_facts() -> None:
-    attempt = cast(dict[str, object], asdict(maximum_audio_attempt()))
-    window = cast(list[dict[str, object]], attempt["windows"])[0]
-    window.update(
-        {
-            "actual_coverage": 0.5,
-            "actual_useful_reference_start": 1,
-            "actual_useful_reference_end": 2,
-            "pre_eof_expected_overlap": 1,
-        }
-    )
+def test_workspace_metadata_rejects_active_chunk_without_evidence() -> None:
+    attempt = _mutable_attempt_dict(provisional_audio_attempt())
+    chunks = cast(dict[str, object], attempt["chunks"])
+    cast(list[object], chunks["lags"])[0] = None
+    cast(list[object], chunks["psrs"])[0] = None
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -619,7 +975,7 @@ def test_workspace_metadata_rejects_all_unobserved_coverage_facts() -> None:
         separators=(",", ":"),
     )
 
-    with pytest.raises(AlignmentReviewContractError, match="unobserved coverage"):
+    with pytest.raises(AlignmentReviewContractError, match="require a lag"):
         parse_alignment_review_workspace_metadata(
             (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
         )

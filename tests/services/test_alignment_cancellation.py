@@ -15,18 +15,18 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from frame_compare.services import (
-    alignment,
-    alignment_audio,
-    alignment_correlation,
-    alignment_streaming,
+from frame_compare.services import alignment, alignment_audio
+from frame_compare.services.alignment_audio import (
+    AudioStreamInfo,
+    AudioStreamSelection,
+    AudioStreamTimeline,
+    VideoStreamStart,
 )
-from frame_compare.services.alignment_audio import AudioStreamInfo, AudioStreamTimeline
 from frame_compare.services.alignment_streaming import (
-    AudioSampleInterval,
     CollectionCleanup,
     CollectionFacts,
-    ContinuousAudioCollectionFailure,
+    PairedAudioCollectionFailure,
+    collect_paired_audio_chunks,
 )
 from frame_compare.services.errors import (
     AudioAlignmentCancellationError,
@@ -66,24 +66,48 @@ def _stream() -> AudioStreamInfo:
     )
 
 
-def _writer_argv() -> list[str]:
+def _selection() -> AudioStreamSelection:
+    return AudioStreamSelection(
+        stream=_stream(),
+        video_start=VideoStreamStart(start_time=Fraction(0), basis="default_zero"),
+    )
+
+
+def _float_writer_argv() -> list[str]:
     script = (
-        "import os,sys,time\n"
+        "import sys,time\n"
         "chunk = bytes(65536)\n"
+        "out = sys.stdout.buffer\n"
         "try:\n"
         " while True:\n"
-        "  os.write(sys.stdout.fileno(), chunk)\n"
+        "  out.write(chunk)\n"
+        "  out.flush()\n"
         "  time.sleep(0.001)\n"
-        "except BrokenPipeError:\n"
+        "except (BrokenPipeError, ValueError):\n"
         " pass\n"
     )
     return [sys.executable, "-c", script]
 
 
-@pytest.mark.parametrize("boundary", ["discarded_gap", "queue_pressure", "requested_rate"])
-@pytest.mark.anyio
-async def test_outer_cancellation_reaches_collection_and_blocks_post_work(
-    boundary: str,
+def _paired_kwargs(
+    consumer: Any,
+    *,
+    chunks: tuple[tuple[int, int], ...] = ((0, 8000),),
+    cancellation: threading.Event | None = None,
+) -> dict[str, Any]:
+    return {
+        "chunks": chunks,
+        "lag_samples": 100,
+        "consumer": consumer,
+        "reference_limit_samples": 8_000_000,
+        "comparison_limit_samples": 8_000_000,
+        "total_timeout_seconds": 30.0,
+        "stall_timeout_seconds": 5.0,
+        "cancellation": cancellation,
+    }
+
+
+def test_outer_cancellation_reaches_collection_and_blocks_post_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -99,33 +123,8 @@ async def test_outer_cancellation_reaches_collection_and_blocks_post_work(
         config=config,
         generated_dir=tmp_path,
     )
-    boundary_reached = threading.Event()
+    pair_reached = threading.Event()
     calls: list[Path] = []
-    real_popen = alignment_streaming.subprocess.Popen
-
-    def observed_popen(*args: Any, **kwargs: Any) -> Any:
-        process = real_popen(*args, **kwargs)
-        if boundary == "requested_rate":
-            boundary_reached.set()
-        return process
-
-    monkeypatch.setattr(alignment_streaming.subprocess, "Popen", observed_popen)
-    monkeypatch.setattr(
-        alignment_audio, "continuous_collection_argv", lambda *_a, **_k: _writer_argv()
-    )
-
-    if boundary in {"discarded_gap", "queue_pressure"}:
-        real_copy = alignment_streaming._copy_intersections
-        cancellation_holder: list[threading.Event] = []
-
-        def observed_copy(*args: Any, **kwargs: Any) -> None:
-            boundary_reached.set()
-            if boundary == "queue_pressure":
-                while not cancellation_holder[0].is_set():
-                    time.sleep(0.001)
-            real_copy(*args, **kwargs)
-
-        monkeypatch.setattr(alignment_streaming, "_copy_intersections", observed_copy)
 
     def collect_until_cancelled(
         _reference: Path,
@@ -136,21 +135,10 @@ async def test_outer_cancellation_reaches_collection_and_blocks_post_work(
     ) -> Any:
         assert cancellation is not None
         calls.append(comparison)
-        if boundary in {"discarded_gap", "queue_pressure"}:
-            cancellation_holder.append(cancellation)
-        start = 2_000_000 if boundary == "discarded_gap" else 0
-        alignment_audio._collect_role(
-            reference,
-            _stream(),
-            (alignment_streaming.AudioSampleInterval(start, 1),),
-            phase="verification" if boundary == "requested_rate" else "discovery",
-            role="reference",
-            sample_rate=48_000 if boundary == "requested_rate" else 8_000,
-            channel_strategy="mono_downmix",
-            max_retained_samples=1,
-            cancellation=cancellation,
-        )
-        raise AssertionError("cancelled collection returned usable audio")
+        pair_reached.set()
+        while not cancellation.is_set():
+            time.sleep(0.001)
+        raise_if_alignment_cancelled(cancellation)
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", collect_until_cancelled)
     diagnostics = MagicMock()
@@ -160,15 +148,16 @@ async def test_outer_cancellation_reaches_collection_and_blocks_post_work(
     monkeypatch.setattr(alignment, "maybe_launch_alignment_vsview", review)
     monkeypatch.setattr(alignment, "save_reusable_offsets", cache_write)
 
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
-    await _wait_until(boundary_reached)
-    if boundary == "queue_pressure":
-        await asyncio.sleep(0.05)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    async def run() -> None:
+        task = asyncio.create_task(
+            alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
+        )
+        await _wait_until(pair_reached)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
 
     assert calls == [comparisons[0]]
     diagnostics.assert_not_called()
@@ -280,7 +269,7 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
         raise AudioAlignmentCleanupError(
             "collector child was not reaped",
             category="cancelled",
-            stage="discovery",
+            stage="collection",
         )
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", fail_cleanup_after_cancel)
@@ -311,141 +300,310 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     cache_write.assert_not_called()
 
 
-def test_maximum_admitted_scoring_stops_between_hypotheses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_prespawn_cancellation_delivers_no_pairs_and_completes_cleanup() -> None:
     cancellation = threading.Event()
-    first_score = threading.Event()
-    calls = 0
-    real_score = alignment_correlation._normalized_overlap_score
-
-    def observed_score(*args: Any, **kwargs: Any) -> float | None:
-        nonlocal calls
-        calls += 1
-        first_score.set()
-        time.sleep(0.005)
-        return real_score(*args, **kwargs)
-
-    monkeypatch.setattr(alignment_correlation, "_normalized_overlap_score", observed_score)
-    outcome: list[BaseException] = []
-
-    def score() -> None:
-        try:
-            alignment_correlation.refine_aligned_score(
-                np.arange(512, dtype=np.float64),
-                np.arange(512, dtype=np.float64),
-                preprocessing_mode="none",
-                correction_bounds_samples=(-255, 255),
-                cancellation=cancellation,
-            )
-        except BaseException as exc:
-            outcome.append(exc)
-
-    worker = threading.Thread(target=score)
-    worker.start()
-    assert first_score.wait(timeout=1)
-    started = time.monotonic()
     cancellation.set()
-    worker.join(timeout=1)
+    delivered: list[int] = []
 
-    assert not worker.is_alive()
-    assert time.monotonic() - started < 1
-    assert len(outcome) == 1
-    assert isinstance(outcome[0], AudioAlignmentCancellationError)
-    assert calls < 511
+    def consumer(index: int, _reference: np.ndarray, _window: np.ndarray) -> None:
+        delivered.append(index)
 
-
-def test_cancelled_collection_with_incomplete_cleanup_preserves_cause_as_fatal(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    cleanup = CollectionCleanup(
-        process_exited=False,
-        stdout_reader_joined=True,
-        stderr_reader_joined=True,
-        stdout_pipe_closed=True,
-        stderr_pipe_closed=True,
-        termination_requested=True,
-        kill_requested=True,
-        failure="process remained live after kill",
+    result = collect_paired_audio_chunks(
+        _float_writer_argv(),
+        _float_writer_argv(),
+        **_paired_kwargs(consumer, cancellation=cancellation),
     )
-    failure = ContinuousAudioCollectionFailure(
-        category="cancelled",
-        message="continuous audio collection was cancelled",
-        facts=CollectionFacts(
-            planned_end_sample=1,
-            emitted_sample_count=0,
-            emitted_byte_count=0,
-            retained_sample_count=0,
+
+    assert isinstance(result, PairedAudioCollectionFailure)
+    assert result.category == "cancelled"
+    assert result.side is None
+    assert delivered == []
+    assert result.reference_cleanup.completed
+    assert result.comparison_cleanup.completed
+
+
+def test_cancelled_paired_collection_stops_delivery_between_chunks() -> None:
+    cancellation = threading.Event()
+    delivered: list[int] = []
+
+    def consumer(index: int, _reference: np.ndarray, _window: np.ndarray) -> None:
+        delivered.append(index)
+        cancellation.set()
+
+    result = collect_paired_audio_chunks(
+        _float_writer_argv(),
+        _float_writer_argv(),
+        **_paired_kwargs(
+            consumer,
+            chunks=((0, 8000), (8000, 8000)),
+            cancellation=cancellation,
+        ),
+    )
+
+    assert isinstance(result, PairedAudioCollectionFailure)
+    assert result.category == "cancelled"
+    assert delivered == [0]
+    assert result.reference_cleanup.completed
+    assert result.comparison_cleanup.completed
+
+
+def test_in_flight_consumer_finishes_before_cancellation_is_observed() -> None:
+    cancellation = threading.Event()
+    entered = threading.Event()
+    exited = threading.Event()
+
+    def consumer(index: int, _reference: np.ndarray, _window: np.ndarray) -> None:
+        assert index == 0
+        entered.set()
+        time.sleep(0.3)
+        exited.set()
+
+    def cancel_once_inside() -> None:
+        assert entered.wait(timeout=10)
+        cancellation.set()
+
+    canceller = threading.Thread(target=cancel_once_inside, daemon=True)
+    canceller.start()
+    result = collect_paired_audio_chunks(
+        _float_writer_argv(),
+        _float_writer_argv(),
+        **_paired_kwargs(consumer, cancellation=cancellation),
+    )
+    canceller.join(timeout=10)
+
+    assert isinstance(result, PairedAudioCollectionFailure)
+    assert result.category == "cancelled"
+    assert exited.is_set()
+    assert result.reference_cleanup.completed
+    assert result.comparison_cleanup.completed
+
+
+def _paired_failure(
+    *,
+    category: str,
+    reference_exited: bool = True,
+    comparison_exited: bool = True,
+) -> PairedAudioCollectionFailure:
+    def facts() -> CollectionFacts:
+        return CollectionFacts(
+            planned_end_sample=4800000,
+            emitted_sample_count=8000,
+            emitted_byte_count=32000,
+            retained_sample_count=8000,
             stderr_byte_count=0,
             stderr_retained=b"",
             stderr_truncated=False,
             elapsed_seconds=0.1,
-            returncode=None,
-        ),
-        cleanup=cleanup,
+            returncode=0,
+        )
+
+    def cleanup(exited: bool) -> CollectionCleanup:
+        return CollectionCleanup(
+            process_exited=exited,
+            stdout_reader_joined=True,
+            stderr_reader_joined=True,
+            stdout_pipe_closed=True,
+            stderr_pipe_closed=True,
+            termination_requested=True,
+            kill_requested=True,
+            failure=None if exited else "process remained live after kill",
+        )
+
+    return PairedAudioCollectionFailure(
+        category=category,  # type: ignore[arg-type]
+        side="reference",
+        message=f"paired audio collection failed: {category}",
+        reference_facts=facts(),
+        comparison_facts=facts(),
+        reference_cleanup=cleanup(reference_exited),
+        comparison_cleanup=cleanup(comparison_exited),
     )
-    monkeypatch.setattr(alignment_audio, "collect_continuous_audio", lambda *_a, **_k: failure)
+
+
+def test_cancelled_pair_with_incomplete_cleanup_raises_cleanup_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_reference_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_matching_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+    monkeypatch.setattr(
+        alignment,
+        "collect_paired_audio_chunks",
+        lambda *_args, **_kwargs: _paired_failure(
+            category="cancelled",
+            reference_exited=False,
+        ),
+    )
 
     with pytest.raises(AudioAlignmentCleanupError) as raised:
-        alignment_audio._collect_role(
-            tmp_path / "source.mkv",
-            _stream(),
-            (AudioSampleInterval(0, 1),),
-            phase="discovery",
-            role="reference",
-            sample_rate=8000,
-            channel_strategy="mono_downmix",
-            max_retained_samples=1,
-            cancellation=None,
+        alignment._estimate_audio_pair(
+            reference,
+            comparison,
+            config=config,
+            fps_reference=Fraction(24),
+            reference_request=request.reference,
+            comparison_request=request.comparisons[0],
         )
 
     assert raised.value.category == "cancelled"
-    assert "continuous audio collection was cancelled" in str(raised.value)
-    assert raised.value.collection_summaries[0].cleanup_failure_count == 1
 
 
-def test_maximum_admitted_native_fft_finishes_safe_boundary_before_cancellation(
+def test_identity_change_with_incomplete_cleanup_raises_cleanup_error(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cancellation = threading.Event()
-    fft_started = threading.Event()
-    fft_release = threading.Event()
-    real_fft = alignment_correlation._linear_correlation
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_reference_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_matching_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
 
-    def bounded_fft(*args: Any, **kwargs: Any) -> Any:
-        fft_started.set()
-        assert fft_release.wait(timeout=1)
-        return real_fft(*args, **kwargs)
+    def collect_then_touch(*_args: Any, **_kwargs: Any) -> Any:
+        with open(comparison, "ab") as handle:
+            handle.write(b"mutated")
+        return _paired_failure(category="timeout", reference_exited=False)
 
-    monkeypatch.setattr(alignment_correlation, "_linear_correlation", bounded_fft)
-    outcome: list[BaseException] = []
-    samples = np.sin(np.arange(1 << 20, dtype=np.float64) * 0.01)
+    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", collect_then_touch)
 
-    def correlate() -> None:
-        try:
-            alignment_correlation.correlate_audio(
-                samples,
-                samples,
-                cancellation=cancellation,
-            )
-        except BaseException as exc:
-            outcome.append(exc)
+    with pytest.raises(AudioAlignmentCleanupError) as raised:
+        alignment._estimate_audio_pair(
+            reference,
+            comparison,
+            config=config,
+            fps_reference=Fraction(24),
+            reference_request=request.reference,
+            comparison_request=request.comparisons[0],
+        )
 
-    worker = threading.Thread(target=correlate)
-    worker.start()
-    assert fft_started.wait(timeout=1)
-    started = time.monotonic()
-    cancellation.set()
-    worker.join(timeout=0.01)
-    assert worker.is_alive()
-    fft_release.set()
-    worker.join(timeout=1)
+    assert raised.value.category == "timeout"
 
-    assert not worker.is_alive()
-    assert time.monotonic() - started < 5
-    assert len(outcome) == 1
-    assert isinstance(outcome[0], AudioAlignmentCancellationError)
+
+def test_cancelled_pair_with_identity_change_still_cancels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With cleanup complete, cancellation (step 2) outranks the identity check (step 3)."""
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_reference_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_matching_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+
+    def collect_then_touch(*_args: Any, **_kwargs: Any) -> Any:
+        with open(comparison, "ab") as handle:
+            handle.write(b"mutated")
+        return _paired_failure(category="cancelled")
+
+    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", collect_then_touch)
+
+    with pytest.raises(AudioAlignmentCancellationError):
+        alignment._estimate_audio_pair(
+            reference,
+            comparison,
+            config=config,
+            fps_reference=Fraction(24),
+            reference_request=request.reference,
+            comparison_request=request.comparisons[0],
+        )
+
+
+def test_incomplete_cleanup_after_failed_pair_is_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        config=config,
+        generated_dir=tmp_path,
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_reference_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "select_matching_audio_stream",
+        lambda _path, **_kwargs: _selection(),
+    )
+    monkeypatch.setattr(
+        alignment,
+        "collect_paired_audio_chunks",
+        lambda *_args, **_kwargs: _paired_failure(
+            category="nonzero_exit",
+            comparison_exited=False,
+        ),
+    )
+
+    with pytest.raises(AudioAlignmentCleanupError) as raised:
+        alignment._estimate_audio_pair(
+            reference,
+            comparison,
+            config=config,
+            fps_reference=Fraction(24),
+            reference_request=request.reference,
+            comparison_request=request.comparisons[0],
+        )
+
+    assert raised.value.category == "nonzero_exit"
+    assert "cleanup did not complete" in str(raised.value)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill(SIGINT) uses POSIX signal delivery")

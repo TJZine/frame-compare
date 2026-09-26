@@ -255,11 +255,11 @@ recovery requirement.
   lineage change therefore misses cleanly rather than reusing offsets computed by a
   different decoder/tool build. Interactively confirmed
   entries may also retain the computed
-  audio alignment result that produced the viewer suggestion, subject to the
-  current automatic-authority policy. Cache schema v2 stores only `computed` and
+  audio alignment result that produced the viewer suggestion; provisional audio
+  candidates are never written as computed authority. Cache schema v2 stores only `computed` and
   `interactive_confirmed`
   origins, requires a bounded scalar stability summary for computed entries and
-  embedded computed results, and persists no per-window evidence or audio. A v1
+  embedded computed results, and persists no per-chunk evidence or audio. A v1
   cache is ignored and recomputed; there is no v1 migration or compatibility reader.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
@@ -314,25 +314,27 @@ recovery requirement.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
 - `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
   manual alignment overrides for the current run
-- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v3,
+- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v4,
   diagnostic-only audio evidence owned by
-  `frame_compare.services.alignment_diagnostics`. Each pathless file is bounded to
-  128 KiB, contains at most 16 primary window outcomes, four mono collection summaries,
-  and six optional named-channel collection summaries, and is written atomically before
-  optional review. Current attempts retain
-  observed continuous collection facts; preanalysis rejections remain `not_observed`.
+  `frame_compare.services.alignment_diagnostics` and defined once in
+  `frame_compare.utils.alignment_evidence`. Each pathless file is bounded to
+  128 KiB, retains selected-stream facts with start-time compensation, contiguous
+  chunk runs, compact per-chunk columnar rows, the global lag, the sub-frame
+  estimate, the audio decision, and paired collection summaries, and is written
+  atomically before optional review. Current attempts retain
+  observed paired-collection facts; preanalysis rejections remain `not_observed`.
   A final review outcome may replace the envelope once while preserving the canonical
   original-attempt digest. These files are never read by alignment, trim, or
   shared-cache owners and expire only when the run folder is removed.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
   (VSView's BestSource workspace is not a Frame Compare source-loader change).
-  Frame Compare metadata in generated sessions is schema v4; metadata v1/v2/v3,
-  unknown, or mixed versions require regeneration.
+  Frame Compare metadata in generated sessions is schema v5; older, unknown,
+  or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
-  the VSView panel only after one complete whole-set positions action or keep-current
-  action.
+  the VSView panel only after one complete whole-set confirm action (positions or
+  known offsets) or keep-current action.
   The sidecar remains result schema v1: one ordered decision per comparison, either
   confirmed raw source frames or `keep_current`. Frame Compare derives this sibling
   path from the trusted generated session script, checks the UUID/session identity and
@@ -432,68 +434,60 @@ unless that cleanup failed; no partial worker result reaches phase-output applic
 Incomplete child, reader, pipe, or handle cleanup is a distinct fatal alignment error,
 including after cancellation, even when ordinary dependency or decode failures remain
 warning-only for optional alignment. The attempt
-retains resolved pathless stream facts, one bounded result for
-every planned window, raw candidate/quality facts, aggregate qualified-policy evidence,
-and a separate display-only provisional candidate. The shipped
-`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy allows an otherwise
-qualified mono result to become trusted automatic authority after every existing
-integrity, quality, support, contradiction, boundary, search-edge, and configured
-gate passes. It reaches the existing trim and computed-cache paths. Channel
-corroboration remains a permanently provisional manual-review candidate and cannot
-reach those paths. Manual confirmation replaces authority without replacing that
+retains resolved pathless stream facts, per-chunk columnar evidence, contiguous
+chunk runs, the global lag, start compensation, the sub-frame estimate, and the
+audio decision. The shipped
+`whole-track-chunked-phat-video-check-20260925` policy keeps every fresh audio
+pass provisional until the video check confirms it: an agreed audio stage becomes
+a `provisional` candidate with reason `video_check_pending`, and every other
+outcome is `unavailable` with its own reason and no candidate. No fresh computed
+value is applied, trimmed, or written to the computed cache in this state.
+Manual confirmation replaces authority without replacing that
 original attempt. Immutable `ClipState` carries the attempt even when its applied
 `alignment` remains null. `alignment_correlation` converts its raw
 correlation lag into the signed `reference source frame - comparison source frame`
-contract before consensus results reach hints, caches, or trim calculation. Immutable
+contract before decision results reach hints, caches, or trim calculation. Immutable
 orchestration alignment state carries that summary to warning and human-report owners
 without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
-previous-offset reuse policy. Current temporal-invariants computed cache hits may reuse qualified
-mono authority, while channel-only evidence remains non-applied; validated
-human-confirmed authority continues to reuse through the `previous_offsets` policy.
+previous-offset reuse policy. Validated
+human-confirmed authority continues to reuse through the `previous_offsets` policy;
+stale-policy shared entries miss and recompute.
 
-Computed alignment work is planned against typed timing for each selected audio stream.
-`alignment_audio` owns stream-relative duration/origin normalization, the fixed peak and
-total FFT-work budgets, requested-rate PCM and scoring budgets, distributed window
-selection, exact rate conversion, verification halos, and the canonical FFmpeg recipe.
-Discovery runs at `min(requested rate, 8000)` with one 4 kHz admission retry when
-needed. With the default window shape and `minimum_valid_windows <= 2`, sources longer
-than 30 and through 60 seconds use two disjoint integer endpoint intervals split at
-`floor(N/2)`, so odd totals neither overlap nor lose their final sample. Above 60 and
-below 90 seconds, the two endpoint intervals remain capped at 30 seconds and leave a
-gap; a larger configured minimum uses the existing distributed planning. Requested-rate
-verification derives the same shared endpoint after exact rate conversion. Each
-source/rate/channel treatment is decoded once from origin, resampled, bounded by one
-final sample endpoint, and retained only at admitted logical intervals.
-`alignment_streaming` is the adjacent, independently exercisable continuous-collection
-owner. It accepts a caller-prepared FFmpeg argument vector, scalar admitted intervals,
-the final sample horizon, an explicit retained-sample ceiling, hard deadline, and
-optional cancellation event; resolves the executable through `utils.subproc`; and owns
-one child, bounded stdout/stderr readers,
-interval intersection copies, endpoint classification, typed transport failures, and
-deterministic cleanup. It imports neither alignment planning nor trust/cache policy.
+Computed alignment work runs whole-track chunked correlation over each selected audio
+stream. `alignment_audio` owns stream probing and deterministic selection, audio and
+video start-time probing with container-start compensation, and the canonical
+whole-track 8 kHz mono FFmpeg recipe. Reference chunks of length
+`C = clamp(floor(D/3), 5 s, 30 s)` (one chunk of length `D` when the shorter
+selected-stream duration `D` is below 5 s) are tiled from reference sample 0, each
+searched over lags `[-M, +M]` where `M = max_offset_seconds`; comparison samples
+outside the stream are zero. A final partial chunk is analyzed when it reaches at
+least `C / 2` and dropped otherwise. Requests whose per-chunk FFT would exceed
+2^22 points return the non-applied `analysis_budget_exceeded` result before any
+decode. The compensated offset is
+`lag / 8000 + (audio_start_ref - video_start_ref) - (audio_start_cmp - video_start_cmp)`,
+using ffprobe start times of the selected audio stream and the first non-`attached_pic`
+video stream; a missing start time counts as 0 and is recorded as `default_zero`.
+`alignment_streaming` is the adjacent, independently exercisable paired-collection
+owner. It decodes reference and comparison concurrently through one `_ChildStream`
+per side read in lockstep, with bounded memory (one reference chunk, one
+`chunk + 2M` comparison window, fixed-size pipe queues, FFT scratch), a 30 s
+no-progress watchdog, and a `120 s + 0.1 x longest known duration` total cap; it
+owns the two children, bounded stdout/stderr readers, typed transport failures,
+and deterministic cleanup. It imports neither alignment planning nor trust/cache
+policy. Accumulated correlation state becomes usable only after both children exit
+0, both readers finish, and cleanup completes; any failure discards it.
 Cancellation is checked before process creation, during bounded queue consumption,
-between source processes and comparisons, between logical windows, and between scoring
-hypotheses. A native NumPy FFT already in progress completes to its admitted safe
-boundary before cancellation is observed; Python threads are not interrupted.
-The production path collects the reference and comparison sequentially, analyzes one
-numeric pair at a time, and releases the discovery store before any requested-rate
-verification collection. When discovery and requested rates differ, all verification
-intervals and halos are frozen before I/O and the original bounded global hypotheses are
-translated through their local origins. Direct-rate work uses at most two decodes per
-comparison; verification uses at most four. No PCM survives into another comparison.
-After that mono path completes, the default `mono_downmix` strategy may collect the
-fixed-order intersection of explicitly named `FL`, `FR`, and `FC` views when mono
-evidence lacks independent support and an integrity/coverage-valid primary row missed
-the fixed waveform floor. Each view is collected as one sequential reference/comparison
-pair at the requested rate through the same origin, EOF, cancellation, identity, and
-cleanup owner, then its PCM is released before the next view. At most six additional
-collections occur. Views corroborate one temporal observation per planned window and
-never become mono voters or independent observations themselves. The channel candidate's
-duration-tier check combines unique same-frame, fixed-base-credible mono observations
-with corroborated channel windows; channel evidence replaces rather than double-counts
-a weak mono row with the same logical ID. Mono evidence contributes only its retained
-interval and lag to that temporal check and cannot alter channel confidence or authority.
-`alignment_correlation.estimate_alignment_offset` converts the raw correlation lag to the
+and between comparisons; a native NumPy FFT already in progress completes to its
+admitted safe boundary before cancellation is observed. No PCM survives into
+another comparison.
+`alignment_correlation` is pure numeric chunk estimation: per-chunk GCC-PHAT with
+full whitening, activity gating at -50 dBFS RMS on both sides, PSR credibility at
+`>= 25`, global lag as the argmax of summed active-chunk correlations, and
+agreement within 2 ms requiring at least `min(3, analyzed)` agreeing chunks and an
+80% agreeing share of credible chunks. Disagreement yields `no_single_offset`
+with contiguous chunk runs for edit/drift diagnosis; a global lag within 2 ms of
+`+/-M` is `search_edge` and is never applied. `alignment_correlation`
+converts the raw correlation lag to the
 public `reference source frame - comparison source frame` sign.
 That raw offset remains unchanged in results, diagnostics, manual review, and caches.
 At the orchestration application boundary, base trim starts are converted into the
@@ -502,37 +496,24 @@ comparison base trim`; the calculator's relative trims are then composed onto th
 domains. Consequently, the final reference raw-source start minus each authorized
 comparison raw-source start equals the stored raw offset, including zero when the two
 base trims differ. A missing offset remains missing and never becomes zero authority.
-`alignment_consensus` translates that signed local offset through the reference and
-comparison stream origins before applying extraction-integrity, base-credible, voting,
-independent-support, and automatic-authority gates. Base-credible evidence requires the
-requested-rate score floor, meaningful finite signal/overlap, and peak floor; voting also
-requires 90% useful observed coverage and the configured thresholds. Any base-credible
-estimate in another applied frame bin is a hard veto, even when stricter configuration
-excludes it from voting. For named-channel corroboration this veto is global across
-relevant temporal windows, including windows whose channel views internally agree. The
-default ratio is unanimity among voting-qualified windows.
-Stability is classified only from extraction-integrity, fixed-credibility, and coverage-qualified
-observed windows; rejected or unobserved planned intervals remain diagnostic and unassessed.
-The duration-tier temporal-support requirement applies to actual useful intervals even
-when explicit window length or stride changes the planned shape; custom planning does not
-waive short full-source or medium/long endpoint support.
-An observed lower-median sample offset represents the winning frame group without replacing
-raw window evidence. Requests
-outside the fixed internal work budget produce a typed non-applied
-`analysis_budget_exceeded` consensus rather than widening config validation, truncating
-the requested search silently, or attempting unbounded work. The estimator-policy token
-includes this strategy so older computed cache entries are not reused. The current
-fixed channel rule requires two activity/coverage/peak-valid named views in one
-frame bin and the existing correction neighborhood, including at least one view at the
-unchanged waveform floor. A base-credible named view in another frame bin, in any relevant
-temporal window, vetoes the aggregate hint even when that window's named views internally
-agree. Qualifying channel evidence creates only a distinctly labeled provisional manual-
-review candidate; it cannot set `review_qualified`, join mono authority voters, satisfy
-a mono trust gate, override a credible contradiction, write computed cache authority,
-or reach trims. The current
-`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy activates
-qualified mono authority for trims and computed-cache writes while channel
-corroboration remains permanently provisional and cannot authorize either.
+`alignment_decision` maps the whole-track chunked estimate, container-start
+compensation, A6 rounding, and the collection outcome to the v4 decision. An agreed
+audio stage is `provisional` with reason `video_check_pending` and an `audio_only`
+candidate holding the rounded frame, the time offset, and the sub-frame evidence
+`x = offset_seconds x fps_reference`; every other outcome is `unavailable` with its
+own reason and no candidate. Stability is derived from chunk runs (`stable` on agreement,
+`possible_discontinuity` for two or more credible runs at different lags,
+`possible_drift` for a sustained walk across three or more runs, `variable`
+otherwise, `insufficient_evidence` below three credible chunks), and the
+correlation score is the agreeing-over-credible fraction. The estimator-policy
+token is part of the shared source-set identity so older computed cache entries
+are not reused.
+`frame_compare.utils.alignment_evidence` is the single definition of the v4
+evidence schema: frozen dataclasses plus one strict payload parser, standard
+library only so the VSView panel process can import it without NumPy. Terminal
+presentation lives in `frame_compare.services.alignment_presentation`, which owns
+the frozen decision-first strings, the `audio_alignment_requires_review` JSON
+warning, and the `Audio Alignment` panel.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -545,16 +526,16 @@ write-source provenance such as `computed_this_run`,
 computed or interactively confirmed provenance rather than inferring eligibility from
 the final flattened `AlignmentResult.source`. Shared cache schema v2 remains
 accepted-authority-only and does not serialize the richer attempt. Warm cache entries
-therefore report historical stream/window details as unavailable rather than
+therefore report historical stream/chunk details as unavailable rather than
 inventing them.
 
 Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
-service-projected audio evidence as metadata schema v4. The
+service-projected audio evidence as metadata schema v5. The
 typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
-strict metadata-v4/result-v1 topology and primitive DTO validation, trusted
+strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it remains inert for ordinary or
@@ -1014,10 +995,12 @@ Runtime ownership matrix:
 | Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
-| Audio stream probing, selected-stream timeline normalization, deterministic stream selection, bounded distributed work planning, stream overrides, and origin-based FFmpeg/channel extraction policy | `frame_compare.services.alignment_audio` |
-| One-child continuous FFmpeg collection, bounded pipe drainage, admitted interval retention, endpoint classification, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
-| Audio correlation, unequal-length lag mapping, overlap-normalized confidence, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
-| Sequential audio-window consumption, weak-window rejection, global-origin translation, majority consensus selection, ambiguity gating, and provisional-only corresponding-channel corroboration | `frame_compare.services.alignment_consensus` |
+| Audio stream probing, deterministic stream selection, audio/video start probing with container-start compensation, and the canonical whole-track FFmpeg extraction recipe | `frame_compare.services.alignment_audio` |
+| Paired lockstep FFmpeg collection with one `_ChildStream` per side, bounded pipe drainage, watchdog/total time bounds, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
+| Pure numeric chunked GCC-PHAT estimation: chunk planning, per-chunk prominence, global-lag accumulation, and agreement gating | `frame_compare.services.alignment_correlation` |
+| Audio-stage decision combining the chunked estimate, compensation, rounding, and collection outcome; chunk-run stability derivation and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
+| Single definition of the v4 audio-evidence schema (frozen dataclasses plus strict payload parser) | `frame_compare.utils.alignment_evidence` |
+| Terminal alignment presentation: frozen decision-first strings, JSON review warning, and the Audio Alignment panel | `frame_compare.services.alignment_presentation` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
@@ -1047,7 +1030,8 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/cli/entry.py`
 - `src/frame_compare/services/alignment.py` and its focused audio-alignment owners
   (`alignment_audio.py`, `alignment_streaming.py`, `alignment_correlation.py`,
-  `alignment_consensus.py`, `alignment_vsview.py`)
+  `alignment_decision.py`, `alignment_presentation.py`, `alignment_vsview.py`)
+  plus the single evidence definition in `src/frame_compare/utils/alignment_evidence.py`
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
@@ -1060,8 +1044,8 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v4 transport required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v4/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v5 transport required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v5/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape; it validates the embedded audio attempt through the single `utils/alignment_evidence.py` parser instead of re-describing the schema. |
 | `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |

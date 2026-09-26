@@ -978,7 +978,7 @@ def test_uncooperative_children_are_killed_and_reaped() -> None:
 def test_cleanup_failure_is_fatal_and_attributed_per_side(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real_reap = alignment_streaming._reap_paired_side
+    real_reap = alignment_streaming._ChildStream.reap
 
     def reap_with_failure(side: Any) -> Any:
         cleanup = real_reap(side)
@@ -986,7 +986,7 @@ def test_cleanup_failure_is_fatal_and_attributed_per_side(
             return replace(cleanup, failure="injected leftover reader")
         return cleanup
 
-    monkeypatch.setattr(alignment_streaming, "_reap_paired_side", reap_with_failure)
+    monkeypatch.setattr(alignment_streaming._ChildStream, "reap", reap_with_failure)
     accumulator = _StrictAccumulator()
     result = collect_paired_audio_chunks(
         _child_argv(_payload([1.0] * 1200)),
@@ -1307,3 +1307,68 @@ def test_gapped_chunks_with_zero_lag_match_u1() -> None:
         chunks=chunks,
         lag_samples=0,
     )
+
+
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_completed_child_drains_delayed_stderr_before_pipe_close(
+    monkeypatch: pytest.MonkeyPatch,
+    exit_code: int,
+) -> None:
+    """Ported U3-R M6: a child that exits and writes stderr late keeps full stderr.
+
+    Both stderr readers are held back until the collector reaches bounded reader
+    cleanup; the exited child's late stderr must still be fully retained and
+    cleanup must complete.
+    """
+    release_reader = threading.Event()
+    start_reader = alignment_streaming._start_reader
+
+    def start_with_delayed_stderr(thread: threading.Thread) -> None:
+        if thread.name == "alignment-stderr-reader":
+            run = thread.run
+            join = thread.join
+
+            def delayed_run() -> None:
+                if not release_reader.wait(timeout=10.0):
+                    raise RuntimeError("collector did not reach bounded reader cleanup")
+                run()
+
+            def release_and_join(timeout: float | None = None) -> None:
+                release_reader.set()
+                join(timeout=timeout)
+
+            monkeypatch.setattr(thread, "run", delayed_run)
+            monkeypatch.setattr(thread, "join", release_and_join)
+        start_reader(thread)
+
+    monkeypatch.setattr(alignment_streaming, "_start_reader", start_with_delayed_stderr)
+    stderr = b"bounded decoder diagnostic\n"
+    reference_argv = _child_argv(_payload([1.0, 2.0, 3.0, 4.0]), stderr=stderr, exit_code=exit_code)
+    comparison_argv = _child_argv(_payload([1.0, 2.0, 3.0, 4.0]), stderr=stderr)
+    accumulator = _StrictAccumulator()
+    try:
+        result = collect_paired_audio_chunks(
+            reference_argv,
+            comparison_argv,
+            **_paired_kwargs(accumulator, chunks=((0, 2), (2, 2)), lag_samples=1),
+        )
+    finally:
+        release_reader.set()
+
+    if exit_code:
+        failed = _assert_failed(result, "nonzero_exit", "reference")
+        assert failed.reference_facts.returncode == exit_code
+        assert failed.reference_facts.stderr_byte_count == len(stderr)
+        assert failed.reference_facts.stderr_retained == stderr
+        assert failed.reference_cleanup.completed
+        assert failed.comparison_cleanup.completed
+    else:
+        assert isinstance(result, PairedAudioCollection)
+        assert result.reference_facts.returncode == 0
+        assert result.comparison_facts.returncode == 0
+        assert result.reference_facts.stderr_byte_count == len(stderr)
+        assert result.reference_facts.stderr_retained == stderr
+        assert result.comparison_facts.stderr_byte_count == len(stderr)
+        assert result.comparison_facts.stderr_retained == stderr
+        assert result.reference_cleanup.completed
+        assert result.comparison_cleanup.completed

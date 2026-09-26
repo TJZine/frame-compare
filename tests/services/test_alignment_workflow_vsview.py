@@ -15,11 +15,22 @@ import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
-from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_diagnostics import original_attempt_digest
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.alignment_evidence import (
+    AudioAlignmentAttempt,
+    AudioAlignmentDecision,
+    AudioAnalysisFacts,
+    AudioChunkColumns,
+    AudioChunkRun,
+    AudioDecisionCandidate,
+    AudioStageOutcome,
+    SelectedAudioStreamEvidence,
+    VideoCheckObservation,
+)
+from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewResult,
@@ -36,40 +47,175 @@ from tests.services.alignment_request_test_support import (
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
-def align_clips_from_request(*args: object, **kwargs: object):
-    return asyncio.run(_align_clips_from_request(*args, **kwargs))
+def align_clips_from_request(
+    request: AlignmentRequest,
+    config: AlignmentConfig,
+    **kwargs: Any,
+) -> list[AlignmentResult]:
+    return asyncio.run(_align_clips_from_request(request, config, **kwargs))
 
 
-@pytest.fixture(autouse=True)
-def automatic_authority_is_disabled_for_native_workflow_fixtures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep native-review fixtures focused on review replacement semantics."""
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_consensus.automatic_authority_is_held",
-        lambda: False,
+def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
+    """Hand-built trusted attempt so review tests stay isolated from the estimator.
+
+    The whole-track audio stage never applies on its own in U3; these
+    review-replacement tests stub the estimator with a trusted attempt to
+    simulate confirmed authority flowing into the native session request.
+    """
+    return AudioAlignmentAttempt(
+        reference_identity_digest="d" * 64,
+        comparison_identity_digest="e" * 64,
+        comparison_ordinal=1,
+        status="complete",
+        estimator_policy="whole-track-chunked-phat-video-check-20260925",
+        diagnostic_policy="retained-audio-evidence-v1",
+        media_runtime_fingerprint="alignment-runtime",
+        ffmpeg_version="not_observed",
+        ffprobe_version="not_observed",
+        extraction_recipe="recipe",
+        fps_num=24,
+        fps_den=1,
+        selected_streams=(
+            SelectedAudioStreamEvidence(
+                role="reference",
+                source_identity_digest="d" * 64,
+                audio_stream_index=0,
+                absolute_stream_index=1,
+                selection_method="automatic_metadata",
+                selection_rank=(0, 0, 0, 0),
+                codec_name="aac",
+                sample_rate=48000,
+                channels=2,
+                channel_layout="stereo",
+                language="eng",
+                is_default=True,
+                is_original=False,
+                is_commentary=False,
+                language_match="not_applicable",
+                commentary_match="not_applicable",
+                stream_start_num=0,
+                stream_start_den=1,
+                stream_start_basis="default_zero",
+                input_start_num=0,
+                input_start_den=1,
+                input_start_basis="default_zero",
+                time_base_num=1,
+                time_base_den=48000,
+                duration_num=120,
+                duration_den=1,
+                duration_basis="duration_ts",
+                video_start_num=0,
+                video_start_den=1,
+                video_start_basis="default_zero",
+            ),
+            SelectedAudioStreamEvidence(
+                role="comparison",
+                source_identity_digest="e" * 64,
+                audio_stream_index=0,
+                absolute_stream_index=1,
+                selection_method="automatic_metadata",
+                selection_rank=(0, 0, 0, 0),
+                codec_name="aac",
+                sample_rate=48000,
+                channels=2,
+                channel_layout="stereo",
+                language="eng",
+                is_default=True,
+                is_original=False,
+                is_commentary=False,
+                language_match="not_applicable",
+                commentary_match="not_applicable",
+                stream_start_num=0,
+                stream_start_den=1,
+                stream_start_basis="default_zero",
+                input_start_num=0,
+                input_start_den=1,
+                input_start_basis="default_zero",
+                time_base_num=1,
+                time_base_den=48000,
+                duration_num=120,
+                duration_den=1,
+                duration_basis="duration_ts",
+                video_start_num=0,
+                video_start_den=1,
+                video_start_basis="default_zero",
+            ),
+        ),
+        analysis=AudioAnalysisFacts(
+            analysis_rate=8000,
+            max_offset_seconds=30.0,
+            chunk_samples=40000,
+            lag_samples=240000,
+            planned_chunk_count=5,
+        ),
+        chunks=AudioChunkColumns(
+            starts=(0, 40000, 80000, 120000, 160000),
+            counts=(40000,) * 5,
+            active=(True,) * 5,
+            lags=(0,) * 5,
+            psrs=(88.5,) * 5,
+            credible=(True,) * 5,
+            agrees=(True,) * 5,
+        ),
+        runs=(AudioChunkRun(first_index=0, last_index=4, lag=0, chunk_count=5),),
+        audio=AudioStageOutcome(
+            status="agreed",
+            global_lag=0,
+            active_chunks=5,
+            credible_chunks=5,
+            agreeing_chunks=5,
+            compensation_seconds=0.0,
+            subframe_estimate=0.0,
+            rounded_frame=0,
+        ),
+        collection_observation="not_observed",
+        collection=(),
+        video_check=VideoCheckObservation(
+            observation="not_observed",
+            scored_offsets=(),
+            confirmed_offset=None,
+            index_build_seconds=None,
+            positions=(),
+        ),
+        decision=AudioAlignmentDecision(
+            state="trusted_automatic",
+            candidate=AudioDecisionCandidate(
+                frame_offset=frame_offset,
+                time_offset_seconds=frame_offset / 24,
+                subframe_estimate=float(frame_offset),
+                basis="audio_only",
+            ),
+            primary_reason="audio_video_confirmed",
+            failed_gates=(),
+        ),
+        stability=audio_attempt().stability,
     )
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_reuse_cache.automatic_authority_is_held",
-        lambda: False,
+
+
+def _trusted_computed_result(
+    reference: Path, comparison: Path, frame_offset: int
+) -> AlignmentResult:
+    return AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=frame_offset,
+        time_offset_seconds=frame_offset / 24,
+        correlation_score=0.99,
+        algorithm="cross_correlation",
+        source="computed",
+        stability=audio_attempt().stability,
+        audio_attempt=_trusted_attempt(frame_offset),
     )
 
 
-def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, offset: int = 1000) -> None:
+def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, frame_offset: int = 3) -> None:
     monkeypatch.setattr(
         "frame_compare.services.alignment_audio.probe_fps", lambda _path: Fraction(24, 1)
     )
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
-        lambda *_args, **_kwargs: AlignmentConsensus(
-            sample_offset=offset,
-            score=0.99,
-            applied=True,
-            diagnostic="accepted",
-            valid_windows=1,
-            consensus_windows=1,
-            consensus_ratio=1.0,
-            ambiguity_ratio=2.0,
+        lambda reference, comparison, **_kwargs: _trusted_computed_result(
+            reference, comparison, frame_offset
         ),
     )
     monkeypatch.setattr(
@@ -141,6 +287,19 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     attempt = audio_attempt()
+    unapplied = AlignmentResult(
+        reference_clip="ref.mkv",
+        comparison_clip="comparison.mkv",
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic="video_check_pending",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
     initial_snapshot: dict[str, object] = {}
     monkeypatch.setattr(
         "frame_compare.services.alignment_audio.probe_fps",
@@ -148,19 +307,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     )
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
-        lambda *_args, **_kwargs: AlignmentConsensus(
-            sample_offset=None,
-            score=0.99,
-            applied=False,
-            diagnostic="insufficient_consensus",
-            valid_windows=5,
-            consensus_windows=4,
-            consensus_ratio=0.8,
-            ambiguity_ratio=2.0,
-            window_records=attempt.windows,
-            decision=attempt.decision,
-            audio_attempt=attempt,
-        ),
+        lambda *_args, **_kwargs: unapplied,
     )
     monkeypatch.setattr(
         alignment_vsview,
@@ -329,3 +476,10 @@ def test_alignment_passes_complete_native_session_request(
         "ref": "ref",
         "comparison": "comparison",
     }
+    review = json.loads(request.audio_review_by_key["ref:comparison"])
+    assert review["current_authority"] == {
+        "origin": "computed_this_run",
+        "frame_offset": 3,
+    }
+    assert review["evidence_availability"] == "current_attempt"
+    assert review["audio_attempt"]["decision"]["candidate"]["frame_offset"] == 3

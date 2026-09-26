@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from frame_compare.services.alignment_correlation import ANALYSIS_SAMPLE_RATE
+from frame_compare.utils.alignment_evidence import AUDIO_ANALYSIS_SAMPLE_RATE
 
-SAMPLE_RATE = ANALYSIS_SAMPLE_RATE
+SAMPLE_RATE = AUDIO_ANALYSIS_SAMPLE_RATE
 
 _DEFAULT_GAINS = (1.0, 0.8, 0.9)
 _DOWNMIX_GAINS = (0.7, 1.0, 0.5)

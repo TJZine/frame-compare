@@ -707,6 +707,12 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     overlays: list[str] = []
+    candidate = {
+        "frame_offset": 0,
+        "time_offset_seconds": 0.0,
+        "subframe_estimate": 0.0,
+        "basis": "audio_only",
+    }
     reviews = {
         "ref:accepted": json.dumps(
             {
@@ -715,8 +721,9 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
                 "audio_attempt": {
                     "decision": {
                         "state": "trusted_automatic",
-                        "candidate": {"frame_offset": 0},
+                        "candidate": candidate,
                         "primary_reason": "accepted",
+                        "failed_gates": [],
                     }
                 },
             }
@@ -728,8 +735,9 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
                 "audio_attempt": {
                     "decision": {
                         "state": "provisional",
-                        "candidate": {"frame_offset": 0},
-                        "primary_reason": "insufficient_consensus",
+                        "candidate": candidate,
+                        "primary_reason": "video_check_pending",
+                        "failed_gates": [],
                     }
                 },
             }
@@ -743,6 +751,7 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
                         "state": "unavailable",
                         "candidate": None,
                         "primary_reason": "insufficient_signal",
+                        "failed_gates": ["insufficient_signal"],
                     }
                 },
             }

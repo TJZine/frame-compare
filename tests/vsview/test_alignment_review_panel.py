@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Callable, Generator
 from dataclasses import asdict
@@ -22,6 +23,21 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 from vsengine.loops import get_loop, set_loop  # noqa: E402
 from vsview.vsenv import QtEventLoop  # noqa: E402
 
+from frame_compare.services.alignment_decision import (  # noqa: E402
+    ALIGNMENT_ESTIMATOR_POLICY,
+)
+from frame_compare.utils.alignment_evidence import (  # noqa: E402
+    AlignmentStabilitySummary,
+    AudioAlignmentAttempt,
+    AudioAlignmentDecision,
+    AudioAnalysisFacts,
+    AudioChunkColumns,
+    AudioChunkRun,
+    AudioDecisionCandidate,
+    AudioStageOutcome,
+    SelectedAudioStreamEvidence,
+    VideoCheckObservation,
+)
 from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
@@ -37,7 +53,6 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
-from tests.services.test_alignment_diagnostics import audio_attempt  # noqa: E402
 
 _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
@@ -60,64 +75,319 @@ def _audio_review(suggestion: int | None) -> str:
     )
 
 
-def _provisional_audio_review(ordinal: int = 1) -> str:
-    attempt = asdict(audio_attempt())
-    attempt["comparison_ordinal"] = ordinal
+_REFERENCE_DIGEST = "a" * 64
+_COMPARISON_DIGEST = "b" * 64
+_DIAGNOSTIC_POLICY = "retained-audio-evidence-v1"
+_FPS_NUM = 24
+_FPS_DEN = 1
+_CHUNK_SAMPLES = 40000
+_LAG_SAMPLES = 240000
+_MAX_OFFSET_SECONDS = 30.0
+_AGREE_PSR = 30.0
+
+
+def _frame_lag(frame_offset: int) -> int:
+    """Return the exact 8 kHz lag for the whole-frame offsets used by fixtures."""
+    lag = frame_offset * 8000 // _FPS_NUM
+    assert lag * _FPS_NUM == frame_offset * 8000
+    return lag
+
+
+def _subframe_estimate(lag: int) -> float:
+    return lag / 8000 * (_FPS_NUM / _FPS_DEN)
+
+
+def _stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
+    return SelectedAudioStreamEvidence(
+        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        source_identity_digest=digest,
+        audio_stream_index=0,
+        absolute_stream_index=1,
+        selection_method="automatic_metadata",
+        selection_rank=(0, 0, 0, 0),
+        codec_name="aac",
+        sample_rate=48000,
+        channels=2,
+        channel_layout="stereo",
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        language_match="not_applicable" if role == "reference" else "match",
+        commentary_match="not_applicable" if role == "reference" else "match",
+        stream_start_num=0,
+        stream_start_den=1,
+        stream_start_basis="metadata",
+        input_start_num=0,
+        input_start_den=1,
+        input_start_basis="metadata",
+        time_base_num=1,
+        time_base_den=48000,
+        duration_num=120,
+        duration_den=1,
+        duration_basis="duration_ts",
+        video_start_num=0,
+        video_start_den=1,
+        video_start_basis="metadata",
+    )
+
+
+def _analysis(*, planned_chunk_count: int) -> AudioAnalysisFacts:
+    planned = planned_chunk_count > 0
+    return AudioAnalysisFacts(
+        analysis_rate=8000,
+        max_offset_seconds=_MAX_OFFSET_SECONDS,
+        chunk_samples=_CHUNK_SAMPLES if planned else 0,
+        lag_samples=_LAG_SAMPLES if planned else 0,
+        planned_chunk_count=planned_chunk_count,
+    )
+
+
+def _agreed_columns(*, lag: int, chunk_count: int) -> AudioChunkColumns:
+    return AudioChunkColumns(
+        starts=tuple(index * _CHUNK_SAMPLES for index in range(chunk_count)),
+        counts=tuple(_CHUNK_SAMPLES for _ in range(chunk_count)),
+        active=tuple(True for _ in range(chunk_count)),
+        lags=tuple(lag for _ in range(chunk_count)),
+        psrs=tuple(_AGREE_PSR for _ in range(chunk_count)),
+        credible=tuple(True for _ in range(chunk_count)),
+        agrees=tuple(True for _ in range(chunk_count)),
+    )
+
+
+def _attempt_shell(
+    *,
+    ordinal: int,
+    status: str,
+    analysis: AudioAnalysisFacts,
+    chunks: AudioChunkColumns,
+    runs: tuple[AudioChunkRun, ...],
+    audio: AudioStageOutcome,
+    decision: AudioAlignmentDecision,
+    stability: AlignmentStabilitySummary,
+) -> AudioAlignmentAttempt:
+    return AudioAlignmentAttempt(
+        reference_identity_digest=_REFERENCE_DIGEST,
+        comparison_identity_digest=_COMPARISON_DIGEST,
+        comparison_ordinal=ordinal,  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]
+        estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
+        diagnostic_policy=_DIAGNOSTIC_POLICY,
+        media_runtime_fingerprint="alignment-runtime-test",
+        ffmpeg_version="not_observed",
+        ffprobe_version="not_observed",
+        extraction_recipe="ffmpeg -i <input> -map 0:a -f f32le -",
+        fps_num=_FPS_NUM,
+        fps_den=_FPS_DEN,
+        selected_streams=(
+            _stream("reference", _REFERENCE_DIGEST),
+            _stream("comparison", _COMPARISON_DIGEST),
+        ),
+        analysis=analysis,
+        chunks=chunks,
+        runs=runs,
+        audio=audio,
+        collection_observation="not_observed",
+        collection=(),
+        video_check=VideoCheckObservation(
+            observation="not_observed",
+            scored_offsets=(),
+            confirmed_offset=None,
+            index_build_seconds=None,
+            positions=(),
+        ),
+        decision=decision,
+        stability=stability,
+    )
+
+
+def _agreed_audio(*, lag: int, frame_offset: int, chunk_count: int) -> AudioStageOutcome:
+    return AudioStageOutcome(
+        status="agreed",
+        global_lag=lag,
+        active_chunks=chunk_count,
+        credible_chunks=chunk_count,
+        agreeing_chunks=chunk_count,
+        compensation_seconds=0.0,
+        subframe_estimate=_subframe_estimate(lag),
+        rounded_frame=frame_offset,
+    )
+
+
+def _stable_summary(*, frame_offset: int, chunk_count: int) -> AlignmentStabilitySummary:
+    return AlignmentStabilitySummary(
+        classification="stable",
+        valid_windows=chunk_count,
+        offset_min_frames=frame_offset,
+        offset_max_frames=frame_offset,
+        first_offset_frames=frame_offset,
+        last_offset_frames=frame_offset,
+        largest_adjacent_jump_frames=0,
+        change_position_seconds=None,
+    )
+
+
+def provisional_audio_attempt(
+    *, ordinal: int = 1, frame_offset: int = 0, chunk_count: int = 4
+) -> AudioAlignmentAttempt:
+    """Agreed audio stage awaiting video confirmation (the U3 applied-nothing state)."""
+    lag = _frame_lag(frame_offset)
+    subframe = _subframe_estimate(lag)
+    assert math.floor(subframe + 0.5) == frame_offset
+    return _attempt_shell(
+        ordinal=ordinal,
+        status="complete",
+        analysis=_analysis(planned_chunk_count=chunk_count),
+        chunks=_agreed_columns(lag=lag, chunk_count=chunk_count),
+        runs=(
+            AudioChunkRun(
+                first_index=0,
+                last_index=chunk_count - 1,
+                lag=lag,
+                chunk_count=chunk_count,
+            ),
+        ),
+        audio=_agreed_audio(lag=lag, frame_offset=frame_offset, chunk_count=chunk_count),
+        decision=AudioAlignmentDecision(
+            state="provisional",
+            candidate=AudioDecisionCandidate(
+                frame_offset=frame_offset,
+                time_offset_seconds=lag / 8000,
+                subframe_estimate=subframe,
+                basis="audio_only",
+            ),
+            primary_reason="video_check_pending",
+            failed_gates=(),
+        ),
+        stability=_stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),
+    )
+
+
+def trusted_audio_attempt(
+    *, ordinal: int = 1, frame_offset: int = 0, chunk_count: int = 4
+) -> AudioAlignmentAttempt:
+    """Audio-plus-video confirmed attempt that may authorize an applied result."""
+    lag = _frame_lag(frame_offset)
+    subframe = _subframe_estimate(lag)
+    assert math.floor(subframe + 0.5) == frame_offset
+    return _attempt_shell(
+        ordinal=ordinal,
+        status="complete",
+        analysis=_analysis(planned_chunk_count=chunk_count),
+        chunks=_agreed_columns(lag=lag, chunk_count=chunk_count),
+        runs=(
+            AudioChunkRun(
+                first_index=0,
+                last_index=chunk_count - 1,
+                lag=lag,
+                chunk_count=chunk_count,
+            ),
+        ),
+        audio=_agreed_audio(lag=lag, frame_offset=frame_offset, chunk_count=chunk_count),
+        decision=AudioAlignmentDecision(
+            state="trusted_automatic",
+            candidate=AudioDecisionCandidate(
+                frame_offset=frame_offset,
+                time_offset_seconds=lag / 8000,
+                subframe_estimate=subframe,
+                basis="audio_only",
+            ),
+            primary_reason="audio_video_confirmed",
+            failed_gates=(),
+        ),
+        stability=_stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),
+    )
+
+
+def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
+    """Two credible runs at different lags: no single offset, never applied."""
+    near_lag = _frame_lag(12)
+    far_lag = _frame_lag(24)
+    chunk_count = 4
+    return _attempt_shell(
+        ordinal=ordinal,
+        status="complete",
+        analysis=_analysis(planned_chunk_count=chunk_count),
+        chunks=AudioChunkColumns(
+            starts=tuple(index * _CHUNK_SAMPLES for index in range(chunk_count)),
+            counts=tuple(_CHUNK_SAMPLES for _ in range(chunk_count)),
+            active=(True, True, True, True),
+            lags=(near_lag, near_lag, far_lag, far_lag),
+            psrs=(_AGREE_PSR, _AGREE_PSR, _AGREE_PSR, _AGREE_PSR),
+            credible=(True, True, True, True),
+            agrees=(True, True, False, False),
+        ),
+        runs=(
+            AudioChunkRun(first_index=0, last_index=1, lag=near_lag, chunk_count=2),
+            AudioChunkRun(first_index=2, last_index=3, lag=far_lag, chunk_count=2),
+        ),
+        audio=AudioStageOutcome(
+            status="no_single_offset",
+            global_lag=near_lag,
+            active_chunks=chunk_count,
+            credible_chunks=chunk_count,
+            agreeing_chunks=2,
+            compensation_seconds=0.0,
+            subframe_estimate=_subframe_estimate(near_lag),
+            rounded_frame=12,
+        ),
+        decision=AudioAlignmentDecision(
+            state="unavailable",
+            candidate=None,
+            primary_reason="no_single_offset",
+            failed_gates=("no_single_offset",),
+        ),
+        stability=AlignmentStabilitySummary(
+            classification="possible_discontinuity",
+            valid_windows=chunk_count,
+            offset_min_frames=12,
+            offset_max_frames=24,
+            first_offset_frames=12,
+            last_offset_frames=24,
+            largest_adjacent_jump_frames=12,
+            change_position_seconds=10.0,
+        ),
+    )
+
+
+def _provisional_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
+            "audio_attempt": asdict(
+                provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
+            ),
         },
         sort_keys=True,
         separators=(",", ":"),
     )
 
 
-def _accepted_audio_review(ordinal: int = 1) -> str:
-    payload = cast(dict[str, Any], json.loads(_provisional_audio_review(ordinal)))
-    payload["current_authority"] = {"origin": "computed_this_run", "frame_offset": 0}
-    attempt = cast(dict[str, Any], payload["audio_attempt"])
-    attempt["consensus_minimum_ratio"] = 0.8
-    decision = cast(dict[str, Any], attempt["decision"])
-    decision.update(
-        state="trusted_automatic",
-        primary_reason="accepted",
-        failed_gates=[],
+def _accepted_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
+    return json.dumps(
+        {
+            "current_authority": {"origin": "computed_this_run", "frame_offset": frame_offset},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(
+                trusted_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
+            ),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _unavailable_audio_review(ordinal: int = 1) -> str:
-    payload = cast(dict[str, Any], json.loads(_provisional_audio_review(ordinal)))
-    attempt = cast(dict[str, Any], payload["audio_attempt"])
-    windows = cast(list[dict[str, Any]], attempt["windows"])
-    for window in windows:
-        window.update(
-            requested_sample_lag=None,
-            requested_frame_candidate=None,
-            requested_score=None,
-            peak_ratio=None,
-            peak_rate=None,
-            review_qualified=False,
-            configured_quality=False,
-            vote_disposition="failed",
-            terminal_stage="signal_validation",
-            terminal_category="insufficient_signal",
-        )
-    decision = cast(dict[str, Any], attempt["decision"])
-    decision.update(
-        state="unavailable",
-        candidate=None,
-        primary_reason="insufficient_signal",
-        raw_correlated_windows=0,
-        consensus_windows=0,
-        consensus_ratio=None,
-        aggregate_score=None,
-        minimum_peak_ratio=None,
-        failed_gates=["insufficient_signal"],
+    return json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(unavailable_audio_attempt(ordinal=ordinal)),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _manual_audio_review(offset: int = 0) -> str:
@@ -388,7 +658,7 @@ def test_metadata_v1_session_requires_regeneration(tmp_path: Path) -> None:
     message = panel.error_label.text()
     assert "newly generated session" in message
     assert "metadata v1" in message
-    assert "requires v4" in message
+    assert "requires v5" in message
     assert "Inactive" in panel.progress_label.text()
     assert not panel.keep_button.isEnabled()
 
@@ -501,8 +771,8 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
     panel, _api, script = _panel(tmp_path, suggestion=None, comparison_count=2)
 
     assert [label.text() for label in panel.source_outcome_labels[1:]] == [
-        "Unresolved comparison — no usable audio candidate",
-        "Unresolved comparison — no usable audio candidate",
+        "No usable audio candidate (no usable audio signal) — NOT APPLIED",
+        "No usable audio candidate (no usable audio signal) — NOT APPLIED",
     ]
     assert "remain unresolved" in panel.keep_help_label.text()
     assert panel.keep_button.isEnabled()
@@ -554,7 +824,8 @@ def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) ->
 
     assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
     assert api.timeline.added == []
-    assert "marker omitted" in panel.audio_detail_groups[0].findChild(QLabel).text().lower()
+    details_label = cast(QLabel, panel.audio_detail_groups[0].findChild(QLabel))
+    assert "marker omitted" in details_label.text().lower()
 
 
 def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: Path) -> None:
@@ -603,7 +874,7 @@ def test_mixed_states_keep_separate_authority_and_saved_labels(tmp_path: Path) -
     assert [label.text().splitlines()[0] for label in panel.audio_summary_labels] == [
         "Accepted audio alignment: +0f — APPLIED",
         "Provisional audio candidate: +0f — NOT APPLIED",
-        "Unresolved comparison — no usable audio candidate",
+        "No usable audio candidate (no single offset across the track) — NOT APPLIED",
         "Manually confirmed alignment: +0f — APPLIED",
     ]
     original_details = [

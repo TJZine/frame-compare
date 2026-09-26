@@ -8,13 +8,13 @@ import tomllib
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
 import tomli_w
 
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
-from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
 )
@@ -30,8 +30,20 @@ from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
     AlignmentResult,
-    AlignmentStabilitySummary,
+    PreviousOffsetReusePolicy,
     ReusableAlignmentEntry,
+)
+from frame_compare.utils.alignment_evidence import (
+    AlignmentStabilitySummary,
+    AudioAlignmentAttempt,
+    AudioAlignmentDecision,
+    AudioAnalysisFacts,
+    AudioChunkColumns,
+    AudioChunkRun,
+    AudioDecisionCandidate,
+    AudioStageOutcome,
+    SelectedAudioStreamEvidence,
+    VideoCheckObservation,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
@@ -42,23 +54,12 @@ from frame_compare.utils.types import (
 )
 
 
-def align_clips_from_request(*args: object, **kwargs: object):
-    return asyncio.run(_align_clips_from_request(*args, **kwargs))
-
-
-@pytest.fixture(autouse=True)
-def automatic_authority_is_disabled_for_reuse_fixtures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep legacy reuse fixtures focused on precedence and cache plumbing."""
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_consensus.automatic_authority_is_held",
-        lambda: False,
-    )
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_reuse_cache.automatic_authority_is_held",
-        lambda: False,
-    )
+def align_clips_from_request(
+    request: AlignmentRequest,
+    config: AlignmentConfig,
+    **kwargs: Any,
+) -> list[AlignmentResult]:
+    return asyncio.run(_align_clips_from_request(request, config, **kwargs))
 
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
@@ -73,17 +74,131 @@ _DEFAULT_STABILITY = AlignmentStabilitySummary(
 )
 
 
-def _accepted_consensus(sample_offset: int = 0) -> AlignmentConsensus:
-    return AlignmentConsensus(
-        sample_offset=sample_offset,
-        score=0.99,
-        applied=True,
-        diagnostic="accepted",
-        valid_windows=1,
-        consensus_windows=1,
-        consensus_ratio=1.0,
-        ambiguity_ratio=None,
+def _reuse_stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
+    return SelectedAudioStreamEvidence(
+        role=role,  # type: ignore[arg-type]
+        source_identity_digest=digest,
+        audio_stream_index=0,
+        absolute_stream_index=1,
+        selection_method="automatic_metadata",
+        selection_rank=(0, 0, 0, 0),
+        codec_name="aac",
+        sample_rate=48000,
+        channels=2,
+        channel_layout="stereo",
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        language_match="not_applicable",
+        commentary_match="not_applicable",
+        stream_start_num=0,
+        stream_start_den=1,
+        stream_start_basis="default_zero",
+        input_start_num=0,
+        input_start_den=1,
+        input_start_basis="default_zero",
+        time_base_num=1,
+        time_base_den=48000,
+        duration_num=120,
+        duration_den=1,
+        duration_basis="duration_ts",
+        video_start_num=0,
+        video_start_den=1,
+        video_start_basis="default_zero",
+    )
+
+
+def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
+    """Hand-built trusted attempt so reuse tests stay isolated from the estimator.
+
+    The whole-track audio stage never applies on its own in U3 (every audio
+    pass is provisional pending the video check); these precedence tests stub
+    the estimator with a trusted attempt to simulate confirmed authority.
+    """
+    return AudioAlignmentAttempt(
+        reference_identity_digest="d" * 64,
+        comparison_identity_digest="e" * 64,
+        comparison_ordinal=1,
+        status="complete",
+        estimator_policy="whole-track-chunked-phat-video-check-20260925",
+        diagnostic_policy="retained-audio-evidence-v1",
+        media_runtime_fingerprint="alignment-runtime",
+        ffmpeg_version="not_observed",
+        ffprobe_version="not_observed",
+        extraction_recipe="recipe",
+        fps_num=24,
+        fps_den=1,
+        selected_streams=(
+            _reuse_stream("reference", "d" * 64),
+            _reuse_stream("comparison", "e" * 64),
+        ),
+        analysis=AudioAnalysisFacts(
+            analysis_rate=8000,
+            max_offset_seconds=30.0,
+            chunk_samples=40000,
+            lag_samples=240000,
+            planned_chunk_count=5,
+        ),
+        chunks=AudioChunkColumns(
+            starts=(0, 40000, 80000, 120000, 160000),
+            counts=(40000,) * 5,
+            active=(True,) * 5,
+            lags=(0,) * 5,
+            psrs=(88.5,) * 5,
+            credible=(True,) * 5,
+            agrees=(True,) * 5,
+        ),
+        runs=(AudioChunkRun(first_index=0, last_index=4, lag=0, chunk_count=5),),
+        audio=AudioStageOutcome(
+            status="agreed",
+            global_lag=0,
+            active_chunks=5,
+            credible_chunks=5,
+            agreeing_chunks=5,
+            compensation_seconds=0.0,
+            subframe_estimate=0.0,
+            rounded_frame=0,
+        ),
+        collection_observation="not_observed",
+        collection=(),
+        video_check=VideoCheckObservation(
+            observation="not_observed",
+            scored_offsets=(),
+            confirmed_offset=None,
+            index_build_seconds=None,
+            positions=(),
+        ),
+        decision=AudioAlignmentDecision(
+            state="trusted_automatic",
+            candidate=AudioDecisionCandidate(
+                frame_offset=frame_offset,
+                time_offset_seconds=frame_offset / 24,
+                subframe_estimate=float(frame_offset),
+                basis="audio_only",
+            ),
+            primary_reason="audio_video_confirmed",
+            failed_gates=(),
+        ),
         stability=_DEFAULT_STABILITY,
+    )
+
+
+def _trusted_computed_result(
+    reference: Path,
+    comparison: Path,
+    frame_offset: int = 0,
+) -> AlignmentResult:
+    return AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=frame_offset,
+        time_offset_seconds=frame_offset / 24,
+        correlation_score=0.99,
+        algorithm="cross_correlation",
+        source="computed",
+        stability=_DEFAULT_STABILITY,
+        audio_attempt=_trusted_attempt(frame_offset),
     )
 
 
@@ -92,7 +207,7 @@ def _stub_computed_audio_alignment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep these reuse-policy tests isolated from the FFmpeg owner."""
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
-        lambda *_args, **_kwargs: _accepted_consensus(),
+        lambda reference, comparison, **_kwargs: _trusted_computed_result(reference, comparison, 0),
     )
 
 
@@ -116,19 +231,8 @@ def _request_clip(path: Path, *, label: str | None = None) -> AlignmentClipReque
 
 def _alignment_cache_settings(config: AlignmentConfig) -> AlignmentCacheSettings:
     return AlignmentCacheSettings(
-        sample_rate=config.sample_rate,
         max_offset_seconds=config.max_offset_seconds,
-        correlation_mode=config.correlation_mode,
-        preprocessing_mode=config.preprocessing_mode,
         channel_strategy=config.channel_strategy,
-        confidence_threshold=config.confidence_threshold,
-        ambiguity_peak_ratio=config.ambiguity_peak_ratio,
-        window_length_seconds=config.window_length_seconds,
-        window_stride_seconds=config.window_stride_seconds,
-        minimum_valid_windows=config.minimum_valid_windows,
-        consensus_minimum_ratio=config.consensus_minimum_ratio,
-        refinement_mode=config.refinement_mode,
-        refinement_sample_rate=config.refinement_sample_rate,
     )
 
 
@@ -306,6 +410,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         algorithm="cross_correlation",
         source="computed",
         stability=_DEFAULT_STABILITY,
+        audio_attempt=_trusted_attempt(7),
     )
     save_reusable_offsets(
         request,
@@ -344,8 +449,68 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     }
     terminal = capsys.readouterr().err
     assert "Accepted audio alignment reused: +7f - APPLIED" in terminal
-    assert "Historical window and selected-stream details are unavailable" in terminal
+    assert "Historical chunk and selected-stream details are unavailable" in terminal
     mock_save_shared.assert_not_called()
+
+
+def test_stale_policy_entry_is_not_replayed_or_applied(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    config = AlignmentConfig(previous_offsets="always", use_vsview=False)
+    request = _alignment_request(
+        tmp_path,
+        reference=ref,
+        comparisons=[comp],
+        config=config,
+    )
+    stale_result = _trusted_computed_result(ref, comp, 9)
+    with monkeypatch.context() as patch_cache:
+        patch_cache.setattr(
+            "frame_compare.services.alignment_reuse_cache.ALIGNMENT_ESTIMATOR_POLICY",
+            "stale-alignment-policy",
+        )
+        save_reusable_offsets(
+            request,
+            [
+                AlignmentProvenance(
+                    result=stale_result,
+                    comparison_cache_key=comparison_cache_key(request.comparisons[0]),
+                    provenance="computed_this_run",
+                )
+            ],
+        )
+
+    attempt = _trusted_attempt(0)
+    provisional = replace(
+        _trusted_computed_result(ref, comp),
+        frame_offset=None,
+        time_offset_seconds=None,
+        applied=False,
+        diagnostic="video_check_pending",
+        audio_attempt=replace(
+            attempt,
+            decision=replace(
+                attempt.decision,
+                state="provisional",
+                primary_reason="video_check_pending",
+            ),
+        ),
+    )
+    estimate = Mock(return_value=provisional)
+    monkeypatch.setattr("frame_compare.services.alignment._estimate_audio_pair", estimate)
+
+    (result,) = align_clips_from_request(request, config, reference_fps=Fraction(24, 1))
+
+    estimate.assert_called_once()
+    assert result.source == "computed"
+    assert result.applied is False
+    assert result.frame_offset is None
+    assert result.diagnostic == "video_check_pending"
 
 
 def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_without_prompt(
@@ -366,13 +531,14 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
         config=config,
         generated_dir=generated_dir,
     )
+    diagnostics_dir = tmp_path / "alignment_diagnostics"
+    diagnostics_dir.mkdir()
     request = replace(
         request,
-        alignment_diagnostics_dir=tmp_path / "alignment_diagnostics",
+        alignment_diagnostics_dir=diagnostics_dir,
         alignment_diagnostics_root=tmp_path.parent,
     )
-    request.alignment_diagnostics_dir.mkdir()
-    (request.alignment_diagnostics_dir / "comparison-1.json").write_text(
+    (diagnostics_dir / "comparison-1.json").write_text(
         '{"frame_offset": 999}',
         encoding="utf-8",
     )
@@ -482,7 +648,7 @@ def test_align_clips_from_request_prompt_no_reuses_computed_offsets_without_audi
 def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    policy: str,
+    policy: PreviousOffsetReusePolicy,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     ref = tmp_path / "ref.mkv"
@@ -721,7 +887,7 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
 
     def _capture_prompt(**kwargs: object) -> bool:
         nonlocal captured_prompt_input
-        captured_prompt_input = kwargs["prompt_input"]
+        captured_prompt_input = cast(PreviousOffsetPromptInput, kwargs["prompt_input"])
         return False
 
     monkeypatch.setattr(
@@ -786,6 +952,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     algorithm="cross_correlation",
                     source="computed",
                     stability=_DEFAULT_STABILITY,
+                    audio_attempt=_trusted_attempt(4),
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
                 provenance="computed_this_run",
@@ -800,6 +967,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     algorithm="cross_correlation",
                     source="computed",
                     stability=_DEFAULT_STABILITY,
+                    audio_attempt=_trusted_attempt(7),
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[1]),
                 provenance="computed_this_run",
@@ -1022,7 +1190,9 @@ def test_align_clips_from_request_interactive_confirmed_entry_keeps_computed_fal
     with (
         patch(
             "frame_compare.services.alignment._estimate_audio_pair",
-            return_value=_accepted_consensus(4000),
+            side_effect=lambda reference, comparison, **_: _trusted_computed_result(
+                reference, comparison, 12
+            ),
         ),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from frame_compare.services.alignment_consensus import hold_computed_result
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_reuse_cache import (
     comparison_cache_key,
@@ -94,8 +93,6 @@ def _apply_cached_alignment_result(
 ) -> None:
     key = _alignment_key_from_request(request, comparison)
     comparison_key = comparison_cache_key(comparison)
-    if computed_cache_hit:
-        result = hold_computed_result(result)
     results_map[key] = result
     provenances[key] = AlignmentProvenance(
         result=result,

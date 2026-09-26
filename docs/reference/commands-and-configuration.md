@@ -79,7 +79,7 @@ invocation.
 | `[paths]` | Input, config, and generated-data locations |
 | `[sources]` | Reference, analysis source, labels, FPS policy, and per-source overrides |
 | `[analysis]` | User/random/metric frame counts, mode, exclusions, and deterministic seed |
-| `[audio_alignment]` | Audio stream, correlation, consensus, reuse, and VSView behavior |
+| `[audio_alignment]` | Audio stream selection, whole-track chunked estimation, previous-offset reuse, and VSView behavior |
 | `[screenshots]` | Renderer, active-picture detection, geometry, overlays, PNG writer/compression, and timeouts |
 | `[color]` | HDR-to-SDR tonemapping preset, target luminance, tone curve, lift, and contrast recovery |
 | `[report]` | Static report generation, embedding, and auto-open behavior |
@@ -118,7 +118,7 @@ frames entered`, known-offset drafts say `{n}/{total} offsets entered`, and both
 alignment, unlink the playheads and position each source on the same visible moment. Or
 keep the current alignment.` Valid source-frame drafts use `Entered source frame: N`.
 Closing VSView without saving writes no result. Generated
-session metadata uses v4 while the typed sibling result sidecar remains v1; strict
+session metadata uses v5 while the typed sibling result sidecar remains v1; strict
 session/result validation and authoritative raw frame bounds remain unchanged.
 
 ## Environment variables and secrets

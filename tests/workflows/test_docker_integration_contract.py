@@ -24,6 +24,7 @@ ALIGNMENT_TRIGGER_PATHS = (
     "src/frame_compare/orchestration/context.py",
     "src/frame_compare/utils/subproc.py",
     "src/frame_compare/utils/types.py",
+    "src/frame_compare/utils/alignment_evidence.py",
 )
 
 ALIGNMENT_TEST_TRIGGER_PATTERNS = (
@@ -74,7 +75,6 @@ def _run_verifier(
     environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
     environment["FRAME_COMPARE_DOCKER_INVOCATION"] = str(invocation)
     environment["FRAME_COMPARE_DOCKER_MODE"] = mode
-    environment["FRAME_COMPARE_CHANNEL_CORROBORATION"] = "0"
     result = subprocess.run(
         [bash, "tools/verify_docker_integration.sh", "--no-build", *(extra_args or [])],
         cwd=repo_root,
@@ -107,13 +107,6 @@ def test_default_verifier_excludes_only_opt_in_resource_module(
     result, invocation = _run_verifier(repo_root, tmp_path)
 
     assert result.returncode == 17
-    command = shlex.split(invocation)
-    service_index = command.index("frame-compare-test")
-    assert command[service_index - 2 : service_index] == [
-        "-e",
-        "FRAME_COMPARE_CHANNEL_CORROBORATION=1",
-    ]
-    assert command.count("FRAME_COMPARE_CHANNEL_CORROBORATION=1") == 1
     command = shlex.split(invocation.splitlines()[-1])
     assert command[-3:] == ["--ignore=" + RESOURCE_TEST, "tests/integration/", "tests/vs/"]
     assert command.count("tests/integration/") == 1

@@ -20,9 +20,9 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 ## Recommended workflow
 
-1. Let automatic alignment collect and report an offset candidate. A qualified mono
-   result may apply automatically; channel corroboration remains provisional and is
-   never applied.
+1. Let automatic alignment collect and report an offset candidate. An agreed
+   audio result stays provisional until the video check confirms it; nothing
+   applies automatically in this state.
 2. Review the evidence and warnings, especially for provisional or unavailable results.
 3. Use the native VSView panel for optional alignment review when the route is
    available and the evidence needs visual confirmation. It is not part of automatic
@@ -33,7 +33,7 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 ## Audio stream selection
 
-The alignment service uses the selected audio streams and preprocessing strategy from
+The alignment service uses the selected audio streams from
 configuration. Confirm that the sources are using corresponding language, mix, and
 content. A stereo theatrical mix and a commentary track can correlate poorly even when
 the video is the same.
@@ -44,94 +44,85 @@ surface documented in the
 
 ## Evidence and temporal support
 
-The diagnostic keeps every planned row: raw correlated, weak, failed, short, and
-unattempted. Automatic qualification requires finite requested-rate score `>= 0.90`,
-peak ratio `>= 1.50` (`unbounded` is allowed), meaningful overlap, and actual observed
-support. Voting additionally requires at least 90% useful coverage and the configured
-thresholds; the configured consensus ratio applies only to voting-qualified windows.
-A base-credible estimate in another frame bin is a hard contradiction, even when it is
-excluded from voting by a stricter setting.
+Frame Compare decodes the whole selected audio stream at 8 kHz mono and tiles the
+reference into chunks of `C = clamp(floor(D/3), 5 s, 30 s)`, where `D` is the
+shorter selected-stream duration (one chunk of length `D` below 5 s). Each chunk
+is correlated against the comparison with GCC-PHAT over lags `[-M, +M]` with
+`M = max_offset_seconds` (default 30 s). A chunk counts only when both sides are
+above -50 dBFS RMS, and is credible at a peak prominence (PSR) of at least 25.
+The global lag is the argmax of the summed active-chunk correlations. Chunks
+within 2 ms of that lag agree; the audio stage passes when at least
+`min(3, analyzed)` chunks agree and they cover at least 80% of the credible
+chunks. A global lag within 2 ms of the search edge is never applied.
 
-With the default window shape and `minimum_valid_windows <= 2`, sources up to 30 seconds
-use one full shared-duration interval, sources longer than 30 and through 60 seconds use
-two disjoint endpoint intervals split in integer sample coordinates at `floor(N/2)`, and
-sources above 60 and below 90 seconds use two capped 30-second endpoint intervals with a
-gap. Sources of at least 90 seconds use five distributed 30-second intervals. A larger
-configured minimum uses the existing distributed planning. Explicit window length and
-stride preserve their requested shape, but do not waive the duration tier's temporal
-support requirement. Overlapping or duplicate useful intervals do not create independent
-support. Clean planned completion and observed early EOF are
-distinct successful collection outcomes; failed collection PCM is never usable.
+Container start times matter: the compensated offset adds the
+reference-vs-comparison difference of (audio start minus video start) to the
+chunked lag, so sources with container audio delays align to video rather than to
+a confidently wrong sample offset. A missing start time counts as 0 and is
+recorded as `default_zero`.
+
+Disagreement (`no_single_offset`) keeps contiguous chunk runs grouped by lag so
+an insert or drift reads as runs, never as an applied value. Unrelated audio,
+edits, and speed differences refuse rather than apply. Only two FFmpeg children
+run per comparison with bounded memory: memory does not grow with duration, but
+compute time does.
+Failed collection PCM is never usable: accumulated evidence counts only after
+both decodes succeed with complete cleanup.
 
 ## Previous offset reuse
 
 Interactively confirmed offsets can be stored in the shared alignment reuse cache.
-Qualified mono computed results may be written and reused as trim authority under the
-current temporal-invariants policy. Channel-provisional evidence is never written or reused as trim
-authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
+Fresh computed audio candidates are provisional and are never written or reused as
+trim authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
 selected reference relationship, audio stream choices, alignment settings, and relevant
 runtime identity.
 
 A cache miss simply returns to normal alignment. Corrupt or unsupported reuse data is
 ignored with a warning rather than treated as authoritative evidence.
 
-Computed alignment may also classify bounded evidence across the source as stable,
+Computed alignment also classifies bounded evidence across the source as stable,
 possible drift, possible discontinuity, variable, or insufficient. This summary is
-diagnostic only and is scoped to extraction-integrity, fixed-credibility,
-coverage-qualified observed windows; rejected or unobserved planned intervals remain
-unassessed. Any reported change position is an approximate interval between observations,
-not an observed edit location. Channel-provisional computed evidence remains separate
+diagnostic only and is derived from credible chunk runs; unobserved planned chunks
+remain unassessed. Any reported change position is an approximate interval between observations,
+not an observed edit location. Provisional computed evidence remains separate
 from trim authority; explicit or human-confirmed offsets remain authoritative.
-Consensus groups windows only when their requested-rate sample estimates produce the
-same integer source-frame correction at the reference FPS. It does not merge adjacent
-frames or use the diagnostic stability classification for acceptance. The winning
-group retains an observed lower-median sample estimate for diagnostic time reporting,
-while preserving every original per-window sample estimate as evidence.
-Material non-stable evidence produces one concise warning and should be verified at
-multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
+Alignment reuse cache
 schema v2 requires the compact summary and the reference-minus-comparison sign
 convention. The internal estimator policy token
-`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922`
+`whole-track-chunked-phat-video-check-20260925`
 is part of the full shared source-set identity for both computed and interactively confirmed
 entries. A stale-policy shared entry misses and is recomputed or reviewed normally. Schema-v1 entries are ignored and recomputed;
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
 remains a v1 file with the same path and offset semantics.
 
-Fresh computation distinguishes three shipped audio-evidence states. `trusted_automatic`
-means a qualified mono candidate passed every authority gate and is applied. `provisional`
-means a unique display-qualified candidate survived an attempt but remains a clearly
-unaccepted review hint, including every channel-corroborated candidate. Under the internal
-`continuous-origin-qualified-channel-corroboration-2097152-v2-temporal-invariants-20260922` policy, channel evidence is
-never applied or passed as authoritative integer/null fields. `unavailable`
-means no unique usable
-candidate exists, and Frame Compare does not invent zero. The
-display-only qualification floor is score 0.90 and peak ratio 1.50. Raw, base-credible,
-voting-qualified, winning, and independent counts are reported separately. Voting requires
-90% useful observed coverage and applies each configured threshold as the maximum of that
-threshold and the policy floor; `consensus_minimum_ratio` applies to voting-qualified
-windows. A base-credible estimate in another frame bin is a hard contradiction, even if
-a stricter setting excludes it from voting. Channel corroboration independently prevents
-computed application. Manual confirmation is a separate fact and does not rewrite the
-original audio attempt. The temporal-invariants identity invalidates stale shared source-set
+Fresh computation distinguishes two shipped audio-evidence states while the video
+check is pending. `provisional` means the audio stage agreed on one constant
+offset, reported with reason `video_check_pending` as a clearly unaccepted review
+hint: audio alone fixes the offset only to within about one frame, and the pending
+video check picks the exact applied frame. `unavailable`
+means no single usable
+offset exists, and Frame Compare does not invent zero. Manual confirmation is a
+separate fact and does not rewrite the
+original audio attempt. The replacement policy identity invalidates stale shared source-set
 entries, including embedded computed results and prior interactive confirmations; cache
 schema v2 and the manual-override schema remain unchanged.
 
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
-schema-v3 file records selected stream metadata, every planned window outcome, raw
-candidate and quality facts, the aggregate decision, and the final review resolution.
-It also retains bounded continuous-collection summaries and useful-overlap/coverage
-facts when observed. Shortage and observed-EOF states remain explicit; a failed collection
-never contributes usable PCM evidence. Continuous collection decodes each selected source from its audio
-origin once per phase, keeps only admitted distributed intervals in memory, and records
-clean endpoint versus observed-EOF counts without padding or backfilling short windows.
-A lower-rate discovery pass is followed by requested-rate verification only when needed.
+schema-v4 file records selected stream metadata with start-time compensation, chunk
+runs, compact per-chunk rows (start, lag, PSR, active/credible/agree flags), the
+global lag, the sub-frame estimate, the audio decision, and the final review
+resolution.
+It also retains bounded paired-collection summaries when observed. A failed collection
+never contributes usable PCM evidence. Paired collection decodes reference and
+comparison concurrently in lockstep, keeping per side one sample store plus one
+delivery scratch buffer, and never spills PCM to disk.
 Fresh computation runs in one owned worker thread so the application can respond to
 cancellation while FFmpeg collection or bounded scoring is active. Cancelling waits for
 cooperative child/reader/worker cleanup before the interruption escapes; it does not
 interrupt a native FFT already running, which may finish to its admitted safe boundary.
 Cancelled work never applies trims, writes reusable offsets, publishes a completed
-diagnostic, or opens native review. Failure to release the child or readers is fatal.
+diagnostic, or opens native review. Failure to release a child or its readers is fatal.
 It records the expected media-runtime fingerprint; FFmpeg/ffprobe version fields say
 `not_observed` because this package does not add version-probe subprocesses.
 It contains no media paths, PCM, environment values, credentials, full commands, or
@@ -139,22 +130,6 @@ full subprocess stderr. Source identity digests are pseudonymous rather than ano
 and sharing a run folder also shares its bounded labels and timing facts. The file is
 diagnostic only: editing, corrupting, or deleting it cannot change trims or cache reuse.
 It is retained until the run folder is deleted.
-
-When the default mono downmix has too little independent support because an otherwise
-valid row misses the fixed waveform floor, Frame Compare can inspect the exact common
-`FL`, `FR`, and `FC` channel names in fixed order. It uses at most three views, releases
-each view's PCM before collecting the next, and still counts one observation per temporal
-window. Two same-frame activity/coverage/peak-valid views are required and at least one
-must meet the unchanged waveform floor; any base-credible named view in another frame
-bin, from any relevant temporal window, vetoes the aggregate hint even if that window's
-named views internally agree. The retained score and peak aggregates are explicitly channel-view
-evidence. The duration-tier check combines each corroborated channel window with unique
-same-frame, fixed-base-credible mono observations; a shared logical window is counted once,
-with its channel evidence replacing the weak mono row. Mono observations contribute only
-their temporal interval and lag, never channel confidence or authority. Such evidence is
-always a provisional manual-review hint: it cannot become an
-automatic alignment, enter the shared computed cache, or authorize a trim, even after
-the qualified mono estimator is activated later.
 
 ## Native VSView alignment review
 
@@ -183,27 +158,27 @@ and `Comparison N` names, while preserving source order, multi-comparison behavi
 Frame Compare overlays, and BT.709 preview defaults.
 
 Before review, normal terminal output leads with the current decision and signed frame
-offset. Applied states are `Audio alignment accepted: +Nf - APPLIED`, `Accepted audio
-alignment reused: +Nf - APPLIED`, or `Manually confirmed alignment: +Nf - APPLIED`,
+offset. A provisional state is
+`Comparison N - Provisional audio candidate: +Nf - NOT APPLIED`. A
+`video_check_pending` candidate adds exactly `Video confirmation pending; not applied.`;
+other provisional candidates add exactly `Visual confirmation required to use this hint. Align manually or keep the current alignment.` An unavailable state
+emits `Comparison N - No usable audio candidate (<plain-words reason>) - NOT APPLIED`
+followed by `Align manually or keep the current alignment.` Applied states are
+manual-only in this state:
+`Accepted audio alignment reused: +Nf - APPLIED` or
+`Manually confirmed alignment: +Nf - APPLIED`,
 followed by `No additional confirmation needed.` A previously shared manual result is
 labeled `Manually confirmed alignment reused: +Nf - APPLIED`; current-run and
-preexisting manual results keep the unqualified manual label. A provisional state is
-`Provisional audio candidate: +Nf - NOT APPLIED` with `Visual confirmation required to
-use this hint. Align manually or keep the current alignment.` An unavailable state is
-`No usable audio candidate - NOT APPLIED` with `Align manually or keep the current
-alignment.` The current manual authority leads even when an original provisional or
+preexisting manual results keep the unqualified manual label.
+The current manual authority leads even when an original provisional or
 unavailable attempt is retained as history. Verbose output adds bounded stream, gate,
-runtime/policy, work, per-window, and original-attempt facts; the original provisional
+runtime/policy, work, and credible-chunk counts, plus original-attempt facts;
+individual diagnostic chunks are never printed; the original provisional
 state remains explicitly `NOT APPLIED` there. Quiet mode hides routine accepted/status
 evidence but leaves actionable rejection and write-failure warnings; JSON keeps its
-existing stdout schema and uses structured stderr for actionable rejection. No-color
+existing stdout schema and uses structured stderr for actionable rejection, including
+the `audio_alignment_requires_review` warning. No-color
 and redirected output stay plain and nonblocking.
-
-When an admitted named-channel fallback actually begins, normal human progress emits
-one transition per comparison by appending `Checking individual audio channels for a
-review hint. Any hint will need visual confirmation.` to the existing comparison
-identity. Sufficient mono, ineligible fallback, quiet, and JSON runs do not emit this
-activity, and repeated channel views/windows do not duplicate it.
 
 The terminal does not prompt for frames or read review input. Open **Frame Compare
 Alignment Review** from VSView's Tool Panel, unlink the playheads, and position
@@ -241,10 +216,13 @@ fields are an escape hatch, not a second result workflow. Provisional values nev
 prefill those fields, move a playhead, mark a source visited, increase readiness, or
 enable confirmation.
 
-The persistent **Audio evidence** section leads with the current authority: `Accepted
-audio alignment: +Nf — APPLIED`, `Accepted audio alignment reused: +Nf — APPLIED`, or
+The persistent **Audio evidence** section leads with the current authority:
+`Accepted audio alignment reused: +Nf — APPLIED` or
 `Manually confirmed alignment: +Nf — APPLIED`, each followed by `No additional
-confirmation needed.` Without current authority it shows either `Provisional audio
+confirmation needed.` The unqualified `Accepted audio alignment: +Nf — APPLIED`
+form is reserved for a video-confirmed fresh result (a later unit); fresh
+computed results stay provisional until then. Without current authority the
+section shows either `Provisional audio
 candidate: +Nf — NOT APPLIED` with `Visual confirmation required to use this hint.` or
 `Unresolved comparison — no usable audio candidate`. A manual authority remains first
 when original provisional or unavailable evidence is retained; original evidence stays
@@ -270,11 +248,11 @@ duplicate, incomplete, or out-of-bounds sidecars are rejected before any offset 
 applied. Missing modern `_Range` is reported once but remains unset, preserving
 VSView's native range inference; other native diagnostics remain inherited.
 
-Generated Frame Compare sessions use metadata v4 while the result sidecar remains v1.
-Metadata v1/v2/v3, unknown-version, mixed-version, and malformed Frame Compare sessions must
+Generated Frame Compare sessions use metadata v5 while the result sidecar remains v1.
+Older, unknown-version, mixed-version, and malformed Frame Compare sessions must
 be regenerated after upgrading; they are not migrated into trust. Ordinary VSView
 sessions without Frame Compare metadata remain inert. Shared alignment cache schema v2,
-diagnostic artifact schema v3, and manual override schema v1 are separate contracts and
+diagnostic artifact schema v4, and manual override schema v1 are separate contracts and
 are unchanged by this session-metadata update.
 
 The native-panel workflow uses each source exactly once, named outputs, public

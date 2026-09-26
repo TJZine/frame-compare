@@ -79,19 +79,8 @@ def _request(tmp_path: Path) -> AlignmentRequest:
         generated_dir=tmp_path / "generated",
         shared_alignment_cache_dir=tmp_path / "generated" / "cache" / "alignment",
         settings=AlignmentCacheSettings(
-            sample_rate=8000,
             max_offset_seconds=30.0,
-            correlation_mode="raw_fft",
-            preprocessing_mode="none",
             channel_strategy="mono_downmix",
-            confidence_threshold=0.0,
-            ambiguity_peak_ratio=1.0,
-            window_length_seconds=0.0,
-            window_stride_seconds=0.0,
-            minimum_valid_windows=1,
-            consensus_minimum_ratio=1.0,
-            refinement_mode="disabled",
-            refinement_sample_rate=None,
         ),
     )
 

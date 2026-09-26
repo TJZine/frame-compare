@@ -13,7 +13,8 @@ from rich.table import Table
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import report_console_width
 from frame_compare.services.release_identity import format_release_descriptor
-from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
+from frame_compare.services.types import AlignmentSource
+from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
 
 _MAX_SELECTED_FRAMES = 8
@@ -115,7 +116,7 @@ def _format_stability(summary: AlignmentStabilitySummary) -> str:
     text = summary.classification.replace("_", " ")
     if summary.offset_min_frames is not None and summary.offset_max_frames is not None:
         text += f"; {summary.offset_min_frames:+d}..{summary.offset_max_frames:+d} frames"
-    text += f"; scoped to {summary.valid_windows} qualified observed windows"
+    text += f"; scoped to {summary.valid_windows} credible chunks"
     if summary.change_position_seconds is not None:
         seconds = round(summary.change_position_seconds)
         text += (
@@ -183,7 +184,7 @@ def _render_alignment_table(
         ):
             value = _format_stability(stability)
             if verbose:
-                value += f"; {stability.valid_windows} valid windows"
+                value += f"; {stability.valid_windows} credible chunks"
             table.add_row("  stability", f"{escape(value)}")
         table.add_row("  source", f"{escape(source)}")
         table.add_row(

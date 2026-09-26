@@ -135,12 +135,26 @@ def test_generated_glyph_and_arrow_ascii_fallback(
     assert helpers["_arrow"]() == "\u2192"
 
 
+def _decision_payload(*, state: str) -> dict[str, object]:
+    return {
+        "state": state,
+        "candidate": {
+            "frame_offset": 0,
+            "time_offset_seconds": 0.0,
+            "subframe_estimate": 0.0,
+            "basis": "audio_only",
+        },
+        "primary_reason": "test",
+        "failed_gates": [],
+    }
+
+
 def _accepted_review() -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
             "evidence_availability": "historical_details_unavailable",
-            "audio_attempt": {"decision": {"state": "trusted_automatic"}},
+            "audio_attempt": {"decision": _decision_payload(state="trusted_automatic")},
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -152,13 +166,19 @@ def _provisional_review() -> str:
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "not_computed",
-            "audio_attempt": {
-                "decision": {
-                    "state": "provisional",
-                    "candidate": {"frame_offset": 0},
-                    "primary_reason": "test",
-                }
-            },
+            "audio_attempt": {"decision": _decision_payload(state="provisional")},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _malformed_review() -> str:
+    return json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "not_computed",
+            "audio_attempt": {"decision": {"state": "provisional"}},
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -170,6 +190,7 @@ def _execute_ready_block(
     monkeypatch: pytest.MonkeyPatch,
     *,
     stderr_encoding: str,
+    audio_review_by_key: dict[str, str] | None = None,
 ) -> str:
     reference = tmp_path / "ref.mkv"
     comparisons = [tmp_path / "a.mkv", tmp_path / "b.mkv"]
@@ -213,7 +234,9 @@ def _execute_ready_block(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key={"ref:a": 0, "ref:b": None},
-        audio_review_by_key={"ref:a": _accepted_review(), "ref:b": _provisional_review()},
+        audio_review_by_key=audio_review_by_key
+        if audio_review_by_key is not None
+        else {"ref:a": _accepted_review(), "ref:b": _provisional_review()},
         frame_props_by_stem={
             stem: {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0}
             for stem in ("ref", "a", "b")
@@ -259,6 +282,21 @@ def test_generated_ready_block_ascii_fallback(
     assert "> VSView is open \u00b7 waiting for you" in output.splitlines()
     assert "  1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
     assert "  hints    ShortA   Audio alignment accepted: +0f" in output.splitlines()
+
+
+def test_generated_ready_block_falls_back_on_malformed_audio_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _execute_ready_block(
+        tmp_path,
+        monkeypatch,
+        stderr_encoding="utf-8",
+        audio_review_by_key={"ref:a": _accepted_review(), "ref:b": _malformed_review()},
+    )
+
+    lines = output.splitlines()
+    assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
+    assert any("LongerB" in line and "No usable audio candidate" in line for line in lines)
 
 
 def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:

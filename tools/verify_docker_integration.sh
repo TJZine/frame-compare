@@ -133,7 +133,7 @@ docker_cmd=(
   --rm
 )
 
-docker_env_args=(-e FRAME_COMPARE_CHANNEL_CORROBORATION=1)
+docker_env_args=()
 if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
   docker_env_args+=(-e FRAME_COMPARE_REQUIRE_LIBPLACEBO=1)
 fi

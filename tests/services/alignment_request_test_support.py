@@ -59,19 +59,8 @@ def alignment_request(
             shared_alignment_cache_dir or generated_dir / "shared-alignment"
         ),
         settings=AlignmentCacheSettings(
-            sample_rate=config.sample_rate,
             max_offset_seconds=config.max_offset_seconds,
-            correlation_mode=config.correlation_mode,
-            preprocessing_mode=config.preprocessing_mode,
             channel_strategy=config.channel_strategy,
-            confidence_threshold=config.confidence_threshold,
-            ambiguity_peak_ratio=config.ambiguity_peak_ratio,
-            window_length_seconds=config.window_length_seconds,
-            window_stride_seconds=config.window_stride_seconds,
-            minimum_valid_windows=config.minimum_valid_windows,
-            consensus_minimum_ratio=config.consensus_minimum_ratio,
-            refinement_mode=config.refinement_mode,
-            refinement_sample_rate=config.refinement_sample_rate,
         ),
     )
 

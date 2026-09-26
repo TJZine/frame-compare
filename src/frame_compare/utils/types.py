@@ -181,19 +181,8 @@ def _is_positive_int(value: object) -> bool:
 class AlignmentCacheSettings:
     """Alignment settings that participate in shared cache identity."""
 
-    sample_rate: int
     max_offset_seconds: float
-    correlation_mode: str
-    preprocessing_mode: str
     channel_strategy: str
-    confidence_threshold: float
-    ambiguity_peak_ratio: float
-    window_length_seconds: float
-    window_stride_seconds: float
-    minimum_valid_windows: int
-    consensus_minimum_ratio: float
-    refinement_mode: str
-    refinement_sample_rate: int | None
 
 
 @dataclass(frozen=True, slots=True)

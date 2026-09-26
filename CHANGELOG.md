@@ -7,6 +7,24 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+### Changed
+
+- Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT
+  correlation plus container start compensation. An agreed audio stage stays
+  provisional with reason `video_check_pending` until the video check confirms the
+  exact applied frame; nothing computed is applied, trimmed, or cached in this
+  state. The removed `[audio_alignment]` tuning fields are rejected as unknown
+  keys, the diagnostic artifact moves to schema v4, VSView session metadata moves
+  to v5, and stale computed or shared entries miss and recompute under the new
+  `whole-track-chunked-phat-video-check-20260925` policy. Cache schema v2 and the
+  manual-override schema are unchanged.
+- **Upgrade note:** configs that still set any removed `[audio_alignment]` key
+  (`sample_rate`, `correlation_mode`, `preprocessing_mode`,
+  `confidence_threshold`, `ambiguity_peak_ratio`, `window_length_seconds`,
+  `window_stride_seconds`, `minimum_valid_windows`, `consensus_minimum_ratio`,
+  `refinement_mode`, `refinement_sample_rate`) now fail validation as unknown
+  keys; delete each such key.
+
 ## [0.6.0]
 
 ### Fixed
