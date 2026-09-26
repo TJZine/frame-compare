@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from typing import get_args
 
 from frame_compare.services.alignment_correlation import (
     ChunkedAudioEstimate,
+    ChunkObservation,
     ChunkPlan,
+    ChunkRun,
 )
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
@@ -17,12 +20,16 @@ from frame_compare.utils.alignment_evidence import (
     AudioAlignmentDecision,
     AudioAnalysisFacts,
     AudioAttemptStatus,
+    AudioAuthorityRecount,
     AudioChunkColumns,
     AudioChunkRun,
     AudioDecisionCandidate,
     AudioOutcomeStatus,
     AudioPeakRatio,
+    AudioSameFrameContext,
     AudioStageOutcome,
+    VideoCheckObservation,
+    VideoTargetEvidence,
 )
 
 ALIGNMENT_ESTIMATOR_POLICY = "whole-track-chunked-phat-video-check-20260925"
@@ -42,6 +49,27 @@ class DecidedAudioStage:
     decision: AudioAlignmentDecision
     stability: AlignmentStabilitySummary
     correlation_score: float
+    video_check: VideoCheckObservation | None = None
+    authority_recount: AudioAuthorityRecount | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AudioFrameDisagreements:
+    """Frame-level A4b classification used to choose V3a targets."""
+
+    same_frame_context: tuple[AudioSameFrameContext, ...]
+    competing_runs: tuple[ChunkRun, ...]
+    credible_disagreements: tuple[ChunkObservation, ...]
+    noncredible_disagreements: tuple[ChunkObservation, ...]
+
+
+V6_PRIMARY_REASON_ORDER = (
+    "competing_offset_confirmed_by_video",
+    "competing_offset",
+    "unresolved_audio_disagreement",
+    "video_check_inconclusive",
+    "video_check_unavailable",
+)
 
 
 def compensated_offset_seconds(
@@ -88,6 +116,259 @@ def _compensated_lag_to_frame(
     return rounded_frame(
         subframe_estimate(offset_seconds=offset_seconds, fps_reference=fps_reference)
     )
+
+
+def _audio_agrees(left: int, right: int) -> bool:
+    return abs(left - right) <= AUDIO_ANALYSIS_SAMPLE_RATE * 2 // 1000
+
+
+def _observation_frame(
+    observation: ChunkObservation,
+    *,
+    compensation_seconds: float,
+    fps_reference: Fraction,
+) -> int:
+    if observation.lag is None:
+        raise ValueError(f"chunk {observation.index} is missing its lag")
+    return _compensated_lag_to_frame(
+        observation.lag,
+        compensation_seconds=compensation_seconds,
+        fps_reference=fps_reference,
+    )
+
+
+def _adjacent_competing_runs(
+    observations: Sequence[ChunkObservation],
+) -> tuple[ChunkRun, ...]:
+    """Build A4a runs without inheriting U1's non-credible-gap behavior."""
+    runs: list[ChunkRun] = []
+    members: list[ChunkObservation] = []
+
+    def close_run() -> None:
+        if len(members) < 2:
+            return
+        lags = [item.lag for item in members]
+        if any(lag is None for lag in lags):
+            return
+        runs.append(
+            ChunkRun(
+                first_index=members[0].index,
+                last_index=members[-1].index,
+                lag=int(sorted(lag for lag in lags if lag is not None)[(len(lags) - 1) // 2]),
+                chunk_count=len(members),
+            )
+        )
+
+    for observation in observations:
+        if observation.lag is None:
+            continue
+        if not members:
+            members = [observation]
+            continue
+        previous = members[-1]
+        if (
+            observation.index == previous.index + 1
+            and previous.lag is not None
+            and members[0].lag is not None
+            and _audio_agrees(observation.lag, members[0].lag)
+        ):
+            members.append(observation)
+            continue
+        close_run()
+        members = [observation]
+    close_run()
+    return tuple(runs)
+
+
+def classify_audio_disagreements(
+    *,
+    estimate: ChunkedAudioEstimate,
+    confirmed_offset: int,
+    fps_reference: Fraction,
+    compensation_seconds: float,
+) -> AudioFrameDisagreements:
+    """Classify A4b frame-distinct evidence after V5 confirms ``c``."""
+    if estimate.global_lag is None:
+        return AudioFrameDisagreements((), (), (), ())
+
+    frame_distinct_credible: list[ChunkObservation] = []
+    frame_distinct_noncredible: list[ChunkObservation] = []
+    same_frame: list[AudioSameFrameContext] = []
+    for observation in estimate.observations:
+        if observation.lag is None or not observation.active:
+            continue
+        if _audio_agrees(observation.lag, estimate.global_lag):
+            continue
+        frame = _observation_frame(
+            observation,
+            compensation_seconds=compensation_seconds,
+            fps_reference=fps_reference,
+        )
+        if frame == confirmed_offset:
+            if observation.credible:
+                assert observation.lag is not None
+                offset_seconds = observation.lag / AUDIO_ANALYSIS_SAMPLE_RATE + compensation_seconds
+                same_frame.append(
+                    AudioSameFrameContext(
+                        chunk_index=observation.index,
+                        lag_samples=observation.lag,
+                        subframe_estimate=subframe_estimate(
+                            offset_seconds=offset_seconds,
+                            fps_reference=fps_reference,
+                        ),
+                        rounded_frame=frame,
+                    )
+                )
+            continue
+        if observation.credible:
+            frame_distinct_credible.append(observation)
+        else:
+            frame_distinct_noncredible.append(observation)
+
+    competing_runs = _adjacent_competing_runs(frame_distinct_credible)
+    run_members = {
+        index for run in competing_runs for index in range(run.first_index, run.last_index + 1)
+    }
+    single_credible = tuple(
+        item for item in frame_distinct_credible if item.index not in run_members
+    )
+    return AudioFrameDisagreements(
+        same_frame_context=tuple(same_frame),
+        competing_runs=competing_runs,
+        credible_disagreements=single_credible,
+        noncredible_disagreements=tuple(frame_distinct_noncredible),
+    )
+
+
+def recount_audio_authority(
+    *,
+    estimate: ChunkedAudioEstimate,
+    plan: ChunkPlan,
+    confirmed_offset: int,
+    fps_reference: Fraction,
+    compensation_seconds: float,
+) -> AudioAuthorityRecount:
+    """Apply A4 to frame-level agreement while retaining U1's raw outcome."""
+    if estimate.global_lag is None:
+        return AudioAuthorityRecount(
+            raw_status=estimate.outcome,
+            raw_agreeing_chunks=estimate.agreeing_count,
+            authority_status="no_usable_audio",
+            authority_agreeing_chunks=0,
+            passed=False,
+        )
+    authority_agreeing = 0
+    for observation in estimate.observations:
+        if not observation.credible or observation.lag is None:
+            continue
+        if _audio_agrees(observation.lag, estimate.global_lag) or (
+            _observation_frame(
+                observation,
+                compensation_seconds=compensation_seconds,
+                fps_reference=fps_reference,
+            )
+            == confirmed_offset
+        ):
+            authority_agreeing += 1
+    credible = estimate.credible_count
+    required = max(1, min(3, len(estimate.observations)))
+    at_search_edge = (
+        abs(estimate.global_lag) >= plan.lag_samples - AUDIO_ANALYSIS_SAMPLE_RATE * 2 // 1000
+    )
+    passed = (
+        not at_search_edge
+        and authority_agreeing >= required
+        and authority_agreeing * 5 >= credible * 4
+    )
+    authority_status: AudioOutcomeStatus
+    if at_search_edge:
+        authority_status = "search_edge"
+    elif passed:
+        authority_status = "agreed"
+    else:
+        authority_status = "no_single_offset"
+    return AudioAuthorityRecount(
+        raw_status=estimate.outcome,
+        raw_agreeing_chunks=estimate.agreeing_count,
+        authority_status=authority_status,
+        authority_agreeing_chunks=authority_agreeing,
+        passed=passed,
+    )
+
+
+def _target_map(
+    targets: Sequence[VideoTargetEvidence],
+) -> dict[tuple[str, int, int], VideoTargetEvidence]:
+    return {
+        (target.kind, target.first_chunk_index, target.last_chunk_index): target
+        for target in targets
+    }
+
+
+def v6_failure_reasons(
+    *,
+    authority_recount: AudioAuthorityRecount,
+    video: VideoCheckObservation,
+    competing_runs: Sequence[ChunkRun],
+    credible_disagreements: Sequence[ChunkObservation],
+) -> tuple[str, ...]:
+    """Return all V6 failures in the plan's required primary-order sequence."""
+    targets = _target_map(video.targets)
+    alternative_confirmed = any(
+        target.resolution == "alternative_confirmed" for target in video.targets
+    )
+    unresolved_run = any(
+        (target := targets.get(("run", run.first_index, run.last_index))) is None
+        or target.resolution != "resolved"
+        for run in competing_runs
+    )
+    unresolved_chunk = any(
+        (target := targets.get(("chunk", item.index, item.index))) is None
+        or target.resolution != "resolved"
+        for item in credible_disagreements
+    )
+    failures: list[str] = []
+    if alternative_confirmed:
+        failures.append(V6_PRIMARY_REASON_ORDER[0])
+    if unresolved_run:
+        failures.append(V6_PRIMARY_REASON_ORDER[1])
+    if unresolved_chunk:
+        failures.append(V6_PRIMARY_REASON_ORDER[2])
+    if video.observation == "observed":
+        if video.confirmed_offset is None:
+            failures.append(V6_PRIMARY_REASON_ORDER[3])
+    else:
+        failures.append(V6_PRIMARY_REASON_ORDER[4])
+    if not authority_recount.passed and not failures:
+        failures.append(authority_recount.authority_status)
+    return tuple(failures)
+
+
+def is_trusted_automatic(
+    *,
+    authority_recount: AudioAuthorityRecount,
+    video: VideoCheckObservation,
+    competing_runs: Sequence[ChunkRun],
+    credible_disagreements: Sequence[ChunkObservation],
+) -> bool:
+    """The single V6 trusted predicate; every conjunct is independently required."""
+    authority_ok = authority_recount.passed
+    video_ok = video.observation == "observed" and video.confirmed_offset is not None
+    targets = _target_map(video.targets)
+    runs_ok = all(
+        (target := targets.get(("run", run.first_index, run.last_index))) is not None
+        and target.resolution == "resolved"
+        for run in competing_runs
+    )
+    chunks_ok = all(
+        (target := targets.get(("chunk", item.index, item.index))) is not None
+        and target.resolution == "resolved"
+        for item in credible_disagreements
+    )
+    no_alternative_ok = all(
+        target.resolution != "alternative_confirmed" for target in video.targets
+    )
+    return authority_ok and video_ok and runs_ok and chunks_ok and no_alternative_ok
 
 
 def _is_sustained_walk(values: list[int]) -> bool:
@@ -283,6 +564,100 @@ def _analysis_facts(plan: ChunkPlan | None, *, max_offset_seconds: float) -> Aud
     )
 
 
+def decide_after_video(
+    *,
+    stage: DecidedAudioStage,
+    estimate: ChunkedAudioEstimate,
+    plan: ChunkPlan,
+    video: VideoCheckObservation,
+    fps_reference: Fraction,
+) -> DecidedAudioStage:
+    """Apply A4b and V6 to a completed audio stage after V5 returns."""
+    if stage.audio.global_lag is None:
+        return replace(stage, video_check=video)
+    confirmed_offset = video.confirmed_offset
+    if video.observation != "observed" or confirmed_offset is None:
+        reason = (
+            "video_check_unavailable"
+            if video.observation != "observed"
+            else "video_check_inconclusive"
+        )
+        candidate = stage.decision.candidate
+        decision = stage.decision
+        if candidate is not None and stage.audio.status != "search_edge":
+            decision = replace(
+                decision,
+                state="provisional",
+                primary_reason=reason,
+                failed_gates=(reason,),
+            )
+        return replace(stage, video_check=video, decision=decision)
+
+    compensation_seconds = stage.audio.compensation_seconds
+    if compensation_seconds is None:
+        raise ValueError("a completed audio stage needs compensation for video authority")
+    classification = classify_audio_disagreements(
+        estimate=estimate,
+        confirmed_offset=confirmed_offset,
+        fps_reference=fps_reference,
+        compensation_seconds=compensation_seconds,
+    )
+    recount = recount_audio_authority(
+        estimate=estimate,
+        plan=plan,
+        confirmed_offset=confirmed_offset,
+        fps_reference=fps_reference,
+        compensation_seconds=compensation_seconds,
+    )
+    video = replace(video, same_frame_context=classification.same_frame_context)
+    reasons = v6_failure_reasons(
+        authority_recount=recount,
+        video=video,
+        competing_runs=classification.competing_runs,
+        credible_disagreements=classification.credible_disagreements,
+    )
+    trusted = is_trusted_automatic(
+        authority_recount=recount,
+        video=video,
+        competing_runs=classification.competing_runs,
+        credible_disagreements=classification.credible_disagreements,
+    )
+    candidate = stage.decision.candidate
+    if candidate is None and stage.audio.status != "search_edge":
+        if stage.audio.subframe_estimate is None or stage.audio.compensation_seconds is None:
+            raise ValueError("a global audio lag needs sub-frame evidence")
+        candidate = AudioDecisionCandidate(
+            frame_offset=confirmed_offset,
+            time_offset_seconds=stage.audio.global_lag / AUDIO_ANALYSIS_SAMPLE_RATE
+            + stage.audio.compensation_seconds,
+            subframe_estimate=stage.audio.subframe_estimate,
+            basis="audio_only",
+        )
+    elif candidate is not None:
+        candidate = replace(candidate, frame_offset=confirmed_offset)
+    if trusted:
+        decision = AudioAlignmentDecision(
+            state="trusted_automatic",
+            candidate=candidate,
+            primary_reason="audio_video_confirmed",
+            failed_gates=(),
+        )
+    else:
+        primary_reason = reasons[0] if reasons else "no_single_offset"
+        decision = AudioAlignmentDecision(
+            state="provisional" if candidate is not None else "unavailable",
+            candidate=candidate,
+            primary_reason=primary_reason,
+            failed_gates=reasons or (primary_reason,),
+        )
+    return replace(
+        stage,
+        decision=decision,
+        video_check=video,
+        authority_recount=recount,
+    )
+
+
 def decide_completed_stage(
     *,
     estimate: ChunkedAudioEstimate,
@@ -456,14 +831,21 @@ def decide_rejected_stage(
 
 __all__ = [
     "ALIGNMENT_ESTIMATOR_POLICY",
+    "AudioFrameDisagreements",
     "VIDEO_CHECK_PENDING_REASON",
+    "V6_PRIMARY_REASON_ORDER",
     "DecidedAudioStage",
+    "classify_audio_disagreements",
     "compensated_offset_seconds",
     "correlation_score",
     "decide_aborted_stage",
     "decide_completed_stage",
+    "decide_after_video",
     "decide_rejected_stage",
     "derive_stability",
+    "is_trusted_automatic",
+    "recount_audio_authority",
     "rounded_frame",
     "subframe_estimate",
+    "v6_failure_reasons",
 ]

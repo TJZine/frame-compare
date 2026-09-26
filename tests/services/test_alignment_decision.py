@@ -11,22 +11,35 @@ from frame_compare.services.alignment_correlation import (
     ChunkedAudioEstimate,
     ChunkedCorrelation,
     ChunkObservation,
+    ChunkPlan,
     ChunkRun,
     comparison_window,
     plan_audio_chunks,
 )
 from frame_compare.services.alignment_decision import (
+    V6_PRIMARY_REASON_ORDER,
     VIDEO_CHECK_PENDING_REASON,
+    classify_audio_disagreements,
     compensated_offset_seconds,
     correlation_score,
     decide_aborted_stage,
+    decide_after_video,
     decide_completed_stage,
     decide_rejected_stage,
     derive_stability,
+    is_trusted_automatic,
+    recount_audio_authority,
     rounded_frame,
     subframe_estimate,
+    v6_failure_reasons,
 )
-from frame_compare.utils.alignment_evidence import AUDIO_ANALYSIS_SAMPLE_RATE
+from frame_compare.utils.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    AudioAuthorityRecount,
+    VideoCheckObservation,
+    VideoTargetEvidence,
+    VideoTargetPosition,
+)
 from tests.services.alignment_synthetic_audio import (
     insert_program,
     make_program,
@@ -274,6 +287,289 @@ def _observation(index: int, *, lag: int | None, credible: bool, agrees: bool) -
         psr=30.0 if credible else 5.0,
         credible=credible,
         agrees=agrees,
+    )
+
+
+def _estimate(
+    observations: tuple[ChunkObservation, ...],
+    *,
+    outcome: str = "agreed",
+    global_lag: int = 0,
+    agreeing_count: int | None = None,
+    runs: tuple[ChunkRun, ...] = (),
+) -> ChunkedAudioEstimate:
+    credible_count = sum(item.credible for item in observations)
+    return ChunkedAudioEstimate(
+        outcome=outcome,  # type: ignore[arg-type]
+        global_lag=global_lag,
+        observations=observations,
+        runs=runs,
+        active_count=sum(item.active for item in observations),
+        credible_count=credible_count,
+        agreeing_count=(
+            agreeing_count
+            if agreeing_count is not None
+            else sum(item.agrees for item in observations)
+        ),
+    )
+
+
+def _plan_for(*observations: ChunkObservation) -> ChunkPlan:
+    count = max((item.index for item in observations), default=0) + 1
+    return ChunkPlan(
+        chunk_samples=240000,
+        lag_samples=8000,
+        chunks=tuple((index * 240000, 240000) for index in range(count)),
+    )
+
+
+def _authority(*, passed: bool = True, status: str = "agreed") -> AudioAuthorityRecount:
+    return AudioAuthorityRecount(
+        raw_status="agreed",
+        raw_agreeing_chunks=3,
+        authority_status=status,  # type: ignore[arg-type]
+        authority_agreeing_chunks=3 if passed else 1,
+        passed=passed,
+    )
+
+
+def _video(
+    *targets: VideoTargetEvidence,
+    confirmed_offset: int | None = 0,
+    observed: bool = True,
+) -> VideoCheckObservation:
+    if not observed:
+        return VideoCheckObservation(
+            observation="not_observed",
+            scored_offsets=(),
+            confirmed_offset=None,
+            index_build_seconds=None,
+            positions=(),
+        )
+    return VideoCheckObservation(
+        observation="observed",
+        scored_offsets=(-2, -1, 0, 1, 2),
+        confirmed_offset=confirmed_offset,
+        index_build_seconds=0.0,
+        positions=(),
+        targets=targets,
+    )
+
+
+def _target(
+    kind: str,
+    first: int,
+    last: int,
+    resolution: str,
+    *,
+    position_index: int,
+) -> VideoTargetEvidence:
+    if resolution == "unexamined":
+        positions = ()
+    elif resolution == "alternative_confirmed":
+        positions = (VideoTargetPosition(position_index, position_index, 1.0, 0.1, "alternative"),)
+    elif resolution == "resolved":
+        count = 2 if kind == "run" else 1
+        positions = tuple(
+            VideoTargetPosition(
+                position_index + offset,
+                position_index + offset,
+                0.1,
+                1.0,
+                "confirmed",
+            )
+            for offset in range(count)
+        )
+    else:
+        positions = (VideoTargetPosition(position_index, position_index, 1.0, 1.0, "neither"),)
+    return VideoTargetEvidence(
+        kind=kind,  # type: ignore[arg-type]
+        first_chunk_index=first,
+        last_chunk_index=last,
+        alternative_offsets=(1,),
+        resolution=resolution,  # type: ignore[arg-type]
+        positions=positions,
+    )
+
+
+def test_a4b_recount_accepts_14_of_20_when_six_lags_share_the_frame() -> None:
+    observations = tuple(
+        _observation(
+            index,
+            lag=80 if index >= 14 else 0,
+            credible=True,
+            agrees=index < 14,
+        )
+        for index in range(20)
+    )
+    estimate = _estimate(observations, outcome="no_single_offset", agreeing_count=14)
+    recount = recount_audio_authority(
+        estimate=estimate,
+        plan=_plan_for(*observations),
+        confirmed_offset=0,
+        fps_reference=Fraction(24),
+        compensation_seconds=0.0,
+    )
+    classification = classify_audio_disagreements(
+        estimate=estimate,
+        confirmed_offset=0,
+        fps_reference=Fraction(24),
+        compensation_seconds=0.0,
+    )
+
+    assert estimate.outcome == "no_single_offset"
+    assert recount.raw_status == "no_single_offset"
+    assert recount.raw_agreeing_chunks == 14
+    assert recount.authority_agreeing_chunks == 20
+    assert recount.authority_status == "agreed"
+    assert recount.passed
+    assert len(classification.same_frame_context) == 6
+    assert classification.credible_disagreements == ()
+
+
+def test_decide_after_video_trusts_the_recounted_authority() -> None:
+    observations = tuple(
+        _observation(
+            index,
+            lag=80 if index >= 14 else 0,
+            credible=True,
+            agrees=index < 14,
+        )
+        for index in range(20)
+    )
+    estimate = _estimate(observations, outcome="no_single_offset", agreeing_count=14)
+    plan = _plan_for(*observations)
+    stage = decide_completed_stage(
+        estimate=estimate,
+        plan=plan,
+        max_offset_seconds=1.0,
+        reference_audio_start=Fraction(0),
+        reference_video_start=Fraction(0),
+        comparison_audio_start=Fraction(0),
+        comparison_video_start=Fraction(0),
+        fps_reference=Fraction(24),
+    )
+
+    decided = decide_after_video(
+        stage=stage,
+        estimate=estimate,
+        plan=plan,
+        video=_video(),
+        fps_reference=Fraction(24),
+    )
+
+    assert decided.decision.state == "trusted_automatic"
+    assert decided.decision.primary_reason == "audio_video_confirmed"
+    assert decided.decision.candidate is not None
+    assert decided.decision.candidate.frame_offset == 0
+    assert decided.authority_recount is not None
+    assert decided.authority_recount.raw_status == "no_single_offset"
+
+
+def test_a4a_requires_index_adjacency_for_competing_runs() -> None:
+    observations = (
+        _observation(2, lag=1600, credible=True, agrees=False),
+        _observation(15, lag=1600, credible=True, agrees=False),
+    )
+    estimate = _estimate(
+        observations,
+        outcome="no_single_offset",
+        runs=(ChunkRun(first_index=2, last_index=15, lag=1600, chunk_count=2),),
+    )
+
+    classification = classify_audio_disagreements(
+        estimate=estimate,
+        confirmed_offset=0,
+        fps_reference=Fraction(24),
+        compensation_seconds=0.0,
+    )
+
+    assert classification.competing_runs == ()
+    assert tuple(item.index for item in classification.credible_disagreements) == (2, 15)
+
+
+@pytest.mark.parametrize(
+    ("authority", "video", "runs", "credible", "expected"),
+    [
+        (True, _video(), (), (), True),
+        (False, _video(), (), (), False),
+        (True, _video(observed=False), (), (), False),
+        (
+            True,
+            _video(_target("run", 2, 3, "unexamined", position_index=0)),
+            (ChunkRun(first_index=2, last_index=3, lag=1600, chunk_count=2),),
+            (),
+            False,
+        ),
+        (
+            True,
+            _video(),
+            (),
+            (_observation(5, lag=1600, credible=True, agrees=False),),
+            False,
+        ),
+        (
+            True,
+            _video(_target("chunk", 9, 9, "alternative_confirmed", position_index=0)),
+            (),
+            (),
+            False,
+        ),
+    ],
+)
+def test_v6_trusted_predicate_requires_each_conjunct(
+    authority: bool,
+    video: VideoCheckObservation,
+    runs: tuple[ChunkRun, ...],
+    credible: tuple[ChunkObservation, ...],
+    expected: bool,
+) -> None:
+    assert (
+        is_trusted_automatic(
+            authority_recount=_authority(passed=authority),
+            video=video,
+            competing_runs=runs,
+            credible_disagreements=credible,
+        )
+        is expected
+    )
+
+
+def test_v6_reason_ordering_uses_the_plan_order() -> None:
+    run = ChunkRun(first_index=2, last_index=3, lag=1600, chunk_count=2)
+    credible = _observation(5, lag=1600, credible=True, agrees=False)
+    ordered = v6_failure_reasons(
+        authority_recount=_authority(),
+        video=_video(
+            _target("run", 2, 3, "unresolved", position_index=0),
+            _target("chunk", 5, 5, "unresolved", position_index=2),
+            _target("chunk", 9, 9, "alternative_confirmed", position_index=3),
+        ),
+        competing_runs=(run,),
+        credible_disagreements=(credible,),
+    )
+    assert ordered[:3] == V6_PRIMARY_REASON_ORDER[:3]
+
+
+@pytest.mark.parametrize(
+    ("video", "expected"),
+    [
+        (_video(confirmed_offset=None), ("video_check_inconclusive",)),
+        (_video(observed=False), ("video_check_unavailable",)),
+    ],
+)
+def test_v6_reason_ordering_covers_video_terminal_reasons(
+    video: VideoCheckObservation,
+    expected: tuple[str, ...],
+) -> None:
+    assert (
+        v6_failure_reasons(
+            authority_recount=_authority(),
+            video=video,
+            competing_runs=(),
+            credible_disagreements=(),
+        )
+        == expected
     )
 
 
