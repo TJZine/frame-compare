@@ -253,7 +253,9 @@ recovery requirement.
   media-runtime alignment fingerprint. For the
   managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
   lineage change therefore misses cleanly rather than reusing offsets computed by a
-  different decoder/tool build. Interactively confirmed
+  different decoder/tool build. Because final authority depends on video frame
+  numbering, the alignment fingerprint also includes the selected VapourSynth and
+  L-SMASH-Works decoder identity. Interactively confirmed
   entries may also retain the computed
   audio alignment result that produced the viewer suggestion; provisional audio
   candidates are never written as computed authority. Cache schema v2 stores only `computed` and
@@ -320,7 +322,12 @@ recovery requirement.
   `frame_compare.utils.alignment_evidence`. Each pathless file is bounded to
   128 KiB, retains selected-stream facts with start-time compensation, contiguous
   chunk runs, compact per-chunk columnar rows, the global lag, the sub-frame
-  estimate, the audio decision, and paired collection summaries, and is written
+  estimate, paired collection summaries, the A4b authority recount, and the final
+  video/decision evidence. Video evidence includes the five-offset base checks,
+  targeted V5a checks, same-frame context, and bounded review check points. Each
+  target stores its authoritative `target_offset`, `credible`, `start_sample`, and
+  `end_sample`; `chunks.total_samples` preserves the analyzed span even when chunk
+  rows are omitted from another projection. The artifact is written
   atomically before optional review. Current attempts retain
   observed paired-collection facts; preanalysis rejections remain `not_observed`.
   A final review outcome may replace the envelope once while preserving the canonical
@@ -433,15 +440,16 @@ worker and collector cleanup to finish, and then re-raises the original cancella
 unless that cleanup failed; no partial worker result reaches phase-output application.
 Incomplete child, reader, pipe, or handle cleanup is a distinct fatal alignment error,
 including after cancellation, even when ordinary dependency or decode failures remain
-warning-only for optional alignment. The attempt
-retains resolved pathless stream facts, per-chunk columnar evidence, contiguous
-chunk runs, the global lag, start compensation, the sub-frame estimate, and the
-audio decision. The shipped
-`whole-track-chunked-phat-video-check-20260925` policy keeps every fresh audio
-pass provisional until the video check confirms it: an agreed audio stage becomes
-a `provisional` candidate with reason `video_check_pending`, and every other
-outcome is `unavailable` with its own reason and no candidate. No fresh computed
-value is applied, trimmed, or written to the computed cache in this state.
+warning-only for optional alignment. The attempt retains resolved pathless stream
+facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
+compensation, the sub-frame estimate, the A4b authority recount, the video
+observation, and the final decision. Under the shipped
+`whole-track-chunked-phat-video-check-20260925` policy, the audio-only decision is an
+internal `video_check_pending` seam. When a global lag exists, `alignment_video`
+checks the run's own L-SMASH sources in the same worker thread and
+`alignment_decision` combines the result. Only `trusted_automatic` with reason
+`audio_video_confirmed` is applied, trimmed, or written to the computed cache;
+provisional and unavailable results are evidence only.
 Manual confirmation replaces authority without replacing that
 original attempt. Immutable `ClipState` carries the attempt even when its applied
 `alignment` remains null. `alignment_correlation` converts its raw
@@ -496,24 +504,37 @@ comparison base trim`; the calculator's relative trims are then composed onto th
 domains. Consequently, the final reference raw-source start minus each authorized
 comparison raw-source start equals the stored raw offset, including zero when the two
 base trims differ. A missing offset remains missing and never becomes zero authority.
-`alignment_decision` maps the whole-track chunked estimate, container-start
-compensation, A6 rounding, and the collection outcome to the v4 decision. An agreed
-audio stage is `provisional` with reason `video_check_pending` and an `audio_only`
-candidate holding the rounded frame, the time offset, and the sub-frame evidence
-`x = offset_seconds x fps_reference`; every other outcome is `unavailable` with its
-own reason and no candidate. Stability is derived from chunk runs (`stable` on agreement,
+`alignment_decision` maps the whole-track estimate, container-start compensation,
+A6 rounding, A4a competing runs, A4b frame-level authority recount, and the V5/V5a
+observation to the v4 decision. It owns the single V6 trusted predicate and ordered
+failure reasons. A trusted result is `trusted_automatic` /
+`audio_video_confirmed`; unresolved or video-confirmed alternatives are provisional
+with `competing_offset_confirmed_by_video`, `competing_offset`, or
+`unresolved_audio_disagreement`; a globally inconclusive or unreadable video check
+is provisional with `video_check_inconclusive` or `video_check_unavailable` when a
+candidate exists. Audio-stage failures remain unavailable unless video supplies a
+review hint; preanalysis and collection failures retain their existing unavailable
+reasons. Stability is derived from chunk runs (`stable` on agreement,
 `possible_discontinuity` for two or more credible runs at different lags,
 `possible_drift` for a sustained walk across three or more runs, `variable`
 otherwise, `insufficient_evidence` below three credible chunks), and the
 correlation score is the agreeing-over-credible fraction. The estimator-policy
 token is part of the shared source-set identity so older computed cache entries
 are not reused.
+`alignment_video` owns V1-V5a: bounded five-offset base scoring, targeted run/chunk
+hypothesis checks, L-SMASH loading through the injected run `VSLoader`, active-rect
+crop/downscale/rank scoring, cancellation and source-identity checks, and bounded
+review check-point construction. It never falls back to FFMS2. A missing or failing
+loader becomes `video_check_unavailable`, not a run failure.
 `frame_compare.utils.alignment_evidence` is the single definition of the v4
-evidence schema: frozen dataclasses plus one strict payload parser, standard
-library only so the VSView panel process can import it without NumPy. Terminal
-presentation lives in `frame_compare.services.alignment_presentation`, which owns
-the frozen decision-first strings, the `audio_alignment_requires_review` JSON
-warning, and the `Audio Alignment` panel.
+evidence schema and shared P4/P4a presentation projection: frozen dataclasses, one
+strict standard-library payload walker/parser, and decision/region/check-point
+strings consumed by both terminal and panel renderers. `alignment_presentation`
+owns the terminal/Rich and structured-warning rendering of that projection;
+`alignment_review_panel` renders the same projection in VSView. Native metadata v5
+uses a bounded compact projection: per-chunk columns are empty, but runs,
+`chunks.total_samples`, authoritative target facts, aggregate counts, video checks,
+and review check points remain present.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -533,7 +554,9 @@ Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
-service-projected audio evidence as metadata schema v5. The
+service-projected audio evidence as metadata schema v5. That projection omits
+per-chunk rows but retains target identity, bounds, credibility and offset, analyzed
+sample span, aggregate audio facts, and the complete bounded video/review evidence. The
 typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
 strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
@@ -998,9 +1021,10 @@ Runtime ownership matrix:
 | Audio stream probing, deterministic stream selection, audio/video start probing with container-start compensation, and the canonical whole-track FFmpeg extraction recipe | `frame_compare.services.alignment_audio` |
 | Paired lockstep FFmpeg collection with one `_ChildStream` per side, bounded pipe drainage, watchdog/total time bounds, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
 | Pure numeric chunked GCC-PHAT estimation: chunk planning, per-chunk prominence, global-lag accumulation, and agreement gating | `frame_compare.services.alignment_correlation` |
-| Audio-stage decision combining the chunked estimate, compensation, rounding, and collection outcome; chunk-run stability derivation and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
-| Single definition of the v4 audio-evidence schema (frozen dataclasses plus strict payload parser) | `frame_compare.utils.alignment_evidence` |
-| Terminal alignment presentation: frozen decision-first strings, JSON review warning, and the Audio Alignment panel | `frame_compare.services.alignment_presentation` |
+| Audio/video authority decision: compensation and rounding, A4a/A4b classification and recount, V6 trusted predicate/reason ordering, stability, and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
+| Bounded L-SMASH video confirmation, V3/V3a sampling, V5/V5a scoring, cancellation/identity checks, and review check points | `frame_compare.services.alignment_video` |
+| Single definition of diagnostic-v4 evidence, metadata-v5 compact projection facts, strict payload parsing, and shared P4/P4a presentation policy | `frame_compare.utils.alignment_evidence` |
+| Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |

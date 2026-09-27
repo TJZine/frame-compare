@@ -1041,3 +1041,37 @@ Return to the controller or maintainer if:
   - Known follow-up for U4: `utils/alignment_evidence.py` (about 890 lines) keeps
     parallel `_check_value` and `_parse_value` type walkers. Unify them if U4's
     schema extension touches that code.
+- 2026-09-27: U4 implemented and remediated through accepted commit `9360e10a`.
+  `alignment_video.py` now owns V1-V5a over the run's L-SMASH loader;
+  `alignment_decision.py` owns A4a/A4b, the authority recount, ordered V6 failures,
+  and the single trusted predicate; orchestration passes loader, active rectangles,
+  cancellation, source identities, and the scoped alignment-runtime fingerprint.
+  Only `trusted_automatic` reaches trims or the computed cache.
+  - Diagnostic v4 and metadata v5 were extended in place with base and targeted
+    video evidence, same-frame context, authority recount, and P4a check points.
+    `VideoTargetEvidence.target_offset`, `credible`, `start_sample`, and
+    `end_sample` are authoritative. Compact native metadata omits per-chunk rows but
+    retains those target facts, aggregate counts, and `chunks.total_samples`.
+  - P4/P4a projection policy moved into `utils/alignment_evidence.py`, with terminal
+    and panel code as renderers. The U3 follow-up was completed by replacing the
+    parallel walkers with one schema walker: the file was 897 lines before U4 and
+    1,036 immediately after the schema/walker commit; later video and presentation
+    evidence grew the same cohesive owner further.
+  - The synthetic ten-minute acceptance matrix covers inserts at 60, 540, and 570
+    seconds; 4 s and 30 s replacements; repeated-cue and low-motion disagreement;
+    4- and 7-target budget exhaustion; active non-credible shifted audio; multipath,
+    same-frame, 14/20 raw authority, and resolved-run cases; loudness, compression,
+    surround/downmix, and stem changes; adjacency; V5a mechanics; false minima;
+    loader/cancellation/identity/out-of-range failures; start-time conversion; and
+    trusted trim/cache conjuncts. Canonical Docker most recently passed 254 tests
+    with zero skips. Three warmed direct video-check samples were 2.863 s, 2.758 s,
+    and 2.690 s (mean 2.770 s), below the plan's approximate 4 s expectation.
+  - The approved historical copy mockup remains unchanged. Governing-plan/final-source
+    deviations are explicit: a non-credible V5a neither-win is
+    `local_video_inconclusive`, not proof that picture/content differs; active
+    non-credible audio is weak evidence, not quiet, while inactive sections are
+    planned but unanalyzed context; an alternative video win at any target still
+    blocks; check points preserve authoritative producer target identity, planned
+    frames, and the winning offset rather than reconstructing them from compact
+    presentation rows; and the shared projection may merge/split overlapping run and
+    chunk regions only while retaining their authoritative target keys/resolutions.

@@ -20,9 +20,8 @@ commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
 ## Recommended workflow
 
-1. Let automatic alignment collect and report an offset candidate. An agreed
-   audio result stays provisional until the video check confirms it; nothing
-   applies automatically in this state.
+1. Let automatic alignment collect an audio candidate and confirm the exact frame
+   against the video. It applies only when every audio/video authority gate passes.
 2. Review the evidence and warnings, especially for provisional or unavailable results.
 3. Use the native VSView panel for optional alignment review when the route is
    available and the evidence needs visual confirmation. It is not part of automatic
@@ -61,21 +60,58 @@ chunked lag, so sources with container audio delays align to video rather than t
 a confidently wrong sample offset. A missing start time counts as 0 and is
 recorded as `default_zero`.
 
-Disagreement (`no_single_offset`) keeps contiguous chunk runs grouped by lag so
-an insert or drift reads as runs, never as an applied value. Unrelated audio,
-edits, and speed differences refuse rather than apply. Only two FFmpeg children
+Disagreement (`no_single_offset`) keeps contiguous chunk runs grouped by lag. After
+video confirmation, credible chunks that round to the confirmed frame count as
+frame-level agreement; a coherent frame-distinct run still requires targeted video
+resolution. Only two FFmpeg children
 run per comparison with bounded memory: memory does not grow with duration, but
 compute time does.
 Failed collection PCM is never usable: accumulated evidence counts only after
 both decodes succeed with complete cleanup.
 
+### Video confirmation and refusal limits
+
+Whenever audio produces a global lag, Frame Compare uses the run's L-SMASH loader;
+there is no FFMS2 fallback. It scores 12 base positions across the middle 90% of the
+raw-frame overlap at offsets `r-2` through `r+2`. A strict local minimum must have a
+runner-up/best margin of at least 1.1. The exact frame is confirmed only within
+`r-1..r+1`, with at least 6 informative positions, at least 75% wins, and median
+winning margin at least 1.5. Static, tied, repeated, or aliased frames are
+uninformative rather than false confirmation.
+
+After that global confirmation, V5a checks frame-distinct disagreement regions.
+Competing runs receive four positions first, single credible chunks receive four
+each in descending PSR order, and active non-credible chunks receive two each, with
+12 targeted positions total. At each position it compares the confirmed frame with
+the target's own compensated audio-frame neighbourhood, excluding the confirmed
+frame. Exact ties and two zero scores mean neither hypothesis wins. A non-credible
+neither-win is weak evidence and does not block. A credible chunk needs at least one
+confirmed-frame win and no alternative win; a run needs at least two confirmed-frame
+wins and no alternative win. Unexamined or unresolved credible evidence blocks.
+
+This is deliberately a sampling contract, not proof that every edit is found. A
+chunk that straddles an edit can resolve from sampled pre-edit motion while sampled
+post-edit frames are inconclusive; later shifted chunks usually expose the change,
+but the straddling chunk alone does not prove it. Active non-credible shifted audio
+is caught only when a target samples it and the alternative video wins. Fully silent
+or inactive shifted audio creates no target. Same-length replacement content is
+allowed because its constant offset remains correct.
+
+Level changes, compression, surround/downmix differences, stem changes, quiet
+sections, and local inconclusive evidence do not independently veto an otherwise
+confirmed offset. They remain review context. Credible evidence for another offset
+must still be resolved, and global audio/video confirmation is always required.
+
 ## Previous offset reuse
 
-Interactively confirmed offsets can be stored in the shared alignment reuse cache.
-Fresh computed audio candidates are provisional and are never written or reused as
-trim authority. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
+Interactively confirmed offsets and fresh `trusted_automatic` results can be stored
+in the shared alignment reuse cache. Provisional and unavailable results are never
+written or reused as trim authority. Reuse is keyed by the source set, fingerprints,
+trims, effective FPS,
 selected reference relationship, audio stream choices, alignment settings, and relevant
-runtime identity.
+runtime identity. The alignment runtime fingerprint includes standalone FFmpeg/
+ffprobe plus the VapourSynth and L-SMASH-Works decoder identity because automatic
+authority now depends on L-SMASH frame numbering.
 
 A cache miss simply returns to normal alignment. Corrupt or unsupported reuse data is
 ignored with a warning rather than treated as authoritative evidence.
@@ -95,15 +131,16 @@ entries. A stale-policy shared entry misses and is recomputed or reviewed normal
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`
 remains a v1 file with the same path and offset semantics.
 
-Fresh computation distinguishes two shipped audio-evidence states while the video
-check is pending. `provisional` means the audio stage agreed on one constant
-offset, reported with reason `video_check_pending` as a clearly unaccepted review
-hint: audio alone fixes the offset only to within about one frame, and the pending
-video check picks the exact applied frame. `unavailable`
-means no single usable
-offset exists, and Frame Compare does not invent zero. Manual confirmation is a
-separate fact and does not rewrite the
-original audio attempt. The replacement policy identity invalidates stale shared source-set
+Fresh computation has three final states. `trusted_automatic` /
+`audio_video_confirmed` applies only when global audio authority passes, the base
+video vote confirms the exact frame, every frame-distinct credible disagreement or
+run is examined and resolved for that frame, and no target confirms an alternative.
+`provisional` preserves a candidate but withholds authority for a confirmed
+alternative, unresolved/unexamined credible evidence, an inconclusive base video
+vote, or an unavailable video read. `unavailable` means no candidate can be
+established, and Frame Compare does not invent zero. `video_check_pending` is only
+the internal audio-to-video handoff state. Manual confirmation is a separate fact and
+does not rewrite the original audio attempt. The replacement policy identity invalidates stale shared source-set
 entries, including embedded computed results and prior interactive confirmations; cache
 schema v2 and the manual-override schema remain unchanged.
 
@@ -112,7 +149,11 @@ Each run retains that attempt in
 schema-v4 file records selected stream metadata with start-time compensation, chunk
 runs, compact per-chunk rows (start, lag, PSR, active/credible/agree flags), the
 global lag, the sub-frame estimate, the audio decision, and the final review
-resolution.
+resolution. Video evidence includes the base five-offset table, targeted checks,
+same-frame context, and bounded review check points. Diagnostic v4 retains compact
+per-chunk rows. Native metadata v5 deliberately omits those rows but keeps
+`chunks.total_samples`, aggregate counts, runs, and every target's authoritative
+offset, credibility, sample bounds, alternatives, resolution, and sampled scores.
 It also retains bounded paired-collection summaries when observed. A failed collection
 never contributes usable PCM evidence. Paired collection decodes reference and
 comparison concurrently in lockstep, keeping per side one sample store plus one
@@ -158,13 +199,13 @@ and `Comparison N` names, while preserving source order, multi-comparison behavi
 Frame Compare overlays, and BT.709 preview defaults.
 
 Before review, normal terminal output leads with the current decision and signed frame
-offset. A provisional state is
-`Comparison N - Provisional audio candidate: +Nf - NOT APPLIED`. A
-`video_check_pending` candidate adds exactly `Video confirmation pending; not applied.`;
-other provisional candidates add exactly `Visual confirmation required to use this hint. Align manually or keep the current alignment.` An unavailable state
+offset. A trusted fresh state is
+`Comparison N - Audio alignment accepted: +Nf - APPLIED`. A provisional state is
+`Comparison N - Provisional audio candidate: +Nf - NOT APPLIED`, followed by the
+shared plain-language reason, affected regions,
+bounded check points, and `Align manually or keep the current alignment.` An unavailable state
 emits `Comparison N - No usable audio candidate (<plain-words reason>) - NOT APPLIED`
 followed by `Align manually or keep the current alignment.` Applied states are
-manual-only in this state:
 `Accepted audio alignment reused: +Nf - APPLIED` or
 `Manually confirmed alignment: +Nf - APPLIED`,
 followed by `No additional confirmation needed.` A previously shared manual result is
@@ -217,13 +258,14 @@ prefill those fields, move a playhead, mark a source visited, increase readiness
 enable confirmation.
 
 The persistent **Audio evidence** section leads with the current authority:
-`Accepted audio alignment reused: +Nf — APPLIED` or
+`Accepted audio alignment: +Nf — APPLIED`, `Accepted audio alignment reused: +Nf —
+APPLIED`, or
 `Manually confirmed alignment: +Nf — APPLIED`, each followed by `No additional
-confirmation needed.` The unqualified `Accepted audio alignment: +Nf — APPLIED`
-form is reserved for a video-confirmed fresh result (a later unit); fresh
-computed results stay provisional until then. Without current authority the
+confirmation needed.` A trusted result with resolved credible disagreement may add
+a factual `Noted:` context line. Without current authority the
 section shows either `Provisional audio
-candidate: +Nf — NOT APPLIED` with `Visual confirmation required to use this hint.` or
+candidate: +Nf — NOT APPLIED` with the same reason, region, and check-point
+projection as terminal output plus `Visual confirmation required to use this hint.`, or
 `Unresolved comparison — no usable audio candidate`. A manual authority remains first
 when original provisional or unavailable evidence is retained; original evidence stays
 provisional/unresolved in its own line and in the details. Expandable **Audio evidence

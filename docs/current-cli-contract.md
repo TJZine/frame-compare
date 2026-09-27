@@ -569,16 +569,27 @@ unchanged.
   spinner: the comparison count is too small to make those indicators useful, while
   the changing description still identifies the active comparison. Structured JSON
   progress keeps its measurable comparison milestones.
-- Before an optional native review opens, each non-applied current audio attempt emits a
-  compact, inset `Audio Alignment` panel naming its provisional
-  candidate as `Comparison N - Provisional audio candidate: +Nf - NOT APPLIED`.
-  A `video_check_pending` candidate adds exactly `Video confirmation pending; not applied.`;
-  other provisional candidates add exactly `Visual confirmation required to use this hint. Align manually or keep the current alignment.` Unavailable results
-  emit `Comparison N - No usable audio candidate (<plain-words reason>) - NOT APPLIED`
-  followed by `Align manually or keep the current alignment.` Applied states are
-  decision-first and manual-only in this state: `Accepted audio alignment reused:
-  +Nf - APPLIED` or `Manually confirmed alignment: +Nf - APPLIED`, followed by
-  `No additional confirmation needed.` A previously shared manual result is labeled
+- Before an optional native review opens, each current attempt emits a compact,
+  inset `Audio Alignment` panel. A fresh video-confirmed result is
+  `Comparison N - Audio alignment accepted: +Nf - APPLIED`; reused computed and
+  manual authority retain `Accepted audio alignment reused: +Nf - APPLIED` and
+  `Manually confirmed alignment: +Nf - APPLIED`, followed by `No additional
+  confirmation needed.` A non-applied candidate is `Comparison N - Provisional
+  audio candidate: +Nf - NOT APPLIED`, followed by the shared plain-language reason,
+  up to three region lines, up to two check points, and `Align manually or keep the
+  current alignment.` The exact reason sentences are:
+  `The video confirms +Nf in <range>, so the sources likely differ by an edit there.`
+  for `competing_offset_confirmed_by_video`; `Audio in <range> points to +Nf, and
+  the video could not settle which offset is right there.` for `competing_offset`;
+  `Audio in <range> points to +Nf, and the video could not rule that out.` for
+  `unresolved_audio_disagreement`; `The audio points to +Nf, but the video could not
+  confirm the exact frame (little motion or different framing at the checked
+  points).` for `video_check_inconclusive`; and `The audio points to +Nf, but the
+  video could not be read to confirm the exact frame.` for
+  `video_check_unavailable`. Unexamined sections add their bounded plain-language
+  sentence. Unavailable results emit `Comparison N - No usable audio candidate
+  (<plain-words reason>) - NOT APPLIED` followed by `Align manually or keep the
+  current alignment.` A previously shared manual result is labeled
   `Manually confirmed alignment reused: +Nf - APPLIED`; current-run and preexisting
   manual results keep the unqualified manual label.
   The current applied result and provenance lead even when an original attempt is
@@ -587,12 +598,13 @@ unchanged.
   diagnostic location is reported only after a successful write. The human Rich panel
   owns that success presentation; `alignment_diagnostics_written` remains a structured
   event for JSON/log output and is suppressed from interactive human output.
-- The pre-review evidence block keeps manual/human-authoritative `+0f`, provisional
+- The pre-review evidence block keeps trusted/manual `+0f`, provisional
   `+0f`, and absence distinct. Provisional audio evidence never authorizes a
   correction. Verbose output retains the reason, estimator policy, chunk
   active/credible/agreeing counts with lag and compensation, the sub-frame estimate,
   selected stream ordinals and start-time bases, collection facts,
-  and original attempt state; historical computed and human reuse are labeled
+  V5/V5a video outcomes, targets, review regions/check points, and original attempt
+  state; historical computed and human reuse are labeled
   separately and do not fabricate current stream/chunk details.
 - `--verbose` adds bounded selected-stream, chunk, gate, runtime/policy, work, and
   credible-chunk counts; individual diagnostic chunks are never printed.
@@ -1400,9 +1412,12 @@ Before saving, each comparison has an **Audio evidence** summary and a collapsed
 evidence details — Comparison N** independent of its manual draft. Current authority
 leads with `Accepted audio alignment: +Nf — APPLIED`, `Accepted audio alignment reused:
 +Nf — APPLIED`, or `Manually confirmed alignment: +Nf — APPLIED`, followed by `No
-additional confirmation needed.` Without current authority, the panel shows
-`Provisional audio candidate: +Nf — NOT APPLIED` with `Visual confirmation required to
-use this hint.` or `Unresolved comparison — no usable audio candidate`. Original evidence
+additional confirmation needed.` A trusted fresh result may also add a factual
+`Noted:` line for resolved credible disagreement. Without current authority, the
+panel shows `Provisional audio candidate: +Nf — NOT APPLIED`, the same shared reason,
+region, and check-point projection as terminal output, and `Visual confirmation
+required to use this hint.`, or `Unresolved comparison — no usable audio candidate`.
+Original evidence
 remains in its original classification, including provisional evidence after a manual
 confirmation. A provisional marker is display-only: it never prefills a field, moves a
 playhead, marks an output visited, increases readiness, enables confirmation, writes an
@@ -1422,7 +1437,11 @@ The generated session carries an explicit UUID session identity, one reference r
 ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
 hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v5. The panel derives display bounds from public
+schema v5. The compact native projection omits per-chunk rows but retains
+`chunks.total_samples`, aggregate chunk counts, runs, the authority recount, base
+video checks, check points, and each target's authoritative `target_offset`,
+`credible`, `start_sample`, `end_sample`, alternatives, resolution, and sampled
+positions. The panel derives display bounds from public
 output clip lengths, while the alignment service validates raw result indices against
 the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
 sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
@@ -1676,17 +1695,45 @@ process/reader cleanup is fatal even when ordinary missing dependency, decode, o
 correlation failures would remain warning-only for optional alignment. This adds no
 flag, configuration field, signal-handler framework, or successful JSON field.
 
-Every fresh completed attempt also retains immutable selected-stream facts,
-per-chunk columnar evidence, chunk runs, the global lag, start compensation, the
-sub-frame estimate, and an explicit audio decision: `provisional` or `unavailable`
-under the shipped `whole-track-chunked-phat-video-check-20260925` policy. An
-agreed audio stage produces a `provisional` candidate with reason
-`video_check_pending` and an `audio_only` basis; every other outcome is
-`unavailable` with its own reason and no candidate. A provisional candidate
-never supplies an applied offset, trim, cache value, or trusted VSView hint. A
-manual result keeps the original attempt as separate diagnostic history.
-Provisional results keep computed frame/time authority null. Whole-track support
-does not claim drift compensation or per-segment edit matching.
+Every fresh completed attempt retains immutable selected-stream facts, per-chunk
+columnar evidence, chunk runs, the global lag, start compensation, sub-frame
+estimate, A4b authority recount, bounded video evidence, and one of three final
+states under `whole-track-chunked-phat-video-check-20260925`:
+
+- `trusted_automatic` / `audio_video_confirmed`: the A4b authority gate passes,
+  V5 confirms the exact frame, every frame-distinct credible disagreement/run is
+  examined and resolved for that frame, and no V5a target confirms its alternative.
+  This is the only fresh computed state that applies trims or enters the computed
+  cache.
+- `provisional`: a review hint with candidate authority withheld. Its primary reason
+  is the first applicable value in exact order:
+  `competing_offset_confirmed_by_video`, `competing_offset`,
+  `unresolved_audio_disagreement`, `video_check_inconclusive`,
+  `video_check_unavailable`. `failed_gates` retains every applicable reason. When
+  raw audio is `no_single_offset` but still has a global lag and video confirms a
+  review frame, the final state is provisional with `no_single_offset` rather than
+  trusted.
+- `unavailable`: no candidate can be established. Final reasons include
+  `no_single_offset`, `search_edge`, `no_usable_audio`,
+  `selected_audio_timeline_unavailable`, `analysis_budget_exceeded`,
+  `source_identity_changed`, and bounded collection failure categories. If a raw
+  global lag exists, video still runs; a confirmed video frame may turn the result
+  into a provisional review hint, but never into trusted authority unless every V6
+  conjunct passes.
+
+`video_check_pending` is only the internal pre-video decision and is not the final
+fresh result when the video stage has run. A provisional value never applies, trims,
+writes the computed cache, prefills manual fields, moves a VSView playhead, marks a
+source visited, increases readiness, or enables confirmation. A manual result keeps
+the original attempt as separate diagnostic history. Whole-track support does not
+claim drift compensation or per-segment edit matching.
+
+The shared source-set identity includes the scoped alignment runtime fingerprint.
+That scope covers the selected standalone FFmpeg/ffprobe lineage and, because final
+authority depends on decoded frame numbering, the selected VapourSynth and
+L-SMASH-Works identity. A change misses the cache and recomputes. Resolved active
+rectangles affect video scoring but intentionally do not enter this source-relationship
+cache identity; clearing the cache forces re-verification after a crop change.
 
 ## Persistence Rules
 
@@ -1696,18 +1743,27 @@ Fresh runs write one pathless diagnostic artifact per comparison at
 PCM, raw command line, full subprocess stderr, environment value, or credential. It
 is atomically snapshotted before optional review and may be atomically replaced once
 with the final human outcome. Current attempts retain bounded observed paired-collection
-summaries, per-chunk evidence, and chunk runs; preanalysis rejections remain `not_observed`. The
+summaries, per-chunk evidence, chunk runs, the authority recount, five-offset video
+table, same-frame context, targeted evidence, and P4a check points; preanalysis
+rejections remain `not_observed`. Target rows carry authoritative `target_offset`,
+`credible`, `start_sample`, and `end_sample` fields, while `chunks.total_samples`
+records the analyzed span. The
 SHA-256 digest covers only canonical original-attempt
 JSON, so manual confirmation does not rewrite the recorded audio attempt. Sharing a
 run folder also shares bounded labels, pseudonymous source identity digests, selected
 stream metadata, and timing evidence.
 
 Diagnostic files are never read for offset selection, trim application, or shared
-cache reuse. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
+cache reuse. Diagnostic v4 and generated-session metadata v5 were extended in place
+for this unreleased policy; older native metadata is rejected and regenerated. Native
+metadata retains the same authoritative target/aggregate facts in a bounded compact
+projection without per-chunk rows. Missing, edited, corrupt, or unsupported
+artifacts cannot authorize an
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
 authority unchanged; a containment or symlink escape remains fail-closed. The shared
-alignment cache remains schema v2 and stores eligible authority only. Fresh computed
-results are provisional and are never written as computed authority;
+alignment cache remains schema v2 and stores eligible authority only. Only fresh
+`trusted_automatic` results are written as computed authority; provisional and
+unavailable attempts are never written;
 the policy token participates in the full shared source-set identity, so stale policy
 entries—including embedded computed results and interactive confirmations—miss cleanly.
 Historical cache hits do not fabricate current
