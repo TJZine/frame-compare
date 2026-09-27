@@ -1326,27 +1326,18 @@ def _review_target_status(target: VideoTargetEvidence | None) -> AudioReviewRegi
     return "not checked" if target.resolution == "unexamined" else "not settled"
 
 
-def _review_target_offset(
-    attempt: AudioAlignmentAttempt, target: VideoTargetEvidence
-) -> int | None:
-    return target.target_offset
-
-
 def _review_target_candidates(
     attempt: AudioAlignmentAttempt,
     targets: tuple[VideoTargetEvidence, ...],
 ) -> tuple[AudioReviewRegion, ...]:
     regions: list[AudioReviewRegion] = []
     for target in targets:
-        offset = _review_target_offset(attempt, target)
-        if offset is None:
-            continue
         start, end = _review_chunk_bounds(
             attempt, target.first_chunk_index, target.last_chunk_index
         )
         regions.append(
             AudioReviewRegion(
-                offset,
+                target.target_offset,
                 start,
                 end,
                 _review_target_status(target),
@@ -1416,7 +1407,11 @@ def _review_non_overlapping(
                 previous.offset,
                 previous.start_seconds,
                 previous.end_seconds,
-                _review_merge_status(previous.status, region.status),
+                (
+                    primary.status
+                    if primary.target_key is not None
+                    else _review_merge_status(previous.status, region.status)
+                ),
                 primary.target_resolution,
                 primary.target_key,
                 _review_merge_target_projections(previous, region),
@@ -1510,7 +1505,8 @@ def _review_overlay_regions(
         status = active[0].status
         projections = _review_region_target_projections(active[0])
         for region in active[1:]:
-            status = _review_merge_status(status, region.status)
+            if not active_targets:
+                status = _review_merge_status(status, region.status)
             projections = tuple(
                 dict.fromkeys((*projections, *_review_region_target_projections(region)))
             )

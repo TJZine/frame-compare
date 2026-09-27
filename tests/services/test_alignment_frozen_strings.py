@@ -433,6 +433,54 @@ def _nested_alternative_confirmed_chunk_attempt():
     )
 
 
+def _production_nested_targets_attempt():
+    attempt = _review_attempt("competing_offset")
+    targets = (
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=0,
+            last_chunk_index=1,
+            target_offset=250,
+            alternative_offsets=(249, 250, 251),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(1, 9_000, 1.0, 1.0, "neither"),),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=2,
+            last_chunk_index=2,
+            target_offset=246,
+            alternative_offsets=(245, 246, 247),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(2, 9_001, 1.0, 1.0, "neither"),),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=3,
+            last_chunk_index=3,
+            target_offset=250,
+            alternative_offsets=(249, 250, 251),
+            resolution="alternative_confirmed",
+            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative"),),
+        ),
+    )
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(81_000, 81_000, 82_000, 83_333),
+            credible=(True, True, False, True),
+            agrees=(False, False, False, False),
+        ),
+        runs=(AudioChunkRun(first_index=0, last_index=3, lag=81_000, chunk_count=3),),
+        video_check=replace(attempt.video_check, targets=targets),
+        decision=replace(
+            attempt.decision,
+            failed_gates=("competing_offset", "unresolved_audio_disagreement"),
+        ),
+    )
+
+
 def _unresolved_run_then_chunk_attempt():
     attempt = _review_attempt("competing_offset")
     targets = (
@@ -1232,7 +1280,27 @@ def test_nested_alternative_confirmed_chunk_splits_wide_run(
     region = next(region for region in review.regions if region.offset == 250)
 
     assert (region.start_seconds, region.end_seconds) == (60.0, 90.0)
+    assert region.status == "confirmed by video"
     assert (("chunk", 2, 2), "alternative_confirmed") in region.target_projections
+
+    resolved_target = replace(
+        attempt.video_check.targets[1],
+        resolution="resolved",
+        positions=(VideoTargetPosition(2, 9_001, 0.1, 1.0, "confirmed"),),
+    )
+    resolved_attempt = replace(
+        attempt,
+        video_check=replace(
+            attempt.video_check,
+            targets=(attempt.video_check.targets[0], resolved_target),
+        ),
+    )
+    resolved_region = next(
+        region
+        for region in build_audio_review_presentation(resolved_attempt).regions
+        if region.offset == 250
+    )
+    assert resolved_region.status == "confirmed by video"
 
     result = AlignmentResult(
         reference.name,
@@ -1255,6 +1323,71 @@ def test_nested_alternative_confirmed_chunk_splits_wide_run(
         in err
     )
     assert "The video confirms +243f" not in err
+
+
+def test_authoritative_nested_targets_match_compact_native_projection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _production_nested_targets_attempt()
+    compact = _project_audio_attempt_for_review(attempt)
+    full_review = build_audio_review_presentation(attempt)
+    compact_review = build_audio_review_presentation(compact)
+    expected_reasons = (
+        "Audio in 0:00-1:00 points to +250f, and the video could not settle which offset is right there.",
+        "Audio in 1:00-1:30 points to +246f, and the video could not rule that out.",
+    )
+    expected_regions = (
+        "+250f  0:00-1:00  not settled",
+        "+246f  1:00-1:30  not settled",
+        "+250f  1:30-2:00  confirmed by video",
+    )
+
+    assert compact.chunks.rows_omitted
+    assert full_review.suggested_offset == compact_review.suggested_offset == 146
+    assert full_review.reason_lines() == compact_review.reason_lines() == expected_reasons
+    assert full_review.region_lines() == compact_review.region_lines() == expected_regions
+
+    unexamined = _unexamined_attempt()
+    unexamined_target = replace(
+        unexamined.video_check.targets[0],
+        target_offset=250,
+        alternative_offsets=(249, 250, 251),
+    )
+    unexamined = replace(
+        unexamined,
+        video_check=replace(unexamined.video_check, targets=(unexamined_target,)),
+    )
+    compact_unexamined = _project_audio_attempt_for_review(unexamined)
+    assert build_audio_review_presentation(unexamined).region_lines() == (
+        build_audio_review_presentation(compact_unexamined).region_lines()
+    )
+    assert (
+        "+250f  1:00-2:00  not checked"
+        in build_audio_review_presentation(compact_unexamined).region_lines()
+    )
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="competing_offset",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    for line in (*expected_reasons, *expected_regions):
+        assert line in err
 
 
 @pytest.mark.parametrize(

@@ -56,6 +56,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
 from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
     _multi_context_attempt,
+    _production_nested_targets_attempt,
     _review_attempt,
     _singleton_chunk_target_attempt,
 )
@@ -769,6 +770,38 @@ def test_panel_summary_keeps_singleton_chunk_reason_target(
         "Audio in 1:00–1:30 points to +246f, and the video could not rule that out."
         in panel.audio_summary_labels[0].text()
     )
+
+
+def test_panel_matches_compact_projection_for_authoritative_nested_targets(
+    tmp_path: Path,
+) -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _project_audio_attempt_for_review(_production_nested_targets_attempt())
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=audio_review)
+
+    summary = panel.audio_summary_labels[0].text()
+    assert (
+        "Audio in 0:00–1:00 points to +250f, and the video could not settle which offset is right there."
+        in summary
+    )
+    assert "Audio in 1:00–1:30 points to +246f, and the video could not rule that out." in summary
+    assert "+250f  0:00–1:00  not settled" in summary
+    assert "+246f  1:00–1:30  not settled" in summary
+    assert "+250f  1:30–2:00  confirmed by video" in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert not panel.use_positions_button.isEnabled()
 
 
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
