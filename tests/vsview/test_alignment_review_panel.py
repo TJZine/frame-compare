@@ -1335,6 +1335,11 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     details.setChecked(True)
     detail_text = cast(QLabel, details.findChild(QLabel)).text()
     assert "Established:" in detail_text
+    assert "             Video: confirmed +146f" in detail_text
+    assert "Check points: 1:01:01 — reference 13,123 ↔ comparison 12,880 (+243f)" in detail_text
+    assert ": Video: confirmed" not in detail_text
+    assert ": +243f" not in detail_text
+    assert "Check points: Check" not in detail_text
     assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in detail_text
     assert "Runtime/policy:" in detail_text
     selectable = (

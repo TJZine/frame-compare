@@ -76,6 +76,14 @@ type VideoTargetResolution = Literal[
 ]
 type VideoTargetWinner = Literal["confirmed", "alternative", "neither"]
 
+_AUDIO_REVIEW_REGION_REASONS = frozenset(
+    {
+        "competing_offset_confirmed_by_video",
+        "competing_offset",
+        "unresolved_audio_disagreement",
+    }
+)
+
 AUDIO_ANALYSIS_SAMPLE_RATE = 8000
 MAX_AUDIO_CHUNKS = 4096
 _MAX_TEXT = 256
@@ -1028,6 +1036,11 @@ class AudioReviewPresentation:
                     "and the video could not settle which offset is right there."
                 )
             elif reason == "unresolved_audio_disagreement":
+                if region is not None:
+                    lines.append(
+                        f"Audio in {_review_region_text(region, panel=panel)} points to {region.offset:+d}f, "
+                        "and the video could not rule that out."
+                    )
                 unexamined = sum(
                     max(1, target.last_chunk_index - target.first_chunk_index + 1)
                     for target in self.attempt.video_check.targets
@@ -1037,11 +1050,6 @@ class AudioReviewPresentation:
                     lines.append(
                         f"Audio in {unexamined} more section{'' if unexamined == 1 else 's'} points "
                         "elsewhere; they were not checked, so the offset is not applied."
-                    )
-                elif region is not None:
-                    lines.append(
-                        f"Audio in {_review_region_text(region, panel=panel)} points to {region.offset:+d}f, "
-                        "and the video could not rule that out."
                     )
             elif reason == "video_check_inconclusive" and self.suggested_offset is not None:
                 lines.append(
@@ -1073,13 +1081,17 @@ class AudioReviewPresentation:
         )
 
     def check_point_lines(
-        self, *, panel: bool = False, limit: int | None = None
+        self,
+        *,
+        panel: bool = False,
+        limit: int | None = None,
+        include_label: bool = True,
     ) -> tuple[str, ...]:
         points = self.check_points if limit is None else self.check_points[:limit]
         separator = "↔" if panel else "<->"
         dash = " — " if panel else "  "
         return tuple(
-            f"Check {_review_time(point.timestamp_seconds)}{dash}reference "
+            f"{'Check ' if include_label else ''}{_review_time(point.timestamp_seconds)}{dash}reference "
             f"{point.reference_frame:,} {separator} comparison "
             f"{point.suggested_comparison_frame:,} "
             f"({point.reference_frame - point.suggested_comparison_frame:+d}f)"
@@ -1178,16 +1190,50 @@ class AudioReviewPresentation:
             )
         return None
 
-    def verbose_rows(self) -> tuple[EvidenceRow, ...]:
+    def normal_review_rows(self, *, panel: bool, action_line: str) -> tuple[EvidenceRow, ...]:
+        """Return the shared normal P4 block after its surface-specific outcome."""
+        if self.attempt.decision.primary_reason == "video_check_pending":
+            return (
+                EvidenceRow(
+                    key="",
+                    value="Video confirmation pending; not applied.",
+                    style="warn",
+                ),
+            )
+
+        rows = [
+            EvidenceRow(key="", value=line, style="warn") for line in self.reason_lines(panel=panel)
+        ]
+        if _AUDIO_REVIEW_REGION_REASONS.intersection(self.reasons):
+            rows.extend(
+                EvidenceRow(key="", value=f"  {line}", style="muted")
+                for line in self.region_lines(panel=panel, limit=3)
+            )
+            if len(self.regions) > 3:
+                rows.append(
+                    EvidenceRow(
+                        key="",
+                        value=f"and {len(self.regions) - 3} more regions",
+                        style="muted",
+                    )
+                )
+        rows.extend(
+            EvidenceRow(key="", value=line, style="muted")
+            for line in self.check_point_lines(panel=panel, limit=2)
+        )
+        rows.append(EvidenceRow(key="", value=action_line, style="muted"))
+        return tuple(rows)
+
+    def verbose_rows(self, *, panel: bool = False) -> tuple[EvidenceRow, ...]:
         rows: list[EvidenceRow] = [
             EvidenceRow(key="Established", value=self.established_audio_line(), style="value"),
             EvidenceRow(key="", value=self.established_video_line(), style="value"),
         ]
-        for index, line in enumerate(self.region_lines()):
+        for index, line in enumerate(self.region_lines(panel=panel)):
             rows.append(EvidenceRow(key="Regions" if index == 0 else "", value=line, style="muted"))
-        for line in self.context_lines():
+        for line in self.context_lines(panel=panel):
             rows.append(EvidenceRow(key="Context", value=line, style="muted"))
-        for index, line in enumerate(self.check_point_lines()):
+        for index, line in enumerate(self.check_point_lines(panel=panel, include_label=False)):
             rows.append(
                 EvidenceRow(key="Check points" if index == 0 else "", value=line, style="muted")
             )
@@ -1203,6 +1249,17 @@ class AudioReviewPresentation:
             )
         )
         return tuple(rows)
+
+    def verbose_lines(self, *, panel: bool = False) -> tuple[str, ...]:
+        lines: list[str] = []
+        continuation_key = ""
+        for row in self.verbose_rows(panel=panel):
+            if row.key:
+                lines.append(f"{row.key}: {row.value}")
+                continuation_key = row.key
+            else:
+                lines.append(f"{' ' * (len(continuation_key) + 2)}{row.value}")
+        return tuple(lines)
 
 
 def _review_time(seconds: float) -> str:
@@ -1371,6 +1428,9 @@ def _review_reason_region(
         candidates = tuple(region for region in candidates if region.status == "confirmed by video")
     elif reason == "competing_offset":
         candidates = tuple(region for region in candidates if region.status != "confirmed by video")
+    elif reason == "unresolved_audio_disagreement":
+        candidates = tuple(region for region in candidates if region.status != "confirmed by video")
+        return candidates[0] if candidates else None
     return candidates[0] if candidates else (regions[0] if regions else None)
 
 

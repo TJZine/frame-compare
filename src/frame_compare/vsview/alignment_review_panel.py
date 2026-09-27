@@ -900,24 +900,13 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
         candidate = review.suggested_offset
         if candidate is not None:
             lines.extend((f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",))
-            if attempt.decision.primary_reason == "video_check_pending":
-                lines.append("Video confirmation pending; not applied.")
-            else:
-                lines.extend(review.reason_lines(panel=True))
-                if any(
-                    reason
-                    in {
-                        "competing_offset_confirmed_by_video",
-                        "competing_offset",
-                        "unresolved_audio_disagreement",
-                    }
-                    for reason in review.reasons
-                ):
-                    lines.extend(f"  {line}" for line in review.region_lines(panel=True, limit=3))
-                    if len(review.regions) > 3:
-                        lines.append(f"and {len(review.regions) - 3} more regions")
-                lines.extend(review.check_point_lines(panel=True, limit=2))
-                lines.append("Visual confirmation required to use this hint.")
+            lines.extend(
+                row.value
+                for row in review.normal_review_rows(
+                    panel=True,
+                    action_line="Visual confirmation required to use this hint.",
+                )
+            )
     if not lines:
         lines.append(_unavailable_summary_line(comparison))
 
@@ -962,9 +951,7 @@ def _audio_details(
             reference_source_frame_count,
         )
         return "\n".join(lines)
-    lines = [
-        f"{row.key}: {row.value}" for row in build_audio_review_presentation(attempt).verbose_rows()
-    ]
+    lines = list(build_audio_review_presentation(attempt).verbose_lines(panel=True))
     lines.extend(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt))
     _append_marker_bounds_detail(lines, comparison, reference_source_frame_count)
     return "\n".join(lines)

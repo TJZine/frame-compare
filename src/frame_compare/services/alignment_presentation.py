@@ -133,24 +133,17 @@ def _normal_evidence_rows(
                 WARN,
             ),
         ]
-        if decision.primary_reason == "video_check_pending":
-            rows.append(("", "Video confirmation pending; not applied.", WARN))
-        else:
-            rows.extend(("", line, WARN) for line in review.reason_lines())
-            if any(
-                reason
-                in {
-                    "competing_offset_confirmed_by_video",
-                    "competing_offset",
-                    "unresolved_audio_disagreement",
-                }
-                for reason in review.reasons
-            ):
-                rows.extend(("", f"  {line}", MUTED) for line in review.region_lines(limit=3))
-                if len(review.regions) > 3:
-                    rows.append(("", f"and {len(review.regions) - 3} more regions", MUTED))
-            rows.extend(("", line, MUTED) for line in review.check_point_lines(limit=2))
-            rows.append(("", "Align manually or keep the current alignment.", MUTED))
+        rows.extend(
+            (
+                "",
+                row.value,
+                WARN if row.style == "warn" else MUTED,
+            )
+            for row in review.normal_review_rows(
+                panel=False,
+                action_line="Align manually or keep the current alignment.",
+            )
+        )
         return tuple(rows)
 
     reason = decision.primary_reason if decision is not None else result.diagnostic
@@ -191,9 +184,7 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
         _original_audio_attempt_line(attempt),
         _format_stream_summary(attempt),
     ]
-    lines.extend(
-        f"{row.key}: {row.value}" for row in build_audio_review_presentation(attempt).verbose_rows()
-    )
+    lines.extend(build_audio_review_presentation(attempt).verbose_lines())
     lines.extend(f"  {row.key}: {row.value}" for row in audio_evidence_rows(attempt))
     return lines
 

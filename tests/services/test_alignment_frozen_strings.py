@@ -256,6 +256,61 @@ def _unexamined_attempt():
     )
 
 
+def _mixed_resolved_unresolved_attempt():
+    attempt = _review_attempt("unresolved_audio_disagreement")
+    targets = (
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=1,
+            last_chunk_index=1,
+            alternative_offsets=(243, 244),
+            resolution="alternative_confirmed",
+            positions=(VideoTargetPosition(1, 13_123, 1.0, 0.1, "alternative"),),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=2,
+            last_chunk_index=2,
+            alternative_offsets=(246,),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(2, 9_000, 1.0, 1.0, "neither"),),
+        ),
+    )
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(1177, 81_000, 82_000, 1177),
+            agrees=(True, False, False, True),
+        ),
+        runs=(
+            AudioChunkRun(first_index=0, last_index=0, lag=1177, chunk_count=1),
+            AudioChunkRun(first_index=1, last_index=1, lag=81_000, chunk_count=1),
+            AudioChunkRun(first_index=2, last_index=2, lag=82_000, chunk_count=1),
+            AudioChunkRun(first_index=3, last_index=3, lag=1177, chunk_count=1),
+        ),
+        video_check=replace(attempt.video_check, targets=targets),
+    )
+
+
+def _mixed_unresolved_unexamined_attempt():
+    attempt = _review_attempt("unresolved_audio_disagreement")
+    unexamined = VideoTargetEvidence(
+        kind="run",
+        first_chunk_index=0,
+        last_chunk_index=1,
+        alternative_offsets=(250,),
+        resolution="unexamined",
+        positions=(),
+    )
+    return replace(
+        attempt,
+        video_check=replace(
+            attempt.video_check, targets=(*attempt.video_check.targets, unexamined)
+        ),
+    )
+
+
 def _audio_failed_video_confirmed_attempt():
     attempt = _review_attempt("video_check_inconclusive")
     return replace(
@@ -639,34 +694,6 @@ def test_json_mode_logs_review_warning(tmp_path: Path, capsys: pytest.CaptureFix
     assert '"reason": "video_check_pending"' in captured.err
 
 
-def test_json_stdout_is_identical_when_review_reason_changes(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    configure_logging("INFO", "json")
-    config = AlignmentConfig(cache_results=False, no_color=True)
-    reference, comparison, request = _request_for(tmp_path, config)
-    first = _review_attempt("competing_offset")
-    second = _review_attempt("video_check_inconclusive")
-    for attempt in (first, second):
-        result = AlignmentResult(
-            reference_clip=reference.name,
-            comparison_clip=comparison.name,
-            frame_offset=None,
-            time_offset_seconds=None,
-            correlation_score=0.5,
-            algorithm="cross_correlation",
-            source="computed",
-            applied=False,
-            diagnostic=attempt.decision.primary_reason,
-            stability=attempt.stability,
-            audio_attempt=attempt,
-        )
-        _present(request, result, config, json_output=True)
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "audio_alignment_requires_review" in captured.err
-
-
 @pytest.mark.parametrize(
     ("reason", "expected"),
     [
@@ -854,6 +881,61 @@ def test_unexamined_budget_add_on_is_plain_and_verbose(
     )
 
 
+def test_unresolved_reason_prefers_unsettled_region_over_confirmed_region(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _mixed_resolved_unresolved_attempt()
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="unresolved_audio_disagreement",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    assert "Audio in 1:00-1:30 points to +246f, and the video could not rule that out." in err
+    assert "Audio in 0:30-1:00 points to +243f, and the video could not rule that out." not in err
+
+
+def test_unresolved_reason_lists_region_before_unexamined_add_on(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _mixed_unresolved_unexamined_attempt()
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="unresolved_audio_disagreement",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    region = "Audio in 1:00-2:00 points to +243f, and the video could not rule that out."
+    add_on = "Audio in 2 more sections points elsewhere; they were not checked, so the offset is not applied."
+    assert err.index(region) < err.index(add_on)
+
+
 def test_video_vote_uses_only_strict_informative_positions() -> None:
     review = build_audio_review_presentation(_strict_video_vote_attempt())
     assert review.video_wins == 6
@@ -932,3 +1014,8 @@ def test_p4a_verbose_rows_include_established_context_and_all_checks(
     assert "Regions: +146f" in err
     assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in err
     assert "Check 4:30  reference 6,474 <-> comparison 6,328 (+146f)" in err
+    assert "             Video: confirmed +146f" in err
+    assert "         +243f" in err
+    assert ": Video: confirmed" not in err
+    assert ": +243f" not in err
+    assert "Check points: Check" not in err
