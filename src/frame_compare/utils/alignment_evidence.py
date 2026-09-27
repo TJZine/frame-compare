@@ -1117,7 +1117,6 @@ class AudioReviewPresentation:
     check_points: tuple[VideoCheckPoint, ...]
     same_frame_regions: tuple[AudioReviewRegion, ...]
     resolved_regions: tuple[AudioReviewRegion, ...]
-    content_region: AudioReviewRegion | None
     video_wins: int
     video_informative: int
     video_margin: float | None
@@ -1246,12 +1245,7 @@ class AudioReviewPresentation:
                 f"{len(self.same_frame_regions)} section{'' if len(self.same_frame_regions) == 1 else 's'} "
                 "differ by less than a frame (sub-frame); not a disagreement."
             )
-        if self.content_region is not None:
-            lines.append(
-                f"Picture differs in {_review_region_text(self.content_region, panel=panel)} "
-                "(for example a replaced shot); offset still holds."
-            )
-        elif self.resolved_regions:
+        if self.resolved_regions:
             lines.append(
                 f"Audio differed in {_review_region_text(self.resolved_regions[0], panel=panel)}; "
                 "the video confirmed the offset there."
@@ -1283,11 +1277,6 @@ class AudioReviewPresentation:
                 f"Noted: audio differed in {count or len(self.resolved_regions)} section"
                 f"{'s' if (count or len(self.resolved_regions)) != 1 else ''} ({ranges}); "
                 f"the video confirmed {self.suggested_offset:+d}f there."
-            )
-        if self.content_region is not None:
-            return (
-                f"Noted: the picture differs in {_review_region_text(self.content_region, panel=panel)} "
-                "(for example a replaced shot); the offset still holds."
             )
         return None
 
@@ -1780,7 +1769,6 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
         for item in video.same_frame_context
     )
     resolved_regions: list[AudioReviewRegion] = []
-    content_region: AudioReviewRegion | None = None
     for target in video.targets:
         if target.kind != "chunk":
             continue
@@ -1793,9 +1781,6 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
         )
         if target.resolution == "resolved" and target.credible:
             resolved_regions.append(target_region)
-        elif target.resolution == "unresolved" and not target.credible:
-            content_region = target_region
-            break
     wins, informative, margin = _review_video_vote(video)
     return AudioReviewPresentation(
         attempt=attempt,
@@ -1805,7 +1790,6 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
         check_points=video.check_points[:5],
         same_frame_regions=tuple(same_frame_regions),
         resolved_regions=tuple(resolved_regions),
-        content_region=content_region,
         video_wins=wins,
         video_informative=informative,
         video_margin=margin,

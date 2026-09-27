@@ -10,6 +10,7 @@ literals).
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -17,10 +18,20 @@ from types import SimpleNamespace
 
 import pytest
 
+import frame_compare.services.alignment_video as alignment_video
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.cli.run_command import handle_json_output
 from frame_compare.orchestration import RunResult
 from frame_compare.services.alignment import align_clips_from_request as _align_async
+from frame_compare.services.alignment_correlation import (
+    ChunkedAudioEstimate,
+    ChunkObservation,
+    ChunkPlan,
+)
+from frame_compare.services.alignment_decision import (
+    decide_after_video,
+    decide_completed_stage,
+)
 from frame_compare.services.alignment_presentation import (
     present_alignment_evidence,
     print_pre_review_summary,
@@ -526,31 +537,97 @@ def _production_nested_targets_attempt():
     )
 
 
-def _chunk_target_context_attempt(*, credible: bool, resolution: str):
-    attempt = _review_attempt("unresolved_audio_disagreement")
-    winner = "confirmed" if resolution == "resolved" else "neither"
-    target = replace(
-        attempt.video_check.targets[0],
+def _producer_target_context_attempt(*, credible: bool, resolution: str):
+    observations = tuple(
+        ChunkObservation(
+            index=index,
+            reference_start=index * 240_000,
+            reference_count=240_000,
+            active=True,
+            lag=667 if index == 2 else 0,
+            psr=30.0 if index != 2 or credible else 5.0,
+            credible=index != 2 or credible,
+            agrees=index != 2,
+        )
+        for index in range(5)
+    )
+    estimate = ChunkedAudioEstimate(
+        outcome="agreed",
+        global_lag=0,
+        observations=observations,
+        runs=(),
+        active_count=5,
+        credible_count=sum(item.credible for item in observations),
+        agreeing_count=4,
+    )
+    plan = ChunkPlan(
+        chunk_samples=240_000,
+        lag_samples=8_000,
+        chunks=tuple((index * 240_000, 240_000) for index in range(5)),
+    )
+    stage = decide_completed_stage(
+        estimate=estimate,
+        plan=plan,
+        max_offset_seconds=1.0,
+        reference_audio_start=Fraction(0),
+        reference_video_start=Fraction(0),
+        comparison_audio_start=Fraction(0),
+        comparison_video_start=Fraction(0),
+        fps_reference=Fraction(24),
+    )
+    winner = {
+        "resolved": "confirmed",
+        "unresolved": "neither",
+        "alternative_confirmed": "alternative",
+    }.get(resolution)
+    positions = () if winner is None else (VideoTargetPosition(1, 13_123, 0.1, 1.0, winner),)
+    target_resolution = (
+        "unexamined"
+        if resolution == "unexamined"
+        else alignment_video._target_resolution("chunk", positions)
+    )
+    assert target_resolution == resolution
+    target = VideoTargetEvidence(
         kind="chunk",
         first_chunk_index=2,
         last_chunk_index=2,
         credible=credible,
+        start_sample=480_000,
         end_sample=720_000,
-        resolution=resolution,
-        positions=(VideoTargetPosition(1, 13_123, 0.1, 1.0, winner),),
+        target_offset=2,
+        alternative_offsets=(1, 2, 3),
+        resolution=target_resolution,
+        positions=positions,
     )
+    video = VideoCheckObservation(
+        observation="observed",
+        scored_offsets=(-2, -1, 0, 1, 2),
+        confirmed_offset=0,
+        index_build_seconds=0.1,
+        positions=(VideoPositionDifference(0, 6_474, (2.0, 1.0, 0.1, 1.0, 2.0)),),
+        targets=(target,),
+        check_points=(VideoCheckPoint(75.0, 1_800, 1_798),),
+    )
+    decided = decide_after_video(
+        stage=stage,
+        estimate=estimate,
+        plan=plan,
+        video=video,
+        fps_reference=Fraction(24),
+    )
+    base = attempt_with_chunks(5)
     return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            credible=(True, True, credible, True),
-        ),
-        audio=replace(
-            attempt.audio,
-            credible_chunks=3 if not credible else 4,
-            agreeing_chunks=2,
-        ),
-        video_check=replace(attempt.video_check, targets=(target,)),
+        base,
+        fps_num=24,
+        fps_den=1,
+        analysis=decided.analysis,
+        chunks=decided.chunks,
+        runs=decided.runs,
+        audio=decided.audio,
+        video_check=decided.video_check,
+        decision=decided.decision,
+        stability=decided.stability,
+        authority_recount=decided.authority_recount,
     )
 
 
@@ -720,21 +797,21 @@ def _strict_video_vote_attempt():
 
 
 def _applied_result(reference: Path, comparison: Path, attempt) -> AlignmentResult:
+    assert attempt.decision.state == "trusted_automatic"
+    candidate = attempt.decision.candidate
+    assert candidate is not None
     return AlignmentResult(
         reference_clip=reference.name,
         comparison_clip=comparison.name,
-        frame_offset=146,
-        time_offset_seconds=146 / 24,
+        frame_offset=candidate.frame_offset,
+        time_offset_seconds=candidate.time_offset_seconds,
         correlation_score=1.0,
         algorithm="cross_correlation",
         source="computed",
         applied=True,
         diagnostic="audio_video_confirmed",
         stability=attempt.stability,
-        audio_attempt=replace(
-            attempt,
-            decision=replace(attempt.decision, state="trusted_automatic"),
-        ),
+        audio_attempt=attempt,
     )
 
 
@@ -1495,21 +1572,43 @@ def test_authoritative_nested_targets_match_compact_native_projection(
 
 
 @pytest.mark.parametrize(
-    ("credible", "resolution", "expected_context", "expected_noted"),
+    (
+        "credible",
+        "resolution",
+        "expected_state",
+        "expected_reason",
+        "expected_context",
+        "expected_noted",
+    ),
     [
-        (True, "unresolved", (), None),
+        (True, "unresolved", "provisional", "unresolved_audio_disagreement", (), None),
         (
             True,
             "resolved",
+            "trusted_automatic",
+            "audio_video_confirmed",
             ("Audio differed in 1:00-1:30; the video confirmed the offset there.",),
-            "Noted: audio differed in 1 section (1:00-1:30); the video confirmed +146f there.",
+            "Noted: audio differed in 1 section (1:00-1:30); the video confirmed +0f there.",
         ),
-        (False, "resolved", (), None),
+        (False, "resolved", "trusted_automatic", "audio_video_confirmed", (), None),
+        (False, "unresolved", "trusted_automatic", "audio_video_confirmed", (), None),
+        (True, "unexamined", "provisional", "unresolved_audio_disagreement", (), None),
+        (False, "unexamined", "trusted_automatic", "audio_video_confirmed", (), None),
+        (
+            True,
+            "alternative_confirmed",
+            "provisional",
+            "competing_offset_confirmed_by_video",
+            (),
+            None,
+        ),
         (
             False,
-            "unresolved",
-            ("Picture differs in 1:00-1:30 (for example a replaced shot); offset still holds.",),
-            "Noted: the picture differs in 1:00-1:30 (for example a replaced shot); the offset still holds.",
+            "alternative_confirmed",
+            "provisional",
+            "competing_offset_confirmed_by_video",
+            (),
+            None,
         ),
     ],
 )
@@ -1518,16 +1617,21 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     capsys: pytest.CaptureFixture[str],
     credible: bool,
     resolution: str,
+    expected_state: str,
+    expected_reason: str,
     expected_context: tuple[str, ...],
     expected_noted: str | None,
 ) -> None:
     from frame_compare.services.alignment import _project_audio_attempt_for_review
 
-    attempt = _chunk_target_context_attempt(credible=credible, resolution=resolution)
+    attempt = _producer_target_context_attempt(credible=credible, resolution=resolution)
     compact = _project_audio_attempt_for_review(attempt)
     full_review = build_audio_review_presentation(attempt)
     compact_review = build_audio_review_presentation(compact)
 
+    assert attempt.decision.state == expected_state
+    assert attempt.decision.primary_reason == expected_reason
+    assert compact.decision == attempt.decision
     assert compact.chunks.rows_omitted
     assert full_review.context_lines() == compact_review.context_lines() == expected_context
     assert full_review.context_lines(panel=True) == compact_review.context_lines(panel=True)
@@ -1543,15 +1647,16 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
 
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
+    applied = expected_state == "trusted_automatic"
     result = AlignmentResult(
         reference.name,
         comparison.name,
-        None,
-        None,
+        0 if applied else None,
+        0.0 if applied else None,
         0.5,
         "cross_correlation",
         "computed",
-        applied=False,
+        applied=applied,
         diagnostic=attempt.decision.primary_reason,
         stability=attempt.stability,
         audio_attempt=attempt,
@@ -1561,13 +1666,29 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     full_terminal = capsys.readouterr().err
     _present(request, compact_result, config)
     assert capsys.readouterr().err == full_terminal
+    assert "Picture differs" not in full_terminal
+    assert "the picture differs" not in full_terminal
+    assert (" - APPLIED" in full_terminal) is applied
+    assert (" - NOT APPLIED" in full_terminal) is (not applied)
 
-    if expected_noted is not None:
-        _present(request, _applied_result(reference, comparison, attempt), config)
-        full_applied = capsys.readouterr().err
-        _present(request, _applied_result(reference, comparison, compact), config)
-        assert capsys.readouterr().err == full_applied
-        assert expected_noted in full_applied
+    _present(request, result, config, verbose=True)
+    verbose_terminal = capsys.readouterr().err
+    assert f"Decision: state={expected_state}; reason={expected_reason}" in verbose_terminal
+    assert "Picture differs" not in verbose_terminal
+    if expected_noted is None:
+        assert "Noted:" not in full_terminal
+    else:
+        assert expected_noted in full_terminal
+
+    configure_logging("INFO", "json")
+    _present(request, result, config, json_output=True)
+    json_streams = capsys.readouterr()
+    assert json_streams.out == ""
+    assert ("audio_alignment_requires_review" in json_streams.err) is (not applied)
+    if applied:
+        assert json_streams.err == ""
+    else:
+        assert json.loads(json_streams.err)["reason"] == expected_reason
 
 
 def test_partial_final_target_bounds_match_compact_native_projection() -> None:
@@ -1823,7 +1944,7 @@ def test_applied_noted_line_only_exists_with_context(
 ) -> None:
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
-    plain = _review_attempt("competing_offset_confirmed_by_video")
+    plain = _producer_target_context_attempt(credible=False, resolution="unresolved")
     _present(request, _applied_result(reference, comparison, plain), config)
     assert "Noted:" not in capsys.readouterr().err
 
@@ -1832,8 +1953,8 @@ def test_applied_noted_line_only_exists_with_context(
         video_check=replace(
             plain.video_check,
             same_frame_context=(
-                AudioSameFrameContext(0, 1177, 3.531, 146),
-                AudioSameFrameContext(1, 1177, 3.531, 146),
+                AudioSameFrameContext(0, 0, 0.0, 0),
+                AudioSameFrameContext(1, 0, 0.0, 0),
             ),
         ),
     )
