@@ -676,6 +676,7 @@ def test_repeated_music_cue_is_resolved_by_identical_moving_video(
 ) -> None:
     result = _align_pair(u4_media, "repeated-music-cue", tmp_path / "generated")
     _assert_label(result, state="trusted_automatic", reason="audio_video_confirmed")
+    assert result.frame_offset == 0
     assert result.audio_attempt is not None
     _assert_audio(
         result,
