@@ -1317,21 +1317,23 @@ def _review_target_status(target: VideoTargetEvidence | None) -> AudioReviewRegi
 def _review_target_offset(
     attempt: AudioAlignmentAttempt, target: VideoTargetEvidence
 ) -> int | None:
-    lag: int | None = None
     if target.kind == "run":
         for run in attempt.runs:
             if (run.first_index, run.last_index) == (
                 target.first_chunk_index,
                 target.last_chunk_index,
             ):
-                lag = run.lag
-                break
-        if lag is not None:
-            return _review_frame_for_lag(attempt, lag)
-    return target.alternative_offsets[0] if target.alternative_offsets else None
+                return _review_frame_for_lag(attempt, run.lag)
+        return None
+    if target.first_chunk_index != target.last_chunk_index:
+        return None
+    if not 0 <= target.first_chunk_index < len(attempt.chunks.lags):
+        return None
+    lag = attempt.chunks.lags[target.first_chunk_index]
+    return None if lag is None else _review_frame_for_lag(attempt, lag)
 
 
-def _review_target_regions(
+def _review_target_candidates(
     attempt: AudioAlignmentAttempt,
     targets: tuple[VideoTargetEvidence, ...],
 ) -> tuple[AudioReviewRegion, ...]:
@@ -1353,7 +1355,7 @@ def _review_target_regions(
                 (target.kind, target.first_chunk_index, target.last_chunk_index),
             )
         )
-    return _review_non_overlapping(tuple(regions))
+    return tuple(regions)
 
 
 def _review_region_target_projections(
@@ -1457,6 +1459,76 @@ def _review_non_overlapping(
     return tuple(clipped)
 
 
+def _review_overlay_regions(
+    base_regions: tuple[AudioReviewRegion, ...],
+    target_regions: tuple[AudioReviewRegion, ...],
+) -> tuple[AudioReviewRegion, ...]:
+    all_regions = (*base_regions, *target_regions)
+    boundaries = tuple(
+        sorted(
+            {
+                boundary
+                for region in all_regions
+                for boundary in (region.start_seconds, region.end_seconds)
+                if region.end_seconds > region.start_seconds
+            }
+        )
+    )
+    segments: list[AudioReviewRegion] = []
+    for start, end in zip(boundaries, boundaries[1:], strict=False):
+        if end <= start:
+            continue
+        active_base = tuple(
+            region
+            for region in base_regions
+            if region.start_seconds < end and region.end_seconds > start
+        )
+        active_targets = tuple(
+            region
+            for region in target_regions
+            if region.start_seconds < end and region.end_seconds > start
+        )
+        if not active_base and not active_targets:
+            continue
+        if active_targets:
+            selected_target = min(
+                active_targets,
+                key=lambda region: (
+                    region.end_seconds - region.start_seconds,
+                    region.start_seconds,
+                ),
+            )
+            active = (selected_target,) + tuple(
+                region
+                for region in (*active_targets, *active_base)
+                if region is not selected_target
+            )
+            offset = selected_target.offset
+        else:
+            active = active_base
+            offset = active_base[0].offset
+        primary = next((region for region in active if region.target_key is not None), active[0])
+        status = active[0].status
+        projections = _review_region_target_projections(active[0])
+        for region in active[1:]:
+            status = _review_merge_status(status, region.status)
+            projections = tuple(
+                dict.fromkeys((*projections, *_review_region_target_projections(region)))
+            )
+        segments.append(
+            AudioReviewRegion(
+                offset,
+                start,
+                end,
+                status,
+                primary.target_resolution,
+                primary.target_key,
+                projections,
+            )
+        )
+    return _review_non_overlapping(tuple(segments))
+
+
 def _review_regions(
     attempt: AudioAlignmentAttempt, suggested: int | None
 ) -> tuple[AudioReviewRegion, ...]:
@@ -1514,16 +1586,10 @@ def _review_regions(
     else:
         regions = tuple(runs)
 
-    existing_run_keys = {("run", run.first_index, run.last_index) for run in attempt.runs}
-    extras = tuple(
-        region
-        for region in _review_target_regions(attempt, video.targets)
-        if any(
-            target_key not in existing_run_keys
-            for target_key, _resolution in _review_region_target_projections(region)
-        )
+    chronological = _review_overlay_regions(
+        _review_non_overlapping(tuple(regions)),
+        _review_target_candidates(attempt, video.targets),
     )
-    chronological = _review_non_overlapping((*regions, *extras))
     if suggested is None:
         return chronological
     return tuple(

@@ -364,7 +364,7 @@ def _singleton_chunk_target_attempt():
             kind="chunk",
             first_chunk_index=2,
             last_chunk_index=2,
-            alternative_offsets=(246,),
+            alternative_offsets=(245, 246, 247),
             resolution="unresolved",
             positions=(VideoTargetPosition(2, 9_000, 1.0, 1.0, "neither"),),
         ),
@@ -379,6 +379,45 @@ def _singleton_chunk_target_attempt():
         runs=tuple(
             AudioChunkRun(first_index=index, last_index=index, lag=lag, chunk_count=1)
             for index, lag in enumerate((1177, 81_000, 82_000, 1177))
+        ),
+        video_check=replace(attempt.video_check, targets=targets),
+    )
+
+
+def _nested_alternative_confirmed_chunk_attempt():
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    targets = (
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=0,
+            last_chunk_index=3,
+            alternative_offsets=(242, 243, 244),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(1, 9_000, 1.0, 1.0, "neither"),),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=2,
+            last_chunk_index=2,
+            alternative_offsets=(249, 250, 251),
+            resolution="alternative_confirmed",
+            positions=(VideoTargetPosition(2, 9_001, 1.0, 0.1, "alternative"),),
+        ),
+    )
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(81_000, 81_000, 83_333, 81_000),
+            credible=(True, True, False, True),
+            agrees=(False, False, False, False),
+        ),
+        runs=(AudioChunkRun(first_index=0, last_index=3, lag=81_000, chunk_count=3),),
+        audio=replace(
+            attempt.audio,
+            global_lag=81_000,
+            credible_chunks=3,
+            agreeing_chunks=0,
         ),
         video_check=replace(attempt.video_check, targets=targets),
     )
@@ -399,7 +438,7 @@ def _unresolved_run_then_chunk_attempt():
             kind="chunk",
             first_chunk_index=3,
             last_chunk_index=3,
-            alternative_offsets=(250,),
+            alternative_offsets=(249, 250, 251),
             resolution="unresolved",
             positions=(VideoTargetPosition(2, 9_001, 1.0, 1.0, "neither"),),
         ),
@@ -444,7 +483,7 @@ def _resolved_before_alternative_confirmed_attempt():
             kind="chunk",
             first_chunk_index=3,
             last_chunk_index=3,
-            alternative_offsets=(250,),
+            alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
             positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative"),),
         ),
@@ -453,7 +492,7 @@ def _resolved_before_alternative_confirmed_attempt():
         attempt,
         chunks=replace(
             attempt.chunks,
-            lags=(1177, 81_000, 81_000, 1177),
+            lags=(1177, 81_000, 81_000, 83_333),
             agrees=(True, False, False, True),
         ),
         runs=(
@@ -1167,6 +1206,41 @@ def test_chunk_target_identity_survives_singleton_run_projection(
     err = capsys.readouterr().err
     assert "Audio in 1:00-1:30 points to +246f, and the video could not rule that out." in err
     assert "Audio in 1 more section points elsewhere; they were not checked" in err
+
+
+def test_nested_alternative_confirmed_chunk_splits_wide_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _nested_alternative_confirmed_chunk_attempt()
+    review = build_audio_review_presentation(attempt)
+    region = next(region for region in review.regions if region.offset == 250)
+
+    assert (region.start_seconds, region.end_seconds) == (60.0, 90.0)
+    assert (("chunk", 2, 2), "alternative_confirmed") in region.target_projections
+
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="competing_offset_confirmed_by_video",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    assert (
+        "The video confirms +250f in 1:00-1:30, so the sources likely differ by an edit there."
+        in err
+    )
+    assert "The video confirms +243f" not in err
 
 
 @pytest.mark.parametrize(
