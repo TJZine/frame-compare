@@ -110,7 +110,7 @@ class _CheckPointTarget:
     status: str
     order: int
     psr: float
-    frames: tuple[int, ...]
+    points: tuple[tuple[int, int], ...]
 
 
 def sample_to_reference_frame(
@@ -767,38 +767,40 @@ def _check_points(
         ]
         return max(values, default=float("-inf"))
 
-    def target_frames(target: VideoTargetEvidence) -> tuple[int, ...]:
+    def target_points(target: VideoTargetEvidence) -> tuple[tuple[int, int], ...]:
         if target.resolution == "unexamined":
             if planned_target_frames is None:
                 return ()
             key = (target.kind, target.first_chunk_index, target.last_chunk_index)
-            return tuple(planned_target_frames.get(key, ()))[:1]
+            return tuple(
+                (frame, target.target_offset) for frame in planned_target_frames.get(key, ())
+            )[:1]
         preferred_winner = {
             "resolved": "confirmed",
             "alternative_confirmed": "alternative",
             "unresolved": "neither",
         }[target.resolution]
         preferred = tuple(
-            position.reference_frame
-            for position in target.positions
-            if position.winner == preferred_winner
+            position for position in target.positions if position.winner == preferred_winner
         )
-        if target.resolution != "unresolved":
-            return preferred
         remaining = tuple(
-            position.reference_frame
-            for position in target.positions
-            if position.winner != preferred_winner
+            position for position in target.positions if position.winner != preferred_winner
         )
-        return (*preferred, *remaining)
+        return tuple(
+            (
+                position.reference_frame,
+                confirmed if position.winner == "confirmed" else target.target_offset,
+            )
+            for position in (*preferred, *remaining)
+        )
 
     def target_offset(target: VideoTargetEvidence) -> int:
         return confirmed if target.resolution == "resolved" else target.target_offset
 
     candidates: list[_CheckPointTarget] = []
     for order, target in enumerate(targets):
-        frames = target_frames(target)
-        if not frames:
+        target_check_points = target_points(target)
+        if not target_check_points:
             continue
         candidates.append(
             _CheckPointTarget(
@@ -814,7 +816,7 @@ def _check_points(
                 ),
                 order=order,
                 psr=target_psr(target),
-                frames=frames,
+                points=target_check_points,
             )
         )
     candidates.sort(key=lambda candidate: (candidate.start, candidate.end, candidate.order))
@@ -868,8 +870,8 @@ def _check_points(
     for region in target_regions:
         represented = False
         for candidate in region:
-            for frame in candidate.frames:
-                if add_point(frame, candidate.offset):
+            for frame, offset in candidate.points:
+                if add_point(frame, offset):
                     represented = True
                     break
             if represented:
@@ -882,10 +884,10 @@ def _check_points(
 
     for region in target_regions:
         for candidate in region:
-            for frame in candidate.frames:
+            for frame, offset in candidate.points:
                 if len(points) >= 5:
                     break
-                add_point(frame, candidate.offset)
+                add_point(frame, offset)
             if len(points) >= 5:
                 break
         if len(points) >= 5:

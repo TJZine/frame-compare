@@ -7,6 +7,7 @@ from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -791,8 +792,106 @@ def test_check_points_follow_target_resolution_and_track_order() -> None:
         (201, 199),
         (401, 401),
         (900, 900),
-        (100, 99),
+        (100, 100),
     ]
+
+
+@pytest.mark.parametrize(
+    ("winner", "resolution", "comparison_frame"),
+    [
+        ("confirmed", "unresolved", 100),
+        ("alternative", "alternative_confirmed", 99),
+    ],
+)
+def test_single_winner_run_checkpoint_uses_its_winning_offset(
+    winner: Literal["confirmed", "alternative"],
+    resolution: str,
+    comparison_frame: int,
+) -> None:
+    position = alignment_video.VideoTargetPosition(
+        0,
+        100,
+        0.1 if winner == "confirmed" else 1.0,
+        0.1 if winner == "alternative" else 1.0,
+        winner,
+    )
+    actual_resolution = alignment_video._target_resolution("run", (position,))
+    assert actual_resolution == resolution
+    target = alignment_video.VideoTargetEvidence(
+        kind="run",
+        first_chunk_index=0,
+        last_chunk_index=1,
+        credible=True,
+        start_sample=0,
+        end_sample=20,
+        target_offset=1,
+        alternative_offsets=(1,),
+        resolution=actual_resolution,
+        positions=(position,),
+    )
+
+    points = alignment_video._check_points(
+        (),
+        (target,),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+    )
+
+    assert points == (alignment_video.VideoCheckPoint(100 / float(FPS), 100, comparison_frame),)
+
+
+def test_mixed_run_checkpoint_pairing_is_truthful_ordered_and_capped() -> None:
+    positions = (
+        alignment_video.VideoTargetPosition(0, 100, 1.0, 1.0, "neither"),
+        alignment_video.VideoTargetPosition(1, 101, 0.1, 1.0, "confirmed"),
+        alignment_video.VideoTargetPosition(2, 102, 1.0, 0.1, "alternative"),
+    )
+    resolution = alignment_video._target_resolution("run", positions)
+    assert resolution == "alternative_confirmed"
+    target = alignment_video.VideoTargetEvidence(
+        kind="run",
+        first_chunk_index=0,
+        last_chunk_index=1,
+        credible=True,
+        start_sample=0,
+        end_sample=20,
+        target_offset=1,
+        alternative_offsets=(1,),
+        resolution=resolution,
+        positions=positions,
+    )
+    base_positions = tuple(
+        alignment_video.VideoPositionDifference(
+            index,
+            frame,
+            (2.0, 1.0, 0.1, 1.0, 2.0),
+        )
+        for index, frame in enumerate((900, 901))
+    )
+
+    points = alignment_video._check_points(
+        base_positions,
+        (target,),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+    )
+
+    assert [(point.reference_frame, point.suggested_comparison_frame) for point in points] == [
+        (102, 101),
+        (900, 900),
+        (100, 99),
+        (101, 101),
+        (901, 901),
+    ]
+    assert points == alignment_video._check_points(
+        base_positions,
+        (target,),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+    )
 
 
 def test_unexamined_target_keeps_unscored_planned_review_point() -> None:
