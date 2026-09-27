@@ -579,6 +579,7 @@ def test_native_projection_of_large_attempt_stays_within_bound() -> None:
 
 def test_round_trip_complete_rejected_and_aborted() -> None:
     complete = attempt_with_chunks(3)
+    assert complete.chunks.total_samples == sum(complete.chunks.counts)
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(complete)) == complete
 
     rejected_payload = asdict(complete)
@@ -625,6 +626,7 @@ def test_round_trip_complete_rejected_and_aborted() -> None:
     }
     rejected = evidence_from_payload(AudioAlignmentAttempt, rejected_payload)
     assert rejected.status == "preanalysis_rejection"
+    assert rejected.chunks.total_samples == 0
     assert rejected.audio.compensation_seconds is None
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(rejected)) == rejected
 
@@ -652,6 +654,7 @@ def test_round_trip_complete_rejected_and_aborted() -> None:
     }
     aborted = evidence_from_payload(AudioAlignmentAttempt, aborted_payload)
     assert aborted.status == "aborted"
+    assert aborted.chunks.total_samples == complete.chunks.total_samples
     assert aborted.audio.compensation_seconds == -0.5
     assert aborted.collection_failure == AudioCollectionFailure(category="timeout", side=None)
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(aborted)) == aborted

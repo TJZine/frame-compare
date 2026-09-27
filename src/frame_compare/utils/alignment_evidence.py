@@ -378,7 +378,9 @@ class AudioChunkColumns:
     Empty columns mean chunk rows were omitted for the native projection
     (``rows_omitted``) or were never observed (a rejection or an aborted
     collection); otherwise every column has one entry per planned chunk.
-    ``total_samples`` always retains the exact analyzed 8 kHz reference span.
+    ``total_samples`` is status-qualified: completed attempts retain the
+    analyzed 8 kHz reference span, aborted attempts retain the planned span,
+    and attempts without a plan (including preanalysis rejections) retain zero.
     """
 
     starts: tuple[int, ...]
@@ -850,6 +852,8 @@ class AudioAlignmentAttempt:
             raise ValueError("observed collection facts need both paired sides in order")
         planned = self.analysis.planned_chunk_count
         lag_radius = self.analysis.lag_samples
+        # The span is analyzed for complete attempts, planned for aborted
+        # attempts, and zero when no plan exists.
         total_samples = self.chunks.total_samples
         if planned == 0:
             if total_samples != 0:
@@ -1385,8 +1389,10 @@ def _review_chunk_bounds(
     rate = attempt.analysis.analysis_rate
     if starts and 0 <= first < len(starts) and 0 <= last < len(starts):
         return starts[first] / rate, (starts[last] + counts[last]) / rate
-    chunk = attempt.analysis.chunk_samples / rate
-    return first * chunk, (last + 1) * chunk
+    chunk_samples = attempt.analysis.chunk_samples
+    return first * chunk_samples / rate, min(
+        (last + 1) * chunk_samples, attempt.chunks.total_samples
+    ) / rate
 
 
 def _review_target_bounds(

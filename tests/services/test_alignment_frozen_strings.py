@@ -1590,6 +1590,49 @@ def test_partial_final_target_bounds_match_compact_native_projection() -> None:
     assert all("1:00-2:00" not in line for line in compact_review.region_lines())
 
 
+def test_partial_final_base_regions_match_compact_native_projection() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    partial = _partial_final_target_attempt()
+    run_attempt = replace(partial, video_check=replace(partial.video_check, targets=()))
+    full_attempt = replace(run_attempt, runs=())
+
+    for attempt, expected in (
+        (run_attempt, "+243f  1:00-1:45  not settled"),
+        (full_attempt, "+146f  0:00-1:45  confirmed by video"),
+    ):
+        compact = _project_audio_attempt_for_review(attempt)
+        full_regions = build_audio_review_presentation(attempt).region_lines()
+        compact_regions = build_audio_review_presentation(compact).region_lines()
+
+        assert compact.chunks.rows_omitted
+        assert full_regions == compact_regions
+        assert expected in compact_regions
+        assert all("2:00" not in line for line in compact_regions)
+
+
+def test_partial_final_same_frame_context_matches_compact_native_projection() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    partial = _partial_final_target_attempt()
+    attempt = replace(
+        partial,
+        video_check=replace(
+            partial.video_check,
+            same_frame_context=(AudioSameFrameContext(3, 1177, 146.23, 146),),
+        ),
+    )
+    compact = _project_audio_attempt_for_review(attempt)
+    full_review = build_audio_review_presentation(attempt)
+    compact_review = build_audio_review_presentation(compact)
+
+    assert compact.chunks.rows_omitted
+    assert full_review.same_frame_regions == compact_review.same_frame_regions
+    assert tuple(
+        (region.start_seconds, region.end_seconds) for region in compact_review.same_frame_regions
+    ) == ((90.0, 105.0),)
+
+
 @pytest.mark.parametrize(
     ("reason", "expected", "not_expected"),
     [

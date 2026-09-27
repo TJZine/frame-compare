@@ -319,8 +319,7 @@ recovery requirement.
   `frame_compare.services.alignment_diagnostics` and defined once in
   `frame_compare.utils.alignment_evidence`. Each pathless file is bounded to
   128 KiB, retains selected-stream facts with start-time compensation, contiguous
-  chunk runs, the exact analyzed reference-sample span, compact per-chunk columnar
-  rows, the global lag, the sub-frame
+  chunk runs, compact per-chunk columnar rows, the global lag, the sub-frame
   estimate, the audio decision, and paired collection summaries, and is written
   atomically before optional review. Current attempts retain
   observed paired-collection facts; preanalysis rejections remain `not_observed`.
@@ -534,10 +533,8 @@ Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
-service-projected audio evidence as metadata schema v5. The compact projection omits
-per-chunk rows but retains the exact analyzed reference-sample span so final partial
-chunk bounds remain authoritative. The typed
-`frame_compare.vsview.alignment_review_contract` owns the session identity,
+service-projected audio evidence as metadata schema v5. The
+typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
 strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
