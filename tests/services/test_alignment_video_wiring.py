@@ -86,16 +86,16 @@ def _fixed_estimate(plan: ChunkPlan, mode: str) -> ChunkedAudioEstimate:
     observations: list[ChunkObservation] = []
     for index, (start, count) in enumerate(plan.chunks):
         if mode == "unresolved_run":
-            lag = 0 if index == 0 else 1600
+            lag = 1600 if index >= 18 else 0
             credible = True
-            agrees = index == 0
+            agrees = index < 18
         elif mode == "unexamined_chunk":
             lag = 1600 if index == len(plan.chunks) - 1 else 0
             credible = True
             agrees = index != len(plan.chunks) - 1
         else:
-            lag = 1600 if index == len(plan.chunks) - 1 else 0
-            credible = index != len(plan.chunks) - 1
+            lag = 1600 if index == 19 else 0
+            credible = index != 19
             agrees = credible
         observations.append(
             ChunkObservation(
@@ -112,12 +112,12 @@ def _fixed_estimate(plan: ChunkPlan, mode: str) -> ChunkedAudioEstimate:
 
     if mode == "unresolved_run":
         runs = (
-            ChunkRun(first_index=0, last_index=0, lag=0, chunk_count=1),
+            ChunkRun(first_index=0, last_index=17, lag=0, chunk_count=18),
             ChunkRun(
-                first_index=1,
-                last_index=len(plan.chunks) - 1,
+                first_index=18,
+                last_index=19,
                 lag=1600,
-                chunk_count=len(plan.chunks) - 1,
+                chunk_count=2,
             ),
         )
         outcome = "no_single_offset"
@@ -161,6 +161,15 @@ class _FixedCorrelation:
 
     def finish(self) -> ChunkedAudioEstimate:
         return self._estimate
+
+
+def _twenty_chunk_plan(*_args: object) -> ChunkPlan:
+    chunk_samples = 14_000
+    return ChunkPlan(
+        chunk_samples=chunk_samples,
+        lag_samples=8_000,
+        chunks=tuple((index * chunk_samples, chunk_samples) for index in range(20)),
+    )
 
 
 def _run(
@@ -351,10 +360,12 @@ def test_each_v6_failure_blocks_application_trims_and_cache(
         shared_alignment_cache_dir=tmp_path / "shared",
     )
     target = {
-        "unresolved_run": _target("run", 1, 2, "unresolved"),
+        "unresolved_run": _target("run", 18, 19, "unresolved"),
         "unexamined_chunk": _target("chunk", 4, 4, "unexamined"),
-        "alternative_confirmed": _target("chunk", 2, 2, "alternative_confirmed"),
+        "alternative_confirmed": _target("chunk", 19, 19, "alternative_confirmed"),
     }[mode]
+    if mode in {"unresolved_run", "alternative_confirmed"}:
+        monkeypatch.setattr(alignment_service, "plan_audio_chunks", _twenty_chunk_plan)
     monkeypatch.setattr(
         alignment_service,
         "ChunkedCorrelation",
@@ -369,12 +380,14 @@ def test_each_v6_failure_blocks_application_trims_and_cache(
 
     (result,) = _run(request, config, loader=loader)
 
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.video_check.targets == (target,)
+    recount = result.audio_attempt.authority_recount
+    assert recount is not None
+    assert recount.passed is True
     assert result.applied is False
     assert result.frame_offset is None
     assert result.diagnostic == expected_diagnostic
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.video_check.targets == (target,)
-    assert result.audio_attempt.authority_recount is not None
     assert not (tmp_path / "shared" / "alignment_reuse.toml").exists()
 
 

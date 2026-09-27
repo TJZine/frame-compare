@@ -114,3 +114,5 @@ def test_each_v6_failure_never_reaches_alignment_trims(
     assert output.comparisons[0].alignment is None
     assert output.reference.trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_start_frames == 0
+    assert output.warnings
+    assert diagnostic in output.warnings[0]
