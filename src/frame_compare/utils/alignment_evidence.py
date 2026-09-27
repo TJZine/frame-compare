@@ -1208,10 +1208,15 @@ class AudioReviewPresentation:
         offset = self.suggested_offset
         if offset is None:
             offset = self.attempt.audio.rounded_frame or 0
+        weak = max(0, self.attempt.audio.active_chunks - self.attempt.audio.credible_chunks)
+        inactive = max(
+            0,
+            self.attempt.analysis.planned_chunk_count - self.attempt.audio.active_chunks,
+        )
         return (
-            f"Audio: {agreeing} of {self.attempt.audio.credible_chunks} sections agree on "
-            f"{offset:+d}f ({max(0, self.attempt.audio.credible_chunks - agreeing)} differ, "
-            f"{max(0, self.attempt.audio.active_chunks - self.attempt.audio.credible_chunks)} quiet)."
+            f"Audio: {agreeing} of {self.attempt.audio.credible_chunks} credible sections agree on "
+            f"{offset:+d}f ({max(0, self.attempt.audio.credible_chunks - agreeing)} differ; "
+            f"{weak} active with weak evidence; {inactive} inactive)."
         )
 
     def established_video_line(self) -> str:
@@ -1408,6 +1413,12 @@ def _review_target_status(target: VideoTargetEvidence | None) -> AudioReviewRegi
     return "not checked" if target.resolution == "unexamined" else "not settled"
 
 
+def _review_target_offset(video: VideoCheckObservation, target: VideoTargetEvidence) -> int:
+    if target.resolution == "resolved" and video.confirmed_offset is not None:
+        return video.confirmed_offset
+    return target.target_offset
+
+
 def _review_target_candidates(
     attempt: AudioAlignmentAttempt,
     targets: tuple[VideoTargetEvidence, ...],
@@ -1417,7 +1428,7 @@ def _review_target_candidates(
         start, end = _review_target_bounds(attempt, target)
         regions.append(
             AudioReviewRegion(
-                target.target_offset,
+                _review_target_offset(attempt.video_check, target),
                 start,
                 end,
                 _review_target_status(target),
@@ -1614,7 +1625,7 @@ def _review_regions(
         target = targets.get(("run", run.first_index, run.last_index))
         converted = _review_frame_for_lag(attempt, run.lag)
         offset = (
-            target.target_offset
+            _review_target_offset(video, target)
             if target is not None
             else (
                 suggested
@@ -1762,7 +1773,7 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
     regions = _review_regions(attempt, suggested)
     same_frame_regions = tuple(
         AudioReviewRegion(
-            video.confirmed_offset or item.rounded_frame,
+            (video.confirmed_offset if video.confirmed_offset is not None else item.rounded_frame),
             *_review_chunk_bounds(attempt, item.chunk_index, item.chunk_index),
             "confirmed by video",
         )
@@ -1774,7 +1785,7 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
             continue
         start, end = _review_target_bounds(attempt, target)
         target_region = AudioReviewRegion(
-            video.confirmed_offset or suggested or 0,
+            (video.confirmed_offset if video.confirmed_offset is not None else suggested or 0),
             start,
             end,
             _review_target_status(target),

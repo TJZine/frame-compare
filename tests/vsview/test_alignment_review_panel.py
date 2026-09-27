@@ -57,6 +57,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
 from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
     _multi_context_attempt,
+    _producer_count_attempt,
     _producer_target_context_attempt,
     _production_nested_targets_attempt,
     _review_attempt,
@@ -879,6 +880,26 @@ def test_panel_target_context_matches_full_and_compact_evidence(
 
     expected_details = build_audio_review_presentation(attempt).verbose_lines(panel=True)
     assert expected_details == build_audio_review_presentation(compact).verbose_lines(panel=True)
+    expected_offset = 0 if resolution == "resolved" else 2
+    expected_status = {
+        "resolved": "confirmed by video",
+        "alternative_confirmed": "confirmed by video",
+        "unresolved": "not settled",
+        "unexamined": "not checked",
+    }[resolution]
+    expected_region = f"{expected_offset:+d}f  1:00–1:30  {expected_status}"
+    assert any(expected_region in line for line in expected_details)
+    expected_check_offset = 0 if resolution in {"resolved", "unexamined"} else 2
+    expected_check = (
+        "1:15 — reference 1,800 ↔ comparison "
+        f"{1_800 - expected_check_offset:,} ({expected_check_offset:+d}f)"
+        if resolution != "unexamined"
+        else "0:50 — reference 1,200 ↔ comparison 1,200 (+0f)"
+    )
+    assert any(expected_check in line for line in expected_details)
+    if resolution == "resolved":
+        assert all("+2f  1:00–1:30  confirmed by video" not in line for line in expected_details)
+        assert all("comparison 1,798 (+2f)" not in line for line in expected_details)
     for detail_text in detail_texts:
         assert all(line in detail_text for line in expected_details)
         assert "Picture differs" not in detail_text
@@ -886,6 +907,66 @@ def test_panel_target_context_matches_full_and_compact_evidence(
         assert [field.text() for field in panel.frame_inputs] == ["", ""]
         assert [field.text() for field in panel.offset_inputs] == [""]
         assert not panel.use_positions_button.isEnabled()
+
+
+@pytest.mark.parametrize(
+    ("planned", "active", "credible", "agreeing", "expected"),
+    [
+        (4, 4, 3, 3, "(0 differ; 1 active with weak evidence; 0 inactive)."),
+        (4, 3, 3, 3, "(0 differ; 0 active with weak evidence; 1 inactive)."),
+        (5, 4, 3, 3, "(0 differ; 1 active with weak evidence; 1 inactive)."),
+        (4, 0, 0, 0, "(0 differ; 0 active with weak evidence; 4 inactive)."),
+    ],
+)
+def test_panel_established_counts_match_full_and_compact_evidence(
+    tmp_path: Path,
+    planned: int,
+    active: int,
+    credible: int,
+    agreeing: int,
+    expected: str,
+) -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _producer_count_attempt(
+        planned=planned,
+        active=active,
+        credible=credible,
+        agreeing=agreeing,
+    )
+    compact = _project_audio_attempt_for_review(attempt)
+    expected_line = f"Audio: {agreeing} of {credible} credible sections agree on +0f {expected}"
+    summaries: list[str] = []
+    details: list[str] = []
+    for label, candidate in (("full", attempt), ("compact", compact)):
+        audio_review = json.dumps(
+            {
+                "current_authority": {
+                    "origin": "none",
+                    "frame_offset": None,
+                },
+                "evidence_availability": "current_attempt",
+                "audio_attempt": asdict(candidate),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        panel_dir = tmp_path / label
+        panel_dir.mkdir()
+        panel, _api, _script = _panel(panel_dir, suggestion=None, audio_review=audio_review)
+        summaries.append(panel.audio_summary_labels[0].text())
+        group = panel.audio_detail_groups[0]
+        group.setChecked(True)
+        details.append(cast(QLabel, group.findChild(QLabel)).text())
+
+    assert summaries[0] == summaries[1]
+    if active:
+        assert summaries[0].startswith("Provisional audio candidate: +0f — NOT APPLIED")
+    else:
+        assert summaries[0].startswith("No usable audio candidate")
+    assert details[0] == details[1]
+    assert f"Established: {expected_line}" in details[0]
+    assert " quiet)." not in details[0]
 
 
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
