@@ -174,6 +174,7 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="chunk",
             first_chunk_index=0,
             last_chunk_index=0,
+            target_offset=147,
             alternative_offsets=(147, 148),
             resolution="resolved",
             positions=(VideoTargetPosition(0, 100, 0.1, 1.0, "confirmed"),),
@@ -182,6 +183,7 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="chunk",
             first_chunk_index=1,
             last_chunk_index=1,
+            target_offset=150,
             alternative_offsets=(149, 150, 151),
             resolution="unresolved",
             positions=(VideoTargetPosition(1, 200, 1.0, 1.0, "neither"),),
@@ -190,6 +192,7 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="run",
             first_chunk_index=2,
             last_chunk_index=3,
+            target_offset=153,
             alternative_offsets=(152, 153),
             resolution="unexamined",
             positions=(),
@@ -198,6 +201,7 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="run",
             first_chunk_index=4,
             last_chunk_index=5,
+            target_offset=155,
             alternative_offsets=(154, 155, 156),
             resolution="alternative_confirmed",
             positions=(VideoTargetPosition(2, 300, 1.0, 0.1, "alternative"),),
@@ -230,12 +234,27 @@ def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(attempt))
     assert parsed == attempt
     assert parsed.authority_recount is not None
+    assert parsed.video_check.targets[0].target_offset == 147
     assert parsed.video_check.targets[3].resolution == "alternative_confirmed"
     assert parsed.video_check.same_frame_context[0].rounded_frame == 146
     assert parsed.video_check.check_points[0].suggested_comparison_frame == 154
 
 
+def test_native_compact_projection_retains_authoritative_target_offset() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    projected = _project_audio_attempt_for_review(_populated_video_attempt())
+    assert projected.chunks.rows_omitted is True
+    assert projected.chunks.starts == ()
+    assert projected.video_check.targets[0].target_offset == 147
+
+
 def test_extended_video_evidence_rejects_bad_values() -> None:
+    payload = asdict(_populated_video_attempt())
+    payload["video_check"]["targets"][0]["target_offset"] = True
+    with pytest.raises(ValueError):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
     payload = asdict(_populated_video_attempt())
     payload["video_check"]["targets"][0]["resolution"] = "pending"
     with pytest.raises(ValueError, match="must be one of"):
@@ -259,6 +278,7 @@ def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            target_offset=6,
             alternative_offsets=(5, 6, 7),
             resolution="resolved",
             positions=(VideoTargetPosition(index, index * 100, 0.1, 1.0, "confirmed"),),

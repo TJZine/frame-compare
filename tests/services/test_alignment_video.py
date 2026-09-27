@@ -435,6 +435,7 @@ def test_check_points_cover_each_target_before_filling_the_five_point_cap() -> N
             kind="chunk",
             first_chunk_index=first_index,
             last_chunk_index=first_index,
+            target_offset=1,
             alternative_offsets=(1,),
             resolution="unresolved",
             positions=tuple(
@@ -532,6 +533,7 @@ def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: 
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            target_offset=alternative,
             alternative_offsets=(alternative,),
             resolution="unresolved",
             positions=(
@@ -593,6 +595,7 @@ def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            target_offset=1,
             alternative_offsets=(1,),
             resolution="unresolved",
             positions=tuple(
@@ -642,6 +645,7 @@ def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            target_offset=index,
             alternative_offsets=(index,),
             resolution="resolved",
             positions=(

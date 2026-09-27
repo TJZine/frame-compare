@@ -557,6 +557,7 @@ class VideoTargetEvidence:
     kind: VideoTargetKind
     first_chunk_index: int
     last_chunk_index: int
+    target_offset: int
     alternative_offsets: tuple[int, ...]
     resolution: VideoTargetResolution
     positions: tuple[VideoTargetPosition, ...]
@@ -565,6 +566,7 @@ class VideoTargetEvidence:
         _check_shallow(self)
         _check_int("first_chunk_index", self.first_chunk_index, minimum=0)
         _check_int("last_chunk_index", self.last_chunk_index, minimum=0)
+        _check_int("target_offset", self.target_offset)
         if self.last_chunk_index < self.first_chunk_index:
             raise ValueError("video target ends before it starts")
         if self.kind == "chunk" and self.first_chunk_index != self.last_chunk_index:
@@ -1317,20 +1319,7 @@ def _review_target_status(target: VideoTargetEvidence | None) -> AudioReviewRegi
 def _review_target_offset(
     attempt: AudioAlignmentAttempt, target: VideoTargetEvidence
 ) -> int | None:
-    if target.kind == "run":
-        for run in attempt.runs:
-            if (run.first_index, run.last_index) == (
-                target.first_chunk_index,
-                target.last_chunk_index,
-            ):
-                return _review_frame_for_lag(attempt, run.lag)
-        return None
-    if target.first_chunk_index != target.last_chunk_index:
-        return None
-    if not 0 <= target.first_chunk_index < len(attempt.chunks.lags):
-        return None
-    lag = attempt.chunks.lags[target.first_chunk_index]
-    return None if lag is None else _review_frame_for_lag(attempt, lag)
+    return target.target_offset
 
 
 def _review_target_candidates(

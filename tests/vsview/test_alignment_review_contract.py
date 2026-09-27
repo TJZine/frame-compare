@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import cast
 
@@ -23,6 +23,8 @@ from frame_compare.utils.alignment_evidence import (
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
+    VideoTargetEvidence,
+    VideoTargetPosition,
 )
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
@@ -577,6 +579,46 @@ def test_workspace_metadata_accepts_signed_chunk_evidence() -> None:
     assert parsed.chunks.lags == (_frame_lag(-12),) * 4
     assert parsed.decision.candidate is not None
     assert parsed.decision.candidate.frame_offset == -12
+
+
+def test_workspace_metadata_retains_authoritative_target_offset() -> None:
+    target = VideoTargetEvidence(
+        kind="chunk",
+        first_chunk_index=0,
+        last_chunk_index=0,
+        target_offset=246,
+        alternative_offsets=(245, 246, 247),
+        resolution="unresolved",
+        positions=(VideoTargetPosition(0, 500, 1.0, 1.0, "neither"),),
+    )
+    attempt = replace(
+        provisional_audio_attempt(chunk_count=1),
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(144, 145, 146, 147, 148),
+            confirmed_offset=146,
+            index_build_seconds=0.0,
+            positions=(),
+            targets=(target,),
+        ),
+    )
+    review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    workspace = parse_alignment_review_workspace_metadata(
+        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+    )
+
+    parsed = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed is not None
+    assert parsed.video_check.targets[0].target_offset == 246
 
 
 def test_workspace_metadata_rejects_unobserved_collection_payload() -> None:

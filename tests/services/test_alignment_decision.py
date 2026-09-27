@@ -386,6 +386,7 @@ def _target(
         kind=kind,  # type: ignore[arg-type]
         first_chunk_index=first,
         last_chunk_index=last,
+        target_offset=1,
         alternative_offsets=(1,),
         resolution=resolution,  # type: ignore[arg-type]
         positions=positions,
