@@ -700,8 +700,18 @@ class VideoCheckObservation:
         ):
             raise ValueError("same-frame context must round to the confirmed offset")
         for target in self.targets:
-            if self.confirmed_offset in target.alternative_offsets:
-                raise ValueError("target alternatives must exclude the confirmed offset")
+            if target.target_offset == self.confirmed_offset:
+                raise ValueError("video target offset must differ from the confirmed offset")
+            expected = tuple(
+                offset
+                for offset in range(target.target_offset - 1, target.target_offset + 2)
+                if offset != self.confirmed_offset
+            )
+            if target.alternative_offsets != expected:
+                raise ValueError(
+                    "target alternatives must be the ordered target-offset neighbourhood "
+                    "and exclude the confirmed offset"
+                )
         target_indexes = [
             position.position_index for target in self.targets for position in target.positions
         ]

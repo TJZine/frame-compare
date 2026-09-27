@@ -779,7 +779,7 @@ def _check_points(
     candidates = [
         (
             *target_bounds(target),
-            target.alternative_offsets[0],
+            target.target_offset,
             (
                 "confirmed by video"
                 if target.resolution in {"resolved", "alternative_confirmed"}
@@ -828,7 +828,7 @@ def _check_points(
         return True
 
     def add_target_point(target: VideoTargetEvidence, position: VideoTargetPosition) -> None:
-        suggested = confirmed if position.winner == "confirmed" else target.alternative_offsets[0]
+        suggested = confirmed if position.winner == "confirmed" else target.target_offset
         add_point(position.reference_frame, suggested)
 
     def add_confirmed_point(position: VideoPositionDifference) -> bool:

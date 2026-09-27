@@ -506,6 +506,70 @@ def test_check_points_use_producer_scored_offsets_for_confirmed_contrast(
     assert points[0].suggested_comparison_frame == 900 - confirmed
 
 
+def test_check_points_use_authoritative_target_offset() -> None:
+    target = alignment_video.VideoTargetEvidence(
+        kind="chunk",
+        first_chunk_index=1,
+        last_chunk_index=1,
+        target_offset=246,
+        alternative_offsets=(245, 246, 247),
+        resolution="unresolved",
+        positions=(alignment_video.VideoTargetPosition(12, 500, 1.0, 1.0, "neither"),),
+    )
+
+    points = alignment_video._check_points(
+        (),
+        (target,),
+        confirmed=146,
+        scored_offsets=(144, 145, 146, 147, 148),
+        fps_reference=FPS,
+    )
+
+    assert points == (alignment_video.VideoCheckPoint(500 / float(FPS), 500, 254),)
+
+
+def test_check_points_keep_adjacent_distinct_target_offsets_separate() -> None:
+    def target(
+        index: int, frame: int, offset: int, alternatives: tuple[int, ...]
+    ) -> alignment_video.VideoTargetEvidence:
+        return alignment_video.VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            target_offset=offset,
+            alternative_offsets=alternatives,
+            resolution="unresolved",
+            positions=(alignment_video.VideoTargetPosition(index, frame, 1.0, 1.0, "neither"),),
+        )
+
+    points = alignment_video._check_points(
+        (
+            alignment_video.VideoPositionDifference(
+                position_index=0,
+                reference_frame=900,
+                score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+            ),
+        ),
+        (
+            target(1, 500, 145, (145, 146)),
+            target(2, 700, 146, (145, 146, 147)),
+        ),
+        confirmed=144,
+        scored_offsets=(142, 143, 144, 145, 146),
+        fps_reference=FPS,
+        chunks=(
+            alignment_video._Chunk(1, 0, 10, True, 0, 100.0, True, False),
+            alignment_video._Chunk(2, 10, 10, True, 0, 90.0, True, False),
+        ),
+    )
+
+    assert [(point.reference_frame, point.suggested_comparison_frame) for point in points] == [
+        (500, 355),
+        (700, 554),
+        (900, 756),
+    ]
+
+
 @pytest.mark.parametrize("target_count", (5, 6))
 def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: int) -> None:
     if target_count == 5:

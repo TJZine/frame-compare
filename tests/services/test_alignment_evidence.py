@@ -193,7 +193,7 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             first_chunk_index=2,
             last_chunk_index=3,
             target_offset=153,
-            alternative_offsets=(152, 153),
+            alternative_offsets=(152, 153, 154),
             resolution="unexamined",
             positions=(),
         ),
@@ -268,6 +268,30 @@ def test_extended_video_evidence_rejects_bad_values() -> None:
     payload = asdict(_populated_video_attempt())
     payload["video_check"]["check_points"][0]["timestamp_seconds"] = -1
     with pytest.raises(ValueError, match="non-negative"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+@pytest.mark.parametrize(
+    ("target_offset", "alternative_offsets", "match"),
+    [
+        (999999, [147, 148], "ordered target-offset neighbourhood"),
+        (147, [148, 147], "ordered target-offset neighbourhood"),
+        (147, [147], "ordered target-offset neighbourhood"),
+        (147, [147, 148, 149], "ordered target-offset neighbourhood"),
+        (146, [145, 147], "must differ from the confirmed offset"),
+    ],
+)
+def test_extended_video_evidence_rejects_noncanonical_target_neighbourhood(
+    target_offset: int,
+    alternative_offsets: list[int],
+    match: str,
+) -> None:
+    payload = asdict(_populated_video_attempt())
+    target = payload["video_check"]["targets"][0]
+    target["target_offset"] = target_offset
+    target["alternative_offsets"] = alternative_offsets
+
+    with pytest.raises(ValueError, match=match):
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
 

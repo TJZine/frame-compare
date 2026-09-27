@@ -619,6 +619,21 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
     assert parsed.video_check.targets[0].target_offset == 246
+    contradictory = json.loads(review)
+    contradictory["audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 999999
+
+    with pytest.raises(AlignmentReviewContractError, match="ordered target-offset neighbourhood"):
+        parse_alignment_review_workspace_metadata(
+            (
+                _reference_output(0),
+                _comparison_output(
+                    1,
+                    1,
+                    suggestion=None,
+                    audio_review=json.dumps(contradictory),
+                ),
+            )
+        )
 
 
 def test_workspace_metadata_rejects_unobserved_collection_payload() -> None:

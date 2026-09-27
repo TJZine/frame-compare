@@ -508,6 +508,10 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
     assert len(payload["pair"]["comparison_label"]) == 256
     serialized = path.read_text(encoding="utf-8")
     assert str(tmp_path) not in serialized
+    payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 999999
+
+    with pytest.raises(ValueError, match="ordered target-offset neighbourhood"):
+        evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
 
 
 def test_symlinked_diagnostic_directory_is_rejected(tmp_path: Path) -> None:
