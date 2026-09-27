@@ -304,6 +304,7 @@ def check_video_alignment(
             base_positions,
             target_evidence,
             confirmed=confirmed,
+            scored_offsets=scored_offsets,
             fps_reference=fps_reference,
         )
         return VideoCheckResult(
@@ -745,44 +746,45 @@ def _check_points(
     targets: Sequence[VideoTargetEvidence],
     *,
     confirmed: int,
+    scored_offsets: Sequence[int],
     fps_reference: Fraction,
 ) -> tuple[VideoCheckPoint, ...]:
     points: list[VideoCheckPoint] = []
     selected_base_positions: set[int] = set()
-    target_positions = [target for target in targets if target.positions]
+    target_regions = [target for target in targets if target.positions][:4]
+    selected_points: set[tuple[int, int]] = set()
+
+    def add_point(reference_frame: int, suggested: int) -> None:
+        key = (reference_frame, suggested)
+        if key in selected_points:
+            return
+        points.append(
+            VideoCheckPoint(
+                timestamp_seconds=reference_frame / float(fps_reference),
+                reference_frame=reference_frame,
+                suggested_comparison_frame=max(0, reference_frame - suggested),
+            )
+        )
+        selected_points.add(key)
 
     def add_target_point(target: VideoTargetEvidence, position: VideoTargetPosition) -> None:
         suggested = confirmed if position.winner == "confirmed" else target.alternative_offsets[0]
-        points.append(
-            VideoCheckPoint(
-                timestamp_seconds=position.reference_frame / float(fps_reference),
-                reference_frame=position.reference_frame,
-                suggested_comparison_frame=max(0, position.reference_frame - suggested),
-            )
-        )
+        add_point(position.reference_frame, suggested)
 
     def add_confirmed_point(position: VideoPositionDifference) -> bool:
         winner, _margin = _position_winner(
             position.score_by_offset,
-            tuple(range(confirmed - 2, confirmed + 3)),
+            scored_offsets,
         )
         if winner != confirmed:
             return False
         if position.position_index in selected_base_positions:
             return False
-        points.append(
-            VideoCheckPoint(
-                timestamp_seconds=position.reference_frame / float(fps_reference),
-                reference_frame=position.reference_frame,
-                suggested_comparison_frame=max(0, position.reference_frame - confirmed),
-            )
-        )
+        add_point(position.reference_frame, confirmed)
         selected_base_positions.add(position.position_index)
         return True
 
-    for target in target_positions:
-        if len(points) >= 5:
-            break
+    for target in target_regions:
         add_target_point(target, target.positions[0])
 
     if len(points) < 5:
@@ -790,7 +792,7 @@ def _check_points(
             if add_confirmed_point(position):
                 break
 
-    for target in target_positions:
+    for target in target_regions:
         for position in target.positions[1:]:
             if len(points) >= 5:
                 break

@@ -465,11 +465,130 @@ def test_check_points_cover_each_target_before_filling_the_five_point_cap() -> N
         base_positions,
         targets,
         confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
         fps_reference=FPS,
     )
 
     assert [point.reference_frame for point in points] == [110, 500, 900, 111, 112]
     assert len(points) == 5
+
+
+@pytest.mark.parametrize("confirmed", (-1, 0, 1))
+def test_check_points_use_producer_scored_offsets_for_confirmed_contrast(
+    confirmed: int,
+) -> None:
+    scored_offsets = (-2, -1, 0, 1, 2)
+    scores = tuple(0.1 if offset == confirmed else 2.0 for offset in scored_offsets)
+    position = alignment_video.VideoPositionDifference(
+        position_index=0,
+        reference_frame=900,
+        score_by_offset=scores,
+    )
+
+    points = alignment_video._check_points(
+        (position,),
+        (),
+        confirmed=confirmed,
+        scored_offsets=scored_offsets,
+        fps_reference=FPS,
+    )
+    winner, margin = alignment_video._position_winner(scores, scored_offsets)
+
+    assert winner == confirmed
+    assert margin == pytest.approx(20.0)
+    assert [point.reference_frame for point in points] == [900]
+    assert points[0].suggested_comparison_frame == 900 - confirmed
+
+
+@pytest.mark.parametrize("target_count", (5, 6))
+def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: int) -> None:
+    def target(index: int) -> alignment_video.VideoTargetEvidence:
+        return alignment_video.VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            alternative_offsets=(index + 1,),
+            resolution="unresolved",
+            positions=(
+                alignment_video.VideoTargetPosition(
+                    position_index=index,
+                    reference_frame=100 * index,
+                    confirmed_score=1.0,
+                    alternative_score=1.0,
+                    winner="neither",
+                ),
+            ),
+        )
+
+    base_position = alignment_video.VideoPositionDifference(
+        position_index=0,
+        reference_frame=900,
+        score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+    )
+    targets = tuple(target(index) for index in range(1, target_count + 1))
+
+    points = alignment_video._check_points(
+        (base_position,),
+        targets,
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+    )
+
+    assert [point.reference_frame for point in points] == [100, 200, 300, 400, 900]
+    assert len(points) == 5
+    assert points == alignment_video._check_points(
+        (base_position,),
+        targets,
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+    )
+
+
+def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
+    def target(index: int, frames: tuple[int, int]) -> alignment_video.VideoTargetEvidence:
+        return alignment_video.VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            alternative_offsets=(1,),
+            resolution="unresolved",
+            positions=tuple(
+                alignment_video.VideoTargetPosition(
+                    position_index=index * 2 + offset,
+                    reference_frame=frame,
+                    confirmed_score=1.0,
+                    alternative_score=1.0,
+                    winner="neither",
+                )
+                for offset, frame in enumerate(frames)
+            ),
+        )
+
+    points = alignment_video._check_points(
+        (
+            alignment_video.VideoPositionDifference(
+                position_index=0,
+                reference_frame=900,
+                score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+            ),
+        ),
+        (target(1, (100, 101)), target(2, (100, 201))),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+    )
+
+    assert [(point.reference_frame, point.suggested_comparison_frame) for point in points] == [
+        (100, 99),
+        (900, 900),
+        (101, 100),
+        (201, 200),
+    ]
+    assert len(
+        {(point.reference_frame, point.suggested_comparison_frame) for point in points}
+    ) == len(points)
 
 
 def test_evidence_failures_are_not_constructed_as_observed() -> None:
