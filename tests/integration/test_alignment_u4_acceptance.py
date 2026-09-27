@@ -46,10 +46,11 @@ _VIDEO_SIZE = "128x72"
 _SAMPLE_RATE = 48000
 _BASE_AUDIO = f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed=1101"
 _OTHER_AUDIO = f"anoisesrc=color=pink:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed=3303"
-_MUSIC_CUE = "aevalsrc=0.30*sin(2*PI*220*t)+0.20*sin(2*PI*330*t)+0.12*sin(2*PI*440*t):s=48000:d=30"
-_MUSIC_STEM = (
-    "aevalsrc=0.18*sin(2*PI*196*t)+0.12*sin(2*PI*294*t)+0.08*sin(2*PI*392*t):s=48000:d=600"
+_MUSIC_CUE = (
+    "aevalsrc=0.70*sin(2*PI*(180*t+18*t*t))+"
+    "0.35*sin(2*PI*(270*t+11*t*t))+0.20*sin(2*PI*(360*t+7*t*t)):s=48000:d=25"
 )
+_MUSIC_STEM = "aevalsrc=0.18*sin(2*PI*196*t)+0.12*sin(2*PI*294*t)+0.08*sin(2*PI*392*t):s=48000:d=30"
 _SURROUND_SOURCES = tuple(
     f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed={seed}"
     for seed in (1101, 2202, 3303, 4404, 5505, 6606)
@@ -237,19 +238,17 @@ def _write_active_tail(path: Path) -> None:
 def _write_repeated_music_cue(path: Path, *, reference: bool) -> None:
     if reference:
         audio_graph = (
-            "[1:a]atrim=start=0:end=330,asetpts=PTS-STARTPTS[a0];"
+            "[1:a]atrim=start=0:end=305,asetpts=PTS-STARTPTS[a0];"
             "[2:a]asetpts=PTS-STARTPTS[a1];"
-            "[1:a]atrim=start=360:end=600,asetpts=PTS-STARTPTS[a2];"
+            "[1:a]atrim=start=330:end=600,asetpts=PTS-STARTPTS[a2];"
             "[a0][a1][a2]concat=n=3:v=0:a=1[a]"
         )
     else:
         audio_graph = (
-            "[2:a]asplit=2[cue0][cue1];"
             "[1:a]atrim=start=0:end=300,asetpts=PTS-STARTPTS[a0];"
-            "[cue0]asetpts=PTS-STARTPTS[a1];"
-            "[cue1]asetpts=PTS-STARTPTS[a2];"
-            "[1:a]atrim=start=360:end=600,asetpts=PTS-STARTPTS[a3];"
-            "[a0][a1][a2][a3]concat=n=4:v=0:a=1[a]"
+            "[2:a]asetpts=PTS-STARTPTS[a1];"
+            "[1:a]atrim=start=325:end=600,asetpts=PTS-STARTPTS[a2];"
+            "[a0][a1][a2]concat=n=3:v=0:a=1[a]"
         )
     _write_media(path, audio_graph=audio_graph, audio_sources=(_MUSIC_CUE,))
 
@@ -274,8 +273,12 @@ def _write_music_stem(path: Path) -> None:
         path,
         audio_sources=(_MUSIC_STEM,),
         audio_graph=(
-            r"[2:a]volume=0.45:enable=between(t\,270\,300)[stem];"
-            "[1:a][stem]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
+            "[1:a]atrim=start=0:end=270,asetpts=PTS-STARTPTS[a0];"
+            "[1:a]atrim=start=270:end=300,asetpts=PTS-STARTPTS[base];"
+            "[2:a]asetpts=PTS-STARTPTS[stem];"
+            "[base][stem]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix];"
+            "[1:a]atrim=start=300:end=600,asetpts=PTS-STARTPTS[a2];"
+            "[a0][mix][a2]concat=n=3:v=0:a=1[a]"
         ),
     )
 
@@ -442,6 +445,41 @@ def _audio_channel_count(path: Path) -> int:
         timeout_seconds=30,
     )
     return int(probe.stdout.decode().strip())
+
+
+def _audio_difference_level(reference: Path, comparison: Path, start_seconds: int) -> float:
+    result = run_subprocess(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-ss",
+            str(start_seconds),
+            "-t",
+            str(_CHUNK_SECONDS),
+            "-i",
+            str(reference),
+            "-ss",
+            str(start_seconds),
+            "-t",
+            str(_CHUNK_SECONDS),
+            "-i",
+            str(comparison),
+            "-filter_complex",
+            "[0:a][1:a]amerge=inputs=2,pan=mono|c0=c0-c1,volumedetect[difference]",
+            "-map",
+            "[difference]",
+            "-f",
+            "null",
+            "-",
+        ],
+        timeout_seconds=60,
+    )
+    for line in result.stderr.decode().splitlines():
+        if "mean_volume:" in line:
+            return float(line.split("mean_volume:", 1)[1].split()[0])
+    raise AssertionError(f"ffmpeg did not report a mean difference level for {start_seconds}s")
 
 
 def _assert_label(result: AlignmentResult, *, state: str, reason: str) -> None:
@@ -638,22 +676,39 @@ def test_repeated_music_cue_is_resolved_by_identical_moving_video(
 ) -> None:
     result = _align_pair(u4_media, "repeated-music-cue", tmp_path / "generated")
     _assert_label(result, state="trusted_automatic", reason="audio_video_confirmed")
+    assert result.audio_attempt is not None
     _assert_audio(
         result,
         global_lag=0,
         subframe=0.0,
         rounded_frame=0,
-        credible=18,
-        agreeing=18,
+        credible=20,
+        agreeing=19,
+        authority_agreeing=19,
+        authority_status="agreed",
+        authority_passed=True,
+        raw_status="agreed",
     )
     _assert_video(result, confirmed_offset=0)
     _assert_targets(
         result,
-        (
-            ("chunk", 11, 11, (719, 720, 721), "resolved", 2),
-            ("chunk", 10, 10, (694, 695, 696), "resolved", 2),
-        ),
+        (("chunk", 10, 10, (119, 120, 121), "resolved", 4),),
     )
+    target = result.audio_attempt.video_check.targets[0]
+    expected_positions = (
+        (12, 7199, 0.0, 0.07938361167907715, "confirmed"),
+        (13, 7439, 0.0, 0.12232393771409988, "confirmed"),
+        (14, 7679, 0.0, 0.07214097678661346, "confirmed"),
+        (15, 7919, 0.0, 0.11072836071252823, "confirmed"),
+    )
+    assert len(target.positions) == len(expected_positions)
+    for position, expected in zip(target.positions, expected_positions, strict=True):
+        position_index, reference_frame, confirmed_score, alternative_score, winner = expected
+        assert position.position_index == position_index
+        assert position.reference_frame == reference_frame
+        assert position.confirmed_score == pytest.approx(confirmed_score, abs=1e-12)
+        assert position.alternative_score == pytest.approx(alternative_score, abs=1e-12)
+        assert position.winner == winner
 
 
 @pytest.mark.integration
@@ -878,6 +933,15 @@ def test_refusal_principle_mix_changes_still_apply(
     if name == "surround":
         assert _audio_channel_count(u4_media.references["surround"]) == 6
         assert _audio_channel_count(u4_media.comparisons["surround"]) == 2
+    if name == "music-stem":
+        levels = tuple(
+            _audio_difference_level(u4_media.reference, u4_media.comparisons[name], start)
+            for start in range(0, _DURATION, _CHUNK_SECONDS)
+        )
+        outside = levels[:9] + levels[10:]
+        assert len(levels) == _CHUNK_COUNT
+        assert levels[9] > -20.0
+        assert max(outside) < -20.0
 
 
 @pytest.mark.integration
