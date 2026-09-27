@@ -14,6 +14,16 @@ import pytest
 import vapoursynth as vs
 
 from frame_compare.services import alignment_video
+from frame_compare.services.alignment_correlation import (
+    ChunkedAudioEstimate,
+    ChunkObservation,
+    ChunkPlan,
+)
+from frame_compare.services.alignment_decision import (
+    DecidedAudioStage,
+    decide_after_video,
+    decide_completed_stage,
+)
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
@@ -60,6 +70,26 @@ def _shifted_clip(reference: vs.VideoNode, offset: int) -> vs.VideoNode:
         return reference[offset:]
     return vs.core.std.Splice(
         [reference[0:1]] * -offset + [reference[: reference.num_frames + offset]]
+    )
+
+
+def _remapped_clip(reference: vs.VideoNode, source_frame: Callable[[int], int]) -> vs.VideoNode:
+    return vs.core.std.Splice(
+        [
+            reference[index : index + 1]
+            for frame in range(reference.num_frames)
+            for index in [source_frame(frame)]
+        ]
+    )
+
+
+def _motion_ranges_clip(*ranges: range, frames: int = 180) -> vs.VideoNode:
+    moving = _moving_clip(frames=frames)
+    return vs.core.std.Splice(
+        [
+            moving[index : index + 1] if any(index in item for item in ranges) else moving[0:1]
+            for index in range(frames)
+        ]
     )
 
 
@@ -117,6 +147,8 @@ def _media(
 
 def _attempt(*, rounded: int, lag: int = 0, planned: int = 1) -> AudioAlignmentAttempt:
     base = attempt_with_chunks(planned, lag=lag)
+    candidate = base.decision.candidate
+    assert candidate is not None
     subframe = float(rounded)
     return replace(
         base,
@@ -129,11 +161,146 @@ def _attempt(*, rounded: int, lag: int = 0, planned: int = 1) -> AudioAlignmentA
         decision=replace(
             base.decision,
             candidate=replace(
-                base.decision.candidate,
+                candidate,
                 frame_offset=rounded,
                 subframe_estimate=subframe,
             ),
         ),
+    )
+
+
+def _attempt_with_lags(
+    lags: tuple[int, ...],
+    *,
+    global_lag: int = 0,
+    chunk_samples: int = 16_000,
+    reference_audio_start: Fraction = Fraction(0),
+) -> AudioAlignmentAttempt:
+    base = _attempt(rounded=0, lag=global_lag, planned=len(lags))
+    compensation = reference_audio_start
+    subframe = float((Fraction(global_lag, 8_000) + compensation) * FPS)
+    rounded = int(np.floor(subframe + 0.5))
+    agrees = tuple(abs(lag - global_lag) <= 16 for lag in lags)
+    reference_stream, comparison_stream = base.selected_streams
+    candidate = base.decision.candidate
+    assert candidate is not None
+    return replace(
+        base,
+        selected_streams=(
+            replace(
+                reference_stream,
+                stream_start_num=reference_audio_start.numerator,
+                stream_start_den=reference_audio_start.denominator,
+                stream_start_basis="metadata",
+            ),
+            comparison_stream,
+        ),
+        analysis=replace(
+            base.analysis,
+            chunk_samples=chunk_samples,
+            planned_chunk_count=len(lags),
+        ),
+        chunks=AudioChunkColumns(
+            starts=tuple(index * chunk_samples for index in range(len(lags))),
+            counts=(chunk_samples,) * len(lags),
+            active=(True,) * len(lags),
+            lags=lags,
+            psrs=(100.0,) * len(lags),
+            credible=(True,) * len(lags),
+            agrees=agrees,
+            total_samples=chunk_samples * len(lags),
+        ),
+        runs=(),
+        audio=replace(
+            base.audio,
+            status="agreed",
+            global_lag=global_lag,
+            active_chunks=len(lags),
+            credible_chunks=len(lags),
+            agreeing_chunks=sum(agrees),
+            compensation_seconds=float(compensation),
+            subframe_estimate=subframe,
+            rounded_frame=rounded,
+        ),
+        decision=replace(
+            base.decision,
+            candidate=replace(
+                candidate,
+                frame_offset=rounded,
+                subframe_estimate=subframe,
+            ),
+        ),
+    )
+
+
+def _decide_video(
+    attempt: AudioAlignmentAttempt, video: VideoCheckObservation
+) -> DecidedAudioStage:
+    observations = tuple(
+        ChunkObservation(
+            index=index,
+            reference_start=start,
+            reference_count=count,
+            active=active,
+            lag=lag,
+            psr=float(psr),
+            credible=credible,
+            agrees=agrees,
+        )
+        for index, (start, count, active, lag, psr, credible, agrees) in enumerate(
+            zip(
+                attempt.chunks.starts,
+                attempt.chunks.counts,
+                attempt.chunks.active,
+                attempt.chunks.lags,
+                attempt.chunks.psrs,
+                attempt.chunks.credible,
+                attempt.chunks.agrees,
+                strict=True,
+            )
+        )
+    )
+    global_lag = attempt.audio.global_lag
+    assert global_lag is not None
+    estimate = ChunkedAudioEstimate(
+        outcome=attempt.audio.status,
+        global_lag=global_lag,
+        observations=observations,
+        runs=(),
+        active_count=len(observations),
+        credible_count=len(observations),
+        agreeing_count=sum(item.agrees for item in observations),
+    )
+    plan = ChunkPlan(
+        chunk_samples=attempt.analysis.chunk_samples,
+        lag_samples=attempt.analysis.lag_samples,
+        chunks=tuple((item.reference_start, item.reference_count) for item in observations),
+    )
+    reference_stream, comparison_stream = attempt.selected_streams
+    stage = decide_completed_stage(
+        estimate=estimate,
+        plan=plan,
+        max_offset_seconds=attempt.analysis.max_offset_seconds,
+        reference_audio_start=Fraction(
+            reference_stream.stream_start_num, reference_stream.stream_start_den
+        ),
+        reference_video_start=Fraction(
+            reference_stream.video_start_num, reference_stream.video_start_den
+        ),
+        comparison_audio_start=Fraction(
+            comparison_stream.stream_start_num, comparison_stream.stream_start_den
+        ),
+        comparison_video_start=Fraction(
+            comparison_stream.video_start_num, comparison_stream.video_start_den
+        ),
+        fps_reference=FPS,
+    )
+    return decide_after_video(
+        stage=stage,
+        estimate=estimate,
+        plan=plan,
+        video=video,
+        fps_reference=FPS,
     )
 
 
@@ -344,6 +511,48 @@ def test_v3a_conversion_and_excluded_alternative(tmp_path: Path) -> None:
     assert 0 not in target.alternative_offsets
 
 
+def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
+    tmp_path: Path,
+) -> None:
+    reference = _moving_clip(frames=120)
+    comparison = _remapped_clip(reference, lambda frame: frame + 2 if frame <= 24 else frame)
+    attempt = _attempt_with_lags(
+        (333, -333, -333, -333, -333, -333, -333, -333, -333, -333),
+        global_lag=-333,
+        chunk_samples=8_000,
+        reference_audio_start=Fraction(1, 24),
+    )
+
+    result = _run(
+        tmp_path,
+        truth=0,
+        reference_clip=reference,
+        comparison_clip=comparison,
+        attempt=attempt,
+    )
+
+    assert result.observation.confirmed_offset == 0
+    assert len(result.observation.targets) == 1
+    target = result.observation.targets[0]
+    assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("chunk", 0, 0)
+    assert (target.start_sample, target.end_sample, target.target_offset) == (0, 8_000, 2)
+    assert target.alternative_offsets == (1, 2, 3)
+    assert [position.reference_frame for position in target.positions] == [3, 10, 17, 24]
+    assert [position.winner for position in target.positions] == ["alternative"] * 4
+    assert all(position.confirmed_score > 0.0 for position in target.positions)
+    assert all(position.alternative_score == 0.0 for position in target.positions)
+    assert target.resolution == "alternative_confirmed"
+    assert [
+        (point.reference_frame, point.suggested_comparison_frame)
+        for point in result.observation.check_points
+    ] == [(3, 1), (27, 27), (10, 8), (17, 15), (24, 22)]
+    decided = _decide_video(attempt, result.observation)
+    assert decided.decision.state == "provisional"
+    assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
+    assert decided.decision.candidate is not None
+    assert decided.decision.candidate.frame_offset == 0
+
+
 def test_a4a_non_adjacent_same_lag_chunks_are_separate_targets() -> None:
     attempt = _attempt(rounded=0, planned=3)
     chunks = (
@@ -412,10 +621,88 @@ def test_run_resolution_requires_two_confirmed_positions() -> None:
     assert alternative == "alternative_confirmed"
 
 
+def test_real_scoring_run_with_one_winning_position_stays_unresolved(
+    tmp_path: Path,
+) -> None:
+    reference = _motion_ranges_clip(range(60, 70), range(96, 180))
+    attempt = _attempt_with_lags((667, 667, 0, 0, 0, 0, 0, 0, 0, 0))
+    result = _run(
+        tmp_path,
+        truth=0,
+        reference_clip=reference,
+        comparison_clip=reference,
+        attempt=attempt,
+    )
+
+    assert result.observation.confirmed_offset == 0
+    assert len(result.observation.targets) == 1
+    target = result.observation.targets[0]
+    assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("run", 0, 1)
+    assert [position.reference_frame for position in target.positions] == [3, 34, 64, 95]
+    assert [position.winner for position in target.positions] == [
+        "neither",
+        "neither",
+        "confirmed",
+        "neither",
+    ]
+    assert [
+        (position.confirmed_score == 0.0, position.alternative_score == 0.0)
+        for position in target.positions
+    ] == [(True, True), (True, True), (True, False), (True, True)]
+    assert target.resolution == "unresolved"
+    base_winners = [
+        alignment_video._position_winner(
+            position.score_by_offset, result.observation.scored_offsets
+        )
+        for position in result.observation.positions
+    ]
+    assert base_winners.count((0, float("inf"))) == 7
+    assert base_winners.count((None, 0.0)) == 5
+    decided = _decide_video(attempt, result.observation)
+    assert decided.decision.state == "provisional"
+    assert decided.decision.primary_reason == "competing_offset"
+    assert decided.decision.candidate is not None
+    assert decided.decision.candidate.frame_offset == 0
+
+
 def test_position_ties_and_periodic_aliases_are_not_informative() -> None:
     offsets = (-2, -1, 0, 1, 2)
     assert alignment_video._position_winner((1.0, 0.0, 0.0, 1.0, 2.0), offsets)[0] is None
     assert alignment_video._position_winner((1.0, 0.9, 0.5, 0.9, 0.5), offsets)[0] is None
+
+
+@pytest.mark.parametrize("cadence", ["duplicated", "periodic"])
+def test_real_cadence_aliases_do_not_confirm_a_wrong_offset(tmp_path: Path, cadence: str) -> None:
+    moving = _moving_clip(frames=120)
+    reference = _remapped_clip(
+        moving,
+        (lambda frame: frame // 2) if cadence == "duplicated" else (lambda frame: frame % 2),
+    )
+    attempt = _attempt_with_lags((333,) * 10, global_lag=333)
+    result = _run(
+        tmp_path,
+        truth=0,
+        reference_clip=reference,
+        comparison_clip=reference,
+        attempt=attempt,
+    )
+
+    assert result.observation.scored_offsets == (-1, 0, 1, 2, 3)
+    assert result.observation.confirmed_offset is None
+    assert len(result.observation.positions) == 12
+    winners = [
+        alignment_video._position_winner(
+            position.score_by_offset, result.observation.scored_offsets
+        )
+        for position in result.observation.positions
+    ]
+    assert winners == [(None, 0.0)] * 12
+    assert all(
+        position.score_by_offset.count(0.0) >= 2 for position in result.observation.positions
+    )
+    decided = _decide_video(attempt, result.observation)
+    assert decided.decision.state == "provisional"
+    assert decided.decision.primary_reason == "video_check_inconclusive"
 
 
 def test_minority_position_edit_cannot_overrule_the_consensus() -> None:
@@ -427,6 +714,55 @@ def test_minority_position_edit_cannot_overrule_the_consensus() -> None:
         )
         == 0
     )
+
+
+def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
+    tmp_path: Path,
+) -> None:
+    reference = _moving_clip(frames=120)
+    comparison = _remapped_clip(
+        reference,
+        lambda frame: frame + 1 if 5 <= frame <= 27 else frame,
+    )
+    result = _run(
+        tmp_path,
+        truth=0,
+        reference_clip=reference,
+        comparison_clip=comparison,
+    )
+    winners_and_margins = [
+        alignment_video._position_winner(
+            position.score_by_offset, result.observation.scored_offsets
+        )
+        for position in result.observation.positions
+    ]
+
+    assert [position.reference_frame for position in result.observation.positions] == [
+        8,
+        17,
+        27,
+        36,
+        45,
+        55,
+        64,
+        74,
+        83,
+        92,
+        102,
+        111,
+    ]
+    assert winners_and_margins == [
+        (1, float("inf")),
+        (1, float("inf")),
+        (1, float("inf")),
+        *((0, float("inf")),) * 9,
+    ]
+    assert result.observation.confirmed_offset == 0
+    decided = _decide_video(_attempt_with_lags((0,) * 10), result.observation)
+    assert decided.decision.state == "trusted_automatic"
+    assert decided.decision.primary_reason == "audio_video_confirmed"
+    assert decided.decision.candidate is not None
+    assert decided.decision.candidate.frame_offset == 0
 
 
 def test_inconclusive_video_still_has_review_check_points(tmp_path: Path) -> None:
