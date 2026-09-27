@@ -748,38 +748,61 @@ def _check_points(
     fps_reference: Fraction,
 ) -> tuple[VideoCheckPoint, ...]:
     points: list[VideoCheckPoint] = []
-    for target in targets:
-        for position in target.positions:
-            if len(points) >= 4:
-                break
-            suggested = (
-                confirmed if position.winner == "confirmed" else target.alternative_offsets[0]
+    selected_base_positions: set[int] = set()
+    target_positions = [target for target in targets if target.positions]
+
+    def add_target_point(target: VideoTargetEvidence, position: VideoTargetPosition) -> None:
+        suggested = confirmed if position.winner == "confirmed" else target.alternative_offsets[0]
+        points.append(
+            VideoCheckPoint(
+                timestamp_seconds=position.reference_frame / float(fps_reference),
+                reference_frame=position.reference_frame,
+                suggested_comparison_frame=max(0, position.reference_frame - suggested),
             )
-            points.append(
-                VideoCheckPoint(
-                    timestamp_seconds=position.reference_frame / float(fps_reference),
-                    reference_frame=position.reference_frame,
-                    suggested_comparison_frame=max(0, position.reference_frame - suggested),
-                )
+        )
+
+    def add_confirmed_point(position: VideoPositionDifference) -> bool:
+        winner, _margin = _position_winner(
+            position.score_by_offset,
+            tuple(range(confirmed - 2, confirmed + 3)),
+        )
+        if winner != confirmed:
+            return False
+        if position.position_index in selected_base_positions:
+            return False
+        points.append(
+            VideoCheckPoint(
+                timestamp_seconds=position.reference_frame / float(fps_reference),
+                reference_frame=position.reference_frame,
+                suggested_comparison_frame=max(0, position.reference_frame - confirmed),
             )
-        if len(points) >= 4:
+        )
+        selected_base_positions.add(position.position_index)
+        return True
+
+    for target in target_positions:
+        if len(points) >= 5:
             break
+        add_target_point(target, target.positions[0])
+
+    if len(points) < 5:
+        for position in base_positions:
+            if add_confirmed_point(position):
+                break
+
+    for target in target_positions:
+        for position in target.positions[1:]:
+            if len(points) >= 5:
+                break
+            add_target_point(target, position)
+        if len(points) >= 5:
+            break
+
     if len(points) < 5:
         for position in base_positions:
             if len(points) >= 5:
                 break
-            winner, _margin = _position_winner(
-                position.score_by_offset,
-                tuple(range(confirmed - 2, confirmed + 3)),
-            )
-            if winner == confirmed:
-                points.append(
-                    VideoCheckPoint(
-                        timestamp_seconds=position.reference_frame / float(fps_reference),
-                        reference_frame=position.reference_frame,
-                        suggested_comparison_frame=max(0, position.reference_frame - confirmed),
-                    )
-                )
+            add_confirmed_point(position)
     return tuple(points)
 
 

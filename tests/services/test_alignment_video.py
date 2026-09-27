@@ -429,6 +429,49 @@ def test_inconclusive_video_still_has_review_check_points(tmp_path: Path) -> Non
     assert len(result.observation.check_points) == 5
 
 
+def test_check_points_cover_each_target_before_filling_the_five_point_cap() -> None:
+    def target(first_index: int, frames: tuple[int, ...]) -> alignment_video.VideoTargetEvidence:
+        return alignment_video.VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=first_index,
+            last_chunk_index=first_index,
+            alternative_offsets=(1,),
+            resolution="unresolved",
+            positions=tuple(
+                alignment_video.VideoTargetPosition(
+                    position_index=first_index * 4 + offset,
+                    reference_frame=frame,
+                    confirmed_score=1.0,
+                    alternative_score=1.0,
+                    winner="neither",
+                )
+                for offset, frame in enumerate(frames)
+            ),
+        )
+
+    base_positions = (
+        alignment_video.VideoPositionDifference(
+            position_index=0,
+            reference_frame=900,
+            score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+        ),
+    )
+    targets = (
+        target(1, (110, 111, 112, 113)),
+        target(2, (500, 501, 502, 503)),
+    )
+
+    points = alignment_video._check_points(
+        base_positions,
+        targets,
+        confirmed=0,
+        fps_reference=FPS,
+    )
+
+    assert [point.reference_frame for point in points] == [110, 500, 900, 111, 112]
+    assert len(points) == 5
+
+
 def test_evidence_failures_are_not_constructed_as_observed() -> None:
     with pytest.raises(ValueError, match="successful"):
         alignment_video.VideoCheckResult(
