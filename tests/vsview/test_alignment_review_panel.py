@@ -53,7 +53,10 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
-from tests.services.test_alignment_frozen_strings import _review_attempt
+from tests.services.test_alignment_frozen_strings import (
+    _audio_failed_video_confirmed_attempt,
+    _review_attempt,
+)
 
 _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
@@ -1334,6 +1337,12 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     assert "Established:" in detail_text
     assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in detail_text
     assert "Runtime/policy:" in detail_text
+    selectable = (
+        Qt.TextInteractionFlag.TextSelectableByMouse
+        | Qt.TextInteractionFlag.TextSelectableByKeyboard
+    )
+    assert panel.audio_summary_labels[0].textInteractionFlags() & selectable == selectable
+    assert cast(QLabel, details.findChild(QLabel)).textInteractionFlags() & selectable == selectable
 
 
 @pytest.mark.parametrize(
@@ -1359,12 +1368,20 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
             "video_check_unavailable",
             "The audio points to +146f, but the video could not be read to confirm the exact frame.",
         ),
+        (
+            "no_single_offset",
+            "The audio does not agree on one offset across the track; the video suggests +146f",
+        ),
     ],
 )
 def test_p4a_panel_covers_each_non_applied_reason(
     tmp_path: Path, reason: str, expected: str
 ) -> None:
-    attempt = _review_attempt(reason)
+    attempt = (
+        _audio_failed_video_confirmed_attempt()
+        if reason == "no_single_offset"
+        else _review_attempt(reason)
+    )
     audio_review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},

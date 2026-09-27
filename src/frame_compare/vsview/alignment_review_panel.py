@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
-from math import floor
-from statistics import median
 from typing import Any, Literal, Protocol, cast, override
 
 from PySide6.QtCore import Qt
@@ -26,13 +24,10 @@ from PySide6.QtWidgets import (
 from vsview.api import PluginAPI, VideoOutputProxy, WidgetPluginBase, hookimpl, run_in_loop
 
 from frame_compare.utils.alignment_evidence import (
-    AudioAlignmentAttempt,
     AudioAlignmentDecision,
-    VideoCheckObservation,
-    VideoCheckPoint,
-    VideoTargetEvidence,
     audio_evidence_rows,
     audio_unavailable_phrase,
+    build_audio_review_presentation,
 )
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewComparisonMetadata,
@@ -72,351 +67,13 @@ _KEEP_HELP = (
     "comparisons remain unresolved."
 )
 _SAVED_GUIDANCE = "Close VSView to resume Frame Compare."
-type _RegionStatus = Literal["confirmed by video", "not settled", "not checked"]
-
-
-@dataclass(frozen=True, slots=True)
-class _Region:
-    offset: int
-    start: float
-    end: float
-    status: _RegionStatus
-
-
-def _format_time(seconds: float) -> str:
-    total = max(0, int(seconds))
-    hours, remainder = divmod(total, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes}:{seconds:02d}"
-
-
-def _format_region(region: _Region) -> str:
-    return f"{_format_time(region.start)}–{_format_time(region.end)}"
-
-
-def _frame_for_lag(attempt: AudioAlignmentAttempt, lag: int) -> int:
-    compensation = attempt.audio.compensation_seconds or 0.0
-    seconds = lag / attempt.analysis.analysis_rate + compensation
-    return floor(seconds * attempt.fps_num / attempt.fps_den + 0.5)
-
-
-def _chunk_bounds(attempt: AudioAlignmentAttempt, first: int, last: int) -> tuple[float, float]:
-    if (
-        attempt.chunks.starts
-        and 0 <= first < len(attempt.chunks.starts)
-        and 0 <= last < len(attempt.chunks.starts)
-    ):
-        rate = attempt.analysis.analysis_rate
-        return (
-            attempt.chunks.starts[first] / rate,
-            (attempt.chunks.starts[last] + attempt.chunks.counts[last]) / rate,
-        )
-    chunk = attempt.analysis.chunk_samples / attempt.analysis.analysis_rate
-    return first * chunk, (last + 1) * chunk
-
-
-def _target_map(
-    video: VideoCheckObservation,
-) -> dict[tuple[str, int, int], VideoTargetEvidence]:
-    return {
-        (target.kind, target.first_chunk_index, target.last_chunk_index): target
-        for target in video.targets
-    }
-
-
-def _target_status(target: VideoTargetEvidence | None) -> _RegionStatus:
-    if target is None:
-        return "not settled"
-    if target.resolution in {"resolved", "alternative_confirmed"}:
-        return "confirmed by video"
-    return "not checked" if target.resolution == "unexamined" else "not settled"
 
 
 def _suggested_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
-    video = comparison.audio_review.audio_attempt
-    if video is not None and video.video_check.confirmed_offset is not None:
-        return video.video_check.confirmed_offset
-    if video is not None and video.decision.candidate is not None:
-        return video.decision.candidate.frame_offset
+    attempt = comparison.audio_review.audio_attempt
+    if attempt is not None:
+        return build_audio_review_presentation(attempt).suggested_offset
     return comparison.audio_review.current_authority.frame_offset
-
-
-def _regions(attempt: AudioAlignmentAttempt, suggested: int | None) -> tuple[_Region, ...]:
-    targets = _target_map(attempt.video_check)
-    regions: list[_Region] = []
-    seen: set[tuple[int, int, int]] = set()
-    for run in attempt.runs:
-        offset = (
-            suggested
-            if suggested is not None and run.lag == attempt.audio.global_lag
-            else _frame_for_lag(attempt, run.lag)
-        )
-        start, end = _chunk_bounds(attempt, run.first_index, run.last_index)
-        target = targets.get(("run", run.first_index, run.last_index))
-        region = _Region(
-            offset=offset,
-            start=start,
-            end=end,
-            status=(
-                "confirmed by video"
-                if attempt.video_check.confirmed_offset == offset
-                else _target_status(target)
-            ),
-        )
-        if suggested is None or offset != suggested or not regions:
-            key = (offset, run.first_index, run.last_index)
-            if key not in seen:
-                regions.append(region)
-                seen.add(key)
-    if suggested is not None and not any(region.offset == suggested for region in regions):
-        planned = attempt.analysis.planned_chunk_count
-        start, end = _chunk_bounds(attempt, 0, planned - 1) if planned else (0.0, 0.0)
-        regions.insert(
-            0,
-            _Region(
-                suggested,
-                start,
-                end,
-                "confirmed by video"
-                if attempt.video_check.confirmed_offset == suggested
-                else "not settled",
-            ),
-        )
-    for target in attempt.video_check.targets:
-        if target.kind == "run" and any(
-            (target.first_chunk_index, target.last_chunk_index) == (run.first_index, run.last_index)
-            for run in attempt.runs
-        ):
-            continue
-        if not target.alternative_offsets:
-            continue
-        start, end = _chunk_bounds(attempt, target.first_chunk_index, target.last_chunk_index)
-        region = _Region(target.alternative_offsets[0], start, end, _target_status(target))
-        key = (region.offset, target.first_chunk_index, target.last_chunk_index)
-        if key not in seen:
-            regions.append(region)
-            seen.add(key)
-    return tuple(regions)
-
-
-def _reason_region(
-    regions: tuple[_Region, ...], suggested: int | None, reason: str
-) -> _Region | None:
-    candidates = tuple(region for region in regions if region.offset != suggested)
-    if reason == "competing_offset_confirmed_by_video":
-        candidates = tuple(region for region in candidates if region.status == "confirmed by video")
-    elif reason == "competing_offset":
-        candidates = tuple(region for region in candidates if region.status != "confirmed by video")
-    return candidates[0] if candidates else (regions[0] if regions else None)
-
-
-def _reason_lines(attempt: AudioAlignmentAttempt) -> tuple[str, ...]:
-    suggested = (
-        attempt.video_check.confirmed_offset
-        if attempt.video_check.confirmed_offset is not None
-        else attempt.decision.candidate.frame_offset
-        if attempt.decision.candidate is not None
-        else None
-    )
-    regions = _regions(attempt, suggested)
-    lines: list[str] = []
-    for reason in dict.fromkeys(
-        attempt.decision.failed_gates or (attempt.decision.primary_reason,)
-    ):
-        region = _reason_region(regions, suggested, reason)
-        if reason == "competing_offset_confirmed_by_video" and region is not None:
-            lines.append(
-                f"The video confirms {region.offset:+d}f in {_format_region(region)}, "
-                "so the sources likely differ by an edit there."
-            )
-        elif reason == "competing_offset" and region is not None:
-            lines.append(
-                f"Audio in {_format_region(region)} points to {region.offset:+d}f, and the video "
-                "could not settle which offset is right there."
-            )
-        elif reason == "unresolved_audio_disagreement":
-            unexamined = sum(
-                max(1, target.last_chunk_index - target.first_chunk_index + 1)
-                for target in attempt.video_check.targets
-                if target.resolution == "unexamined"
-            )
-            if unexamined:
-                lines.append(
-                    f"Audio in {unexamined} more section{'' if unexamined == 1 else 's'} points "
-                    "elsewhere; they were not checked, so the offset is not applied."
-                )
-            elif region is not None:
-                lines.append(
-                    f"Audio in {_format_region(region)} points to {region.offset:+d}f, and the video "
-                    "could not rule that out."
-                )
-        elif reason == "video_check_inconclusive" and suggested is not None:
-            lines.append(
-                f"The audio points to {suggested:+d}f, but the video could not confirm the exact "
-                "frame (little motion or different framing at the checked points)."
-            )
-        elif reason == "video_check_unavailable" and suggested is not None:
-            lines.append(
-                f"The audio points to {suggested:+d}f, but the video could not be read to confirm "
-                "the exact frame."
-            )
-        elif reason == "no_single_offset" and attempt.video_check.confirmed_offset is not None:
-            lines.append(
-                "The audio does not agree on one offset across the track; the video suggests "
-                f"{attempt.video_check.confirmed_offset:+d}f at the checked points."
-            )
-    return tuple(dict.fromkeys(lines))
-
-
-def _check_point_line(point: VideoCheckPoint) -> str:
-    offset = point.reference_frame - point.suggested_comparison_frame
-    return (
-        f"Check {_format_time(point.timestamp_seconds)} — reference {point.reference_frame:,} "
-        f"↔ comparison {point.suggested_comparison_frame:,} ({offset:+d}f)"
-    )
-
-
-def _video_established_line(attempt: AudioAlignmentAttempt) -> str:
-    video = attempt.video_check
-    if video.observation != "observed":
-        return "Video: not observed."
-    if video.confirmed_offset is None:
-        return f"Video: did not confirm an offset at {len(video.positions)} check points."
-    index = video.scored_offsets.index(video.confirmed_offset)
-    wins = sum(
-        min(position.score_by_offset) == position.score_by_offset[index]
-        for position in video.positions
-    )
-    margins: list[float] = []
-    for position in video.positions:
-        best = min(position.score_by_offset)
-        runner = (
-            min(score for score in position.score_by_offset if score != best)
-            if len(set(position.score_by_offset)) > 1
-            else best
-        )
-        if best == 0 and runner > 0:
-            margins.append(float("inf"))
-        elif best > 0:
-            margins.append(runner / best)
-    margin = (
-        "∞"
-        if not margins or any(value == float("inf") for value in margins)
-        else f"{median(margins):.1f}"
-    )
-    return (
-        f"Video: confirmed {video.confirmed_offset:+d}f at {wins} of {len(video.positions)} "
-        f"check points (median margin {margin}×)."
-    )
-
-
-def _detail_lines(attempt: AudioAlignmentAttempt) -> tuple[str, ...]:
-    recount = attempt.authority_recount
-    agreeing = (
-        recount.authority_agreeing_chunks if recount is not None else attempt.audio.agreeing_chunks
-    )
-    suggested = (
-        attempt.video_check.confirmed_offset
-        if attempt.video_check.confirmed_offset is not None
-        else attempt.decision.candidate.frame_offset
-        if attempt.decision.candidate is not None
-        else attempt.audio.rounded_frame
-    )
-    lines = [
-        (
-            f"Established: Audio: {agreeing} of {attempt.audio.credible_chunks} sections agree on "
-            f"{(suggested or 0):+d}f ({max(0, attempt.audio.credible_chunks - agreeing)} differ, "
-            f"{max(0, attempt.audio.active_chunks - attempt.audio.credible_chunks)} quiet)."
-        ),
-        _video_established_line(attempt),
-    ]
-    for index, region in enumerate(_regions(attempt, suggested)):
-        lines.append(
-            f"{'Regions: ' if index == 0 else '':<9}{region.offset:+d}f  {_format_region(region)}  {region.status}"
-        )
-    if recount is not None and recount.raw_agreeing_chunks != recount.authority_agreeing_chunks:
-        lines.append(
-            f"Context: Audio (raw): {recount.raw_agreeing_chunks} of {attempt.audio.credible_chunks} "
-            f"sections agree; {recount.authority_agreeing_chunks - recount.raw_agreeing_chunks} more "
-            "are within the same frame, so "
-            f"{recount.authority_agreeing_chunks} of {attempt.audio.credible_chunks} agree for this offset."
-        )
-    for item in attempt.video_check.same_frame_context:
-        start, end = _chunk_bounds(attempt, item.chunk_index, item.chunk_index)
-        lines.append(
-            f"Context: 1 section differs by less than a frame ({_format_region(_Region(0, start, end, 'not settled'))}); not a disagreement."
-        )
-    for target in attempt.video_check.targets:
-        if target.resolution == "alternative_confirmed" or target.kind != "chunk":
-            continue
-        start, end = _chunk_bounds(attempt, target.first_chunk_index, target.last_chunk_index)
-        credible = (
-            target.first_chunk_index < len(attempt.chunks.credible)
-            and attempt.chunks.credible[target.first_chunk_index]
-        )
-        if credible and target.resolution == "resolved":
-            lines.append(
-                f"Context: Audio differed in {_format_region(_Region(0, start, end, 'not settled'))}; "
-                "the video confirmed the offset there."
-            )
-        else:
-            lines.append(
-                f"Context: Picture differs in {_format_region(_Region(0, start, end, 'not settled'))} "
-                "(for example a replaced shot); offset still holds."
-            )
-        break
-    for index, point in enumerate(attempt.video_check.check_points):
-        lines.append(f"{'Check points: ' if index == 0 else '':<14}{_check_point_line(point)}")
-    decision = attempt.decision
-    lines.append(
-        f"Decision: state={decision.state}; reason={decision.primary_reason}; "
-        f"also={','.join(decision.failed_gates[1:]) or 'none'}"
-    )
-    return tuple(lines)
-
-
-def _noted_line(attempt: AudioAlignmentAttempt) -> str | None:
-    suggested = (
-        attempt.video_check.confirmed_offset
-        if attempt.video_check.confirmed_offset is not None
-        else attempt.decision.candidate.frame_offset
-        if attempt.decision.candidate is not None
-        else None
-    )
-    if suggested is None:
-        return None
-    if attempt.video_check.same_frame_context:
-        item = attempt.video_check.same_frame_context[0]
-        start, end = _chunk_bounds(attempt, item.chunk_index, item.chunk_index)
-        count = len(attempt.video_check.same_frame_context)
-        return (
-            f"Noted: audio differed in {count} section{'s' if count != 1 else ''} "
-            f"({_format_region(_Region(0, start, end, 'not settled'))}); the video confirmed "
-            f"{suggested:+d}f there."
-        )
-    for target in attempt.video_check.targets:
-        if target.resolution == "alternative_confirmed":
-            continue
-        if target.kind == "chunk":
-            start, end = _chunk_bounds(attempt, target.first_chunk_index, target.last_chunk_index)
-            credible = (
-                target.first_chunk_index < len(attempt.chunks.credible)
-                and attempt.chunks.credible[target.first_chunk_index]
-            )
-            if credible and target.resolution == "resolved":
-                count = target.last_chunk_index - target.first_chunk_index + 1
-                return (
-                    f"Noted: audio differed in {count} section{'s' if count != 1 else ''} "
-                    f"({_format_region(_Region(0, start, end, 'not settled'))}); the video "
-                    f"confirmed {suggested:+d}f there."
-                )
-            return (
-                f"Noted: the picture differs in {_format_region(_Region(0, start, end, 'not settled'))} "
-                "(for example a replaced shot); the offset still holds."
-            )
-    return None
 
 
 @dataclass(slots=True)
@@ -699,6 +356,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         for comparison in self._workspace.comparisons:
             summary = QLabel(_audio_summary(comparison), self.audio_group)
             summary.setWordWrap(True)
+            summary.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
             summary.setAccessibleName(
                 f"Comparison {comparison.comparison_ordinal} audio evidence summary"
             )
@@ -718,6 +379,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 details,
             )
             detail_label.setWordWrap(True)
+            detail_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
             details_layout.addWidget(detail_label)
             detail_label.setVisible(False)
             details.toggled.connect(detail_label.setVisible)
@@ -1231,14 +896,14 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
             )
         )
     elif attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
-        candidate = _suggested_offset(comparison)
+        review = build_audio_review_presentation(attempt)
+        candidate = review.suggested_offset
         if candidate is not None:
-            regions = _regions(attempt, candidate)
             lines.extend((f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",))
             if attempt.decision.primary_reason == "video_check_pending":
                 lines.append("Video confirmation pending; not applied.")
             else:
-                lines.extend(_reason_lines(attempt))
+                lines.extend(review.reason_lines(panel=True))
                 if any(
                     reason
                     in {
@@ -1246,19 +911,12 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
                         "competing_offset",
                         "unresolved_audio_disagreement",
                     }
-                    for reason in dict.fromkeys(
-                        attempt.decision.failed_gates or (attempt.decision.primary_reason,)
-                    )
+                    for reason in review.reasons
                 ):
-                    lines.extend(
-                        f"  {region.offset:+d}f  {_format_region(region)}  {region.status}"
-                        for region in regions[:3]
-                    )
-                    if len(regions) > 3:
-                        lines.append(f"and {len(regions) - 3} more regions")
-                lines.extend(
-                    _check_point_line(point) for point in attempt.video_check.check_points[:2]
-                )
+                    lines.extend(f"  {line}" for line in review.region_lines(panel=True, limit=3))
+                    if len(review.regions) > 3:
+                        lines.append(f"and {len(review.regions) - 3} more regions")
+                lines.extend(review.check_point_lines(panel=True, limit=2))
                 lines.append("Visual confirmation required to use this hint.")
     if not lines:
         lines.append(_unavailable_summary_line(comparison))
@@ -1268,7 +926,7 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
         if original is not None:
             lines.append(f"Original evidence: {original}")
     elif authority.origin == "computed_this_run" and attempt is not None:
-        noted = _noted_line(attempt)
+        noted = build_audio_review_presentation(attempt).noted_line(panel=True)
         if noted is not None:
             lines.append(noted)
     return "\n".join(lines)
@@ -1304,7 +962,9 @@ def _audio_details(
             reference_source_frame_count,
         )
         return "\n".join(lines)
-    lines = list(_detail_lines(attempt))
+    lines = [
+        f"{row.key}: {row.value}" for row in build_audio_review_presentation(attempt).verbose_rows()
+    ]
     lines.extend(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt))
     _append_marker_bounds_detail(lines, comparison, reference_source_frame_count)
     return "\n".join(lines)

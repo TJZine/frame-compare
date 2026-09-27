@@ -31,12 +31,15 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.alignment_evidence import (
     AudioChunkRun,
+    AudioSameFrameContext,
     VideoCheckObservation,
     VideoCheckPoint,
     VideoPositionDifference,
     VideoTargetEvidence,
     VideoTargetPosition,
+    build_audio_review_presentation,
 )
+from frame_compare.utils.logging import configure_logging
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_evidence import attempt_with_chunks
@@ -205,6 +208,102 @@ def _review_attempt(reason: str):
             state="provisional",
             primary_reason=reason,
             failed_gates=(reason,),
+        ),
+    )
+
+
+def _early_competing_run_attempt():
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    target = replace(attempt.video_check.targets[0], first_chunk_index=0, last_chunk_index=1)
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(81_000, 81_000, 1177, 1177),
+            agrees=(False, False, True, True),
+        ),
+        runs=(
+            AudioChunkRun(first_index=0, last_index=1, lag=81_000, chunk_count=2),
+            AudioChunkRun(first_index=2, last_index=3, lag=1177, chunk_count=2),
+        ),
+        video_check=replace(attempt.video_check, targets=(target,)),
+    )
+
+
+def _four_region_attempt():
+    attempt = _review_attempt("competing_offset")
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(1177, 81_000, 82_000, 83_000),
+            agrees=(True, False, False, False),
+        ),
+        runs=tuple(
+            AudioChunkRun(first_index=index, last_index=index, lag=lag, chunk_count=1)
+            for index, lag in enumerate((1177, 81_000, 82_000, 83_000))
+        ),
+        video_check=replace(attempt.video_check, targets=()),
+    )
+
+
+def _unexamined_attempt():
+    attempt = _review_attempt("unresolved_audio_disagreement")
+    target = replace(attempt.video_check.targets[0], resolution="unexamined", positions=())
+    return replace(
+        attempt,
+        video_check=replace(attempt.video_check, targets=(target,)),
+    )
+
+
+def _audio_failed_video_confirmed_attempt():
+    attempt = _review_attempt("video_check_inconclusive")
+    return replace(
+        attempt,
+        audio=replace(attempt.audio, status="no_single_offset", agreeing_chunks=2),
+        video_check=replace(attempt.video_check, confirmed_offset=146, targets=()),
+        decision=replace(
+            attempt.decision,
+            primary_reason="no_single_offset",
+            failed_gates=("no_single_offset",),
+        ),
+    )
+
+
+def _strict_video_vote_attempt():
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    positions = tuple(
+        VideoPositionDifference(
+            position_index=index,
+            reference_frame=6_474 + index,
+            score_by_offset=(2.0, 1.2, 0.5, 1.0, 2.0),
+        )
+        for index in range(6)
+    ) + (
+        VideoPositionDifference(
+            position_index=6,
+            reference_frame=6_480,
+            score_by_offset=(0.0, 0.0, 0.0, 0.0, 0.0),
+        ),
+    )
+    return replace(attempt, video_check=replace(attempt.video_check, positions=positions))
+
+
+def _applied_result(reference: Path, comparison: Path, attempt) -> AlignmentResult:
+    return AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=146,
+        time_offset_seconds=146 / 24,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=True,
+        diagnostic="audio_video_confirmed",
+        stability=attempt.stability,
+        audio_attempt=replace(
+            attempt,
+            decision=replace(attempt.decision, state="trusted_automatic"),
         ),
     )
 
@@ -527,15 +626,45 @@ def test_quiet_keeps_only_actionable_notices(
 
 
 def test_json_mode_logs_review_warning(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    configure_logging("INFO", "json")
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
     _present(request, _provisional_result(reference, comparison), config, json_output=True)
 
-    out = capsys.readouterr().out
-    assert "audio_alignment_requires_review" in out
-    assert "decision_state=provisional" in out
-    assert "candidate_frame=146" in out
-    assert "reason=video_check_pending" in out
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "audio_alignment_requires_review" in captured.err
+    assert '"decision_state": "provisional"' in captured.err
+    assert '"candidate_frame": 146' in captured.err
+    assert '"reason": "video_check_pending"' in captured.err
+
+
+def test_json_stdout_is_identical_when_review_reason_changes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    configure_logging("INFO", "json")
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    first = _review_attempt("competing_offset")
+    second = _review_attempt("video_check_inconclusive")
+    for attempt in (first, second):
+        result = AlignmentResult(
+            reference_clip=reference.name,
+            comparison_clip=comparison.name,
+            frame_offset=None,
+            time_offset_seconds=None,
+            correlation_score=0.5,
+            algorithm="cross_correlation",
+            source="computed",
+            applied=False,
+            diagnostic=attempt.decision.primary_reason,
+            stability=attempt.stability,
+            audio_attempt=attempt,
+        )
+        _present(request, result, config, json_output=True)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "audio_alignment_requires_review" in captured.err
 
 
 @pytest.mark.parametrize(
@@ -569,6 +698,7 @@ def test_p4a_reason_copy_is_plain_and_shows_check_points(
     reason: str,
     expected: str,
 ) -> None:
+    configure_logging("INFO", "json")
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
     attempt = _review_attempt(reason)
@@ -594,11 +724,184 @@ def test_p4a_reason_copy_is_plain_and_shows_check_points(
     if reason != "video_check_unavailable":
         assert "Check 1:01:01  reference 13,123 <-> comparison 12,880 (+243f)" in err
     assert "Align manually or keep the current alignment." in err
+    _present(request, result, config, verbose=True)
+    assert f"Decision: state=provisional; reason={reason}" in capsys.readouterr().err
     _present(request, result, config, json_output=True)
-    out = capsys.readouterr().out
-    assert "audio_alignment_requires_review" in out
-    assert f"reason={reason}" in out
-    assert expected not in out
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "audio_alignment_requires_review" in captured.err
+    assert f'"reason": "{reason}"' in captured.err
+    assert expected not in captured.err
+
+
+def test_audio_failed_but_video_confirmed_gets_v6_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _audio_failed_video_confirmed_attempt()
+    result = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=0.5,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic="no_single_offset",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+    err = capsys.readouterr().err
+    assert (
+        "The audio does not agree on one offset across the track; the video suggests +146f" in err
+    )
+
+    _present(request, result, config, verbose=True)
+    verbose = capsys.readouterr().err
+    assert "Decision: state=provisional; reason=no_single_offset" in verbose
+    assert "Video: confirmed +146f" in verbose
+
+
+def test_early_competing_region_does_not_overlap_majority_region(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _early_competing_run_attempt()
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="competing_offset_confirmed_by_video",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+    err = capsys.readouterr().err
+    assert "+146f  1:00-2:00" in err
+    assert "+243f  0:00-1:00" in err
+    assert "+146f  0:00-2:00" not in err
+
+
+def test_four_regions_truncate_after_three_and_keep_order(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _four_region_attempt()
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="competing_offset",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+    err = capsys.readouterr().err
+    review = build_audio_review_presentation(attempt)
+    assert [region.offset for region in review.regions] == [146, 243, 246, 249]
+    assert review.regions[0].end_seconds == review.regions[1].start_seconds
+    assert "+249f" not in "\n".join(review.region_lines(limit=3))
+    assert "and 1 more regions" in err
+
+
+def test_unexamined_budget_add_on_is_plain_and_verbose(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _unexamined_attempt()
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="unresolved_audio_disagreement",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+    assert (
+        "Audio in 2 more sections points elsewhere; they were not checked"
+        in capsys.readouterr().err
+    )
+    _present(request, result, config, verbose=True)
+    assert (
+        "Decision: state=provisional; reason=unresolved_audio_disagreement"
+        in capsys.readouterr().err
+    )
+
+
+def test_video_vote_uses_only_strict_informative_positions() -> None:
+    review = build_audio_review_presentation(_strict_video_vote_attempt())
+    assert review.video_wins == 6
+    assert review.video_informative == 6
+    assert review.video_margin == pytest.approx(2.0)
+    assert review.established_video_line() == (
+        "Video: confirmed +146f at 6 of 7 check points (median margin 2.0×)."
+    )
+
+
+def test_check_points_preserve_order_and_cap_at_five() -> None:
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    points = tuple(VideoCheckPoint(float(index), 1_000 + index, 854 + index) for index in range(5))
+    review = build_audio_review_presentation(
+        replace(attempt, video_check=replace(attempt.video_check, check_points=points))
+    )
+    assert len(review.check_points) == 5
+    assert [point.reference_frame for point in review.check_points] == [
+        1_000,
+        1_001,
+        1_002,
+        1_003,
+        1_004,
+    ]
+
+
+def test_applied_noted_line_only_exists_with_context(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    plain = _review_attempt("competing_offset_confirmed_by_video")
+    _present(request, _applied_result(reference, comparison, plain), config)
+    assert "Noted:" not in capsys.readouterr().err
+
+    contextual = replace(
+        plain,
+        video_check=replace(
+            plain.video_check,
+            same_frame_context=(
+                AudioSameFrameContext(0, 1177, 3.531, 146),
+                AudioSameFrameContext(1, 1177, 3.531, 146),
+            ),
+        ),
+    )
+    _present(request, _applied_result(reference, comparison, contextual), config)
+    err = capsys.readouterr().err
+    assert "Noted: audio differed in 2 sections (0:00-0:30, 0:30-1:00);" in err
 
 
 def test_p4a_verbose_rows_include_established_context_and_all_checks(
