@@ -84,6 +84,7 @@ _AUDIO_REVIEW_REGION_REASONS = frozenset(
     }
 )
 type _AudioReviewTargetKey = tuple[VideoTargetKind, int, int]
+type _AudioReviewTargetProjection = tuple[_AudioReviewTargetKey, VideoTargetResolution]
 
 AUDIO_ANALYSIS_SAMPLE_RATE = 8000
 MAX_AUDIO_CHUNKS = 4096
@@ -1006,6 +1007,7 @@ class AudioReviewRegion:
     status: AudioReviewRegionStatus
     target_resolution: VideoTargetResolution | None = None
     target_key: _AudioReviewTargetKey | None = None
+    target_projections: tuple[_AudioReviewTargetProjection, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1312,6 +1314,81 @@ def _review_target_status(target: VideoTargetEvidence | None) -> AudioReviewRegi
     return "not checked" if target.resolution == "unexamined" else "not settled"
 
 
+def _review_target_offset(
+    attempt: AudioAlignmentAttempt, target: VideoTargetEvidence
+) -> int | None:
+    lag: int | None = None
+    if target.kind == "run":
+        for run in attempt.runs:
+            if (run.first_index, run.last_index) == (
+                target.first_chunk_index,
+                target.last_chunk_index,
+            ):
+                lag = run.lag
+                break
+        if lag is not None:
+            return _review_frame_for_lag(attempt, lag)
+    return target.alternative_offsets[0] if target.alternative_offsets else None
+
+
+def _review_target_regions(
+    attempt: AudioAlignmentAttempt,
+    targets: tuple[VideoTargetEvidence, ...],
+) -> tuple[AudioReviewRegion, ...]:
+    regions: list[AudioReviewRegion] = []
+    for target in targets:
+        offset = _review_target_offset(attempt, target)
+        if offset is None:
+            continue
+        start, end = _review_chunk_bounds(
+            attempt, target.first_chunk_index, target.last_chunk_index
+        )
+        regions.append(
+            AudioReviewRegion(
+                offset,
+                start,
+                end,
+                _review_target_status(target),
+                target.resolution,
+                (target.kind, target.first_chunk_index, target.last_chunk_index),
+            )
+        )
+    return _review_non_overlapping(tuple(regions))
+
+
+def _review_region_target_projections(
+    region: AudioReviewRegion,
+) -> tuple[_AudioReviewTargetProjection, ...]:
+    if region.target_projections:
+        return region.target_projections
+    if region.target_key is None or region.target_resolution is None:
+        return ()
+    return ((region.target_key, region.target_resolution),)
+
+
+def _review_merge_target_projections(
+    first: AudioReviewRegion, second: AudioReviewRegion
+) -> tuple[_AudioReviewTargetProjection, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *_review_region_target_projections(first),
+                *_review_region_target_projections(second),
+            )
+        )
+    )
+
+
+def _review_merge_status(
+    first: AudioReviewRegionStatus, second: AudioReviewRegionStatus
+) -> AudioReviewRegionStatus:
+    if "not checked" in {first, second}:
+        return "not checked"
+    if "not settled" in {first, second}:
+        return "not settled"
+    return "confirmed by video"
+
+
 def _review_track_bounds(attempt: AudioAlignmentAttempt) -> tuple[float, float]:
     planned = attempt.analysis.planned_chunk_count
     if planned:
@@ -1326,6 +1403,24 @@ def _review_non_overlapping(
     clipped: list[AudioReviewRegion] = []
     cursor = 0.0
     for region in ordered:
+        if (
+            clipped
+            and region.start_seconds == clipped[-1].start_seconds
+            and region.end_seconds == clipped[-1].end_seconds
+            and region.offset == clipped[-1].offset
+        ):
+            previous = clipped[-1]
+            primary = previous if previous.target_key is not None else region
+            clipped[-1] = AudioReviewRegion(
+                previous.offset,
+                previous.start_seconds,
+                previous.end_seconds,
+                _review_merge_status(previous.status, region.status),
+                primary.target_resolution,
+                primary.target_key,
+                _review_merge_target_projections(previous, region),
+            )
+            continue
         start = max(region.start_seconds, cursor)
         if region.end_seconds <= start:
             continue
@@ -1336,6 +1431,7 @@ def _review_non_overlapping(
             region.status,
             region.target_resolution,
             region.target_key,
+            _review_region_target_projections(region),
         )
         if (
             clipped
@@ -1343,6 +1439,7 @@ def _review_non_overlapping(
             and clipped[-1].status == candidate.status
             and clipped[-1].target_resolution == candidate.target_resolution
             and clipped[-1].target_key == candidate.target_key
+            and clipped[-1].target_projections == candidate.target_projections
         ):
             previous = clipped[-1]
             clipped[-1] = AudioReviewRegion(
@@ -1352,6 +1449,7 @@ def _review_non_overlapping(
                 previous.status,
                 previous.target_resolution,
                 previous.target_key,
+                previous.target_projections,
             )
         else:
             clipped.append(candidate)
@@ -1416,26 +1514,15 @@ def _review_regions(
     else:
         regions = tuple(runs)
 
-    existing_runs = {(run.first_index, run.last_index) for run in attempt.runs}
-    extras: list[AudioReviewRegion] = []
-    for target in video.targets:
-        if (target.first_chunk_index, target.last_chunk_index) in existing_runs:
-            continue
-        if not target.alternative_offsets:
-            continue
-        start, end = _review_chunk_bounds(
-            attempt, target.first_chunk_index, target.last_chunk_index
+    existing_run_keys = {("run", run.first_index, run.last_index) for run in attempt.runs}
+    extras = tuple(
+        region
+        for region in _review_target_regions(attempt, video.targets)
+        if any(
+            target_key not in existing_run_keys
+            for target_key, _resolution in _review_region_target_projections(region)
         )
-        extras.append(
-            AudioReviewRegion(
-                target.alternative_offsets[0],
-                start,
-                end,
-                _review_target_status(target),
-                target.resolution,
-                (target.kind, target.first_chunk_index, target.last_chunk_index),
-            )
-        )
+    )
     chronological = _review_non_overlapping((*regions, *extras))
     if suggested is None:
         return chronological
@@ -1449,15 +1536,38 @@ def _review_reason_region(
     regions: tuple[AudioReviewRegion, ...], suggested: int | None, reason: str
 ) -> AudioReviewRegion | None:
     candidates = tuple(region for region in regions if region.offset != suggested)
+    target_candidates = candidates
+
+    def target_regions(
+        kind: VideoTargetKind,
+        resolutions: frozenset[VideoTargetResolution],
+    ) -> tuple[AudioReviewRegion, ...]:
+        return tuple(
+            region
+            for region in target_candidates
+            if any(
+                target_key[0] == kind and resolution in resolutions
+                for target_key, resolution in _review_region_target_projections(region)
+            )
+        )
+
     if reason == "competing_offset_confirmed_by_video":
         candidates = tuple(
-            region for region in candidates if region.target_resolution == "alternative_confirmed"
+            region
+            for region in candidates
+            if any(
+                resolution == "alternative_confirmed"
+                for _target_key, resolution in _review_region_target_projections(region)
+            )
         )
         return candidates[0] if candidates else None
-    if reason in {"competing_offset", "unresolved_audio_disagreement"}:
-        candidates = tuple(
-            region for region in candidates if region.target_resolution == "unresolved"
-        )
+    if reason == "competing_offset":
+        candidates = target_regions("run", frozenset({"unresolved", "unexamined"}))
+        return candidates[0] if candidates else None
+    if reason == "unresolved_audio_disagreement":
+        candidates = target_regions("chunk", frozenset({"unresolved"}))
+        if not candidates:
+            candidates = target_regions("run", frozenset({"unresolved"}))
         return candidates[0] if candidates else None
     return candidates[0] if candidates else (regions[0] if regions else None)
 

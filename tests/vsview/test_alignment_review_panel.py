@@ -57,6 +57,7 @@ from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
     _multi_context_attempt,
     _review_attempt,
+    _singleton_chunk_target_attempt,
 )
 
 _SESSION_ID = "12345678123456781234567812345678"
@@ -746,6 +747,28 @@ def test_evidence_details_toggle_works_from_keyboard_and_stays_collapsed_by_defa
 
     assert details.isChecked()
     assert not detail_label.isHidden()
+
+
+def test_panel_summary_keeps_singleton_chunk_reason_target(
+    tmp_path: Path,
+) -> None:
+    attempt = _singleton_chunk_target_attempt()
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=audio_review)
+
+    assert (
+        "Audio in 1:00–1:30 points to +246f, and the video could not rule that out."
+        in panel.audio_summary_labels[0].text()
+    )
 
 
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(

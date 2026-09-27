@@ -349,6 +349,83 @@ def _unexamined_before_unresolved_attempt():
     )
 
 
+def _singleton_chunk_target_attempt():
+    attempt = _review_attempt("unresolved_audio_disagreement")
+    targets = (
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=0,
+            last_chunk_index=0,
+            alternative_offsets=(243,),
+            resolution="unexamined",
+            positions=(),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=2,
+            last_chunk_index=2,
+            alternative_offsets=(246,),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(2, 9_000, 1.0, 1.0, "neither"),),
+        ),
+    )
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(1177, 81_000, 82_000, 1177),
+            agrees=(True, False, False, True),
+        ),
+        runs=tuple(
+            AudioChunkRun(first_index=index, last_index=index, lag=lag, chunk_count=1)
+            for index, lag in enumerate((1177, 81_000, 82_000, 1177))
+        ),
+        video_check=replace(attempt.video_check, targets=targets),
+    )
+
+
+def _unresolved_run_then_chunk_attempt():
+    attempt = _review_attempt("competing_offset")
+    targets = (
+        VideoTargetEvidence(
+            kind="run",
+            first_chunk_index=1,
+            last_chunk_index=2,
+            alternative_offsets=(243,),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(1, 9_000, 1.0, 1.0, "neither"),),
+        ),
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=3,
+            last_chunk_index=3,
+            alternative_offsets=(250,),
+            resolution="unresolved",
+            positions=(VideoTargetPosition(2, 9_001, 1.0, 1.0, "neither"),),
+        ),
+    )
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(1177, 81_000, 81_000, 83_333),
+            agrees=(True, False, False, False),
+        ),
+        runs=(
+            AudioChunkRun(first_index=0, last_index=0, lag=1177, chunk_count=1),
+            AudioChunkRun(first_index=1, last_index=2, lag=81_000, chunk_count=2),
+            AudioChunkRun(first_index=3, last_index=3, lag=83_333, chunk_count=1),
+        ),
+        video_check=replace(attempt.video_check, targets=targets),
+    )
+
+
+def _unexamined_competing_run_attempt():
+    attempt = _review_attempt("competing_offset")
+    target = replace(attempt.video_check.targets[0], resolution="unexamined", positions=())
+    return replace(attempt, video_check=replace(attempt.video_check, targets=(target,)))
+
+
 def _resolved_before_alternative_confirmed_attempt():
     attempt = _review_attempt("competing_offset_confirmed_by_video")
     targets = (
@@ -1059,6 +1136,119 @@ def test_unresolved_reason_skips_earlier_unexamined_region(
     err = capsys.readouterr().err
     assert "Audio in 1:00-1:30 points to +246f, and the video could not rule that out." in err
     assert "Audio in 0:30-1:00 points to +243f, and the video could not rule that out." not in err
+
+
+def test_chunk_target_identity_survives_singleton_run_projection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _singleton_chunk_target_attempt()
+    review = build_audio_review_presentation(attempt)
+    region = next(region for region in review.regions if region.offset == 246)
+
+    assert region.target_projections == ((("chunk", 2, 2), "unresolved"),)
+
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="unresolved_audio_disagreement",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    assert "Audio in 1:00-1:30 points to +246f, and the video could not rule that out." in err
+    assert "Audio in 1 more section points elsewhere; they were not checked" in err
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected", "not_expected"),
+    [
+        (
+            "competing_offset",
+            "Audio in 0:30-1:30 points to +243f, and the video could not settle which offset is right there.",
+            "Audio in 1:30-2:00 points to +250f, and the video could not settle which offset is right there.",
+        ),
+        (
+            "unresolved_audio_disagreement",
+            "Audio in 1:30-2:00 points to +250f, and the video could not rule that out.",
+            "Audio in 0:30-1:30 points to +243f, and the video could not rule that out.",
+        ),
+    ],
+)
+def test_reason_target_kind_selects_the_matching_region(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    reason: str,
+    expected: str,
+    not_expected: str,
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _unresolved_run_then_chunk_attempt()
+    attempt = replace(
+        attempt,
+        decision=replace(
+            attempt.decision,
+            primary_reason=reason,
+            failed_gates=(reason,),
+        ),
+    )
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic=reason,
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    assert expected in err
+    assert not_expected not in err
+
+
+def test_unexamined_competing_run_has_the_competing_reason_sentence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _unexamined_competing_run_attempt()
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic="competing_offset",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+
+    assert (
+        "Audio in 1:00-2:00 points to +243f, and the video could not settle which offset is right there."
+        in capsys.readouterr().err
+    )
 
 
 def test_confirmed_reason_skips_earlier_resolved_region(
