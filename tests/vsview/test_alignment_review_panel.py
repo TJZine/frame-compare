@@ -53,6 +53,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
+from tests.services.test_alignment_frozen_strings import _review_attempt
 
 _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
@@ -1297,3 +1298,90 @@ def test_deactivation_clears_only_owned_marker_group(tmp_path: Path, next_worksp
         "frame_compare_alignment_review"
     }
     assert "Inactive" in panel.progress_label.text()
+
+
+def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
+    tmp_path: Path,
+) -> None:
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=audio_review,
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert "Provisional audio candidate: +146f — NOT APPLIED" in summary
+    assert "The video confirms +243f in 1:00–2:00" in summary
+    assert "Check 1:01:01 — reference 13,123 ↔ comparison 12,880 (+243f)" in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert panel.progress_label.text() == "0/2 positions captured"
+    assert not panel.use_positions_button.isEnabled()
+
+    details = panel.audio_detail_groups[0]
+    details.setChecked(True)
+    detail_text = cast(QLabel, details.findChild(QLabel)).text()
+    assert "Established:" in detail_text
+    assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in detail_text
+    assert "Runtime/policy:" in detail_text
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        (
+            "competing_offset_confirmed_by_video",
+            "The video confirms +243f in 1:00–2:00, so the sources likely differ by an edit there.",
+        ),
+        (
+            "competing_offset",
+            "Audio in 1:00–2:00 points to +243f, and the video could not settle which offset is right there.",
+        ),
+        (
+            "unresolved_audio_disagreement",
+            "Audio in 1:00–2:00 points to +243f, and the video could not rule that out.",
+        ),
+        (
+            "video_check_inconclusive",
+            "The audio points to +146f, but the video could not confirm the exact frame",
+        ),
+        (
+            "video_check_unavailable",
+            "The audio points to +146f, but the video could not be read to confirm the exact frame.",
+        ),
+    ],
+)
+def test_p4a_panel_covers_each_non_applied_reason(
+    tmp_path: Path, reason: str, expected: str
+) -> None:
+    attempt = _review_attempt(reason)
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=audio_review,
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert "NOT APPLIED" in summary
+    assert expected in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert not panel.use_positions_button.isEnabled()

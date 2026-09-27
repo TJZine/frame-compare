@@ -29,6 +29,14 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
 )
+from frame_compare.utils.alignment_evidence import (
+    AudioChunkRun,
+    VideoCheckObservation,
+    VideoCheckPoint,
+    VideoPositionDifference,
+    VideoTargetEvidence,
+    VideoTargetPosition,
+)
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_evidence import attempt_with_chunks
@@ -113,6 +121,91 @@ def _present(
         quiet=quiet,
         json_output=json_output,
         diagnostics_written=False,
+    )
+
+
+def _review_attempt(reason: str):
+    base = attempt_with_chunks(4)
+    alternate_lag = 81_000
+    target_resolution = {
+        "competing_offset_confirmed_by_video": "alternative_confirmed",
+        "competing_offset": "unresolved",
+        "unresolved_audio_disagreement": "unresolved",
+    }.get(reason)
+    chunks = replace(
+        base.chunks,
+        lags=(1177, 1177, alternate_lag, alternate_lag),
+        agrees=(True, True, False, False),
+    )
+    runs = (
+        AudioChunkRun(first_index=0, last_index=1, lag=1177, chunk_count=2),
+        AudioChunkRun(first_index=2, last_index=3, lag=alternate_lag, chunk_count=2),
+    )
+    target = (
+        (
+            VideoTargetEvidence(
+                kind="run",
+                first_chunk_index=2,
+                last_chunk_index=3,
+                alternative_offsets=(243, 244),
+                resolution=target_resolution,  # type: ignore[arg-type]
+                positions=(
+                    VideoTargetPosition(
+                        position_index=1,
+                        reference_frame=13_123,
+                        confirmed_score=1.0,
+                        alternative_score=0.1,
+                        winner=(
+                            "alternative"
+                            if reason == "competing_offset_confirmed_by_video"
+                            else "neither"
+                        ),
+                    ),
+                ),
+            ),
+        )
+        if target_resolution is not None
+        else ()
+    )
+    video = (
+        VideoCheckObservation(
+            observation="not_observed",
+            scored_offsets=(),
+            confirmed_offset=None,
+            index_build_seconds=None,
+            positions=(),
+        )
+        if reason == "video_check_unavailable"
+        else VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(144, 145, 146, 147, 148),
+            confirmed_offset=(None if reason == "video_check_inconclusive" else 146),
+            index_build_seconds=0.1,
+            positions=(
+                VideoPositionDifference(
+                    position_index=0,
+                    reference_frame=6_474,
+                    score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+                ),
+            ),
+            targets=target,
+            check_points=(
+                VideoCheckPoint(3661.0, 13_123, 12_880),
+                VideoCheckPoint(270.0, 6_474, 6_328),
+            ),
+        )
+    )
+    return replace(
+        base,
+        chunks=chunks,
+        runs=runs,
+        video_check=video,
+        decision=replace(
+            base.decision,
+            state="provisional",
+            primary_reason=reason,
+            failed_gates=(reason,),
+        ),
     )
 
 
@@ -443,3 +536,96 @@ def test_json_mode_logs_review_warning(tmp_path: Path, capsys: pytest.CaptureFix
     assert "decision_state=provisional" in out
     assert "candidate_frame=146" in out
     assert "reason=video_check_pending" in out
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        (
+            "competing_offset_confirmed_by_video",
+            "The video confirms +243f in 1:00-2:00, so the sources likely differ by an edit there.",
+        ),
+        (
+            "competing_offset",
+            "Audio in 1:00-2:00 points to +243f, and the video could not settle which offset is right there.",
+        ),
+        (
+            "unresolved_audio_disagreement",
+            "Audio in 1:00-2:00 points to +243f, and the video could not rule that out.",
+        ),
+        (
+            "video_check_inconclusive",
+            "The audio points to +146f, but the video could not confirm the exact frame",
+        ),
+        (
+            "video_check_unavailable",
+            "The audio points to +146f, but the video could not be read to confirm the exact frame.",
+        ),
+    ],
+)
+def test_p4a_reason_copy_is_plain_and_shows_check_points(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    reason: str,
+    expected: str,
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _review_attempt(reason)
+    result = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=0.5,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic=reason,
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config)
+
+    err = capsys.readouterr().err
+    assert "Comparison 1 - Provisional audio candidate: +146f - NOT APPLIED" in err
+    assert expected in err
+    if reason != "video_check_unavailable":
+        assert "Check 1:01:01  reference 13,123 <-> comparison 12,880 (+243f)" in err
+    assert "Align manually or keep the current alignment." in err
+    _present(request, result, config, json_output=True)
+    out = capsys.readouterr().out
+    assert "audio_alignment_requires_review" in out
+    assert f"reason={reason}" in out
+    assert expected not in out
+
+
+def test_p4a_verbose_rows_include_established_context_and_all_checks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    result = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=0.5,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic="competing_offset_confirmed_by_video",
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+
+    _present(request, result, config, verbose=True)
+
+    err = capsys.readouterr().err
+    assert "Established: Audio: 4 of 4 sections agree on +146f" in err
+    assert "Video: confirmed +146f at 1 of 1 check points" in err
+    assert "Regions: +146f" in err
+    assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in err
+    assert "Check 4:30  reference 6,474 <-> comparison 6,328 (+146f)" in err
