@@ -83,6 +83,7 @@ _AUDIO_REVIEW_REGION_REASONS = frozenset(
         "unresolved_audio_disagreement",
     }
 )
+type _AudioReviewTargetKey = tuple[VideoTargetKind, int, int]
 
 AUDIO_ANALYSIS_SAMPLE_RATE = 8000
 MAX_AUDIO_CHUNKS = 4096
@@ -1003,6 +1004,8 @@ class AudioReviewRegion:
     start_seconds: float
     end_seconds: float
     status: AudioReviewRegionStatus
+    target_resolution: VideoTargetResolution | None = None
+    target_key: _AudioReviewTargetKey | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1231,8 +1234,8 @@ class AudioReviewPresentation:
         ]
         for index, line in enumerate(self.region_lines(panel=panel)):
             rows.append(EvidenceRow(key="Regions" if index == 0 else "", value=line, style="muted"))
-        for line in self.context_lines(panel=panel):
-            rows.append(EvidenceRow(key="Context", value=line, style="muted"))
+        for index, line in enumerate(self.context_lines(panel=panel)):
+            rows.append(EvidenceRow(key="Context" if index == 0 else "", value=line, style="muted"))
         for index, line in enumerate(self.check_point_lines(panel=panel, include_label=False)):
             rows.append(
                 EvidenceRow(key="Check points" if index == 0 else "", value=line, style="muted")
@@ -1294,7 +1297,7 @@ def _review_chunk_bounds(
 
 def _review_target_map(
     video: VideoCheckObservation,
-) -> dict[tuple[str, int, int], VideoTargetEvidence]:
+) -> dict[_AudioReviewTargetKey, VideoTargetEvidence]:
     return {
         (target.kind, target.first_chunk_index, target.last_chunk_index): target
         for target in video.targets
@@ -1326,11 +1329,20 @@ def _review_non_overlapping(
         start = max(region.start_seconds, cursor)
         if region.end_seconds <= start:
             continue
-        candidate = AudioReviewRegion(region.offset, start, region.end_seconds, region.status)
+        candidate = AudioReviewRegion(
+            region.offset,
+            start,
+            region.end_seconds,
+            region.status,
+            region.target_resolution,
+            region.target_key,
+        )
         if (
             clipped
             and clipped[-1].offset == candidate.offset
             and clipped[-1].status == candidate.status
+            and clipped[-1].target_resolution == candidate.target_resolution
+            and clipped[-1].target_key == candidate.target_key
         ):
             previous = clipped[-1]
             clipped[-1] = AudioReviewRegion(
@@ -1338,6 +1350,8 @@ def _review_non_overlapping(
                 previous.start_seconds,
                 max(previous.end_seconds, candidate.end_seconds),
                 previous.status,
+                previous.target_resolution,
+                previous.target_key,
             )
         else:
             clipped.append(candidate)
@@ -1366,7 +1380,16 @@ def _review_regions(
             if video.confirmed_offset is not None and offset == video.confirmed_offset
             else _review_target_status(target)
         )
-        runs.append(AudioReviewRegion(offset, start, end, status))
+        runs.append(
+            AudioReviewRegion(
+                offset,
+                start,
+                end,
+                status,
+                target.resolution if target is not None else None,
+                ("run", run.first_index, run.last_index) if target is not None else None,
+            )
+        )
 
     majority = tuple(
         region for region in runs if suggested is not None and region.offset == suggested
@@ -1409,6 +1432,8 @@ def _review_regions(
                 start,
                 end,
                 _review_target_status(target),
+                target.resolution,
+                (target.kind, target.first_chunk_index, target.last_chunk_index),
             )
         )
     chronological = _review_non_overlapping((*regions, *extras))
@@ -1425,11 +1450,14 @@ def _review_reason_region(
 ) -> AudioReviewRegion | None:
     candidates = tuple(region for region in regions if region.offset != suggested)
     if reason == "competing_offset_confirmed_by_video":
-        candidates = tuple(region for region in candidates if region.status == "confirmed by video")
-    elif reason == "competing_offset":
-        candidates = tuple(region for region in candidates if region.status != "confirmed by video")
-    elif reason == "unresolved_audio_disagreement":
-        candidates = tuple(region for region in candidates if region.status != "confirmed by video")
+        candidates = tuple(
+            region for region in candidates if region.target_resolution == "alternative_confirmed"
+        )
+        return candidates[0] if candidates else None
+    if reason in {"competing_offset", "unresolved_audio_disagreement"}:
+        candidates = tuple(
+            region for region in candidates if region.target_resolution == "unresolved"
+        )
         return candidates[0] if candidates else None
     return candidates[0] if candidates else (regions[0] if regions else None)
 

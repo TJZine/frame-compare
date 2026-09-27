@@ -55,6 +55,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
 )
 from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
+    _multi_context_attempt,
     _review_attempt,
 )
 
@@ -1348,6 +1349,34 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     )
     assert panel.audio_summary_labels[0].textInteractionFlags() & selectable == selectable
     assert cast(QLabel, details.findChild(QLabel)).textInteractionFlags() & selectable == selectable
+
+
+def test_p4a_panel_context_rows_use_one_key_and_continuations(tmp_path: Path) -> None:
+    attempt = _multi_context_attempt()
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=audio_review)
+
+    details = panel.audio_detail_groups[0]
+    details.setChecked(True)
+    detail_text = cast(QLabel, details.findChild(QLabel)).text()
+    assert (
+        "Context: Audio (raw): 2 of 4 sections agree; 2 more are within the same frame"
+        in detail_text
+    )
+    assert (
+        "         2 sections differ by less than a frame (sub-frame); not a disagreement."
+        in detail_text
+    )
+    assert detail_text.count("Context:") == 1
+    assert ": 2 sections differ by less than a frame" not in detail_text
 
 
 @pytest.mark.parametrize(

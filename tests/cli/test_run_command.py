@@ -207,25 +207,6 @@ def test_handle_json_output_success_schema(capsys: pytest.CaptureFixture[str]) -
     }
 
 
-def test_handle_json_output_stdout_is_byte_identical_when_review_reason_changes(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    outputs: list[bytes] = []
-    for reason in ("competing_offset", "video_check_inconclusive"):
-        handle_json_output(
-            RunResult(
-                success=True,
-                warnings=[reason],
-                phase_timings={"audio_review": 1.0},
-            )
-        )
-        captured = capsys.readouterr()
-        outputs.append(captured.out.encode("utf-8"))
-        assert captured.err == ""
-
-    assert outputs[0] == outputs[1]
-
-
 def test_handle_json_output_failure_exits_processing_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
