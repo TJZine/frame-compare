@@ -9,7 +9,7 @@ import math
 import threading
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -135,27 +135,8 @@ def _build_offsets_map(
 
 
 def _project_audio_attempt_for_review(attempt: AudioAlignmentAttempt) -> AudioAlignmentAttempt:
-    """Embed the attempt with its per-chunk rows emptied (M2).
-
-    Runs, counts, the outcome, the compensation and the sub-frame estimate
-    stay; the diagnostic artifact keeps the full rows.
-    """
-    if attempt.chunks.rows_omitted:
-        return attempt
-    return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            starts=(),
-            counts=(),
-            active=(),
-            lags=(),
-            psrs=(),
-            credible=(),
-            agrees=(),
-            rows_omitted=True,
-        ),
-    )
+    """Keep the authoritative rows; payload serialization compacts repeated facts."""
+    return attempt
 
 
 def _build_audio_review_map(

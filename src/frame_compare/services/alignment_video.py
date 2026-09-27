@@ -30,7 +30,8 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_policy import (
     CONFIRMATION_MARGIN,
-    compensated_lag_to_frame,
+    compensated_offset_seconds,
+    rounded_frame,
     sample_to_reference_frame,
 )
 from frame_compare.utils.alignment_policy import (
@@ -251,11 +252,7 @@ def check_video_alignment(
                     if scored is None:
                         return _failed("video_check_unavailable")
                     confirmed_score, alternative_score, alternative_offset = scored
-                    winner = _hypothesis_winner(
-                        confirmed_score,
-                        alternative_score,
-                        alternative_offset=alternative_offset,
-                    )
+                    winner = _hypothesis_winner(confirmed_score, alternative_score)
                     position = VideoTargetPosition(
                         position_index=next_position_index,
                         reference_frame=frame,
@@ -487,19 +484,15 @@ def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
 def _lag_to_frame(
     lag: int | float, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction
 ) -> int:
-    return compensated_lag_to_frame(
-        lag,
-        compensation_seconds=float(_compensation_seconds(attempt)),
-        fps_reference=fps_reference,
-    )
-
-
-def _compensation_seconds(attempt: AudioAlignmentAttempt) -> Fraction:
-    return (
-        _stream_start(attempt, role="reference", video=False)
-        - _stream_start(attempt, role="reference", video=True)
-        - _stream_start(attempt, role="comparison", video=False)
-        + _stream_start(attempt, role="comparison", video=True)
+    return rounded_frame(
+        compensated_offset_seconds(
+            global_lag=lag,
+            reference_audio_start=_stream_start(attempt, role="reference", video=False),
+            reference_video_start=_stream_start(attempt, role="reference", video=True),
+            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
+            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
+        ),
+        fps_reference,
     )
 
 
@@ -519,16 +512,17 @@ def _build_targets(
         global_lag=attempt.audio.global_lag,
         confirmed_offset=confirmed,
         fps_reference=fps_reference,
-        compensation_seconds=float(_compensation_seconds(attempt)),
+        compensation_seconds=compensated_offset_seconds(
+            global_lag=0,
+            reference_audio_start=_stream_start(attempt, role="reference", video=False),
+            reference_video_start=_stream_start(attempt, role="reference", video=True),
+            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
+            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
+        ),
     )
     run_targets: list[_Target] = []
-    run_members: set[int] = set()
     for run in classification.competing_runs:
-        members = [by_index.get(index) for index in range(run.first_index, run.last_index + 1)]
-        if any(member is None or member.lag is None for member in members):
-            continue
-        valid_members = [member for member in members if member is not None]
-        run_members.update(range(run.first_index, run.last_index + 1))
+        members = [by_index[index] for index in range(run.first_index, run.last_index + 1)]
         run_targets.append(
             _Target(
                 kind="run",
@@ -536,8 +530,8 @@ def _build_targets(
                 last_index=run.last_index,
                 lag=competing_run_center(run, chunks),
                 credible=True,
-                start_sample=valid_members[0].reference_start,
-                end_sample=(valid_members[-1].reference_start + valid_members[-1].reference_count),
+                start_sample=members[0].reference_start,
+                end_sample=(members[-1].reference_start + members[-1].reference_count),
                 requested_positions=4,
             )
         )
@@ -545,9 +539,8 @@ def _build_targets(
     credible_targets: list[_Target] = []
     noncredible_targets: list[_Target] = []
     for item in classification.credible_disagreements:
-        chunk = by_index.get(item.index)
-        if chunk is None or chunk.lag is None or chunk.index in run_members:
-            continue
+        chunk = by_index[item.index]
+        assert chunk.lag is not None
         credible_targets.append(
             _Target(
                 kind="chunk",
@@ -561,22 +554,20 @@ def _build_targets(
             )
         )
     for item in classification.noncredible_disagreements:
-        chunk = by_index.get(item.index)
-        if chunk is None or chunk.lag is None or chunk.index in run_members:
-            continue
-        if chunk.active:
-            noncredible_targets.append(
-                _Target(
-                    kind="chunk",
-                    first_index=chunk.index,
-                    last_index=chunk.index,
-                    lag=chunk.lag,
-                    credible=False,
-                    start_sample=chunk.reference_start,
-                    end_sample=chunk.reference_start + chunk.reference_count,
-                    requested_positions=2,
-                )
+        chunk = by_index[item.index]
+        assert chunk.lag is not None
+        noncredible_targets.append(
+            _Target(
+                kind="chunk",
+                first_index=chunk.index,
+                last_index=chunk.index,
+                lag=chunk.lag,
+                credible=False,
+                start_sample=chunk.reference_start,
+                end_sample=chunk.reference_start + chunk.reference_count,
+                requested_positions=2,
             )
+        )
     credible_targets.sort(key=lambda target: -(by_index[target.first_index].psr or 0.0))
     noncredible_targets.sort(key=lambda target: -(by_index[target.first_index].psr or 0.0))
     return (
@@ -651,28 +642,26 @@ def _score_hypotheses(
     except Exception:
         return None
     alternative_score = min(score for _offset, score in alternative_scores)
-    winning_offsets = [offset for offset, score in alternative_scores if score == alternative_score]
+    winning_offset = next(
+        offset for offset, score in alternative_scores if score == alternative_score
+    )
     return (
         confirmed_score,
         alternative_score,
-        winning_offsets[0] if len(winning_offsets) == 1 else None,
+        winning_offset,
     )
 
 
 def _hypothesis_winner(
     confirmed_score: float,
     alternative_score: float,
-    *,
-    alternative_offset: int | None,
 ) -> Literal["confirmed", "alternative", "neither"]:
     if confirmed_score == alternative_score:
         return "neither"
     if confirmed_score == 0.0:
         return "confirmed" if alternative_score > 0.0 else "neither"
     if alternative_score == 0.0:
-        return (
-            "alternative" if confirmed_score > 0.0 and alternative_offset is not None else "neither"
-        )
+        return "alternative" if confirmed_score > 0.0 else "neither"
     if (
         confirmed_score < alternative_score
         and alternative_score / confirmed_score >= CONFIRMATION_MARGIN
@@ -682,7 +671,7 @@ def _hypothesis_winner(
         alternative_score < confirmed_score
         and confirmed_score / alternative_score >= CONFIRMATION_MARGIN
     ):
-        return "alternative" if alternative_offset is not None else "neither"
+        return "alternative"
     return "neither"
 
 
@@ -752,7 +741,11 @@ def _check_points(
                 (
                     confirmed
                     if position.winner == "confirmed"
-                    else position.alternative_offset or target.target_offset
+                    else (
+                        position.alternative_offset
+                        if position.alternative_offset is not None
+                        else target.target_offset
+                    )
                 ),
             )
             for position in (*preferred, *remaining)
@@ -761,15 +754,7 @@ def _check_points(
     def target_offset(target: VideoTargetEvidence) -> int:
         if target.resolution == "resolved":
             return confirmed
-        if target.resolution == "alternative_confirmed":
-            winners = {
-                position.alternative_offset
-                for position in target.positions
-                if position.winner == "alternative"
-            }
-            if len(winners) == 1:
-                return next(iter(winners)) or target.target_offset
-        return target.target_offset
+        return target.representative_offset()
 
     candidates: list[_CheckPointTarget] = []
     for order, target in enumerate(targets):

@@ -652,10 +652,7 @@ def _producer_target_context_attempt(*, credible: bool, resolution: str):
                 reference_frame=1_800,
                 confirmed_score=scores[0],
                 alternative_score=scores[1],
-                winner=alignment_video._hypothesis_winner(
-                    *scores,
-                    alternative_offset=target_offset,
-                ),
+                winner=alignment_video._hypothesis_winner(*scores),
                 alternative_offset=(
                     target_offset if resolution == "alternative_confirmed" else None
                 ),
@@ -1868,7 +1865,7 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         "+250f  1:30-2:00  confirmed by video",
     )
 
-    assert compact.chunks.rows_omitted
+    assert compact.chunks == attempt.chunks
     assert full_review.attempt.video_check.targets == compact_review.attempt.video_check.targets
     assert full_review.suggested_offset == compact_review.suggested_offset == 146
     assert full_review.reason_lines() == compact_review.reason_lines() == expected_reasons
@@ -1929,7 +1926,14 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         "expected_noted",
     ),
     [
-        (True, "unresolved", "provisional", "unresolved_audio_disagreement", (), None),
+        (
+            True,
+            "unresolved",
+            "provisional",
+            "unresolved_audio_disagreement",
+            ("Local video inconclusive in 1:00-1:30 (+0f scored 1.000, +2f scored 1.000).",),
+            None,
+        ),
         (
             True,
             "resolved",
@@ -1993,7 +1997,7 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     assert attempt.decision.state == expected_state
     assert attempt.decision.primary_reason == expected_reason
     assert compact.decision == attempt.decision
-    assert compact.chunks.rows_omitted
+    assert compact.chunks == attempt.chunks
     assert full_review.context_lines() == compact_review.context_lines() == expected_context
     assert full_review.context_lines(panel=True) == compact_review.context_lines(panel=True)
     assert full_review.noted_line() == compact_review.noted_line() == expected_noted
@@ -2119,7 +2123,44 @@ def test_zero_is_retained_as_the_actual_alternative_winner() -> None:
         ),
     )
 
-    assert any(region.offset == 0 for region in build_audio_review_presentation(attempt).regions)
+    review = build_audio_review_presentation(attempt)
+    assert any(region.offset == 0 for region in review.regions)
+    assert review.reason_lines() == (
+        "The video confirms +0f in 1:00-1:30, so the sources likely differ by an edit there.",
+    )
+
+
+def test_distinct_position_winners_use_the_selected_checkpoint_offset() -> None:
+    attempt = _producer_target_context_attempt(credible=True, resolution="alternative_confirmed")
+    (target,) = attempt.video_check.targets
+    (position,) = target.positions
+    target = replace(
+        target,
+        target_offset=2,
+        alternative_offsets=(1, 2, 3),
+        positions=(
+            replace(position, reference_frame=100, alternative_offset=1),
+            replace(position, position_index=13, reference_frame=120, alternative_offset=3),
+        ),
+    )
+    check_points = alignment_video._check_points(
+        (),
+        (target,),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=Fraction(24),
+    )
+    attempt = replace(
+        attempt,
+        video_check=replace(attempt.video_check, targets=(target,), check_points=check_points),
+    )
+
+    review = build_audio_review_presentation(attempt)
+    assert review.reason_lines() == (
+        "The video confirms +1f in 1:00-1:30, so the sources likely differ by an edit there.",
+    )
+    assert any(line.startswith("+1f") for line in review.region_lines())
+    assert review.check_point_lines() == ("Check 0:04  reference 100 <-> comparison 99 (+1f)",)
 
 
 def test_resolved_credible_run_context_matches_full_and_compact_terminal(
@@ -2192,7 +2233,12 @@ def test_nonresolved_credible_runs_never_receive_resolved_context(
 
     assert attempt.decision.state == state
     assert attempt.decision.primary_reason == reason
-    assert review.context_lines() == ()
+    expected = (
+        ("Local video inconclusive in 1:00-2:00 (+0f scored 1.000, +2f scored 1.000).",)
+        if resolution == "unresolved"
+        else ()
+    )
+    assert review.context_lines() == expected
     assert review.noted_line() is None
 
 
@@ -2277,7 +2323,7 @@ def test_partial_final_base_regions_match_compact_native_projection() -> None:
         full_regions = build_audio_review_presentation(attempt).region_lines()
         compact_regions = build_audio_review_presentation(compact).region_lines()
 
-        assert compact.chunks.rows_omitted
+        assert compact.chunks == attempt.chunks
         assert full_regions == compact_regions
         assert expected in compact_regions
         assert all("2:00" not in line for line in compact_regions)
@@ -2298,7 +2344,7 @@ def test_partial_final_same_frame_context_matches_compact_native_projection() ->
     full_review = build_audio_review_presentation(attempt)
     compact_review = build_audio_review_presentation(compact)
 
-    assert compact.chunks.rows_omitted
+    assert compact.chunks == attempt.chunks
     assert full_review.same_frame_regions == compact_review.same_frame_regions
     assert tuple(
         (region.start_seconds, region.end_seconds) for region in compact_review.same_frame_regions

@@ -889,8 +889,7 @@ def test_build_audio_review_map_bounds_empty_projection_for_many_chunks() -> Non
     )
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    assert parsed.chunks.rows_omitted
-    assert parsed.chunks.starts == ()
+    assert parsed.chunks == attempt.chunks
     assert parsed.chunks.total_samples == 2160 * _CHUNK_SAMPLES
     assert len(parsed.runs) == 1
     assert parsed.audio.credible_chunks == 2160

@@ -6,6 +6,7 @@ import asyncio
 import math
 import statistics
 import time
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -24,7 +25,6 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
-from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
@@ -132,6 +132,7 @@ def _write_media(
 def _splice_graph(
     *,
     delayed: tuple[int, ...] = (),
+    advanced: tuple[int, ...] = (),
     delay_ms: int = 10,
 ) -> str:
     pieces: list[str] = []
@@ -142,6 +143,9 @@ def _splice_graph(
         piece = f"[1:a]atrim=start={start}:end={start + _CHUNK_SECONDS},asetpts=PTS-STARTPTS"
         if index in delayed:
             piece += f",adelay={delay_ms}:all=1,atrim=duration=30"
+        elif index in advanced:
+            seconds = delay_ms / 1000
+            piece += f",atrim=start={seconds},apad=pad_dur={seconds},atrim=duration=30"
         graph.append(f"{piece}[{label}]")
         pieces.append(f"[{label}]")
     graph.append("".join(pieces) + f"concat=n={_CHUNK_COUNT}:v=0:a=1[a]")
@@ -282,6 +286,12 @@ def _write_local_surround(path: Path) -> None:
     _write_media(
         path,
         base_audio=_SURROUND_SOURCES[0],
+        video_graph=(
+            "[0:v]drawbox=x=0:y=0:w=128:h=18:color=white:t=fill,"
+            "drawbox=x=0:y=54:w=128:h=18:color=white:t=fill,"
+            "drawbox=x=0:y=0:w=32:h=72:color=white:t=fill,"
+            "drawbox=x=96:y=0:w=32:h=72:color=white:t=fill[v]"
+        ),
         audio_sources=_SURROUND_SOURCES[1:],
         audio_graph=(
             f"{channels}amerge=inputs=6,asplit=3[s0][s1][s2];"
@@ -409,7 +419,13 @@ def _write_media_set(root: Path) -> _MediaSet:
     add("same-frame", lambda path: _write_media(path, audio_graph=_splice_graph(delayed=(10,))))
     add(
         "many-same-frame",
-        lambda path: _write_media(path, audio_graph=_splice_graph(delayed=(2, 5, 8, 11, 14, 17))),
+        lambda path: _write_media(
+            path,
+            audio_graph=_splice_graph(
+                delayed=(7, 9, 11, 13, 15, 17, 19),
+                advanced=(8, 10, 12, 14, 16, 18),
+            ),
+        ),
     )
     add(
         "run-resolved",
@@ -520,10 +536,10 @@ def _real_clip(path: Path, label: str, *, crop: bool) -> ClipState:
     stat = path.stat()
     active_rect = (
         ClipActiveRect(
-            x=8,
-            y=4,
-            width=112,
-            height=64,
+            x=32,
+            y=18,
+            width=64,
+            height=36,
             source="metadata",
             detection_mode="provided",
         )
@@ -577,36 +593,100 @@ def _phase_context(media: _MediaSet, name: str, root: Path, *, crop: bool) -> Ru
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("name", "reason", "applied", "target_resolution", "crop"),
+    (
+        "name",
+        "state",
+        "reason",
+        "authority_passed",
+        "confirmed_offset",
+        "target_resolutions",
+        "same_frame_count",
+        "crop",
+    ),
     [
-        ("authority-fail", "no_single_offset", False, "resolved", False),
-        ("flat-video", "video_check_inconclusive", False, None, False),
-        ("insert-60-low-motion", "competing_offset", False, "unresolved", False),
-        ("budget", "unresolved_audio_disagreement", False, "unexamined", False),
+        (
+            "authority-fail",
+            "provisional",
+            "no_single_offset",
+            False,
+            0,
+            ("resolved",),
+            0,
+            False,
+        ),
+        (
+            "flat-video",
+            "provisional",
+            "video_check_inconclusive",
+            None,
+            None,
+            (),
+            0,
+            False,
+        ),
+        (
+            "insert-60-low-motion",
+            "provisional",
+            "competing_offset",
+            True,
+            -96,
+            ("unresolved",),
+            0,
+            False,
+        ),
+        (
+            "budget",
+            "provisional",
+            "unresolved_audio_disagreement",
+            True,
+            0,
+            ("resolved", "resolved", "resolved", "unexamined"),
+            0,
+            False,
+        ),
         (
             "active-tail",
+            "provisional",
             "competing_offset_confirmed_by_video",
-            False,
-            "alternative_confirmed",
+            True,
+            0,
+            ("alternative_confirmed", "alternative_confirmed"),
+            0,
             False,
         ),
         (
             "active-tail-inconclusive",
+            "trusted_automatic",
             "audio_video_confirmed",
             True,
-            "local_video_inconclusive",
+            0,
+            ("local_video_inconclusive", "local_video_inconclusive"),
+            0,
             False,
         ),
-        ("surround-local", "audio_video_confirmed", True, None, True),
+        (
+            "many-same-frame",
+            "trusted_automatic",
+            "audio_video_confirmed",
+            True,
+            0,
+            (),
+            13,
+            False,
+        ),
+        ("surround-local", "trusted_automatic", "audio_video_confirmed", True, 0, (), 0, True),
     ],
 )
 def test_real_phase_v6_cache_matrix(
     u4_media: _MediaSet,
     tmp_path: Path,
     name: str,
+    state: str,
     reason: str,
-    applied: bool,
-    target_resolution: str | None,
+    authority_passed: bool | None,
+    confirmed_offset: int | None,
+    target_resolutions: tuple[str, ...],
+    same_frame_count: int,
     crop: bool,
 ) -> None:
     ctx = _phase_context(u4_media, name, tmp_path, crop=crop)
@@ -616,35 +696,32 @@ def test_real_phase_v6_cache_matrix(
     attempt = comparison.audio_attempt
 
     assert attempt is not None
+    assert attempt.decision.state == state
     assert attempt.decision.primary_reason == reason
-    assert (comparison.alignment is not None) is applied
+    assert (comparison.alignment is not None) is (state == "trusted_automatic")
     assert output.reference.trim.trim_start_frames == 0
     assert comparison.trim.trim_start_frames == 0
-    if target_resolution is not None:
-        assert target_resolution in {target.resolution for target in attempt.video_check.targets}
+    assert attempt.video_check.confirmed_offset == confirmed_offset
+    assert tuple(target.resolution for target in attempt.video_check.targets) == target_resolutions
+    assert len(attempt.video_check.same_frame_context) == same_frame_count
+    assert (
+        attempt.authority_recount.passed if attempt.authority_recount is not None else None
+    ) is authority_passed
 
     cache_path = ctx.workspace.shared_alignment_cache_dir / "alignment_reuse.toml"
-    assert cache_path.exists() is applied
-    if not applied:
-        return
-
-    replay = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
-    assert replay.comparisons[0].alignment is not None
-    assert replay.comparisons[0].alignment.source == "cached"
-
-    save_manual_override(
-        ctx.workspace.generated_dir,
-        ManualOverride(
-            reference_clip=ctx.reference.path.stem,
-            comparison_clip=ctx.comparisons[0].path.stem,
-            frame_offset=1,
-            timestamp="2026-09-27T00:00:00Z",
-        ),
-    )
-    manual = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
-    assert manual.comparisons[0].alignment is not None
-    assert manual.comparisons[0].alignment.source == "manual"
-    assert manual.comparisons[0].alignment.relative_offset_frames == 1
+    assert cache_path.exists() is (state == "trusted_automatic")
+    if state == "trusted_automatic":
+        cache = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+        source_sets = cache["source_sets"]
+        assert isinstance(source_sets, dict) and len(source_sets) == 1
+        source_set = next(iter(source_sets.values()))
+        assert isinstance(source_set, dict)
+        entries = source_set["entries"]
+        assert isinstance(entries, dict) and len(entries) == 1
+        entry = next(iter(entries.values()))
+        assert isinstance(entry, dict)
+        assert entry["frame_offset"] == 0
+        assert entry["comparison_clip"] == ctx.comparisons[0].path.name
 
 
 def _video_request(path: Path) -> VideoClipRequest:
@@ -1112,7 +1189,7 @@ def test_mix_caused_disagreements_still_apply(
             rounded_frame=0,
             active=20,
             credible=20,
-            agreeing=14,
+            agreeing=7,
             authority_agreeing=20,
             authority_status="agreed",
             authority_passed=True,
@@ -1123,11 +1200,11 @@ def test_mix_caused_disagreements_still_apply(
             (run.first_index, run.last_index, run.lag, run.chunk_count)
             for run in attempt.runs
             if run.lag != 0
-        ) == tuple((index, index, -80, 1) for index in (2, 5, 8, 11, 14, 17))
+        ) == tuple((index, index, -80 if index % 2 else 80, 1) for index in range(7, 20))
         assert tuple(
             (item.chunk_index, item.lag_samples, item.rounded_frame)
             for item in attempt.video_check.same_frame_context
-        ) == tuple((index, -80, 0) for index in (2, 5, 8, 11, 14, 17))
+        ) == tuple((index, -80 if index % 2 else 80, 0) for index in range(7, 20))
         assert attempt.video_check.targets == ()
 
 

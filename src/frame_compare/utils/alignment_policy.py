@@ -17,7 +17,7 @@ CONFIRMATION_FRACTION = 0.75
 
 def compensated_offset_seconds(
     *,
-    global_lag: int,
+    global_lag: int | float,
     reference_audio_start: Fraction,
     reference_video_start: Fraction,
     comparison_audio_start: Fraction,

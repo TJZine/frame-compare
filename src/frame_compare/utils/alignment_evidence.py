@@ -17,10 +17,7 @@ constructing an invalid attempt fail at construction with ``ValueError``.
 
 from __future__ import annotations
 
-import base64
-import json
 import math
-import zlib
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from types import UnionType
 from typing import (
@@ -266,7 +263,7 @@ def evidence_from_payload[T](cls: type[T], data: object) -> T:
         raise ValueError(f"{what} must be a JSON object")
     raw: dict[Any, Any] = cast(dict[Any, Any], data)
     if cls is AudioAlignmentAttempt:
-        raw = _expand_attempt_payload(raw)
+        raw = _expand_attempt_payload(cast(dict[str, object], raw))
     names = {field.name for field in fields(cast(Any, cls))}
     unknown = sorted(key for key in raw if key not in names)
     if unknown:
@@ -612,6 +609,16 @@ class VideoTargetEvidence:
         elif "confirmed" not in winners and "neither" not in winners:
             raise ValueError("unresolved targets need an observed position")
 
+    def representative_offset(self) -> int:
+        """Return the offset supported by the first authoritative target position."""
+        if self.resolution == "alternative_confirmed":
+            return next(
+                position.alternative_offset
+                for position in self.positions
+                if position.winner == "alternative" and position.alternative_offset is not None
+            )
+        return self.target_offset
+
 
 @dataclass(frozen=True, slots=True)
 class AudioSameFrameContext:
@@ -930,99 +937,335 @@ class AudioAlignmentAttempt:
                 raise ValueError("authority recount pass flag is inconsistent")
 
 
-_PACK_THRESHOLD = 64
-_MAX_UNPACKED_BYTES = 8 * 1024 * 1024
+_COMPACT_THRESHOLD = 64
 
 
-def _pack_json(value: object) -> str:
-    raw = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return base64.b64encode(zlib.compress(raw, level=9)).decode("ascii")
+def _format_indices(indices: list[int]) -> str:
+    """Encode ordered unique indices as comma-separated inclusive ranges."""
+    if not indices:
+        return ""
+    ranges: list[str] = []
+    start = previous = indices[0]
+    for index in indices[1:]:
+        if index == previous + 1:
+            previous = index
+            continue
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = index
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(ranges)
 
 
-def _unpack_json(value: object, what: str) -> object:
+def _parse_indices(value: object, *, bound: int, what: str) -> list[int]:
     if not isinstance(value, str):
-        raise ValueError(f"{what} must be a base64 string")
+        raise ValueError(f"{what} must be a range string")
+    if not value:
+        return []
+    indices: list[int] = []
     try:
-        compressed = base64.b64decode(value, validate=True)
-        decompressor = zlib.decompressobj()
-        raw = decompressor.decompress(compressed, _MAX_UNPACKED_BYTES + 1)
-        if (
-            len(raw) > _MAX_UNPACKED_BYTES
-            or not decompressor.eof
-            or decompressor.unused_data
-            or decompressor.unconsumed_tail
-        ):
-            raise ValueError(f"{what} exceeds its decoded bound")
-        return json.loads(raw)
-    except (UnicodeDecodeError, ValueError, zlib.error) as exc:
+        for token in value.split(","):
+            parts = token.split("-")
+            if len(parts) == 1:
+                start = end = int(parts[0])
+            elif len(parts) == 2:
+                start, end = map(int, parts)
+            else:
+                raise ValueError
+            if start < 0 or end < start or end >= bound:
+                raise ValueError
+            indices.extend(range(start, end + 1))
+    except ValueError as exc:
         raise ValueError(f"{what} is invalid") from exc
+    if indices != sorted(set(indices)):
+        raise ValueError(f"{what} must be ordered and unique")
+    return indices
+
+
+def _derived_subframe(payload: dict[str, object], lag: int) -> float:
+    audio = cast(dict[str, object], payload["audio"])
+    compensation = audio["compensation_seconds"]
+    if not isinstance(compensation, (int, float)) or isinstance(compensation, bool):
+        raise ValueError("compact same-frame context needs compensation")
+    fps_num = payload["fps_num"]
+    fps_den = payload["fps_den"]
+    if not isinstance(fps_num, int) or not isinstance(fps_den, int):
+        raise ValueError("compact same-frame context needs integer FPS")
+    return (lag / AUDIO_ANALYSIS_SAMPLE_RATE + float(compensation)) * (fps_num / fps_den)
 
 
 def audio_attempt_payload(attempt: AudioAlignmentAttempt) -> dict[str, object]:
-    """Serialize one attempt, packing only unbounded repeated evidence.
-
-    Small attempts stay directly inspectable. Large chunk rows and video context
-    use a lossless standard-library encoding so the declared maximum evidence
-    shape remains within the fixed artifact bound without truncation.
-    """
+    """Serialize one attempt with semantic compaction for repeated chunk facts."""
     payload = cast(dict[str, object], asdict(attempt))
     chunks = cast(dict[str, object], payload["chunks"])
     starts = cast(list[object], chunks["starts"])
-    if len(starts) > _PACK_THRESHOLD:
-        row_names = ("starts", "counts", "active", "lags", "psrs", "credible", "agrees")
-        chunks["packed_rows"] = _pack_json({name: chunks.pop(name) for name in row_names})
+    if len(starts) > _COMPACT_THRESHOLD:
+        chunks["compact_indices"] = {
+            name: _format_indices(
+                [
+                    index
+                    for index, present in enumerate(cast(list[bool], chunks.pop(name)))
+                    if present
+                ]
+            )
+            for name in ("active", "credible", "agrees")
+        }
+        chunks.pop("starts")
+        chunks.pop("counts")
+
+        runs = cast(list[dict[str, object]], payload.pop("runs"))
+        singletons: list[int] = []
+        other_runs: list[list[object]] = []
+        lags = cast(list[int | None], chunks["lags"])
+        for run in runs:
+            first = cast(int, run["first_index"])
+            if first == run["last_index"] and run["chunk_count"] == 1 and run["lag"] == lags[first]:
+                singletons.append(first)
+            else:
+                other_runs.append(
+                    [run["first_index"], run["last_index"], run["lag"], run["chunk_count"]]
+                )
+        payload["compact_runs"] = {
+            "singletons": _format_indices(singletons),
+            "other": other_runs,
+        }
 
     video = cast(dict[str, object], payload["video_check"])
-    targets = cast(list[object], video["targets"])
-    same_frame = cast(list[object], video["same_frame_context"])
-    if len(targets) + len(same_frame) > _PACK_THRESHOLD:
-        video["packed_context"] = _pack_json(
-            {
-                "targets": video.pop("targets"),
-                "same_frame_context": video.pop("same_frame_context"),
+    same_frame = cast(list[dict[str, object]], video["same_frame_context"])
+    if len(same_frame) > _COMPACT_THRESHOLD:
+        lags = cast(list[int | None], chunks["lags"])
+        confirmed = video["confirmed_offset"]
+        indices: list[int] = []
+        for item in same_frame:
+            index = cast(int, item["chunk_index"])
+            lag = lags[index]
+            if (
+                lag is None
+                or item["lag_samples"] != lag
+                or item["subframe_estimate"] != _derived_subframe(payload, lag)
+                or item["rounded_frame"] != confirmed
+            ):
+                raise ValueError("same-frame context cannot be compacted from chunk evidence")
+            indices.append(index)
+        video["compact_same_frame_indices"] = _format_indices(indices)
+        video.pop("same_frame_context")
+
+    targets = cast(list[dict[str, object]], video["targets"])
+    if len(targets) > _COMPACT_THRESHOLD:
+        compact_targets: list[int] = []
+        compact_offsets: list[int] = []
+        retained: list[dict[str, object]] = []
+        credible = attempt.chunks.credible
+        confirmed = cast(int | None, video["confirmed_offset"])
+        for target in targets:
+            index = cast(int, target["first_chunk_index"])
+            target_offset = cast(int, target["target_offset"])
+            alternatives = [
+                offset
+                for offset in range(target_offset - 1, target_offset + 2)
+                if offset != confirmed
+            ]
+            if (
+                target["kind"] == "chunk"
+                and target["last_chunk_index"] == index
+                and target["resolution"] == "unexamined"
+                and not target["positions"]
+                and index < len(credible)
+                and target["credible"] == credible[index]
+                and target["start_sample"] == index * attempt.analysis.chunk_samples
+                and target["end_sample"]
+                == min((index + 1) * attempt.analysis.chunk_samples, attempt.chunks.total_samples)
+                and target["target_offset"] == target_offset
+                and tuple(cast(list[int] | tuple[int, ...], target["alternative_offsets"]))
+                == tuple(alternatives)
+            ):
+                compact_targets.append(index)
+                compact_offsets.append(target_offset)
+            else:
+                retained.append(target)
+        if compact_targets:
+            video["compact_unexamined_chunks"] = {
+                "indices": (
+                    _format_indices(compact_targets)
+                    if compact_targets == sorted(set(compact_targets))
+                    else compact_targets
+                ),
+                "offsets": compact_offsets,
             }
-        )
+            video["targets"] = retained
     return payload
 
 
-def _expand_attempt_payload(data: dict[Any, Any]) -> dict[Any, Any]:
-    payload = dict(data)
+def _expand_attempt_payload(data: dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = dict(data)
     chunks_raw = payload.get("chunks")
-    if isinstance(chunks_raw, dict) and "packed_rows" in chunks_raw:
+    if isinstance(chunks_raw, dict) and "compact_indices" in chunks_raw:
         chunks = dict(cast(dict[str, object], chunks_raw))
-        row_names = {"starts", "counts", "active", "lags", "psrs", "credible", "agrees"}
-        if row_names & chunks.keys():
-            raise ValueError("packed chunk rows must not duplicate explicit columns")
-        packed = _unpack_json(chunks.pop("packed_rows"), "packed chunk rows")
-        if not isinstance(packed, dict):
-            raise ValueError("packed chunk rows must decode to an object")
-        packed_rows = cast(dict[str, object], packed)
-        if set(packed_rows) != row_names:
-            raise ValueError("packed chunk rows must decode to an object")
-        for name in row_names:
-            chunks[name] = packed_rows[name]
+        if {"starts", "counts", "active", "credible", "agrees"} & chunks.keys():
+            raise ValueError("compact chunk rows must not duplicate derived columns")
+        compact_raw = chunks.pop("compact_indices")
+        if not isinstance(compact_raw, dict):
+            raise ValueError("compact chunk indices must name active, credible and agrees")
+        compact = cast(dict[str, object], compact_raw)
+        if set(compact) != {"active", "credible", "agrees"}:
+            raise ValueError("compact chunk indices must name active, credible and agrees")
+        lags_raw = chunks.get("lags")
+        if not isinstance(lags_raw, (list, tuple)):
+            raise ValueError("compact chunk rows need lag values")
+        lags = cast(list[object] | tuple[object, ...], lags_raw)
+        count = len(lags)
+        analysis_raw = payload.get("analysis")
+        if not isinstance(analysis_raw, dict):
+            raise ValueError("compact chunk rows need analysis facts")
+        analysis = cast(dict[str, object], analysis_raw)
+        chunk_samples = analysis.get("chunk_samples")
+        total_samples = chunks.get("total_samples")
+        if not isinstance(chunk_samples, int) or not isinstance(total_samples, int):
+            raise ValueError("compact chunk rows need integer sample counts")
+        chunks["starts"] = [index * chunk_samples for index in range(count)]
+        chunks["counts"] = [
+            total_samples - index * chunk_samples if index == count - 1 else chunk_samples
+            for index in range(count)
+        ]
+        for name in ("active", "credible", "agrees"):
+            selected = set(_parse_indices(compact[name], bound=count, what=f"compact {name}"))
+            chunks[name] = [index in selected for index in range(count)]
         payload["chunks"] = chunks
 
+    compact_runs = payload.pop("compact_runs", None)
+    if compact_runs is not None:
+        if "runs" in payload:
+            raise ValueError("compact runs must not duplicate explicit runs")
+        chunks_raw = payload.get("chunks")
+        if not isinstance(compact_runs, dict):
+            raise ValueError("compact runs must name singletons and other")
+        compact_runs = cast(dict[str, object], compact_runs)
+        if set(compact_runs) != {"singletons", "other"}:
+            raise ValueError("compact runs must name singletons and other")
+        if not isinstance(chunks_raw, dict):
+            raise ValueError("compact runs need chunk lags")
+        chunks = cast(dict[str, object], chunks_raw)
+        if not isinstance(chunks.get("lags"), (list, tuple)):
+            raise ValueError("compact runs need chunk lags")
+        lags = cast(list[object] | tuple[object, ...], chunks["lags"])
+        runs = [
+            {"first_index": index, "last_index": index, "lag": lags[index], "chunk_count": 1}
+            for index in _parse_indices(
+                compact_runs["singletons"], bound=len(lags), what="compact singleton runs"
+            )
+        ]
+        other_raw = compact_runs["other"]
+        if not isinstance(other_raw, list):
+            raise ValueError("compact other runs must be a list")
+        other = cast(list[object], other_raw)
+        for row in other:
+            if not isinstance(row, list):
+                raise ValueError("compact run rows must contain four values")
+            values = cast(list[object], row)
+            if len(values) != 4:
+                raise ValueError("compact run rows must contain four values")
+            runs.append(
+                dict(
+                    zip(
+                        ("first_index", "last_index", "lag", "chunk_count"),
+                        values,
+                        strict=True,
+                    )
+                )
+            )
+        runs.sort(key=lambda run: cast(int, run["first_index"]))
+        payload["runs"] = runs
+
     video_raw = payload.get("video_check")
-    if isinstance(video_raw, dict) and "packed_context" in video_raw:
+    if isinstance(video_raw, dict):
         video = dict(cast(dict[str, object], video_raw))
-        context_names = {"targets", "same_frame_context"}
-        if context_names & video.keys():
-            raise ValueError("packed video context must not duplicate explicit context")
-        packed = _unpack_json(video.pop("packed_context"), "packed video context")
-        if not isinstance(packed, dict):
-            raise ValueError("packed video context must decode to an object")
-        packed_context = cast(dict[str, object], packed)
-        if set(packed_context) != context_names:
-            raise ValueError("packed video context must decode to an object")
-        for name in context_names:
-            video[name] = packed_context[name]
+        chunks_raw = payload.get("chunks")
+        if not isinstance(chunks_raw, dict):
+            return payload
+        chunks = cast(dict[str, object], chunks_raw)
+        if not isinstance(chunks.get("lags"), (list, tuple)):
+            return payload
+        lags = cast(list[object] | tuple[object, ...], chunks["lags"])
+        compact_same_frame = video.pop("compact_same_frame_indices", None)
+        if compact_same_frame is not None:
+            if "same_frame_context" in video:
+                raise ValueError("compact same-frame context must not duplicate explicit context")
+            confirmed = video.get("confirmed_offset")
+            video["same_frame_context"] = [
+                {
+                    "chunk_index": index,
+                    "lag_samples": lags[index],
+                    "subframe_estimate": _derived_subframe(payload, cast(int, lags[index])),
+                    "rounded_frame": confirmed,
+                }
+                for index in _parse_indices(
+                    compact_same_frame, bound=len(lags), what="compact same-frame context"
+                )
+            ]
+        compact_targets = video.pop("compact_unexamined_chunks", None)
+        if compact_targets is not None:
+            if not isinstance(compact_targets, dict):
+                raise ValueError("compact unexamined targets must name indices and offsets")
+            compact_targets = cast(dict[str, object], compact_targets)
+            if set(compact_targets) != {
+                "indices",
+                "offsets",
+            }:
+                raise ValueError("compact unexamined targets must name indices and offsets")
+            indices_raw = compact_targets["indices"]
+            offsets_raw = compact_targets["offsets"]
+            if isinstance(indices_raw, str):
+                indices: list[int] = _parse_indices(
+                    indices_raw,
+                    bound=len(lags),
+                    what="compact unexamined target indices",
+                )
+            elif isinstance(indices_raw, list):
+                index_values = cast(list[object], indices_raw)
+                if any(
+                    isinstance(index, bool) or not isinstance(index, int) for index in index_values
+                ):
+                    raise ValueError("compact unexamined target columns are invalid")
+                indices = cast(list[int], index_values)
+            else:
+                raise ValueError("compact unexamined target columns are invalid")
+            if not isinstance(offsets_raw, list):
+                raise ValueError("compact unexamined target columns are invalid")
+            offset_values = cast(list[object], offsets_raw)
+            if len(indices) != len(offset_values) or any(
+                isinstance(offset, bool) or not isinstance(offset, int) for offset in offset_values
+            ):
+                raise ValueError("compact unexamined target columns are invalid")
+            offsets = cast(list[int], offset_values)
+            targets_raw = video.get("targets")
+            if not isinstance(targets_raw, list):
+                raise ValueError("compact unexamined targets need explicit target list")
+            targets = cast(list[object], targets_raw)
+            analysis = cast(dict[str, object], payload["analysis"])
+            chunk_samples = cast(int, analysis["chunk_samples"])
+            total_samples = cast(int, chunks["total_samples"])
+            credible = cast(list[bool], chunks["credible"])
+            confirmed = cast(int | None, video.get("confirmed_offset"))
+            for index, target_offset in zip(indices, offsets, strict=True):
+                if index < 0 or index >= len(lags) or lags[index] is None:
+                    raise ValueError("compact unexamined target index is invalid")
+                targets.append(
+                    {
+                        "kind": "chunk",
+                        "first_chunk_index": index,
+                        "last_chunk_index": index,
+                        "credible": credible[index],
+                        "start_sample": index * chunk_samples,
+                        "end_sample": min((index + 1) * chunk_samples, total_samples),
+                        "target_offset": target_offset,
+                        "alternative_offsets": [
+                            offset
+                            for offset in range(target_offset - 1, target_offset + 2)
+                            if offset != confirmed
+                        ],
+                        "resolution": "unexamined",
+                        "positions": [],
+                    }
+                )
         payload["video_check"] = video
     return payload
 

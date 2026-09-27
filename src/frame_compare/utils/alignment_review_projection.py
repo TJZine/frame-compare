@@ -132,6 +132,28 @@ def audio_evidence_rows(attempt: AudioAlignmentAttempt) -> tuple[EvidenceRow, ..
                 style="value",
             )
         )
+    for target in attempt.video_check.targets:
+        for position in target.positions:
+            if position.winner != "neither":
+                continue
+            alternative = (
+                position.alternative_offset
+                if position.alternative_offset is not None
+                else target.target_offset
+            )
+            rows.append(
+                EvidenceRow(
+                    key=f"Local video position {position.position_index}",
+                    value=(
+                        "local_video_inconclusive; "
+                        f"frame={position.reference_frame}; "
+                        f"{attempt.video_check.confirmed_offset:+d}f="
+                        f"{position.confirmed_score:.3f}, "
+                        f"{alternative:+d}f={position.alternative_score:.3f}"
+                    ),
+                    style="value",
+                )
+            )
     if audio.status != "agreed":
         for run in attempt.runs:
             rows.append(
@@ -363,9 +385,6 @@ class AudioReviewPresentation:
                 for region in self.resolved_regions
             )
         for target in self.attempt.video_check.targets:
-            if target.resolution != "local_video_inconclusive" or not target.positions:
-                continue
-            position = target.positions[0]
             region = AudioReviewRegion(
                 target.target_offset,
                 *_review_target_bounds(self.attempt, target),
@@ -374,13 +393,25 @@ class AudioReviewPresentation:
             confirmed = self.attempt.video_check.confirmed_offset
             if confirmed is None:
                 continue
-            lines.append(
-                f"Weak audio in {_review_region_text(region, panel=panel)} pointed to "
-                f"{target.target_offset:+d}f; video inconclusive there "
-                f"({confirmed:+d}f scored {position.confirmed_score:.3f}, "
-                f"{target.target_offset:+d}f scored {position.alternative_score:.3f}); "
-                "not counted."
-            )
+            for position in target.positions:
+                if position.winner != "neither":
+                    continue
+                alternative = (
+                    position.alternative_offset
+                    if position.alternative_offset is not None
+                    else target.target_offset
+                )
+                prefix = (
+                    f"Weak audio in {_review_region_text(region, panel=panel)} pointed to "
+                    f"{target.target_offset:+d}f; video inconclusive there"
+                    if not target.credible
+                    else f"Local video inconclusive in {_review_region_text(region, panel=panel)}"
+                )
+                suffix = "; not counted." if not target.credible else "."
+                lines.append(
+                    f"{prefix} ({confirmed:+d}f scored {position.confirmed_score:.3f}, "
+                    f"{alternative:+d}f scored {position.alternative_score:.3f}){suffix}"
+                )
         return tuple(lines)
 
     def noted_line(self, *, panel: bool = False) -> str | None:
@@ -580,15 +611,7 @@ def _review_target_status(target: VideoTargetEvidence | None) -> AudioReviewRegi
 def _review_target_offset(video: VideoCheckObservation, target: VideoTargetEvidence) -> int:
     if target.resolution == "resolved" and video.confirmed_offset is not None:
         return video.confirmed_offset
-    if target.resolution == "alternative_confirmed":
-        actual = {
-            position.alternative_offset
-            for position in target.positions
-            if position.winner == "alternative" and position.alternative_offset is not None
-        }
-        if len(actual) == 1:
-            return next(iter(actual))
-    return target.target_offset
+    return target.representative_offset()
 
 
 def _review_target_candidates(

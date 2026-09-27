@@ -33,7 +33,6 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.types import SourceInfo
-from tests.services.test_alignment_chunked_correlation import run_estimate
 from tests.services.test_alignment_evidence import attempt_with_chunks
 
 FPS = Fraction(24, 1)
@@ -519,14 +518,61 @@ def test_out_of_range_overlap_is_unavailable(tmp_path: Path) -> None:
 def test_v5a_relative_hypothesis_margin_rules(
     confirmed: float, alternative: float, winner: str
 ) -> None:
-    assert (
-        alignment_video._hypothesis_winner(
-            confirmed,
-            alternative,
-            alternative_offset=1,
-        )
-        == winner
+    assert alignment_video._hypothesis_winner(confirmed, alternative) == winner
+
+
+@pytest.mark.parametrize("alternative_source", (20, 4))
+def test_tied_alternative_minima_choose_the_first_actual_winner(
+    alternative_source: int,
+) -> None:
+    reference = _moving_clip(frames=30)
+    remap = {17: alternative_source, 19: alternative_source, 20: 0}
+    comparison = _remapped_clip(reference, lambda frame: remap.get(frame, frame))
+
+    scored = alignment_video._score_hypotheses(reference, comparison, 20, 0, (1, 3))
+
+    assert scored is not None
+    confirmed_score, alternative_score, alternative_offset = scored
+    assert alternative_offset == 1
+    assert alignment_video._hypothesis_winner(confirmed_score, alternative_score) == "alternative"
+    if alternative_source == 20:
+        assert alternative_score == 0.0
+    else:
+        assert 0.0 < alternative_score < confirmed_score / 1.5
+
+
+def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path) -> None:
+    reference = _moving_clip(frames=120)
+    target_frames = (3, 10, 17, 24)
+    remap = {
+        comparison_frame: reference_frame
+        for reference_frame in target_frames
+        for comparison_frame in (reference_frame - 1, reference_frame - 3)
+    }
+    remap.update(dict.fromkeys(target_frames, 0))
+    comparison = _remapped_clip(reference, lambda frame: remap.get(frame, frame))
+    attempt = _attempt_with_lags(
+        (333, -333, -333, -333, -333, -333, -333, -333, -333, -333),
+        global_lag=-333,
+        chunk_samples=8_000,
+        reference_audio_start=Fraction(1, 24),
     )
+
+    result = _run(
+        tmp_path,
+        truth=0,
+        reference_clip=reference,
+        comparison_clip=comparison,
+        attempt=attempt,
+    )
+
+    (target,) = result.observation.targets
+    assert target.resolution == "alternative_confirmed"
+    assert [position.alternative_offset for position in target.positions] == [1] * 4
+    assert result.observation.check_points[0].suggested_comparison_frame == 2
+    decided = _decide_video(attempt, result.observation)
+    assert decided.decision.state == "provisional"
+    assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
 
 
 def test_v3a_conversion_and_excluded_alternative(tmp_path: Path) -> None:
@@ -615,58 +661,6 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
     assert decided.decision.candidate is not None
     assert decided.decision.candidate.frame_offset == 0
-
-
-def test_real_estimator_accepts_thirteen_same_frame_disagreements(
-    tmp_path: Path,
-) -> None:
-    chunk_samples = 240_000
-    rng = np.random.default_rng(20260927)
-    reference_audio = rng.uniform(-0.3, 0.3, 20 * chunk_samples)
-    comparison_audio = reference_audio.copy()
-    shifts = (-80, 80) * 6 + (-80,)
-    for index, shift in zip(range(7, 20), shifts, strict=True):
-        start = index * chunk_samples
-        comparison_audio[start : start + chunk_samples] = np.roll(
-            reference_audio[start : start + chunk_samples],
-            -shift,
-        )
-
-    estimate = run_estimate(reference_audio, comparison_audio, max_offset_seconds=1.0)
-    assert (estimate.global_lag, estimate.outcome, estimate.agreeing_count) == (
-        0,
-        "no_single_offset",
-        7,
-    )
-    lags = tuple(item.lag for item in estimate.observations)
-    assert all(lag is not None for lag in lags)
-    attempt = _attempt_with_lags(
-        tuple(lag for lag in lags if lag is not None),
-        chunk_samples=chunk_samples,
-    )
-    attempt = replace(
-        attempt,
-        audio=replace(attempt.audio, status=estimate.outcome),
-        chunks=replace(
-            attempt.chunks,
-            psrs=tuple(item.psr for item in estimate.observations),
-        ),
-    )
-    clip = _moving_clip(frames=20 * 30 * 24)
-
-    video = _run(
-        tmp_path,
-        truth=0,
-        attempt=attempt,
-        reference_clip=clip,
-        comparison_clip=clip,
-    )
-    assert video.observation is not None
-    final = _decide_video(attempt, video.observation)
-
-    assert len(final.video_check.same_frame_context) == 13
-    assert final.authority_recount is not None and final.authority_recount.passed
-    assert final.decision.state == "trusted_automatic"
 
 
 def test_a4b_boundary_regroups_frame_distinct_tail_as_one_run() -> None:

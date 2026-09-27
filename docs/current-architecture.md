@@ -326,8 +326,9 @@ recovery requirement.
   video/decision evidence. Video evidence includes the five-offset base checks,
   targeted V5a checks, same-frame context, and bounded review check points. Each
   target stores its authoritative `target_offset`, `credible`, `start_sample`, and
-  `end_sample`; `chunks.total_samples` preserves the analyzed span even when chunk
-  rows are omitted from another projection. The artifact is written
+  `end_sample`; `chunks.total_samples` preserves the analyzed span. Large attempts
+  serialize nominal starts/counts, boolean columns, singleton runs, same-frame
+  context, and unexamined targets by semantic indices without truncation. The artifact is written
   atomically before optional review. Current attempts retain
   observed paired-collection facts; preanalysis rejections remain `not_observed`.
   A final review outcome may replace the envelope once while preserving the canonical
@@ -528,15 +529,15 @@ review check-point construction. It never falls back to FFMS2. A missing or fail
 loader becomes `video_check_unavailable`, not a run failure.
 `frame_compare.utils.alignment_evidence` is the single definition of the v4
 evidence schema: frozen dataclasses, one strict standard-library payload walker/parser,
-and lossless packing for large repeated row/target collections. Pure shared alignment
+and lossless semantic compaction for large repeated row/target collections. Pure shared alignment
 math and vote policy live in `utils.alignment_policy`; the shared P4/P4a
 decision/region/check-point projection lives in `utils.alignment_review_projection`
 and is consumed by both terminal and panel renderers. `alignment_presentation`
 owns the terminal/Rich and structured-warning rendering of that projection;
 `alignment_review_panel` renders the same projection in VSView. Native metadata v5
-uses a bounded compact projection: per-chunk columns are empty, but runs,
-`chunks.total_samples`, authoritative target facts, aggregate counts, video checks,
-and review check points remain present.
+uses that bounded semantic projection while retaining per-chunk facts required by
+context indices, runs, `chunks.total_samples`, authoritative target facts, aggregate
+counts, video checks, and review check points.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -1025,7 +1026,7 @@ Runtime ownership matrix:
 | Pure numeric chunked GCC-PHAT estimation: chunk planning, per-chunk prominence, global-lag accumulation, and agreement gating | `frame_compare.services.alignment_correlation` |
 | Audio/video authority decision: compensation and rounding, A4a/A4b classification and recount, V6 trusted predicate/reason ordering, stability, and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
 | Bounded L-SMASH video confirmation, V3/V3a sampling, V5/V5a scoring, cancellation/identity checks, and review check points | `frame_compare.services.alignment_video` |
-| Single definition of diagnostic-v4 evidence, metadata-v5 compact projection facts, strict payload parsing, and lossless repeated-evidence packing | `frame_compare.utils.alignment_evidence` |
+| Single definition of diagnostic-v4 evidence, metadata-v5 compact projection facts, strict payload parsing, and lossless semantic repeated-evidence compaction | `frame_compare.utils.alignment_evidence` |
 | Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.utils.alignment_policy` |
 | Shared P4/P4a terminal/panel presentation projection | `frame_compare.utils.alignment_review_projection` |
 | Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |

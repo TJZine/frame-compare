@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -12,8 +13,11 @@ import pytest
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_audio, alignment_diagnostics
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.alignment import _build_audio_review_map
+from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.types import AlignmentProvenance, AlignmentResult
 from frame_compare.utils.alignment_evidence import (
+    MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
@@ -26,6 +30,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioCollectionFailure,
     AudioDecisionCandidate,
     AudioDecisionState,
+    AudioSameFrameContext,
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
@@ -506,7 +511,7 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert size < 128 * 1024
-    assert "packed_rows" in payload["original_audio_attempt"]["chunks"]
+    assert "compact_indices" in payload["original_audio_attempt"]["chunks"]
     parsed = evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
     assert len(parsed.chunks.starts) == 360
     assert len(payload["original_audio_attempt"]["collection"]) == 2
@@ -527,6 +532,123 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
     payload["original_audio_attempt"]["video_check"]["targets"][0]["end_sample"] = 1
     with pytest.raises(ValueError, match="end does not match its last chunk"):
         evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
+
+
+@pytest.mark.parametrize("context", ("same-frame", "unexamined"))
+def test_maximum_varied_evidence_fits_full_and_native_envelopes(
+    tmp_path: Path, context: str
+) -> None:
+    rng = random.Random(7301)
+    base = maximum_audio_attempt()
+    count = MAX_AUDIO_CHUNKS
+    lags = (
+        tuple((index % 201) - 100 for index in range(count))
+        if context == "same-frame"
+        else tuple(rng.randrange(-239_000, 239_000) for _ in range(count))
+    )
+    psrs = tuple(rng.uniform(30.0, 1500.0) for _ in range(count))
+    chunks = AudioChunkColumns(
+        starts=tuple(index * 240_000 for index in range(count)),
+        counts=(240_000,) * count,
+        active=(True,) * count,
+        lags=lags,
+        psrs=psrs,
+        credible=(True,) * count,
+        agrees=(False,) * count,
+        total_samples=count * 240_000,
+    )
+    video = (
+        VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(-2, -1, 0, 1, 2),
+            confirmed_offset=0,
+            index_build_seconds=0.01,
+            positions=(),
+            same_frame_context=tuple(
+                AudioSameFrameContext(index, lag, lag / 8000 * 24, 0)
+                for index, lag in enumerate(lags)
+            ),
+        )
+        if context == "same-frame"
+        else VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(-2, -1, 0, 1, 2),
+            confirmed_offset=0,
+            index_build_seconds=0.01,
+            positions=(),
+            targets=tuple(
+                VideoTargetEvidence(
+                    kind="chunk",
+                    first_chunk_index=index,
+                    last_chunk_index=index,
+                    credible=True,
+                    start_sample=index * 240_000,
+                    end_sample=(index + 1) * 240_000,
+                    target_offset=2 + index % 3,
+                    alternative_offsets=(1 + index % 3, 2 + index % 3, 3 + index % 3),
+                    resolution="unexamined",
+                    positions=(),
+                )
+                for index in range(count)
+            ),
+        )
+    )
+    attempt = replace(
+        base,
+        analysis=replace(base.analysis, planned_chunk_count=count),
+        chunks=chunks,
+        runs=tuple(AudioChunkRun(index, index, lag, 1) for index, lag in enumerate(lags)),
+        audio=replace(
+            base.audio,
+            status="no_single_offset",
+            active_chunks=count,
+            credible_chunks=count,
+            agreeing_chunks=0,
+        ),
+        video_check=video,
+        stability=replace(base.stability, valid_windows=count),
+    )
+    result = _result(attempt)
+
+    path, _, diagnostic_size = alignment_diagnostics.write_alignment_diagnostic(
+        generated_root=tmp_path.parent,
+        diagnostics_dir=tmp_path / "alignment_diagnostics",
+        comparison_ordinal=1,
+        reference_label="Reference",
+        comparison_label="Comparison",
+        attempt=attempt,
+        evidence_availability="current_attempt",
+        review_outcome="not_requested",
+        final_result=result,
+        final_origin="none",
+    )
+    diagnostic_payload = json.loads(path.read_text(encoding="utf-8"))
+    assert diagnostic_size <= 128 * 1024
+    assert (
+        evidence_from_payload(AudioAlignmentAttempt, diagnostic_payload["original_audio_attempt"])
+        == attempt
+    )
+
+    reference = Path("reference.mkv")
+    comparison = Path("comparison.mkv")
+    key = alignment_key(reference, comparison)
+    native = _build_audio_review_map(
+        reference=reference,
+        comparisons=[comparison],
+        results_map={key: result},
+        provenances={
+            key: AlignmentProvenance(
+                result=result,
+                comparison_cache_key="key",
+                provenance="computed_this_run",
+                evidence_availability="current_attempt",
+            )
+        },
+    )[key]
+    assert len(native.encode("utf-8")) <= 128 * 1024
+    assert (
+        evidence_from_payload(AudioAlignmentAttempt, json.loads(native)["audio_attempt"]) == attempt
+    )
 
 
 def test_symlinked_diagnostic_directory_is_rejected(tmp_path: Path) -> None:

@@ -21,8 +21,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   trims or the computed cache. The removed `[audio_alignment]` tuning fields are
   rejected as unknown keys, the diagnostic artifact moves to schema v4, VSView
   session metadata moves
-  to v5 (both extended in place with losslessly packed repeated evidence at the
-  declared maximum chunk count), and stale
+  to v5 (both extended in place with semantic chunk/run/context index compaction at
+  the declared maximum chunk count), and stale
   computed or shared entries miss and recompute under the new
   `whole-track-chunked-phat-video-check-20260925` policy. Cache schema v2 and the
   manual-override schema are unchanged.

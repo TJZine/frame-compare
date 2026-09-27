@@ -211,8 +211,8 @@ def test_maximum_attempt_and_retained_targets_round_trip_within_128kib() -> None
     assert evidence_from_payload(AudioAlignmentAttempt, compact_payload) == compact
 
     broken = audio_attempt_payload(attempt)
-    broken["chunks"]["packed_rows"] = "not base64"  # type: ignore[index]
-    with pytest.raises(ValueError, match="packed chunk rows is invalid"):
+    broken["chunks"]["compact_indices"]["active"] = "0-99999"  # type: ignore[index]
+    with pytest.raises(ValueError, match="compact active is invalid"):
         evidence_from_payload(AudioAlignmentAttempt, broken)
 
 
@@ -315,8 +315,7 @@ def test_native_compact_projection_retains_authoritative_target_context() -> Non
 
     projected = _project_audio_attempt_for_review(_populated_video_attempt())
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(projected))
-    assert projected.chunks.rows_omitted is True
-    assert projected.chunks.starts == ()
+    assert projected.chunks == _populated_video_attempt().chunks
     assert projected.chunks.total_samples == 1_440_000
     assert parsed == projected
     assert parsed.video_check.targets[0] == _populated_video_attempt().video_check.targets[0]
@@ -440,8 +439,8 @@ def test_partial_final_target_bounds_survive_compact_projection() -> None:
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(populated)) == populated
     compact = _project_audio_attempt_for_review(populated)
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(compact))
-    assert compact.chunks.rows_omitted is True
-    assert compact.chunks.counts == ()
+    assert compact.chunks.rows_omitted is False
+    assert compact.chunks.counts == chunks.counts
     assert compact.chunks.total_samples == 840_000
     assert parsed.video_check.targets[0] == target
     assert (
@@ -565,7 +564,7 @@ def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
 
 
 def test_native_projection_of_large_attempt_stays_within_bound() -> None:
-    """M2: a 2160-chunk attempt embeds with empty rows and non-empty runs."""
+    """A large native attempt embeds with semantic row compaction."""
     from frame_compare.services.alignment import _build_audio_review_map
     from frame_compare.services.alignment_keys import alignment_key
     from frame_compare.services.types import AlignmentProvenance, AlignmentResult
@@ -603,8 +602,7 @@ def test_native_projection_of_large_attempt_stays_within_bound() -> None:
     encoded = payloads[key]
     assert len(encoded.encode("utf-8")) <= 128 * 1024
     parsed = evidence_from_payload(AudioAlignmentAttempt, json.loads(encoded)["audio_attempt"])
-    assert parsed.chunks.rows_omitted is True
-    assert parsed.chunks.starts == ()
+    assert parsed.chunks == attempt.chunks
     assert len(parsed.runs) == 1
     assert parsed.runs[0].lag == 1177
     assert parsed.audio.active_chunks == 2160

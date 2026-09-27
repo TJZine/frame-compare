@@ -1108,3 +1108,32 @@ Return to the controller or maintainer if:
     unexamined-credible, and noncredible-alternative failures; proves a noncredible
     neither-win remains applicable; and covers trusted replay, manual precedence,
     active crop, and a localized surround/downmix change.
+- 2026-09-27: Final U4 re-review correction (append-only clarification of the prior
+  execution record).
+  - V5a ties are between the confirmed and alternative **hypotheses**. Ties among
+    offsets inside the alternative hypothesis select the first actual minimum in the
+    ordered alternative set; they do not suppress an otherwise winning alternative.
+    Check points and region copy use the same selected real offset, including zero
+    and cases where different positions prefer different alternatives.
+  - The adaptive zlib/base64 JSON formats were removed. Diagnostic v4 and native
+    metadata v5 use one strict semantic representation: nominal chunk starts/counts,
+    boolean columns, singleton runs, same-frame context, and unexamined targets reuse
+    chunk/run facts through indices. Separate `MAX_AUDIO_CHUNKS` full-diagnostic and
+    native-envelope cases with heterogeneous lags/PSRs and many runs fit below
+    128 KiB and round-trip without caps or truncation.
+  - Credible unresolved chunks/runs keep their unresolved authority status while
+    verbose terminal and panel details name `local_video_inconclusive` positions and
+    show both scores. Noncredible neither-win context keeps the amended MUTED/Noted
+    copy from the binding mockup. The approved mockup itself was not changed.
+  - The real phase/cache matrix now has eight rows and asserts each V6 conjunct,
+    exact state, A4b result, V5 result, all target resolutions, trims, and computed
+    cache contents. It includes 13 same-frame disagreements and an active-rect case
+    with deliberately different borders. Replay/manual simulations were removed;
+    their existing contract suites remain authoritative.
+  - Final line accounting: versus the second-round base `363c8c75`, source is
+    `+410/-178` (net `+232`) and tests are `+366/-406` (net `-40`). Versus both the
+    accepted fix base `9d886bff` and reviewed head `ab1a9aa5`, source is
+    `+1663/-1177` (net `+486`) and tests are `+1024/-644` (net `+380`). The lower-layer
+    projection move accounts for `alignment_evidence.py +339/-884` and the new
+    `alignment_review_projection.py +997/-0` versus `ab1a9aa5`; versus `363c8c75`,
+    their final-round changes are `+315/-72` and `+42/-19`, respectively.
