@@ -29,7 +29,11 @@ and the panel details.
 
 - **offset:** signed frames, always with sign and `f`: `+147f`, `+0f`, `-3f`.
 - **section:** the user-facing word for an audio chunk. Never "chunk" or "window" in
-  normal output.
+  normal output. A **clear** section is a credible one; a **weak** section is active
+  but not credible; a **quiet** section is inactive. Only clear sections are counted
+  as agreeing or differing.
+- **Margins:** ASCII `x` everywhere (`3.2x`). An infinite margin reads `exact match`.
+  No `×` or `∞`, in either the terminal or the panel.
 - **check point:** one position where reference and comparison frames are compared.
 - **Times:** reference video time, `m:ss` below one hour and `h:mm:ss` from one
   hour. The panel uses an en dash for ranges and `↔` for check points
@@ -112,8 +116,9 @@ content differences were recorded. It summarizes them in one line:
 `Noted: audio differed in {n} section(s) ({first region}[, …]); the video confirmed
 {o} there.` If only content differences were recorded (V5a neither-wins at
 non-credible targets), it reads
-`Noted: the picture differs in {region} (for example a replaced shot); the offset
-still holds.`
+`Noted: weak audio in {region} pointed elsewhere; the video could not settle it, so
+it was not counted.` (Amended 2026-09-27: a V5a neither-win is
+`local_video_inconclusive`, which is not proof that the picture differs.)
 
 ### Provisional: competing offset confirmed by video
 
@@ -171,20 +176,24 @@ MUTED  Align manually or keep the current alignment.
 The rows use the existing key/value style (`VALUE` values, key column muted).
 
 ```text
-Established   Audio: 38 of 40 sections agree on +147f (2 differ, 0 quiet).
-              Video: confirmed +147f at 11 of 12 check points (median margin 3.2×).
+Established   Audio: 38 of 40 clear sections agree on +147f (2 differ; 3 weak, 1 quiet not counted).
+              Video: confirmed +147f at 11 of 12 check points (median margin 3.2x).
 Regions       +147f  0:00-9:00   confirmed by video
               +243f  9:02-10:00  confirmed by video (3 of 4 targeted points)
 Context       2 sections differ by less than a frame (sub-frame); not a disagreement.
-              Picture differs in 5:00-5:04 (for example a replaced shot); offset still holds.
+              Weak audio in 5:00-5:04 pointed to +150f; video inconclusive there (+147f scored 0.041, +150f scored 0.044); not counted.
 Check points  9:15  reference 13,123 <-> comparison 12,880 (+243f)
-              9:40  reference 13,723 <-> comparison 13,480 (+243f)
               4:30  reference 6,474 <-> comparison 6,327 (+147f)
 Decision      state=provisional; reason=competing_offset_confirmed_by_video; also=none
 Evidence      (existing audio_evidence_rows lines follow unchanged)
 ```
 
-- `Established` always has both lines.
+- `Established` always has both lines. The Audio line omits the
+  `; {w} weak, {q} quiet not counted` part when both are zero.
+- Check points follow the rule above exactly: one per disagreeing or inconclusive
+  region, then one contrast point, up to 5. No filling to 5. (Amended 2026-09-27:
+  the earlier example showing two points for one region contradicted the rule.)
+- Scores print with 3 decimals.
 - `Context` appears only when something was recorded.
 - Raw U1 versus A4b recount, when they differ:
   `Audio (raw): 14 of 20 sections agree; 6 more are within the same frame, so 20 of

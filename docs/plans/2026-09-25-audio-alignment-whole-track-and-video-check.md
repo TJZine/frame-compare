@@ -295,13 +295,18 @@ Confirmed with the maintainer on 2026-09-25.
   strict local minimum and runner-up / best >= 1.1; best = 0 with runner-up > 0 counts
   as an infinite margin, and all-zero or tied scores are uninformative. The video stage
   confirms `c` when `c` is in `r - 1 ... r + 1`, there are >= 6 informative positions,
-  `c` wins >= 75% of them, and the median margin is >= 1.5. A winner at `r +/- 2` is
+  `c` wins >= 75% of them, and the median margin over the positions `c` wins is
+  >= 1.5 (clarified 2026-09-27: the 75% rule already counts losses; the margin
+  measures how decisive `c`'s wins are, and rivals' margins are not evidence for
+  `c`). A winner at `r +/- 2` is
   `video_check_inconclusive` (the audio is off by more than a frame).
 - V5a. Targeted hypothesis check (added 2026-09-26, revised the same day). At each
   targeted position, compare two video hypotheses:
   - the confirmed offset `c`;
   - the alternative: the target's own audio lag, compensated and converted to frames
-    per A5/A6 (`r_chunk`; for a run, the run's median lag), scored at the distinct
+    per A5/A6 (`r_chunk`; for a run, the run's true median lag, which may fall on a
+    half sample; it is computed in the decision module, leaving U1's `ChunkRun`
+    unchanged), scored at the distinct
     offsets `{r_chunk - 1, r_chunk, r_chunk + 1}` minus `c`. The alternative set
     never contains `c`, so a shared candidate can't create false ambiguity. A4b
     guarantees `r_chunk != c`, so the set is never empty.
