@@ -103,6 +103,15 @@ def test_matrix_positives_agree(variant: str, shift: int) -> None:
     assert estimate.agreeing_count == estimate.credible_count == len(active)
 
 
+def test_genuine_negative_15_db_snr_still_aligns() -> None:
+    """Noise 15 dB above the signal still leaves the timing peak usable."""
+    reference = make_program(SEED, 120.0)
+    comparison = noisy_program(SEED, 120.0, noise_seed=4242, snr_db=-15.0)
+    estimate = run_estimate(reference, comparison)
+    assert estimate.outcome == "agreed"
+    assert estimate.global_lag == 0
+
+
 def test_matrix_long_intro_agrees() -> None:
     """A 20 s foreign intro shifts every chunk by exactly the intro length."""
     reference = make_program(SEED, 150.0)

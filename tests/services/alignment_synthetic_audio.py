@@ -150,12 +150,17 @@ def remaster_program(seed: int, duration_seconds: float) -> np.ndarray:
     return limited + 0.01 * rng.standard_normal(signal.size)
 
 
-def noisy_program(seed: int, duration_seconds: float, noise_seed: int) -> np.ndarray:
-    """Same program with white noise at about -15 dB SNR."""
+def noisy_program(
+    seed: int,
+    duration_seconds: float,
+    noise_seed: int,
+    snr_db: float = 15.0,
+) -> np.ndarray:
+    """Same program with white noise at approximately ``snr_db`` SNR."""
     signal = make_program(seed, duration_seconds)
     rms = float(np.sqrt(np.mean(signal * signal)))
     rng = np.random.default_rng(noise_seed)
-    return signal + (rms / 10.0 ** (15.0 / 20.0)) * rng.standard_normal(signal.size)
+    return signal + (rms / 10.0 ** (snr_db / 20.0)) * rng.standard_normal(signal.size)
 
 
 def shift_signal(signal: np.ndarray, shift: int) -> np.ndarray:
