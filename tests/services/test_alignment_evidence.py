@@ -167,13 +167,16 @@ def test_three_hour_attempt_serializes_within_128kib() -> None:
 
 
 def _populated_video_attempt() -> AudioAlignmentAttempt:
-    attempt = attempt_with_chunks(3)
+    attempt = attempt_with_chunks(6)
     confirmed = 146
     targets = (
         VideoTargetEvidence(
             kind="chunk",
             first_chunk_index=0,
             last_chunk_index=0,
+            credible=True,
+            start_sample=(0) * 240_000,
+            end_sample=((0) + 1) * 240_000,
             target_offset=147,
             alternative_offsets=(147, 148),
             resolution="resolved",
@@ -183,6 +186,9 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="chunk",
             first_chunk_index=1,
             last_chunk_index=1,
+            credible=True,
+            start_sample=(1) * 240_000,
+            end_sample=((1) + 1) * 240_000,
             target_offset=150,
             alternative_offsets=(149, 150, 151),
             resolution="unresolved",
@@ -192,6 +198,9 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="run",
             first_chunk_index=2,
             last_chunk_index=3,
+            credible=True,
+            start_sample=(2) * 240_000,
+            end_sample=((3) + 1) * 240_000,
             target_offset=153,
             alternative_offsets=(152, 153, 154),
             resolution="unexamined",
@@ -201,6 +210,9 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             kind="run",
             first_chunk_index=4,
             last_chunk_index=5,
+            credible=True,
+            start_sample=(4) * 240_000,
+            end_sample=((5) + 1) * 240_000,
             target_offset=155,
             alternative_offsets=(154, 155, 156),
             resolution="alternative_confirmed",
@@ -211,9 +223,9 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
         attempt,
         authority_recount=AudioAuthorityRecount(
             raw_status="agreed",
-            raw_agreeing_chunks=3,
+            raw_agreeing_chunks=6,
             authority_status="agreed",
-            authority_agreeing_chunks=3,
+            authority_agreeing_chunks=6,
             passed=True,
         ),
         video_check=VideoCheckObservation(
@@ -235,18 +247,28 @@ def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None
     assert parsed == attempt
     assert parsed.authority_recount is not None
     assert parsed.video_check.targets[0].target_offset == 147
+    assert parsed.video_check.targets[0].credible is True
+    assert (
+        parsed.video_check.targets[0].start_sample,
+        parsed.video_check.targets[0].end_sample,
+    ) == (
+        0,
+        240_000,
+    )
     assert parsed.video_check.targets[3].resolution == "alternative_confirmed"
     assert parsed.video_check.same_frame_context[0].rounded_frame == 146
     assert parsed.video_check.check_points[0].suggested_comparison_frame == 154
 
 
-def test_native_compact_projection_retains_authoritative_target_offset() -> None:
+def test_native_compact_projection_retains_authoritative_target_context() -> None:
     from frame_compare.services.alignment import _project_audio_attempt_for_review
 
     projected = _project_audio_attempt_for_review(_populated_video_attempt())
+    parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(projected))
     assert projected.chunks.rows_omitted is True
     assert projected.chunks.starts == ()
-    assert projected.video_check.targets[0].target_offset == 147
+    assert parsed == projected
+    assert parsed.video_check.targets[0] == _populated_video_attempt().video_check.targets[0]
 
 
 def test_extended_video_evidence_rejects_bad_values() -> None:
@@ -269,6 +291,91 @@ def test_extended_video_evidence_rejects_bad_values() -> None:
     payload["video_check"]["check_points"][0]["timestamp_seconds"] = -1
     with pytest.raises(ValueError, match="non-negative"):
         evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("credible", "yes", "must be a boolean"),
+        ("start_sample", -1, "must be >= 0"),
+        ("end_sample", 0, "sample interval must be non-empty"),
+    ],
+)
+def test_extended_video_evidence_rejects_malformed_target_context(
+    field: str, value: object, match: str
+) -> None:
+    payload = asdict(_populated_video_attempt())
+    payload["video_check"]["targets"][0][field] = value
+
+    with pytest.raises(ValueError, match=match):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+@pytest.mark.parametrize("field", ("credible", "start_sample", "end_sample"))
+def test_extended_video_evidence_requires_total_replacement_target_context(field: str) -> None:
+    payload = asdict(_populated_video_attempt())
+    del payload["video_check"]["targets"][0][field]
+
+    with pytest.raises(ValueError, match="VideoTargetEvidence is missing keys"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+def test_compact_target_context_rejects_impossible_kind_and_bounds() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
+    target = payload["video_check"]["targets"][2]
+    target["credible"] = False
+    with pytest.raises(ValueError, match="run targets must be credible"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
+    payload["video_check"]["targets"][0]["end_sample"] = 480_001
+    with pytest.raises(ValueError, match="end does not match its last chunk"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+def test_partial_final_target_bounds_survive_compact_projection() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = attempt_with_chunks(4)
+    chunks = replace(
+        attempt.chunks,
+        counts=(240_000, 240_000, 240_000, 120_000),
+    )
+    target = VideoTargetEvidence(
+        kind="run",
+        first_chunk_index=2,
+        last_chunk_index=3,
+        credible=True,
+        start_sample=480_000,
+        end_sample=840_000,
+        target_offset=150,
+        alternative_offsets=(149, 150, 151),
+        resolution="unexamined",
+        positions=(),
+    )
+    populated = replace(
+        attempt,
+        chunks=chunks,
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(144, 145, 146, 147, 148),
+            confirmed_offset=146,
+            index_build_seconds=0.0,
+            positions=(),
+            targets=(target,),
+        ),
+    )
+
+    compact = _project_audio_attempt_for_review(populated)
+    parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(compact))
+    assert compact.chunks.rows_omitted is True
+    assert parsed.video_check.targets[0] == target
+    assert (
+        target.start_sample / populated.analysis.analysis_rate,
+        target.end_sample / populated.analysis.analysis_rate,
+    ) == (60.0, 105.0)
 
 
 @pytest.mark.parametrize(
@@ -302,10 +409,26 @@ def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            credible=True,
+            start_sample=(index) * 240_000,
+            end_sample=((index) + 1) * 240_000,
             target_offset=6,
             alternative_offsets=(5, 6, 7),
-            resolution="resolved",
-            positions=(VideoTargetPosition(index, index * 100, 0.1, 1.0, "confirmed"),),
+            resolution="resolved" if index < 3 else "unexamined",
+            positions=(
+                tuple(
+                    VideoTargetPosition(
+                        index * 4 + position,
+                        index * 100 + position,
+                        0.1,
+                        1.0,
+                        "confirmed",
+                    )
+                    for position in range(4)
+                )
+                if index < 3
+                else ()
+            ),
         )
         for index in range(12)
     )

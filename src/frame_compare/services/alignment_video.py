@@ -93,6 +93,7 @@ class _Target:
     first_index: int
     last_index: int
     lag: int
+    credible: bool
     start_sample: int
     end_sample: int
     requested_positions: int
@@ -214,33 +215,29 @@ def check_video_alignment(
         remaining = _TARGET_POSITION_LIMIT
         next_position_index = len(base_positions)
         for target in targets:
+            alternative_frame = _lag_to_frame(
+                target.lag,
+                attempt=attempt,
+                fps_reference=fps_reference,
+            )
+            alternative_offsets = tuple(
+                offset
+                for offset in range(alternative_frame - 1, alternative_frame + 2)
+                if offset != confirmed
+            )
             desired = _target_frames(
                 target,
                 fps_reference=fps_reference,
                 audio_start_reference=reference_audio_start,
                 video_start_reference=reference_video_start,
-                alternative_frame=_lag_to_frame(
-                    target.lag,
-                    attempt=attempt,
-                    fps_reference=fps_reference,
-                ),
+                alternative_frame=alternative_frame,
                 confirmed=confirmed,
                 reference_frame_count=reference_source.num_frames,
                 comparison_frame_count=comparison_source.num_frames,
             )
             selected = desired[:remaining]
+            positions_for_target: list[VideoTargetPosition] = []
             if selected:
-                alternative_frame = _lag_to_frame(
-                    target.lag,
-                    attempt=attempt,
-                    fps_reference=fps_reference,
-                )
-                alternative_offsets = tuple(
-                    offset
-                    for offset in range(alternative_frame - 1, alternative_frame + 2)
-                    if offset != confirmed
-                )
-                positions_for_target: list[VideoTargetPosition] = []
                 for frame in selected:
                     if _is_cancelled(cancellation):
                         return _failed("cancelled")
@@ -268,39 +265,22 @@ def check_video_alignment(
                     next_position_index += 1
                 remaining -= len(positions_for_target)
                 resolution = _target_resolution(target.kind, positions_for_target)
-                target_evidence.append(
-                    VideoTargetEvidence(
-                        kind=target.kind,
-                        first_chunk_index=target.first_index,
-                        last_chunk_index=target.last_index,
-                        target_offset=alternative_frame,
-                        alternative_offsets=alternative_offsets,
-                        resolution=resolution,
-                        positions=tuple(positions_for_target),
-                    )
-                )
             else:
-                alternative_frame = _lag_to_frame(
-                    target.lag,
-                    attempt=attempt,
-                    fps_reference=fps_reference,
+                resolution = "unexamined"
+            target_evidence.append(
+                VideoTargetEvidence(
+                    kind=target.kind,
+                    first_chunk_index=target.first_index,
+                    last_chunk_index=target.last_index,
+                    credible=target.credible,
+                    start_sample=target.start_sample,
+                    end_sample=target.end_sample,
+                    target_offset=alternative_frame,
+                    alternative_offsets=alternative_offsets,
+                    resolution=resolution,
+                    positions=tuple(positions_for_target),
                 )
-                alternative_offsets = tuple(
-                    offset
-                    for offset in range(alternative_frame - 1, alternative_frame + 2)
-                    if offset != confirmed
-                )
-                target_evidence.append(
-                    VideoTargetEvidence(
-                        kind=target.kind,
-                        first_chunk_index=target.first_index,
-                        last_chunk_index=target.last_index,
-                        target_offset=alternative_frame,
-                        alternative_offsets=alternative_offsets,
-                        resolution="unexamined",
-                        positions=(),
-                    )
-                )
+            )
 
         check_points = _check_points(
             base_positions,
@@ -599,8 +579,9 @@ def _build_targets(
                 first_index=run.first_index,
                 last_index=run.last_index,
                 lag=run.lag,
+                credible=True,
                 start_sample=valid_members[0].start,
-                end_sample=valid_members[-1].start + valid_members[-1].count - 1,
+                end_sample=valid_members[-1].start + valid_members[-1].count,
                 requested_positions=4,
             )
         )
@@ -617,8 +598,9 @@ def _build_targets(
                 first_index=chunk.index,
                 last_index=chunk.index,
                 lag=chunk.lag,
+                credible=True,
                 start_sample=chunk.start,
-                end_sample=chunk.start + chunk.count - 1,
+                end_sample=chunk.start + chunk.count,
                 requested_positions=4,
             )
         )
@@ -633,8 +615,9 @@ def _build_targets(
                     first_index=chunk.index,
                     last_index=chunk.index,
                     lag=chunk.lag,
+                    credible=False,
                     start_sample=chunk.start,
-                    end_sample=chunk.start + chunk.count - 1,
+                    end_sample=chunk.start + chunk.count,
                     requested_positions=2,
                 )
             )
@@ -677,7 +660,7 @@ def _target_frames(
     end = min(
         overlap[1],
         sample_to_reference_frame(
-            target.end_sample,
+            target.end_sample - 1,
             fps_reference=fps_reference,
             audio_start_reference=audio_start_reference,
             video_start_reference=video_start_reference,

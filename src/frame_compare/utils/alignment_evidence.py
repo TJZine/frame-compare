@@ -552,11 +552,14 @@ class VideoTargetPosition:
 
 @dataclass(frozen=True, slots=True)
 class VideoTargetEvidence:
-    """A chunk or competing run and its bounded V3a positions."""
+    """A chunk or competing run, its half-open 8 kHz bounds, and V3a positions."""
 
     kind: VideoTargetKind
     first_chunk_index: int
     last_chunk_index: int
+    credible: bool
+    start_sample: int
+    end_sample: int
     target_offset: int
     alternative_offsets: tuple[int, ...]
     resolution: VideoTargetResolution
@@ -566,11 +569,20 @@ class VideoTargetEvidence:
         _check_shallow(self)
         _check_int("first_chunk_index", self.first_chunk_index, minimum=0)
         _check_int("last_chunk_index", self.last_chunk_index, minimum=0)
+        _check_int("start_sample", self.start_sample, minimum=0)
+        _check_int("end_sample", self.end_sample, minimum=0)
         _check_int("target_offset", self.target_offset)
         if self.last_chunk_index < self.first_chunk_index:
             raise ValueError("video target ends before it starts")
+        if self.end_sample <= self.start_sample:
+            raise ValueError("video target sample interval must be non-empty")
         if self.kind == "chunk" and self.first_chunk_index != self.last_chunk_index:
             raise ValueError("chunk targets must name one chunk")
+        if self.kind == "run":
+            if self.first_chunk_index == self.last_chunk_index:
+                raise ValueError("run targets must name at least two chunks")
+            if not self.credible:
+                raise ValueError("run targets must be credible")
         if not 1 <= len(self.alternative_offsets) <= MAX_VIDEO_ALTERNATIVE_OFFSETS:
             raise ValueError("video targets must have 1..3 alternative offsets")
         if len(set(self.alternative_offsets)) != len(self.alternative_offsets):
@@ -853,6 +865,27 @@ class AudioAlignmentAttempt:
             raise ValueError("global lag exceeds the search radius")
         if self.audio.active_chunks > planned:
             raise ValueError("active chunks exceed the planned chunks")
+        for target in self.video_check.targets:
+            if target.last_chunk_index >= planned:
+                raise ValueError("video target exceeds the planned chunks")
+            expected_start = target.first_chunk_index * self.analysis.chunk_samples
+            maximum_end = (target.last_chunk_index + 1) * self.analysis.chunk_samples
+            minimum_end = target.last_chunk_index * self.analysis.chunk_samples
+            if target.start_sample != expected_start:
+                raise ValueError("video target start does not match its first chunk")
+            if not minimum_end < target.end_sample <= maximum_end:
+                raise ValueError("video target end does not match its last chunk")
+            if not self.chunks.rows_omitted:
+                expected_end = (
+                    self.chunks.starts[target.last_chunk_index]
+                    + self.chunks.counts[target.last_chunk_index]
+                )
+                if target.end_sample != expected_end:
+                    raise ValueError("video target end does not match chunk evidence")
+                if target.kind == "chunk" and (
+                    target.credible != self.chunks.credible[target.first_chunk_index]
+                ):
+                    raise ValueError("video target credibility does not match chunk evidence")
         if self.authority_recount is not None:
             if self.video_check.confirmed_offset is None:
                 raise ValueError("authority recount needs a confirmed video offset")

@@ -335,8 +335,11 @@ def test_v3a_conversion_and_excluded_alternative(tmp_path: Path) -> None:
     result = _run(tmp_path, truth=0, attempt=base)
     assert result.observation.confirmed_offset == 0
     assert len(result.observation.targets) == 1
-    assert result.observation.targets[0].alternative_offsets == (1, 2)
-    assert 0 not in result.observation.targets[0].alternative_offsets
+    target = result.observation.targets[0]
+    assert target.alternative_offsets == (1, 2)
+    assert target.credible is True
+    assert (target.start_sample, target.end_sample) == (0, 8_000)
+    assert 0 not in target.alternative_offsets
 
 
 def test_a4a_non_adjacent_same_lag_chunks_are_separate_targets() -> None:
@@ -381,6 +384,8 @@ def test_a4b_boundary_regroups_frame_distinct_tail_as_one_run() -> None:
     assert [(target.kind, target.first_index, target.last_index) for target in targets] == [
         ("run", 2, 3)
     ]
+    assert targets[0].credible is True
+    assert (targets[0].start_sample, targets[0].end_sample) == (20, 40)
     assert [item.chunk_index for item in same_frame] == [1]
 
 
@@ -435,6 +440,9 @@ def test_check_points_cover_each_target_before_filling_the_five_point_cap() -> N
             kind="chunk",
             first_chunk_index=first_index,
             last_chunk_index=first_index,
+            credible=True,
+            start_sample=(first_index) * 240_000,
+            end_sample=((first_index) + 1) * 240_000,
             target_offset=1,
             alternative_offsets=(1,),
             resolution="unresolved",
@@ -511,6 +519,9 @@ def test_check_points_use_authoritative_target_offset() -> None:
         kind="chunk",
         first_chunk_index=1,
         last_chunk_index=1,
+        credible=True,
+        start_sample=(1) * 240_000,
+        end_sample=((1) + 1) * 240_000,
         target_offset=246,
         alternative_offsets=(245, 246, 247),
         resolution="unresolved",
@@ -536,6 +547,9 @@ def test_check_points_keep_adjacent_distinct_target_offsets_separate() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            credible=True,
+            start_sample=(index) * 240_000,
+            end_sample=((index) + 1) * 240_000,
             target_offset=offset,
             alternative_offsets=alternatives,
             resolution="unresolved",
@@ -597,6 +611,9 @@ def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: 
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            credible=True,
+            start_sample=(index) * 240_000,
+            end_sample=((index) + 1) * 240_000,
             target_offset=alternative,
             alternative_offsets=(alternative,),
             resolution="unresolved",
@@ -659,6 +676,9 @@ def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            credible=True,
+            start_sample=(index) * 240_000,
+            end_sample=((index) + 1) * 240_000,
             target_offset=1,
             alternative_offsets=(1,),
             resolution="unresolved",
@@ -709,6 +729,9 @@ def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
+            credible=True,
+            start_sample=(index) * 240_000,
+            end_sample=((index) + 1) * 240_000,
             target_offset=index,
             alternative_offsets=(index,),
             resolution="resolved",

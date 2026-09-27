@@ -586,6 +586,9 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
         kind="chunk",
         first_chunk_index=0,
         last_chunk_index=0,
+        credible=True,
+        start_sample=0,
+        end_sample=_CHUNK_SAMPLES,
         target_offset=246,
         alternative_offsets=(245, 246, 247),
         resolution="unresolved",
@@ -618,7 +621,10 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
 
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    assert parsed.video_check.targets[0].target_offset == 246
+    parsed_target = parsed.video_check.targets[0]
+    assert parsed_target.target_offset == 246
+    assert parsed_target.credible is True
+    assert (parsed_target.start_sample, parsed_target.end_sample) == (0, _CHUNK_SAMPLES)
     contradictory = json.loads(review)
     contradictory["audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 999999
 

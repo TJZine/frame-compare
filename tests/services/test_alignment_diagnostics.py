@@ -473,6 +473,9 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
                     kind="chunk",
                     first_chunk_index=index,
                     last_chunk_index=index,
+                    credible=True,
+                    start_sample=(index) * 240_000,
+                    end_sample=((index) + 1) * 240_000,
                     target_offset=6,
                     alternative_offsets=(5, 6, 7),
                     resolution="resolved",
@@ -504,6 +507,9 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
     assert len(payload["original_audio_attempt"]["chunks"]["starts"]) == 360
     assert len(payload["original_audio_attempt"]["collection"]) == 2
     assert payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] == 6
+    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["credible"] is True
+    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["start_sample"] == 0
+    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["end_sample"] == 240000
     assert len(payload["pair"]["reference_label"]) == 256
     assert len(payload["pair"]["comparison_label"]) == 256
     serialized = path.read_text(encoding="utf-8")

@@ -153,6 +153,9 @@ def _review_attempt(reason: str):
                 kind="run",
                 first_chunk_index=2,
                 last_chunk_index=3,
+                credible=True,
+                start_sample=(2) * 240_000,
+                end_sample=((3) + 1) * 240_000,
                 target_offset=243,
                 alternative_offsets=(242, 243, 244),
                 resolution=target_resolution,  # type: ignore[arg-type]
@@ -218,7 +221,13 @@ def _review_attempt(reason: str):
 
 def _early_competing_run_attempt():
     attempt = _review_attempt("competing_offset_confirmed_by_video")
-    target = replace(attempt.video_check.targets[0], first_chunk_index=0, last_chunk_index=1)
+    target = replace(
+        attempt.video_check.targets[0],
+        first_chunk_index=0,
+        last_chunk_index=1,
+        start_sample=0,
+        end_sample=480_000,
+    )
     return replace(
         attempt,
         chunks=replace(
@@ -264,18 +273,24 @@ def _mixed_resolved_unresolved_attempt():
     attempt = _review_attempt("unresolved_audio_disagreement")
     targets = (
         VideoTargetEvidence(
-            kind="run",
+            kind="chunk",
             first_chunk_index=1,
             last_chunk_index=1,
+            credible=True,
+            start_sample=(1) * 240_000,
+            end_sample=((1) + 1) * 240_000,
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="alternative_confirmed",
             positions=(VideoTargetPosition(1, 13_123, 1.0, 0.1, "alternative"),),
         ),
         VideoTargetEvidence(
-            kind="run",
+            kind="chunk",
             first_chunk_index=2,
             last_chunk_index=2,
+            credible=True,
+            start_sample=(2) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=246,
             alternative_offsets=(245, 246, 247),
             resolution="unresolved",
@@ -305,6 +320,9 @@ def _mixed_unresolved_unexamined_attempt():
         kind="run",
         first_chunk_index=0,
         last_chunk_index=1,
+        credible=True,
+        start_sample=(0) * 240_000,
+        end_sample=((1) + 1) * 240_000,
         target_offset=250,
         alternative_offsets=(249, 250, 251),
         resolution="unexamined",
@@ -322,18 +340,24 @@ def _unexamined_before_unresolved_attempt():
     attempt = _review_attempt("unresolved_audio_disagreement")
     targets = (
         VideoTargetEvidence(
-            kind="run",
+            kind="chunk",
             first_chunk_index=1,
             last_chunk_index=1,
+            credible=True,
+            start_sample=(1) * 240_000,
+            end_sample=((1) + 1) * 240_000,
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="unexamined",
             positions=(),
         ),
         VideoTargetEvidence(
-            kind="run",
+            kind="chunk",
             first_chunk_index=2,
             last_chunk_index=2,
+            credible=True,
+            start_sample=(2) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=246,
             alternative_offsets=(245, 246, 247),
             resolution="unresolved",
@@ -359,9 +383,12 @@ def _singleton_chunk_target_attempt():
     attempt = _review_attempt("unresolved_audio_disagreement")
     targets = (
         VideoTargetEvidence(
-            kind="run",
+            kind="chunk",
             first_chunk_index=0,
             last_chunk_index=0,
+            credible=True,
+            start_sample=(0) * 240_000,
+            end_sample=((0) + 1) * 240_000,
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="unexamined",
@@ -371,6 +398,9 @@ def _singleton_chunk_target_attempt():
             kind="chunk",
             first_chunk_index=2,
             last_chunk_index=2,
+            credible=True,
+            start_sample=(2) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=246,
             alternative_offsets=(245, 246, 247),
             resolution="unresolved",
@@ -399,6 +429,9 @@ def _nested_alternative_confirmed_chunk_attempt():
             kind="run",
             first_chunk_index=0,
             last_chunk_index=3,
+            credible=True,
+            start_sample=(0) * 240_000,
+            end_sample=((3) + 1) * 240_000,
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="unresolved",
@@ -408,6 +441,9 @@ def _nested_alternative_confirmed_chunk_attempt():
             kind="chunk",
             first_chunk_index=2,
             last_chunk_index=2,
+            credible=False,
+            start_sample=(2) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
@@ -440,6 +476,9 @@ def _production_nested_targets_attempt():
             kind="run",
             first_chunk_index=0,
             last_chunk_index=1,
+            credible=True,
+            start_sample=(0) * 240_000,
+            end_sample=((1) + 1) * 240_000,
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="unresolved",
@@ -449,6 +488,9 @@ def _production_nested_targets_attempt():
             kind="chunk",
             first_chunk_index=2,
             last_chunk_index=2,
+            credible=False,
+            start_sample=(2) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=246,
             alternative_offsets=(245, 246, 247),
             resolution="unresolved",
@@ -458,6 +500,9 @@ def _production_nested_targets_attempt():
             kind="chunk",
             first_chunk_index=3,
             last_chunk_index=3,
+            credible=True,
+            start_sample=(3) * 240_000,
+            end_sample=((3) + 1) * 240_000,
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
@@ -488,6 +533,9 @@ def _unresolved_run_then_chunk_attempt():
             kind="run",
             first_chunk_index=1,
             last_chunk_index=2,
+            credible=True,
+            start_sample=(1) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="unresolved",
@@ -497,6 +545,9 @@ def _unresolved_run_then_chunk_attempt():
             kind="chunk",
             first_chunk_index=3,
             last_chunk_index=3,
+            credible=True,
+            start_sample=(3) * 240_000,
+            end_sample=((3) + 1) * 240_000,
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="unresolved",
@@ -532,6 +583,9 @@ def _resolved_before_alternative_confirmed_attempt():
             kind="run",
             first_chunk_index=1,
             last_chunk_index=2,
+            credible=True,
+            start_sample=(1) * 240_000,
+            end_sample=((2) + 1) * 240_000,
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="resolved",
@@ -544,6 +598,9 @@ def _resolved_before_alternative_confirmed_attempt():
             kind="chunk",
             first_chunk_index=3,
             last_chunk_index=3,
+            credible=True,
+            start_sample=(3) * 240_000,
+            end_sample=((3) + 1) * 240_000,
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
@@ -1345,6 +1402,7 @@ def test_authoritative_nested_targets_match_compact_native_projection(
     )
 
     assert compact.chunks.rows_omitted
+    assert full_review.attempt.video_check.targets == compact_review.attempt.video_check.targets
     assert full_review.suggested_offset == compact_review.suggested_offset == 146
     assert full_review.reason_lines() == compact_review.reason_lines() == expected_reasons
     assert full_review.region_lines() == compact_review.region_lines() == expected_regions

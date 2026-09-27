@@ -58,6 +58,9 @@ def _target(
     first_index: int,
     last_index: int,
     resolution: str,
+    *,
+    chunk_samples: int = 240_000,
+    credible: bool = True,
 ) -> VideoTargetEvidence:
     positions = (
         ()
@@ -76,6 +79,9 @@ def _target(
         kind=kind,  # type: ignore[arg-type]
         first_chunk_index=first_index,
         last_chunk_index=last_index,
+        credible=credible,
+        start_sample=first_index * chunk_samples,
+        end_sample=(last_index + 1) * chunk_samples,
         target_offset=1,
         alternative_offsets=(1, 2),
         resolution=resolution,  # type: ignore[arg-type]
@@ -361,9 +367,16 @@ def test_each_v6_failure_blocks_application_trims_and_cache(
         shared_alignment_cache_dir=tmp_path / "shared",
     )
     target = {
-        "unresolved_run": _target("run", 18, 19, "unresolved"),
+        "unresolved_run": _target("run", 18, 19, "unresolved", chunk_samples=14_000),
         "unexamined_chunk": _target("chunk", 4, 4, "unexamined"),
-        "alternative_confirmed": _target("chunk", 19, 19, "alternative_confirmed"),
+        "alternative_confirmed": _target(
+            "chunk",
+            19,
+            19,
+            "alternative_confirmed",
+            chunk_samples=14_000,
+            credible=False,
+        ),
     }[mode]
     if mode in {"unresolved_run", "alternative_confirmed"}:
         monkeypatch.setattr(alignment_service, "plan_audio_chunks", _twenty_chunk_plan)
