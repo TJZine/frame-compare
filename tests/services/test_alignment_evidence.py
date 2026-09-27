@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 
 from frame_compare.utils.alignment_evidence import (
-    MAX_AUDIO_CHUNKS,
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
@@ -164,56 +165,9 @@ def attempt_with_chunks(planned: int, *, lag: int = 1177) -> AudioAlignmentAttem
     )
 
 
-def test_three_hour_attempt_serializes_within_128kib() -> None:
+def test_three_hour_attempt_serializes_within_shared_bound() -> None:
     payload = json.dumps(audio_attempt_payload(attempt_with_chunks(360)), allow_nan=False)
-    assert len(payload.encode("utf-8")) <= 128 * 1024
-
-
-def test_maximum_attempt_and_retained_targets_round_trip_within_128kib() -> None:
-    attempt = attempt_with_chunks(MAX_AUDIO_CHUNKS)
-    attempt = replace(
-        attempt,
-        video_check=VideoCheckObservation(
-            observation="observed",
-            scored_offsets=(144, 145, 146, 147, 148),
-            confirmed_offset=146,
-            index_build_seconds=0.0,
-            positions=(),
-            targets=tuple(
-                VideoTargetEvidence(
-                    kind="chunk",
-                    first_chunk_index=index,
-                    last_chunk_index=index,
-                    credible=True,
-                    start_sample=index * 240_000,
-                    end_sample=(index + 1) * 240_000,
-                    target_offset=148,
-                    alternative_offsets=(147, 148, 149),
-                    resolution="unexamined",
-                    positions=(),
-                )
-                for index in range(MAX_AUDIO_CHUNKS)
-            ),
-        ),
-    )
-
-    full_payload = audio_attempt_payload(attempt)
-    full_json = json.dumps(full_payload, separators=(",", ":"), allow_nan=False)
-    assert len(full_json.encode("utf-8")) <= 128 * 1024
-    assert evidence_from_payload(AudioAlignmentAttempt, full_payload) == attempt
-
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
-    compact = _project_audio_attempt_for_review(attempt)
-    compact_payload = audio_attempt_payload(compact)
-    compact_json = json.dumps(compact_payload, separators=(",", ":"), allow_nan=False)
-    assert len(compact_json.encode("utf-8")) <= 128 * 1024
-    assert evidence_from_payload(AudioAlignmentAttempt, compact_payload) == compact
-
-    broken = audio_attempt_payload(attempt)
-    broken["chunks"]["compact_indices"]["active"] = "0-99999"  # type: ignore[index]
-    with pytest.raises(ValueError, match="compact active is invalid"):
-        evidence_from_payload(AudioAlignmentAttempt, broken)
+    assert len(payload.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
 
 
 def _populated_video_attempt() -> AudioAlignmentAttempt:
@@ -310,12 +264,53 @@ def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None
     assert parsed.video_check.check_points[0].suggested_comparison_frame == 154
 
 
-def test_native_compact_projection_retains_authoritative_target_context() -> None:
+@pytest.mark.parametrize(
+    "case",
+    ("repeat-parse", "input-immutability", "mixed-target-order", "zero-fps-denominator"),
+)
+def test_plain_attempt_parser_contract(case: str) -> None:
+    payload = asdict(_populated_video_attempt())
+    if case == "mixed-target-order":
+        payload["video_check"]["targets"] = list(reversed(payload["video_check"]["targets"]))
+    elif case == "zero-fps-denominator":
+        payload["fps_den"] = 0
+
+    before = deepcopy(payload)
+    if case == "zero-fps-denominator":
+        with pytest.raises(ValueError, match="fps_den"):
+            evidence_from_payload(AudioAlignmentAttempt, payload)
+        return
+
+    first = evidence_from_payload(AudioAlignmentAttempt, payload)
+    second = evidence_from_payload(AudioAlignmentAttempt, payload)
+    assert first == second
+    assert payload == before
+    if case == "mixed-target-order":
+        assert tuple(target.target_offset for target in first.video_check.targets) == (
+            155,
+            153,
+            150,
+            147,
+        )
+
+
+def test_native_projection_omits_rows_and_retains_authoritative_target_context() -> None:
     from frame_compare.services.alignment import _project_audio_attempt_for_review
 
     projected = _project_audio_attempt_for_review(_populated_video_attempt())
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(projected))
-    assert projected.chunks == _populated_video_attempt().chunks
+    assert projected.chunks.rows_omitted is True
+    assert not any(
+        (
+            projected.chunks.starts,
+            projected.chunks.counts,
+            projected.chunks.active,
+            projected.chunks.lags,
+            projected.chunks.psrs,
+            projected.chunks.credible,
+            projected.chunks.agrees,
+        )
+    )
     assert projected.chunks.total_samples == 1_440_000
     assert parsed == projected
     assert parsed.video_check.targets[0] == _populated_video_attempt().video_check.targets[0]
@@ -370,7 +365,7 @@ def test_extended_video_evidence_requires_total_replacement_target_context(field
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
-def test_compact_target_context_rejects_impossible_kind_and_bounds() -> None:
+def test_native_target_context_rejects_impossible_kind_and_bounds() -> None:
     from frame_compare.services.alignment import _project_audio_attempt_for_review
 
     payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
@@ -403,7 +398,7 @@ def test_full_run_target_requires_credible_members_with_nominal_bounds() -> None
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
-def test_partial_final_target_bounds_survive_compact_projection() -> None:
+def test_partial_final_target_bounds_survive_native_projection() -> None:
     from frame_compare.services.alignment import _project_audio_attempt_for_review
 
     attempt = attempt_with_chunks(4)
@@ -437,11 +432,11 @@ def test_partial_final_target_bounds_survive_compact_projection() -> None:
     )
 
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(populated)) == populated
-    compact = _project_audio_attempt_for_review(populated)
-    parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(compact))
-    assert compact.chunks.rows_omitted is False
-    assert compact.chunks.counts == chunks.counts
-    assert compact.chunks.total_samples == 840_000
+    projected = _project_audio_attempt_for_review(populated)
+    parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(projected))
+    assert projected.chunks.rows_omitted is True
+    assert projected.chunks.counts == ()
+    assert projected.chunks.total_samples == 840_000
     assert parsed.video_check.targets[0] == target
     assert (
         target.start_sample / populated.analysis.analysis_rate,
@@ -560,11 +555,10 @@ def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
         ),
     )
     payload = json.dumps(asdict(populated), allow_nan=False)
-    assert len(payload.encode("utf-8")) <= 128 * 1024
+    assert len(payload.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
 
 
-def test_native_projection_of_large_attempt_stays_within_bound() -> None:
-    """A large native attempt embeds with semantic row compaction."""
+def test_native_projection_of_large_attempt_omits_rows() -> None:
     from frame_compare.services.alignment import _build_audio_review_map
     from frame_compare.services.alignment_keys import alignment_key
     from frame_compare.services.types import AlignmentProvenance, AlignmentResult
@@ -600,9 +594,11 @@ def test_native_projection_of_large_attempt_stays_within_bound() -> None:
         },
     )
     encoded = payloads[key]
-    assert len(encoded.encode("utf-8")) <= 128 * 1024
+    assert len(encoded.encode("utf-8")) <= 2 * 1024 * 1024
     parsed = evidence_from_payload(AudioAlignmentAttempt, json.loads(encoded)["audio_attempt"])
-    assert parsed.chunks == attempt.chunks
+    assert parsed.chunks.rows_omitted is True
+    assert parsed.chunks.starts == ()
+    assert parsed.chunks.total_samples == attempt.chunks.total_samples
     assert len(parsed.runs) == 1
     assert parsed.runs[0].lag == 1177
     assert parsed.audio.active_chunks == 2160
@@ -791,11 +787,6 @@ def test_parser_rejects_out_of_bounds_values() -> None:
     payload = asdict(attempt_with_chunks(2))
     payload["reference_identity_digest"] = "not-a-digest"
     with pytest.raises(ValueError, match="digest"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["fps_den"] = 0
-    with pytest.raises(ValueError):
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
 

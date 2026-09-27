@@ -194,7 +194,14 @@ def _write_insert(
 ) -> None:
     base_video = "[0:v]null,split=2[base_a][base_b]"
     if low_motion:
-        base_video = r"[0:v]drawbox=x=0:y=0:w=128:h=72:color=black:t=fill:enable=between(t\,0\,60),split=2[base_a][base_b]"
+        low_motion_start, low_motion_end = (
+            (0, at_seconds) if at_seconds <= _DURATION // 2 else (at_seconds - 2, _DURATION)
+        )
+        base_video = (
+            "[0:v]drawbox=x=0:y=0:w=128:h=72:color=black:t=fill:"
+            f"enable=between(t\\,{low_motion_start}\\,{low_motion_end}),"
+            "split=2[base_a][base_b]"
+        )
     video_graph = ";".join(
         [
             base_video,
@@ -398,6 +405,8 @@ def _write_media_set(root: Path) -> _MediaSet:
     add("insert-540", lambda path: _write_insert(path, 540))
     add("insert-570", lambda path: _write_insert(path, 570))
     add("insert-60-low-motion", lambda path: _write_insert(path, 60, low_motion=True))
+    add("insert-540-low-motion", lambda path: _write_insert(path, 540, low_motion=True))
+    add("insert-570-low-motion", lambda path: _write_insert(path, 570, low_motion=True))
     add("replacement-4", lambda path: _write_replacement(path, 4))
     add("replacement-30", lambda path: _write_replacement(path, 30))
     add("repeated-music-cue", lambda path: _write_repeated_music_cue(path, reference=False))
@@ -417,6 +426,13 @@ def _write_media_set(root: Path) -> _MediaSet:
     add("flat-video", _write_flat_video)
     add("multipath", lambda path: _write_media(path, audio_graph=_multipath_graph()))
     add("same-frame", lambda path: _write_media(path, audio_graph=_splice_graph(delayed=(10,))))
+    add(
+        "six-same-frame",
+        lambda path: _write_media(
+            path,
+            audio_graph=_splice_graph(delayed=(8, 10, 12), advanced=(9, 11, 13)),
+        ),
+    )
     add(
         "many-same-frame",
         lambda path: _write_media(
@@ -665,6 +681,16 @@ def _phase_context(media: _MediaSet, name: str, root: Path, *, crop: bool) -> Ru
             False,
         ),
         (
+            "six-same-frame",
+            "trusted_automatic",
+            "audio_video_confirmed",
+            True,
+            0,
+            (),
+            6,
+            False,
+        ),
+        (
             "many-same-frame",
             "trusted_automatic",
             "audio_video_confirmed",
@@ -704,6 +730,13 @@ def test_real_phase_v6_cache_matrix(
     assert attempt.video_check.confirmed_offset == confirmed_offset
     assert tuple(target.resolution for target in attempt.video_check.targets) == target_resolutions
     assert len(attempt.video_check.same_frame_context) == same_frame_count
+    if name in {"six-same-frame", "many-same-frame"}:
+        expected_raw_agreeing = 14 if name == "six-same-frame" else 7
+        assert attempt.audio.status == "no_single_offset"
+        assert attempt.audio.credible_chunks == 20
+        assert attempt.audio.agreeing_chunks == expected_raw_agreeing
+        assert attempt.authority_recount is not None
+        assert attempt.authority_recount.authority_agreeing_chunks == 20
     assert (
         attempt.authority_recount.passed if attempt.authority_recount is not None else None
     ) is authority_passed
@@ -929,27 +962,45 @@ def test_length_changing_inserts_are_not_applied(
 
 
 @pytest.mark.integration
-def test_low_motion_insert_remains_a_competing_offset_hint(
-    u4_media: _MediaSet, tmp_path: Path
+@pytest.mark.parametrize(
+    ("seconds", "reason", "global_lag", "target"),
+    (
+        (60, "competing_offset", -32000, ("run", 0, 1, (-1, 0, 1), "unresolved", 4)),
+        (540, "competing_offset", 0, ("run", 18, 19, (-97, -96, -95), "unresolved", 4)),
+        (
+            570,
+            "unresolved_audio_disagreement",
+            0,
+            ("chunk", 19, 19, (-97, -96, -95), "unresolved", 4),
+        ),
+    ),
+)
+def test_low_motion_insert_remains_a_provisional_hint(
+    u4_media: _MediaSet,
+    tmp_path: Path,
+    seconds: int,
+    reason: str,
+    global_lag: int,
+    target: tuple[str, int, int, tuple[int, ...], str, int],
 ) -> None:
-    result = _align_pair(u4_media, "insert-60-low-motion", tmp_path / "generated")
-    _assert_label(result, state="provisional", reason="competing_offset")
+    result = _align_pair(u4_media, f"insert-{seconds}-low-motion", tmp_path / "generated")
+    _assert_label(result, state="provisional", reason=reason)
     _assert_audio(
         result,
-        global_lag=-32000,
-        subframe=-96.0,
-        rounded_frame=-96,
+        global_lag=global_lag,
+        subframe=global_lag / 8000 * _FPS,
+        rounded_frame=-96 if seconds == 60 else 0,
         credible=20,
-        agreeing=18,
+        agreeing=19 if seconds == 570 else 18,
     )
     _assert_video(
         result,
-        confirmed_offset=-96,
+        confirmed_offset=-96 if seconds == 60 else 0,
         wins=11,
         informative=11,
-        finite_margin=True,
+        finite_margin=seconds == 60,
     )
-    _assert_targets(result, (("run", 0, 1, (-1, 0, 1), "unresolved", 4),))
+    _assert_targets(result, (target,))
 
 
 @pytest.mark.integration

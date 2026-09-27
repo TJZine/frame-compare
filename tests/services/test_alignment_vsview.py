@@ -21,7 +21,11 @@ from frame_compare.services.alignment_vsview import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult, AlignmentReviewSummary
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt, evidence_from_payload
+from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
+    AudioAlignmentAttempt,
+    evidence_from_payload,
+)
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -118,7 +122,7 @@ def test_audio_review_envelope_carries_a_parseable_v4_attempt() -> None:
         "audio_attempt": asdict(attempt),
     }
     encoded = json.dumps(envelope, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    assert len(encoded.encode("utf-8")) <= 128 * 1024
+    assert len(encoded.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
 
     decoded = json.loads(encoded)
     assert set(decoded) == {"current_authority", "evidence_availability", "audio_attempt"}

@@ -1865,7 +1865,8 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         "+250f  1:30-2:00  confirmed by video",
     )
 
-    assert compact.chunks == attempt.chunks
+    assert compact.chunks.rows_omitted is True
+    assert compact.chunks.total_samples == attempt.chunks.total_samples
     assert full_review.attempt.video_check.targets == compact_review.attempt.video_check.targets
     assert full_review.suggested_offset == compact_review.suggested_offset == 146
     assert full_review.reason_lines() == compact_review.reason_lines() == expected_reasons
@@ -1997,7 +1998,8 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     assert attempt.decision.state == expected_state
     assert attempt.decision.primary_reason == expected_reason
     assert compact.decision == attempt.decision
-    assert compact.chunks == attempt.chunks
+    assert compact.chunks.rows_omitted is True
+    assert compact.chunks.total_samples == attempt.chunks.total_samples
     assert full_review.context_lines() == compact_review.context_lines() == expected_context
     assert full_review.context_lines(panel=True) == compact_review.context_lines(panel=True)
     assert full_review.noted_line() == compact_review.noted_line() == expected_noted
@@ -2323,7 +2325,8 @@ def test_partial_final_base_regions_match_compact_native_projection() -> None:
         full_regions = build_audio_review_presentation(attempt).region_lines()
         compact_regions = build_audio_review_presentation(compact).region_lines()
 
-        assert compact.chunks == attempt.chunks
+        assert compact.chunks.rows_omitted is True
+        assert compact.chunks.total_samples == attempt.chunks.total_samples
         assert full_regions == compact_regions
         assert expected in compact_regions
         assert all("2:00" not in line for line in compact_regions)
@@ -2344,7 +2347,8 @@ def test_partial_final_same_frame_context_matches_compact_native_projection() ->
     full_review = build_audio_review_presentation(attempt)
     compact_review = build_audio_review_presentation(compact)
 
-    assert compact.chunks == attempt.chunks
+    assert compact.chunks.rows_omitted is True
+    assert compact.chunks.total_samples == attempt.chunks.total_samples
     assert full_review.same_frame_regions == compact_review.same_frame_regions
     assert tuple(
         (region.start_seconds, region.end_seconds) for region in compact_review.same_frame_regions

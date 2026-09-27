@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import random
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -17,13 +16,13 @@ from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.types import AlignmentProvenance, AlignmentResult
 from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
     MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
     AudioAnalysisFacts,
     AudioAttemptStatus,
-    AudioAuthorityRecount,
     AudioChunkColumns,
     AudioChunkRun,
     AudioCollectionFacts,
@@ -34,9 +33,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
-    VideoCheckPoint,
     VideoTargetEvidence,
-    VideoTargetPosition,
     evidence_from_payload,
 )
 
@@ -365,8 +362,8 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 4
     assert before_digest == after_digest == payload["original_attempt_digest"]
-    assert before_size < 128 * 1024
-    assert after_size < 128 * 1024
+    assert before_size < MAX_ALIGNMENT_EVIDENCE_BYTES
+    assert after_size < MAX_ALIGNMENT_EVIDENCE_BYTES
     assert payload["review_outcome"] == "confirmed"
     assert payload["final_resolution"]["frame_offset"] == 0
     serialized = path.read_text(encoding="utf-8")
@@ -402,7 +399,7 @@ def test_diagnostic_artifact_is_compact_json_with_stable_canonical_digest(
     assert "\n" not in content
     assert ": " not in content
     assert '"schema_version":4' in content
-    assert size < 128 * 1024
+    assert size < MAX_ALIGNMENT_EVIDENCE_BYTES
     assert digest == alignment_diagnostics.original_attempt_digest(attempt)
     assert (
         digest == hashlib.sha256(alignment_diagnostics.canonical_attempt_bytes(attempt)).hexdigest()
@@ -458,95 +455,27 @@ def test_failed_final_replacement_preserves_last_valid_snapshot(
     assert path.read_bytes() == original
 
 
-def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> None:
-    base = maximum_audio_attempt()
-    attempt = replace(
-        base,
-        authority_recount=AudioAuthorityRecount(
-            raw_status="agreed",
-            raw_agreeing_chunks=360,
-            authority_status="agreed",
-            authority_agreeing_chunks=360,
-            passed=True,
-        ),
-        video_check=VideoCheckObservation(
-            observation="observed",
-            scored_offsets=(2, 3, 4, 5, 6),
-            confirmed_offset=4,
-            index_build_seconds=0.01,
-            positions=(),
-            targets=tuple(
-                VideoTargetEvidence(
-                    kind="chunk",
-                    first_chunk_index=index,
-                    last_chunk_index=index,
-                    credible=True,
-                    start_sample=(index) * 240_000,
-                    end_sample=((index) + 1) * 240_000,
-                    target_offset=6,
-                    alternative_offsets=(5, 6, 7),
-                    resolution="resolved",
-                    positions=(VideoTargetPosition(index, index * 100, 0.1, 1.0, "confirmed"),),
-                )
-                for index in range(12)
-            ),
-            check_points=tuple(
-                VideoCheckPoint(float(index), index, index + 4) for index in range(5)
-            ),
-        ),
-    )
-
-    path, _, size = alignment_diagnostics.write_alignment_diagnostic(
-        generated_root=tmp_path.parent,
-        diagnostics_dir=tmp_path / "alignment_diagnostics",
-        comparison_ordinal=1,
-        reference_label="R" * 512,
-        comparison_label="C" * 512,
-        attempt=attempt,
-        evidence_availability="current_attempt",
-        review_outcome="not_requested",
-        final_result=_result(attempt),
-        final_origin="none",
-    )
-
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    assert size < 128 * 1024
-    assert "compact_indices" in payload["original_audio_attempt"]["chunks"]
-    parsed = evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
-    assert len(parsed.chunks.starts) == 360
-    assert len(payload["original_audio_attempt"]["collection"]) == 2
-    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] == 6
-    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["credible"] is True
-    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["start_sample"] == 0
-    assert payload["original_audio_attempt"]["video_check"]["targets"][0]["end_sample"] == 240000
-    assert len(payload["pair"]["reference_label"]) == 256
-    assert len(payload["pair"]["comparison_label"]) == 256
-    serialized = path.read_text(encoding="utf-8")
-    assert str(tmp_path) not in serialized
-    payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 999999
-
-    with pytest.raises(ValueError, match="ordered target-offset neighbourhood"):
-        evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
-
-    payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 6
-    payload["original_audio_attempt"]["video_check"]["targets"][0]["end_sample"] = 1
-    with pytest.raises(ValueError, match="end does not match its last chunk"):
-        evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
-
-
-@pytest.mark.parametrize("context", ("same-frame", "unexamined"))
-def test_maximum_varied_evidence_fits_full_and_native_envelopes(
-    tmp_path: Path, context: str
-) -> None:
-    rng = random.Random(7301)
+def _maximum_shape_attempt(shape: str) -> tuple[AudioAlignmentAttempt, tuple[int, int, int]]:
     base = maximum_audio_attempt()
     count = MAX_AUDIO_CHUNKS
-    lags = (
-        tuple((index % 201) - 100 for index in range(count))
-        if context == "same-frame"
-        else tuple(rng.randrange(-239_000, 239_000) for _ in range(count))
-    )
-    psrs = tuple(rng.uniform(30.0, 1500.0) for _ in range(count))
+    if shape in {"same-frame", "mixed"}:
+        same_frame_count = count if shape == "same-frame" else count // 2
+    else:
+        same_frame_count = 0
+    target_count = count // 2 if shape in {"run-targets", "mixed"} else 0
+    if shape == "runs":
+        run_lags = tuple(((index * 7919) % 478_001) - 239_000 for index in range(count // 2))
+        lags = tuple(lag for run_lag in run_lags for lag in (run_lag, run_lag))
+    elif shape == "run-targets":
+        lags = tuple(
+            lag for index in range(count // 2) for lag in (round((2 + index % 7) * 8000 / 24),) * 2
+        )
+    else:
+        lags = tuple(
+            (index % 201) - 100 if index < same_frame_count else round((2 + index % 7) * 8000 / 24)
+            for index in range(count)
+        )
+    psrs = tuple(25.125 + (index * 8191 % 100_000) / 97 for index in range(count))
     chunks = AudioChunkColumns(
         starts=tuple(index * 240_000 for index in range(count)),
         counts=(240_000,) * count,
@@ -557,39 +486,49 @@ def test_maximum_varied_evidence_fits_full_and_native_envelopes(
         agrees=(False,) * count,
         total_samples=count * 240_000,
     )
-    video = (
-        VideoCheckObservation(
-            observation="observed",
-            scored_offsets=(-2, -1, 0, 1, 2),
-            confirmed_offset=0,
-            index_build_seconds=0.01,
-            positions=(),
-            same_frame_context=tuple(
-                AudioSameFrameContext(index, lag, lag / 8000 * 24, 0)
-                for index, lag in enumerate(lags)
-            ),
+    runs = (
+        tuple(AudioChunkRun(index, index + 1, lags[index], 2) for index in range(0, count, 2))
+        if shape != "mixed"
+        else tuple(
+            AudioChunkRun(index, index + 1, lags[index], 2)
+            for index in range(0, same_frame_count, 2)
         )
-        if context == "same-frame"
+        + tuple(
+            AudioChunkRun(index, index, lags[index], 1) for index in range(same_frame_count, count)
+        )
+    )
+    targets = tuple(
+        VideoTargetEvidence(
+            kind="run" if shape == "run-targets" else "chunk",
+            first_chunk_index=(index * 2 if shape == "run-targets" else same_frame_count + index),
+            last_chunk_index=(
+                index * 2 + 1 if shape == "run-targets" else same_frame_count + index
+            ),
+            credible=True,
+            start_sample=(index * 2 if shape == "run-targets" else same_frame_count + index)
+            * 240_000,
+            end_sample=(index * 2 + 2 if shape == "run-targets" else same_frame_count + index + 1)
+            * 240_000,
+            target_offset=2 + index % 7,
+            alternative_offsets=tuple(range(1 + index % 7, 4 + index % 7)),
+            resolution="unexamined",
+            positions=(),
+        )
+        for index in range(target_count)
+    )
+    video = (
+        _not_observed_video()
+        if shape == "runs"
         else VideoCheckObservation(
             observation="observed",
             scored_offsets=(-2, -1, 0, 1, 2),
             confirmed_offset=0,
             index_build_seconds=0.01,
             positions=(),
-            targets=tuple(
-                VideoTargetEvidence(
-                    kind="chunk",
-                    first_chunk_index=index,
-                    last_chunk_index=index,
-                    credible=True,
-                    start_sample=index * 240_000,
-                    end_sample=(index + 1) * 240_000,
-                    target_offset=2 + index % 3,
-                    alternative_offsets=(1 + index % 3, 2 + index % 3, 3 + index % 3),
-                    resolution="unexamined",
-                    positions=(),
-                )
-                for index in range(count)
+            targets=targets,
+            same_frame_context=tuple(
+                AudioSameFrameContext(index, lags[index], lags[index] / 8000 * 24, 0)
+                for index in range(same_frame_count)
             ),
         )
     )
@@ -597,7 +536,7 @@ def test_maximum_varied_evidence_fits_full_and_native_envelopes(
         base,
         analysis=replace(base.analysis, planned_chunk_count=count),
         chunks=chunks,
-        runs=tuple(AudioChunkRun(index, index, lag, 1) for index, lag in enumerate(lags)),
+        runs=runs,
         audio=replace(
             base.audio,
             status="no_single_offset",
@@ -608,6 +547,12 @@ def test_maximum_varied_evidence_fits_full_and_native_envelopes(
         video_check=video,
         stability=replace(base.stability, valid_windows=count),
     )
+    return attempt, (len(runs), len(video.same_frame_context), len(video.targets))
+
+
+@pytest.mark.parametrize("shape", ("runs", "same-frame", "run-targets", "mixed"))
+def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, shape: str) -> None:
+    attempt, populations = _maximum_shape_attempt(shape)
     result = _result(attempt)
 
     path, _, diagnostic_size = alignment_diagnostics.write_alignment_diagnostic(
@@ -623,7 +568,7 @@ def test_maximum_varied_evidence_fits_full_and_native_envelopes(
         final_origin="none",
     )
     diagnostic_payload = json.loads(path.read_text(encoding="utf-8"))
-    assert diagnostic_size <= 128 * 1024
+    assert diagnostic_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, diagnostic_size)
     assert (
         evidence_from_payload(AudioAlignmentAttempt, diagnostic_payload["original_audio_attempt"])
         == attempt
@@ -645,9 +590,22 @@ def test_maximum_varied_evidence_fits_full_and_native_envelopes(
             )
         },
     )[key]
-    assert len(native.encode("utf-8")) <= 128 * 1024
-    assert (
-        evidence_from_payload(AudioAlignmentAttempt, json.loads(native)["audio_attempt"]) == attempt
+    native_size = len(native.encode("utf-8"))
+    assert native_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, native_size)
+    projected = json.loads(native)["audio_attempt"]
+    assert evidence_from_payload(AudioAlignmentAttempt, projected) == replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            starts=(),
+            counts=(),
+            active=(),
+            lags=(),
+            psrs=(),
+            credible=(),
+            agrees=(),
+            rows_omitted=True,
+        ),
     )
 
 

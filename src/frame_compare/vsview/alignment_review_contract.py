@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeGuard, cast, get_args
 
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt, evidence_from_payload
+from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
+    AudioAlignmentAttempt,
+    evidence_from_payload,
+)
 from frame_compare.utils.atomic_write import write_text_atomic
 
 ALIGNMENT_REVIEW_METADATA_VERSION = 5
@@ -433,7 +437,7 @@ def _is_evidence_availability(value: object) -> TypeGuard[_EvidenceAvailabilityL
 def _parse_audio_review(
     raw: object, *, suggested_offset: int | None, comparison_ordinal: int
 ) -> AlignmentReviewAudioReview:
-    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 128 * 1024:
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
         raise AlignmentReviewContractError("alignment review audio evidence is invalid")
     try:
         decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)

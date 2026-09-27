@@ -9,7 +9,7 @@ import math
 import threading
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -68,6 +68,7 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
     AudioAlignmentAttempt,
     AudioCollectionFacts,
     AudioCollectionFailure,
@@ -135,8 +136,23 @@ def _build_offsets_map(
 
 
 def _project_audio_attempt_for_review(attempt: AudioAlignmentAttempt) -> AudioAlignmentAttempt:
-    """Keep the authoritative rows; payload serialization compacts repeated facts."""
-    return attempt
+    """Embed the attempt without per-chunk rows in native review metadata."""
+    if attempt.chunks.rows_omitted:
+        return attempt
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            starts=(),
+            counts=(),
+            active=(),
+            lags=(),
+            psrs=(),
+            credible=(),
+            agrees=(),
+            rows_omitted=True,
+        ),
+    )
 
 
 def _build_audio_review_map(
@@ -170,8 +186,8 @@ def _build_audio_review_map(
             ensure_ascii=False,
             allow_nan=False,
         )
-        if len(encoded.encode("utf-8")) > 128 * 1024:
-            raise AudioAlignmentError("Native alignment-review audio evidence exceeds 128 KiB.")
+        if len(encoded.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
+            raise AudioAlignmentError("Native alignment-review audio evidence exceeds 2 MiB.")
         payloads[key] = encoded
     return payloads
 

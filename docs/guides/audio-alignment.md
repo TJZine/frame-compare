@@ -147,19 +147,19 @@ schema v2 and the manual-override schema remain unchanged.
 Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
 schema-v4 file records selected stream metadata with start-time compensation, chunk
-runs, compact per-chunk rows (start, lag, PSR, active/credible/agree flags), the
-actual winning offset for each resolved local video comparison, and semantic
-chunk/run/context indices for large repeated collections rather than truncation.
+runs, plain per-chunk rows (start, lag, PSR, active/credible/agree flags), and the
+actual winning offset for each resolved local video comparison.
 Review region
 times are expressed on the reference-video timeline. The artifact also retains the
 global lag, the sub-frame estimate, the audio decision, and the final review
 resolution. Video evidence includes the base five-offset table, targeted checks,
-same-frame context, and bounded review check points. Diagnostic v4 retains compact
-per-chunk rows. Native metadata v5 uses the same bounded semantic representation and
-keeps the rows needed to resolve compact context indices, plus `chunks.total_samples`,
-aggregate counts, runs, and every target's authoritative
+same-frame context, and bounded review check points. Diagnostic v4 retains the
+per-chunk rows. Native metadata v5 omits every per-chunk row column and sets
+`rows_omitted=true`; it retains `chunks.total_samples`, aggregate counts, runs,
+explicit same-frame context, and every target's authoritative
 offset, credibility, sample bounds, alternatives, resolution, and sampled scores.
-It also retains bounded paired-collection summaries when observed. A failed collection
+Both payloads share one 2 MiB per-comparison file-size sanity bound. Native metadata
+also retains bounded paired-collection summaries when observed. A failed collection
 never contributes usable PCM evidence. Paired collection decodes reference and
 comparison concurrently in lockstep, keeping per side one sample store plus one
 delivery scratch buffer, and never spills PCM to disk.

@@ -1437,7 +1437,7 @@ The generated session carries an explicit UUID session identity, one reference r
 ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
 hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v5. The compact native projection omits per-chunk rows but retains
+schema v5. The native projection omits per-chunk rows but retains
 `chunks.total_samples`, aggregate chunk counts, runs, the authority recount, base
 video checks, check points, and each target's authoritative `target_offset`,
 `credible`, `start_sample`, `end_sample`, alternatives, resolution, and sampled
@@ -1739,7 +1739,7 @@ cache identity; clearing the cache forces re-verification after a crop change.
 
 Fresh runs write one pathless diagnostic artifact per comparison at
 `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v4 is marked
-`diagnostic_only`, is limited to 128 KiB per comparison, and contains no media path,
+`diagnostic_only`, is limited to 2 MiB per comparison, and contains no media path,
 PCM, raw command line, full subprocess stderr, environment value, or credential. It
 is atomically snapshotted before optional review and may be atomically replaced once
 with the final human outcome. Current attempts retain bounded observed paired-collection
@@ -1756,7 +1756,7 @@ stream metadata, and timing evidence.
 Diagnostic files are never read for offset selection, trim application, or shared
 cache reuse. Diagnostic v4 and generated-session metadata v5 were extended in place
 for this unreleased policy; older native metadata is rejected and regenerated. Native
-metadata retains the same authoritative target/aggregate facts in a bounded compact
+metadata retains the same authoritative target/aggregate facts in a bounded
 projection without per-chunk rows. Missing, edited, corrupt, or unsupported
 artifacts cannot authorize an
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory

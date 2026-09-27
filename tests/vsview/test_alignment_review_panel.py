@@ -23,9 +23,12 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 from vsengine.loops import get_loop, set_loop  # noqa: E402
 from vsview.vsenv import QtEventLoop  # noqa: E402
 
+from frame_compare.services.alignment import _build_audio_review_map  # noqa: E402
 from frame_compare.services.alignment_decision import (  # noqa: E402
     ALIGNMENT_ESTIMATOR_POLICY,
 )
+from frame_compare.services.alignment_keys import alignment_key  # noqa: E402
+from frame_compare.services.types import AlignmentProvenance, AlignmentResult  # noqa: E402
 from frame_compare.utils.alignment_evidence import (  # noqa: E402
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
@@ -37,6 +40,7 @@ from frame_compare.utils.alignment_evidence import (  # noqa: E402
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
+    evidence_from_payload,
 )
 from frame_compare.utils.alignment_review_projection import (  # noqa: E402
     build_audio_review_presentation,
@@ -82,6 +86,21 @@ def _audio_review(suggestion: int | None) -> str:
                 "historical_details_unavailable" if suggestion is not None else "not_computed"
             ),
             "audio_attempt": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _attempt_audio_review(attempt: AudioAlignmentAttempt, *, applied: bool = False) -> str:
+    return json.dumps(
+        {
+            "current_authority": {
+                "origin": "computed_this_run" if applied else "none",
+                "frame_offset": 0 if applied else None,
+            },
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -780,13 +799,40 @@ def test_panel_summary_keeps_singleton_chunk_reason_target(
     )
 
 
-def test_panel_matches_compact_projection_for_authoritative_nested_targets(
+def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_copy(
     tmp_path: Path,
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
-    attempt = _project_audio_attempt_for_review(_production_nested_targets_attempt())
-    audio_review = json.dumps(
+    attempt = _production_nested_targets_attempt()
+    reference = Path("reference.mkv")
+    comparison = Path("comparison.mkv")
+    key = alignment_key(reference, comparison)
+    result = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic=attempt.decision.primary_reason,
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+    native_review = _build_audio_review_map(
+        reference=reference,
+        comparisons=[comparison],
+        results_map={key: result},
+        provenances={
+            key: AlignmentProvenance(
+                result=result,
+                comparison_cache_key="key",
+                provenance="computed_this_run",
+                evidence_availability="current_attempt",
+            )
+        },
+    )[key]
+    full_review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
@@ -795,10 +841,35 @@ def test_panel_matches_compact_projection_for_authoritative_nested_targets(
         sort_keys=True,
         separators=(",", ":"),
     )
+    native_attempt = json.loads(native_review)["audio_attempt"]
+    assert native_attempt["chunks"]["rows_omitted"] is True
+    assert all(
+        native_attempt["chunks"][name] == []
+        for name in ("starts", "counts", "active", "lags", "psrs", "credible", "agrees")
+    )
+    assert native_attempt["chunks"]["total_samples"] == attempt.chunks.total_samples
+    parsed_native = evidence_from_payload(AudioAlignmentAttempt, native_attempt)
+    action = "Align manually or keep the current alignment."
+    assert build_audio_review_presentation(attempt).normal_review_rows(
+        panel=False, action_line=action
+    ) == build_audio_review_presentation(parsed_native).normal_review_rows(
+        panel=False, action_line=action
+    )
 
-    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=audio_review)
+    summaries = []
+    details = []
+    for label, audio_review in (("full", full_review), ("native", native_review)):
+        panel_dir = tmp_path / label
+        panel_dir.mkdir()
+        panel, _api, _script = _panel(panel_dir, suggestion=None, audio_review=audio_review)
+        summaries.append(panel.audio_summary_labels[0].text())
+        group = panel.audio_detail_groups[0]
+        group.setChecked(True)
+        details.append(cast(QLabel, group.findChild(QLabel)).text())
 
-    summary = panel.audio_summary_labels[0].text()
+    assert summaries[0] == summaries[1]
+    assert details[0] == details[1]
+    summary = summaries[1]
     assert (
         "Audio in 0:00–1:00 points to +250f, and the video could not settle which offset is right there."
         in summary
@@ -838,59 +909,33 @@ def test_panel_matches_compact_projection_for_authoritative_nested_targets(
         (False, "alternative_confirmed", "provisional", None),
     ],
 )
-def test_panel_target_context_matches_full_and_compact_evidence(
+def test_panel_target_context_semantic_matrix(
     tmp_path: Path,
     credible: bool,
     resolution: str,
     expected_state: str,
     expected_noted: str | None,
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _producer_target_context_attempt(credible=credible, resolution=resolution)
-    compact = _project_audio_attempt_for_review(attempt)
     assert attempt.decision.state == expected_state
-    summaries: list[str] = []
-    detail_texts: list[str] = []
-    panels: list[AlignmentReviewPanel] = []
-    for label, candidate in (("full", attempt), ("compact", compact)):
-        audio_review = json.dumps(
-            {
-                "current_authority": {
-                    "origin": (
-                        "computed_this_run" if expected_state == "trusted_automatic" else "none"
-                    ),
-                    "frame_offset": 0 if expected_state == "trusted_automatic" else None,
-                },
-                "evidence_availability": "current_attempt",
-                "audio_attempt": asdict(candidate),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        panel_dir = tmp_path / label
-        panel_dir.mkdir()
-        panel, _api, _script = _panel(
-            panel_dir,
-            suggestion=0 if expected_state == "trusted_automatic" else None,
-            audio_review=audio_review,
-        )
-        panels.append(panel)
-        summaries.append(panel.audio_summary_labels[0].text())
-        details = panel.audio_detail_groups[0]
-        details.setChecked(True)
-        detail_texts.append(cast(QLabel, details.findChild(QLabel)).text())
-
-    assert summaries[0] == summaries[1]
-    assert "Picture differs" not in summaries[0]
-    assert "the picture differs" not in summaries[0]
+    applied = expected_state == "trusted_automatic"
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=0 if applied else None,
+        audio_review=_attempt_audio_review(attempt, applied=applied),
+    )
+    summary = panel.audio_summary_labels[0].text()
+    detail_group = panel.audio_detail_groups[0]
+    detail_group.setChecked(True)
+    detail_text = cast(QLabel, detail_group.findChild(QLabel)).text()
+    assert "Picture differs" not in summary
+    assert "the picture differs" not in summary
     if expected_noted is None:
-        assert "Noted:" not in summaries[0]
+        assert "Noted:" not in summary
     else:
-        assert expected_noted in summaries[0]
+        assert expected_noted in summary
 
     expected_details = build_audio_review_presentation(attempt).verbose_lines(panel=True)
-    assert expected_details == build_audio_review_presentation(compact).verbose_lines(panel=True)
     expected_offset = 0 if resolution == "resolved" else 2
     expected_status = {
         "resolved": "confirmed by video",
@@ -911,13 +956,11 @@ def test_panel_target_context_matches_full_and_compact_evidence(
     if resolution == "resolved":
         assert all("+2f  1:00–1:30  confirmed by video" not in line for line in expected_details)
         assert all("comparison 1,798 (+2f)" not in line for line in expected_details)
-    for detail_text in detail_texts:
-        assert all(line in detail_text for line in expected_details)
-        assert "Picture differs" not in detail_text
-    for panel in panels:
-        assert [field.text() for field in panel.frame_inputs] == ["", ""]
-        assert [field.text() for field in panel.offset_inputs] == [""]
-        assert not panel.use_positions_button.isEnabled()
+    assert all(line in detail_text for line in expected_details)
+    assert "Picture differs" not in detail_text
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert not panel.use_positions_button.isEnabled()
 
 
 @pytest.mark.parametrize(
@@ -946,42 +989,23 @@ def test_panel_target_context_matches_full_and_compact_evidence(
         ),
     ],
 )
-def test_panel_resolved_run_context_matches_full_and_compact_evidence(
+def test_panel_resolved_run_context_matrix(
     tmp_path: Path,
     shape: str,
     expected_noted: str,
     expected_context: tuple[str, ...],
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     resolutions = ("resolved",) if shape == "run" else ("resolved", "resolved")
     attempt = _producer_run_context_attempt(shape=shape, resolutions=resolutions)
-    compact = _project_audio_attempt_for_review(attempt)
-    summaries: list[str] = []
-    details: list[str] = []
-    for label, candidate in (("full", attempt), ("compact", compact)):
-        audio_review = json.dumps(
-            {
-                "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
-                "evidence_availability": "current_attempt",
-                "audio_attempt": asdict(candidate),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        panel_dir = tmp_path / label
-        panel_dir.mkdir()
-        panel, _api, _script = _panel(panel_dir, suggestion=0, audio_review=audio_review)
-        summaries.append(panel.audio_summary_labels[0].text())
-        detail_group = panel.audio_detail_groups[0]
-        detail_group.setChecked(True)
-        details.append(cast(QLabel, detail_group.findChild(QLabel)).text())
-
-    assert summaries[0] == summaries[1]
-    assert details[0] == details[1]
-    assert expected_noted in summaries[0]
+    panel, _api, _script = _panel(
+        tmp_path, suggestion=0, audio_review=_attempt_audio_review(attempt, applied=True)
+    )
+    detail_group = panel.audio_detail_groups[0]
+    detail_group.setChecked(True)
+    details = cast(QLabel, detail_group.findChild(QLabel)).text()
+    assert expected_noted in panel.audio_summary_labels[0].text()
     for line in expected_context:
-        assert line in details[0]
+        assert line in details
 
 
 @pytest.mark.parametrize(
@@ -993,7 +1017,7 @@ def test_panel_resolved_run_context_matches_full_and_compact_evidence(
         (4, 0, 0, 0, "(0 differ; 0 weak, 4 quiet not counted)."),
     ],
 )
-def test_panel_established_counts_match_full_and_compact_evidence(
+def test_panel_established_counts_matrix(
     tmp_path: Path,
     planned: int,
     active: int,
@@ -1001,47 +1025,26 @@ def test_panel_established_counts_match_full_and_compact_evidence(
     agreeing: int,
     expected: str,
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _producer_count_attempt(
         planned=planned,
         active=active,
         credible=credible,
         agreeing=agreeing,
     )
-    compact = _project_audio_attempt_for_review(attempt)
     expected_line = f"Audio: {agreeing} of {credible} clear sections agree on +0f {expected}"
-    summaries: list[str] = []
-    details: list[str] = []
-    for label, candidate in (("full", attempt), ("compact", compact)):
-        audio_review = json.dumps(
-            {
-                "current_authority": {
-                    "origin": "none",
-                    "frame_offset": None,
-                },
-                "evidence_availability": "current_attempt",
-                "audio_attempt": asdict(candidate),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        panel_dir = tmp_path / label
-        panel_dir.mkdir()
-        panel, _api, _script = _panel(panel_dir, suggestion=None, audio_review=audio_review)
-        summaries.append(panel.audio_summary_labels[0].text())
-        group = panel.audio_detail_groups[0]
-        group.setChecked(True)
-        details.append(cast(QLabel, group.findChild(QLabel)).text())
-
-    assert summaries[0] == summaries[1]
+    panel, _api, _script = _panel(
+        tmp_path, suggestion=None, audio_review=_attempt_audio_review(attempt)
+    )
+    summary = panel.audio_summary_labels[0].text()
+    group = panel.audio_detail_groups[0]
+    group.setChecked(True)
+    details = cast(QLabel, group.findChild(QLabel)).text()
     if active:
-        assert summaries[0].startswith("Provisional audio candidate: +0f — NOT APPLIED")
+        assert summary.startswith("Provisional audio candidate: +0f — NOT APPLIED")
     else:
-        assert summaries[0].startswith("No usable audio candidate")
-    assert details[0] == details[1]
-    assert f"Established: {expected_line}" in details[0]
-    assert " quiet)." not in details[0]
+        assert summary.startswith("No usable audio candidate")
+    assert f"Established: {expected_line}" in details
+    assert " quiet)." not in details
 
 
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(

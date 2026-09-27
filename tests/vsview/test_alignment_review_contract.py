@@ -12,6 +12,7 @@ from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.services.types import AlignmentProvenance, AlignmentResult
 from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
@@ -814,7 +815,7 @@ def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
         '{"current_authority":{"origin":"none","origin":"none",'
         '"frame_offset":null},"evidence_availability":"not_computed",'
         '"audio_attempt":null}',
-        "x" * (128 * 1024 + 1),
+        "x" * (MAX_ALIGNMENT_EVIDENCE_BYTES + 1),
     ],
     ids=("duplicate-keys", "oversized"),
 )
@@ -882,14 +883,15 @@ def test_build_audio_review_map_bounds_empty_projection_for_many_chunks() -> Non
     )
 
     review = payloads["ref:a"]
-    assert len(review.encode("utf-8")) <= 128 * 1024
+    assert len(review.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
 
     workspace = parse_alignment_review_workspace_metadata(
         (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
     )
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    assert parsed.chunks == attempt.chunks
+    assert parsed.chunks.rows_omitted is True
+    assert parsed.chunks.starts == ()
     assert parsed.chunks.total_samples == 2160 * _CHUNK_SAMPLES
     assert len(parsed.runs) == 1
     assert parsed.audio.credible_chunks == 2160
@@ -910,7 +912,7 @@ def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
         ensure_ascii=False,
         allow_nan=False,
     )
-    assert len(review.encode("utf-8")) < 128 * 1024
+    assert len(review.encode("utf-8")) < MAX_ALIGNMENT_EVIDENCE_BYTES
 
     workspace = parse_alignment_review_workspace_metadata(
         (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))

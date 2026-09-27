@@ -9,12 +9,15 @@ from typing import Literal
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.types import AlignmentResult
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt, audio_attempt_payload
+from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
+    AudioAlignmentAttempt,
+    audio_attempt_payload,
+)
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 
 _SCHEMA_VERSION = 4
-_MAX_ARTIFACT_BYTES = 128 * 1024
 
 type AlignmentReviewOutcome = Literal[
     "pending",
@@ -129,8 +132,8 @@ def write_alignment_diagnostic(
         allow_nan=False,
     )
     size = len(content.encode("utf-8"))
-    if size > _MAX_ARTIFACT_BYTES:
-        raise ValueError(f"audio alignment diagnostic exceeds {_MAX_ARTIFACT_BYTES} bytes: {size}")
+    if size > MAX_ALIGNMENT_EVIDENCE_BYTES:
+        raise ValueError(f"audio alignment diagnostic exceeds the 2 MiB limit: {size} bytes")
     write_text_atomic(path, content, encoding="utf-8")
     return path, digest, size
 

@@ -827,6 +827,29 @@ def test_inconclusive_video_still_has_review_check_points(tmp_path: Path) -> Non
     assert len(result.observation.check_points) == 5
 
 
+def _checkpoint_target(
+    index: int,
+    frame: int,
+    offset: int,
+    alternatives: tuple[int, ...],
+    *,
+    resolution: str = "unresolved",
+    winner: Literal["confirmed", "neither"] = "neither",
+) -> alignment_video.VideoTargetEvidence:
+    return alignment_video.VideoTargetEvidence(
+        kind="chunk",
+        first_chunk_index=index,
+        last_chunk_index=index,
+        credible=True,
+        start_sample=index * 240_000,
+        end_sample=(index + 1) * 240_000,
+        target_offset=offset,
+        alternative_offsets=alternatives,
+        resolution=resolution,
+        positions=(alignment_video.VideoTargetPosition(index, frame, 0.1, 1.0, winner),),
+    )
+
+
 @pytest.mark.parametrize("confirmed", (-1, 0, 1))
 def test_check_points_use_producer_scored_offsets_for_confirmed_contrast(
     confirmed: int,
@@ -855,18 +878,7 @@ def test_check_points_use_producer_scored_offsets_for_confirmed_contrast(
 
 
 def test_check_points_use_authoritative_target_offset() -> None:
-    target = alignment_video.VideoTargetEvidence(
-        kind="chunk",
-        first_chunk_index=1,
-        last_chunk_index=1,
-        credible=True,
-        start_sample=(1) * 240_000,
-        end_sample=((1) + 1) * 240_000,
-        target_offset=246,
-        alternative_offsets=(245, 246, 247),
-        resolution="unresolved",
-        positions=(alignment_video.VideoTargetPosition(12, 500, 1.0, 1.0, "neither"),),
-    )
+    target = _checkpoint_target(1, 500, 246, (245, 246, 247))
 
     points = alignment_video._check_points(
         (),
@@ -880,22 +892,6 @@ def test_check_points_use_authoritative_target_offset() -> None:
 
 
 def test_check_points_keep_adjacent_distinct_target_offsets_separate() -> None:
-    def target(
-        index: int, frame: int, offset: int, alternatives: tuple[int, ...]
-    ) -> alignment_video.VideoTargetEvidence:
-        return alignment_video.VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=index,
-            last_chunk_index=index,
-            credible=True,
-            start_sample=(index) * 240_000,
-            end_sample=((index) + 1) * 240_000,
-            target_offset=offset,
-            alternative_offsets=alternatives,
-            resolution="unresolved",
-            positions=(alignment_video.VideoTargetPosition(index, frame, 1.0, 1.0, "neither"),),
-        )
-
     points = alignment_video._check_points(
         (
             alignment_video.VideoPositionDifference(
@@ -905,8 +901,8 @@ def test_check_points_keep_adjacent_distinct_target_offsets_separate() -> None:
             ),
         ),
         (
-            target(1, 500, 145, (145, 146)),
-            target(2, 700, 146, (145, 146, 147)),
+            _checkpoint_target(1, 500, 145, (145, 146)),
+            _checkpoint_target(2, 700, 146, (145, 146, 147)),
         ),
         confirmed=144,
         scored_offsets=(142, 143, 144, 145, 146),
@@ -946,30 +942,9 @@ def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: 
         )
         expected = [200, 400, 500, 600, 900]
 
-    def target(index: int, frame: int, alternative: int) -> alignment_video.VideoTargetEvidence:
-        return alignment_video.VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=index,
-            last_chunk_index=index,
-            credible=True,
-            start_sample=(index) * 240_000,
-            end_sample=((index) + 1) * 240_000,
-            target_offset=alternative,
-            alternative_offsets=(alternative,),
-            resolution="unresolved",
-            positions=(
-                alignment_video.VideoTargetPosition(
-                    position_index=index,
-                    reference_frame=frame,
-                    confirmed_score=1.0,
-                    alternative_score=1.0,
-                    winner="neither",
-                ),
-            ),
-        )
-
     targets = tuple(
-        target(index, frame, alternative) for index, frame, alternative, _ in specifications
+        _checkpoint_target(index, frame, alternative, (alternative,))
+        for index, frame, alternative, _ in specifications
     )
     chunks = tuple(
         ChunkObservation(
@@ -1292,28 +1267,6 @@ def test_unbounded_psr_target_ranks_above_finite_target() -> None:
 
 
 def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
-    def target(index: int) -> alignment_video.VideoTargetEvidence:
-        return alignment_video.VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=index,
-            last_chunk_index=index,
-            credible=True,
-            start_sample=(index) * 240_000,
-            end_sample=((index) + 1) * 240_000,
-            target_offset=index,
-            alternative_offsets=(index,),
-            resolution="resolved",
-            positions=(
-                alignment_video.VideoTargetPosition(
-                    position_index=index,
-                    reference_frame=100 * index,
-                    confirmed_score=0.1,
-                    alternative_score=1.0,
-                    winner="confirmed",
-                ),
-            ),
-        )
-
     base_positions = (
         alignment_video.VideoPositionDifference(
             position_index=0,
@@ -1326,7 +1279,17 @@ def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
             score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
         ),
     )
-    targets = tuple(target(index) for index in range(1, 5))
+    targets = tuple(
+        _checkpoint_target(
+            index,
+            100 * index,
+            index,
+            (index,),
+            resolution="resolved",
+            winner="confirmed",
+        )
+        for index in range(1, 5)
+    )
     chunks = tuple(
         ChunkObservation(index, (index - 1) * 10, 10, True, 0, 100.0, True, False)
         for index in range(1, 5)

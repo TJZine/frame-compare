@@ -1089,9 +1089,8 @@ Return to the controller or maintainer if:
 - 2026-09-27: U4 adversarial-review remediation was authorized and integrated on the
   accepted fix base. The unintended 12-record limits on retained targets and
   same-frame context were removed; the 12 **scored targeted-position** budget remains.
-  Repeated chunk/target collections now use a lossless standard-library packed JSON
-  projection only when large, so full diagnostic and compact native attempts round-trip
-  at `MAX_AUDIO_CHUNKS` below 128 KiB without truncation.
+  The subsequently removed compact-codec experiment is not part of the final format;
+  diagnostic and native payloads use plain explicit records.
   - A4a run formation now requires a complete adjacent lag span of at most 16 samples.
     V5a uses the true run median and preserves half-sample centres. Per maintainer
     clarification, V5 confirmation keeps the median of margins won by the candidate,
@@ -1107,8 +1106,8 @@ Return to the controller or maintainer if:
     confirmation policy moved to `utils/alignment_policy.py`. The schema remains the
     single strict evidence owner, and orchestration now calls the current typed loader
     seam directly with no signature introspection or legacy fallback.
-  - Proof adds literal A02/A03/A04 counterexamples, a real-estimator 13-same-frame
-    acceptance case, maximum full/compact serialization, controlled timing, nonzero
+  - Proof adds literal A02/A03/A04 counterexamples, real-estimator 6- and
+    13-same-frame acceptance cases, maximum full/native serialization, controlled timing, nonzero
     reference-start rendering, actual alternative-offset copy/checkpoints, and a real
     seven-case phase/cache matrix. That matrix isolates A4b, V5, unresolved-run,
     unexamined-credible, and noncredible-alternative failures; proves a noncredible
@@ -1121,12 +1120,10 @@ Return to the controller or maintainer if:
     ordered alternative set; they do not suppress an otherwise winning alternative.
     Check points and region copy use the same selected real offset, including zero
     and cases where different positions prefer different alternatives.
-  - The adaptive zlib/base64 JSON formats were removed. Diagnostic v4 and native
-    metadata v5 use one strict semantic representation: nominal chunk starts/counts,
-    boolean columns, singleton runs, same-frame context, and unexamined targets reuse
-    chunk/run facts through indices. Separate `MAX_AUDIO_CHUNKS` full-diagnostic and
-    native-envelope cases with heterogeneous lags/PSRs and many runs fit below
-    128 KiB and round-trip without caps or truncation.
+  - All compact JSON codecs were removed. Diagnostic v4 uses nominal chunk
+    starts/counts, boolean columns, runs, same-frame context, and targets as plain
+    explicit records. Native metadata v5 uses the same record types but omits all
+    per-chunk row columns and sets `rows_omitted=true`.
   - Credible unresolved chunks/runs keep their unresolved authority status while
     verbose terminal and panel details name `local_video_inconclusive` positions and
     show both scores. Noncredible neither-win context keeps the amended MUTED/Noted
@@ -1143,3 +1140,32 @@ Return to the controller or maintainer if:
     projection move accounts for `alignment_evidence.py +339/-884` and the new
     `alignment_review_projection.py +997/-0` versus `ab1a9aa5`; versus `363c8c75`,
     their final-round changes are `+315/-72` and `+42/-19`, respectively.
+- 2026-09-27: The final authorized U4 correction deleted the remaining semantic
+  compact codec and restored `MAX_AUDIO_CHUNKS = 4096`; the temporary 1024 proposal
+  was withdrawn. Diagnostic v4 and native metadata v5 now use plain explicit
+  records under one shared 2 MiB per-comparison sanity bound. Native metadata keeps
+  all seven per-chunk columns empty with `rows_omitted=true` while retaining the
+  total sample span, runs, targets, same-frame context, counts, and video evidence.
+  The four serialization-only maximum shapes measured:
+
+  | Shape at 4,096 chunks | Runs | Same-frame records | Unexamined targets | Full envelope | Native payload |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Runs only | 2,048 | 0 | 0 | 380,320 B | 142,054 B |
+  | Same-frame context | 2,048 | 4,096 | 0 | 718,898 B | 495,425 B |
+  | Run targets | 2,048 | 0 | 2,048 | 809,775 B | 580,433 B |
+  | Mixed context and chunk targets | 3,072 | 2,048 | 2,048 | 1,058,348 B | 831,940 B |
+
+  - A credible unresolved target already persists its range, scores, and per-position
+    `winner="neither"`; the projection names that observation
+    `local_video_inconclusive`. Persisting a second derived label would duplicate
+    state. Non-credible targets keep their named resolution because it changes the
+    authority result to nonblocking.
+  - Generated-media proof now covers both 6 and 13 same-frame disagreements plus
+    low-motion inserts at 60, 540, and 570 seconds. Check-point construction and
+    terminal/panel semantic matrices share fixtures while retaining the distinct
+    surface assertions and failure-injection coverage.
+  - Final line accounting versus `8906d414` and `68eb84b8`: source `+38/-343`
+    (net `-305`), tests `+383/-407` (net `-24`). Versus `ab1a9aa5`: source
+    `+1362/-1181` (net `+181`), tests `+1277/-921` (net `+356`). Final U4 totals
+    versus `5019e6ad`: source `+2961/-326` (net `+2635`), tests `+6990/-168`
+    (net `+6822`).
