@@ -188,16 +188,34 @@ def classify_audio_disagreements(
     compensation_seconds: float,
 ) -> AudioFrameDisagreements:
     """Classify A4b frame-distinct evidence after V5 confirms ``c``."""
-    if estimate.global_lag is None:
+    return classify_audio_observations(
+        observations=estimate.observations,
+        global_lag=estimate.global_lag,
+        confirmed_offset=confirmed_offset,
+        fps_reference=fps_reference,
+        compensation_seconds=compensation_seconds,
+    )
+
+
+def classify_audio_observations(
+    *,
+    observations: Sequence[ChunkObservation],
+    global_lag: int | None,
+    confirmed_offset: int,
+    fps_reference: Fraction,
+    compensation_seconds: float,
+) -> AudioFrameDisagreements:
+    """Classify the exact chunk rows shared by the video and decision stages."""
+    if global_lag is None:
         return AudioFrameDisagreements((), (), (), ())
 
     frame_distinct_credible: list[ChunkObservation] = []
     frame_distinct_noncredible: list[ChunkObservation] = []
     same_frame: list[AudioSameFrameContext] = []
-    for observation in estimate.observations:
+    for observation in observations:
         if observation.lag is None or not observation.active:
             continue
-        if _audio_agrees(observation.lag, estimate.global_lag):
+        if _audio_agrees(observation.lag, global_lag):
             continue
         frame = _observation_frame(
             observation,

@@ -488,6 +488,42 @@ def test_a4a_requires_index_adjacency_for_competing_runs() -> None:
     assert tuple(item.index for item in classification.credible_disagreements) == (2, 15)
 
 
+def test_a4b_boundary_run_drives_trusted_or_provisional_video_outcome() -> None:
+    observations = (
+        _observation(0, lag=0, credible=True, agrees=True),
+        _observation(1, lag=166, credible=True, agrees=False),
+        _observation(2, lag=167, credible=True, agrees=False),
+        _observation(3, lag=168, credible=True, agrees=False),
+    )
+    estimate = _estimate(observations, outcome="no_single_offset", agreeing_count=1)
+    classification = classify_audio_disagreements(
+        estimate=estimate,
+        confirmed_offset=0,
+        fps_reference=Fraction(24),
+        compensation_seconds=0.0,
+    )
+
+    assert [
+        (run.first_index, run.last_index, run.chunk_count) for run in classification.competing_runs
+    ] == [(2, 3, 2)]
+    assert tuple(item.index for item in classification.credible_disagreements) == ()
+    assert is_trusted_automatic(
+        authority_recount=_authority(),
+        video=_video(_target("run", 2, 3, "resolved", position_index=0)),
+        competing_runs=classification.competing_runs,
+        credible_disagreements=classification.credible_disagreements,
+    )
+    assert not is_trusted_automatic(
+        authority_recount=_authority(),
+        video=_video(
+            _target("chunk", 2, 2, "resolved", position_index=0),
+            _target("chunk", 3, 3, "resolved", position_index=2),
+        ),
+        competing_runs=classification.competing_runs,
+        credible_disagreements=classification.credible_disagreements,
+    )
+
+
 @pytest.mark.parametrize(
     ("authority", "video", "runs", "credible", "expected"),
     [

@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import numpy.typing as npt
 
+from frame_compare.services.alignment_correlation import ChunkObservation
+from frame_compare.services.alignment_decision import classify_audio_observations
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AudioAlignmentAttempt,
@@ -48,7 +50,6 @@ _INFORMATIVE_MARGIN = 1.1
 _CONFIRMATION_MARGIN = 1.5
 _CONFIRMATION_FRACTION = 0.75
 _TARGET_POSITION_LIMIT = 12
-_AUDIO_LAG_AGREEMENT_SAMPLES = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -536,13 +537,17 @@ def _lag_to_frame(lag: int, *, attempt: AudioAlignmentAttempt, fps_reference: Fr
 
 
 def _lag_to_subframe(lag: int, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction) -> float:
-    compensation = (
+    compensation = _compensation_seconds(attempt)
+    return float((Fraction(lag, AUDIO_ANALYSIS_SAMPLE_RATE) + compensation) * fps_reference)
+
+
+def _compensation_seconds(attempt: AudioAlignmentAttempt) -> Fraction:
+    return (
         _stream_start(attempt, role="reference", video=False)
         - _stream_start(attempt, role="reference", video=True)
         - _stream_start(attempt, role="comparison", video=False)
         + _stream_start(attempt, role="comparison", video=True)
     )
-    return float((Fraction(lag, AUDIO_ANALYSIS_SAMPLE_RATE) + compensation) * fps_reference)
 
 
 def _build_targets(
@@ -556,24 +561,34 @@ def _build_targets(
     if global_lag is None:
         return (), ()
     by_index = {chunk.index: chunk for chunk in chunks}
+    observations = tuple(
+        ChunkObservation(
+            index=chunk.index,
+            reference_start=chunk.start,
+            reference_count=chunk.count,
+            active=chunk.active,
+            lag=chunk.lag,
+            psr=chunk.psr,
+            credible=chunk.credible,
+            agrees=chunk.agrees,
+        )
+        for chunk in chunks
+    )
+    classification = classify_audio_observations(
+        observations=observations,
+        global_lag=attempt.audio.global_lag,
+        confirmed_offset=confirmed,
+        fps_reference=fps_reference,
+        compensation_seconds=float(_compensation_seconds(attempt)),
+    )
     run_targets: list[_Target] = []
     run_members: set[int] = set()
-    for run in attempt.runs:
-        if run.chunk_count < 2 or run.last_index - run.first_index + 1 != run.chunk_count:
-            continue
+    for run in classification.competing_runs:
         members = [by_index.get(index) for index in range(run.first_index, run.last_index + 1)]
-        if any(member is None or not member.credible or member.lag is None for member in members):
+        if any(member is None or member.lag is None for member in members):
             continue
         valid_members = [member for member in members if member is not None]
-        if abs(run.lag - global_lag) <= _AUDIO_LAG_AGREEMENT_SAMPLES:
-            continue
-        if any(
-            _lag_to_frame(member.lag or 0, attempt=attempt, fps_reference=fps_reference)
-            == confirmed
-            for member in valid_members
-        ):
-            continue
-        run_members.update(run.first_index + index for index in range(run.chunk_count))
+        run_members.update(range(run.first_index, run.last_index + 1))
         run_targets.append(
             _Target(
                 kind="run",
@@ -586,42 +601,28 @@ def _build_targets(
             )
         )
 
-    same_frame: list[AudioSameFrameContext] = []
     credible_targets: list[_Target] = []
     noncredible_targets: list[_Target] = []
-    for chunk in chunks:
-        if chunk.lag is None:
+    for item in classification.credible_disagreements:
+        chunk = by_index.get(item.index)
+        if chunk is None or chunk.lag is None or chunk.index in run_members:
             continue
-        chunk_frame = _lag_to_frame(chunk.lag, attempt=attempt, fps_reference=fps_reference)
-        lag_disagrees = abs(chunk.lag - global_lag) > _AUDIO_LAG_AGREEMENT_SAMPLES
-        if chunk.credible and lag_disagrees and chunk_frame == confirmed:
-            same_frame.append(
-                AudioSameFrameContext(
-                    chunk_index=chunk.index,
-                    lag_samples=chunk.lag,
-                    subframe_estimate=_lag_to_subframe(
-                        chunk.lag,
-                        attempt=attempt,
-                        fps_reference=fps_reference,
-                    ),
-                    rounded_frame=chunk_frame,
-                )
+        credible_targets.append(
+            _Target(
+                kind="chunk",
+                first_index=chunk.index,
+                last_index=chunk.index,
+                lag=chunk.lag,
+                start_sample=chunk.start,
+                end_sample=chunk.start + chunk.count - 1,
+                requested_positions=4,
             )
-        if chunk.index in run_members or chunk_frame == confirmed:
+        )
+    for item in classification.noncredible_disagreements:
+        chunk = by_index.get(item.index)
+        if chunk is None or chunk.lag is None or chunk.index in run_members:
             continue
-        if chunk.credible and lag_disagrees:
-            credible_targets.append(
-                _Target(
-                    kind="chunk",
-                    first_index=chunk.index,
-                    last_index=chunk.index,
-                    lag=chunk.lag,
-                    start_sample=chunk.start,
-                    end_sample=chunk.start + chunk.count - 1,
-                    requested_positions=4,
-                )
-            )
-        elif chunk.active:
+        if chunk.active:
             noncredible_targets.append(
                 _Target(
                     kind="chunk",
@@ -635,7 +636,10 @@ def _build_targets(
             )
     credible_targets.sort(key=lambda target: -(by_index[target.first_index].psr or 0.0))
     noncredible_targets.sort(key=lambda target: -(by_index[target.first_index].psr or 0.0))
-    return (*run_targets, *credible_targets, *noncredible_targets), tuple(same_frame)
+    return (
+        (*run_targets, *credible_targets, *noncredible_targets),
+        classification.same_frame_context,
+    )
 
 
 def _target_frames(

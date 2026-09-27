@@ -362,6 +362,28 @@ def test_a4a_non_adjacent_same_lag_chunks_are_separate_targets() -> None:
     ]
 
 
+def test_a4b_boundary_regroups_frame_distinct_tail_as_one_run() -> None:
+    attempt = _attempt(rounded=0, planned=4)
+    chunks = (
+        alignment_video._Chunk(0, 0, 10, True, 0, 100.0, True, True),
+        alignment_video._Chunk(1, 10, 10, True, 166, 100.0, True, False),
+        alignment_video._Chunk(2, 20, 10, True, 167, 99.0, True, False),
+        alignment_video._Chunk(3, 30, 10, True, 168, 98.0, True, False),
+    )
+
+    targets, same_frame = alignment_video._build_targets(
+        attempt,
+        chunks,
+        confirmed=0,
+        fps_reference=FPS,
+    )
+
+    assert [(target.kind, target.first_index, target.last_index) for target in targets] == [
+        ("run", 2, 3)
+    ]
+    assert [item.chunk_index for item in same_frame] == [1]
+
+
 def test_run_resolution_requires_two_confirmed_positions() -> None:
     one = alignment_video._target_resolution(
         "run",
