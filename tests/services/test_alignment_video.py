@@ -825,10 +825,19 @@ def test_single_winner_run_checkpoint_uses_its_winning_offset(
         start_sample=0,
         end_sample=20,
         target_offset=1,
-        alternative_offsets=(1,),
+        alternative_offsets=(1, 2),
         resolution=actual_resolution,
         positions=(position,),
     )
+    observation = VideoCheckObservation(
+        observation="observed",
+        scored_offsets=(-2, -1, 0, 1, 2),
+        confirmed_offset=0,
+        index_build_seconds=0.0,
+        positions=(),
+        targets=(target,),
+    )
+    assert observation.targets == (target,)
 
     points = alignment_video._check_points(
         (),
@@ -857,7 +866,7 @@ def test_mixed_run_checkpoint_pairing_is_truthful_ordered_and_capped() -> None:
         start_sample=0,
         end_sample=20,
         target_offset=1,
-        alternative_offsets=(1,),
+        alternative_offsets=(1, 2),
         resolution=resolution,
         positions=positions,
     )
