@@ -1360,6 +1360,13 @@ def _review_chunk_bounds(
     return first * chunk, (last + 1) * chunk
 
 
+def _review_target_bounds(
+    attempt: AudioAlignmentAttempt, target: VideoTargetEvidence
+) -> tuple[float, float]:
+    rate = attempt.analysis.analysis_rate
+    return target.start_sample / rate, target.end_sample / rate
+
+
 def _review_target_map(
     video: VideoCheckObservation,
 ) -> dict[_AudioReviewTargetKey, VideoTargetEvidence]:
@@ -1383,9 +1390,7 @@ def _review_target_candidates(
 ) -> tuple[AudioReviewRegion, ...]:
     regions: list[AudioReviewRegion] = []
     for target in targets:
-        start, end = _review_chunk_bounds(
-            attempt, target.first_chunk_index, target.last_chunk_index
-        )
+        start, end = _review_target_bounds(attempt, target)
         regions.append(
             AudioReviewRegion(
                 target.target_offset,
@@ -1582,15 +1587,23 @@ def _review_regions(
     targets = _review_target_map(video)
     runs: list[AudioReviewRegion] = []
     for run in attempt.runs:
+        target = targets.get(("run", run.first_index, run.last_index))
         converted = _review_frame_for_lag(attempt, run.lag)
         offset = (
-            suggested
-            if suggested is not None
-            and (run.lag == attempt.audio.global_lag or converted == suggested)
-            else converted
+            target.target_offset
+            if target is not None
+            else (
+                suggested
+                if suggested is not None
+                and (run.lag == attempt.audio.global_lag or converted == suggested)
+                else converted
+            )
         )
-        start, end = _review_chunk_bounds(attempt, run.first_index, run.last_index)
-        target = targets.get(("run", run.first_index, run.last_index))
+        start, end = (
+            _review_target_bounds(attempt, target)
+            if target is not None
+            else _review_chunk_bounds(attempt, run.first_index, run.last_index)
+        )
         status: AudioReviewRegionStatus = (
             "confirmed by video"
             if video.confirmed_offset is not None and offset == video.confirmed_offset
@@ -1733,25 +1746,19 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
     )
     resolved_regions: list[AudioReviewRegion] = []
     content_region: AudioReviewRegion | None = None
-    credible = attempt.chunks.credible
     for target in video.targets:
         if target.kind != "chunk":
             continue
-        start, end = _review_chunk_bounds(
-            attempt, target.first_chunk_index, target.last_chunk_index
-        )
+        start, end = _review_target_bounds(attempt, target)
         target_region = AudioReviewRegion(
             video.confirmed_offset or suggested or 0,
             start,
             end,
             _review_target_status(target),
         )
-        is_credible = (
-            target.first_chunk_index < len(credible) and credible[target.first_chunk_index]
-        )
-        if target.resolution == "resolved" and is_credible:
+        if target.resolution == "resolved" and target.credible:
             resolved_regions.append(target_region)
-        elif target.resolution == "unresolved" and not is_credible:
+        elif target.resolution == "unresolved" and not target.credible:
             content_region = target_region
             break
     wins, informative, margin = _review_video_vote(video)

@@ -4,7 +4,7 @@ import json
 import math
 import os
 from collections.abc import Callable, Generator
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -37,6 +37,7 @@ from frame_compare.utils.alignment_evidence import (  # noqa: E402
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
+    build_audio_review_presentation,
 )
 from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
@@ -55,6 +56,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
 )
 from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
+    _chunk_target_context_attempt,
     _multi_context_attempt,
     _production_nested_targets_attempt,
     _review_attempt,
@@ -802,6 +804,74 @@ def test_panel_matches_compact_projection_for_authoritative_nested_targets(
     assert [field.text() for field in panel.frame_inputs] == ["", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
     assert not panel.use_positions_button.isEnabled()
+
+
+@pytest.mark.parametrize(
+    ("credible", "resolution", "expected_noted"),
+    [
+        (True, "unresolved", None),
+        (
+            True,
+            "resolved",
+            "Noted: audio differed in 1 section (1:00–1:30); the video confirmed +146f there.",
+        ),
+        (False, "resolved", None),
+        (
+            False,
+            "unresolved",
+            "Noted: the picture differs in 1:00–1:30 (for example a replaced shot); the offset still holds.",
+        ),
+    ],
+)
+def test_panel_target_context_matches_full_and_compact_evidence(
+    tmp_path: Path,
+    credible: bool,
+    resolution: str,
+    expected_noted: str | None,
+) -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _chunk_target_context_attempt(credible=credible, resolution=resolution)
+    compact = _project_audio_attempt_for_review(attempt)
+    attempt = replace(attempt, decision=replace(attempt.decision, state="trusted_automatic"))
+    compact = replace(compact, decision=replace(compact.decision, state="trusted_automatic"))
+    summaries: list[str] = []
+    detail_texts: list[str] = []
+    for label, candidate in (("full", attempt), ("compact", compact)):
+        audio_review = json.dumps(
+            {
+                "current_authority": {
+                    "origin": "computed_this_run",
+                    "frame_offset": 146,
+                },
+                "evidence_availability": "current_attempt",
+                "audio_attempt": asdict(candidate),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        panel_dir = tmp_path / label
+        panel_dir.mkdir()
+        panel, _api, _script = _panel(
+            panel_dir,
+            suggestion=146,
+            audio_review=audio_review,
+        )
+        summaries.append(panel.audio_summary_labels[0].text())
+        details = panel.audio_detail_groups[0]
+        details.setChecked(True)
+        detail_texts.append(cast(QLabel, details.findChild(QLabel)).text())
+
+    assert summaries[0] == summaries[1]
+    if expected_noted is None:
+        assert "Noted:" not in summaries[0]
+    else:
+        assert expected_noted in summaries[0]
+
+    expected_details = build_audio_review_presentation(attempt).verbose_lines(panel=True)
+    assert expected_details == build_audio_review_presentation(compact).verbose_lines(panel=True)
+    for detail_text in detail_texts:
+        assert all(line in detail_text for line in expected_details)
 
 
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(

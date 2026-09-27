@@ -526,6 +526,44 @@ def _production_nested_targets_attempt():
     )
 
 
+def _chunk_target_context_attempt(*, credible: bool, resolution: str):
+    attempt = _review_attempt("unresolved_audio_disagreement")
+    winner = "confirmed" if resolution == "resolved" else "neither"
+    target = replace(
+        attempt.video_check.targets[0],
+        kind="chunk",
+        first_chunk_index=2,
+        last_chunk_index=2,
+        credible=credible,
+        end_sample=720_000,
+        resolution=resolution,
+        positions=(VideoTargetPosition(1, 13_123, 0.1, 1.0, winner),),
+    )
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            credible=(True, True, credible, True),
+        ),
+        audio=replace(
+            attempt.audio,
+            credible_chunks=3 if not credible else 4,
+            agreeing_chunks=2,
+        ),
+        video_check=replace(attempt.video_check, targets=(target,)),
+    )
+
+
+def _partial_final_target_attempt():
+    attempt = _review_attempt("competing_offset")
+    target = replace(attempt.video_check.targets[0], end_sample=840_000)
+    return replace(
+        attempt,
+        chunks=replace(attempt.chunks, counts=(240_000, 240_000, 240_000, 120_000)),
+        video_check=replace(attempt.video_check, targets=(target,)),
+    )
+
+
 def _unresolved_run_then_chunk_attempt():
     attempt = _review_attempt("competing_offset")
     targets = (
@@ -1406,6 +1444,10 @@ def test_authoritative_nested_targets_match_compact_native_projection(
     assert full_review.suggested_offset == compact_review.suggested_offset == 146
     assert full_review.reason_lines() == compact_review.reason_lines() == expected_reasons
     assert full_review.region_lines() == compact_review.region_lines() == expected_regions
+    assert full_review.context_lines() == compact_review.context_lines()
+    assert full_review.noted_line() == compact_review.noted_line()
+    assert full_review.verbose_rows() == compact_review.verbose_rows()
+    assert full_review.verbose_rows(panel=True) == compact_review.verbose_rows(panel=True)
 
     unexamined = _unexamined_attempt()
     unexamined_target = replace(
@@ -1446,6 +1488,102 @@ def test_authoritative_nested_targets_match_compact_native_projection(
     err = capsys.readouterr().err
     for line in (*expected_reasons, *expected_regions):
         assert line in err
+
+
+@pytest.mark.parametrize(
+    ("credible", "resolution", "expected_context", "expected_noted"),
+    [
+        (True, "unresolved", (), None),
+        (
+            True,
+            "resolved",
+            ("Audio differed in 1:00-1:30; the video confirmed the offset there.",),
+            "Noted: audio differed in 1 section (1:00-1:30); the video confirmed +146f there.",
+        ),
+        (False, "resolved", (), None),
+        (
+            False,
+            "unresolved",
+            ("Picture differs in 1:00-1:30 (for example a replaced shot); offset still holds.",),
+            "Noted: the picture differs in 1:00-1:30 (for example a replaced shot); the offset still holds.",
+        ),
+    ],
+)
+def test_target_context_and_terminal_rows_match_compact_native_projection(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    credible: bool,
+    resolution: str,
+    expected_context: tuple[str, ...],
+    expected_noted: str | None,
+) -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _chunk_target_context_attempt(credible=credible, resolution=resolution)
+    compact = _project_audio_attempt_for_review(attempt)
+    full_review = build_audio_review_presentation(attempt)
+    compact_review = build_audio_review_presentation(compact)
+
+    assert compact.chunks.rows_omitted
+    assert full_review.context_lines() == compact_review.context_lines() == expected_context
+    assert full_review.context_lines(panel=True) == compact_review.context_lines(panel=True)
+    assert full_review.noted_line() == compact_review.noted_line() == expected_noted
+    assert full_review.noted_line(panel=True) == compact_review.noted_line(panel=True)
+    assert full_review.normal_review_rows(
+        panel=False, action_line="Align manually or keep the current alignment."
+    ) == compact_review.normal_review_rows(
+        panel=False, action_line="Align manually or keep the current alignment."
+    )
+    assert full_review.verbose_rows() == compact_review.verbose_rows()
+    assert full_review.verbose_rows(panel=True) == compact_review.verbose_rows(panel=True)
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    result = AlignmentResult(
+        reference.name,
+        comparison.name,
+        None,
+        None,
+        0.5,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        diagnostic=attempt.decision.primary_reason,
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+    compact_result = replace(result, audio_attempt=compact)
+    _present(request, result, config)
+    full_terminal = capsys.readouterr().err
+    _present(request, compact_result, config)
+    assert capsys.readouterr().err == full_terminal
+
+    if expected_noted is not None:
+        _present(request, _applied_result(reference, comparison, attempt), config)
+        full_applied = capsys.readouterr().err
+        _present(request, _applied_result(reference, comparison, compact), config)
+        assert capsys.readouterr().err == full_applied
+        assert expected_noted in full_applied
+
+
+def test_partial_final_target_bounds_match_compact_native_projection() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _partial_final_target_attempt()
+    compact = _project_audio_attempt_for_review(attempt)
+    full_review = build_audio_review_presentation(attempt)
+    compact_review = build_audio_review_presentation(compact)
+
+    assert (
+        full_review.reason_lines()
+        == compact_review.reason_lines()
+        == (
+            "Audio in 1:00-1:45 points to +243f, and the video could not settle which offset is right there.",
+        )
+    )
+    assert full_review.region_lines() == compact_review.region_lines()
+    assert "+243f  1:00-1:45  not settled" in compact_review.region_lines()
+    assert all("1:00-2:00" not in line for line in compact_review.region_lines())
 
 
 @pytest.mark.parametrize(
