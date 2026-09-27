@@ -129,6 +129,7 @@ def _agreed_columns(*, lag: int, chunk_count: int) -> AudioChunkColumns:
         psrs=tuple(_AGREE_PSR for _ in range(chunk_count)),
         credible=tuple(True for _ in range(chunk_count)),
         agrees=tuple(True for _ in range(chunk_count)),
+        total_samples=chunk_count * _CHUNK_SAMPLES,
     )
 
 
@@ -307,6 +308,7 @@ def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
             psrs=(_AGREE_PSR, _AGREE_PSR, _AGREE_PSR, _AGREE_PSR),
             credible=(True, True, True, True),
             agrees=(True, True, False, False),
+            total_samples=chunk_count * _CHUNK_SAMPLES,
         ),
         runs=(
             AudioChunkRun(first_index=0, last_index=1, lag=near_lag, chunk_count=2),
@@ -356,6 +358,7 @@ def rejected_audio_attempt(
         psrs=(),
         credible=(),
         agrees=(),
+        total_samples=0,
     )
     return _attempt_shell(
         ordinal=ordinal,
@@ -888,6 +891,7 @@ def test_build_audio_review_map_bounds_empty_projection_for_many_chunks() -> Non
     assert parsed is not None
     assert parsed.chunks.rows_omitted
     assert parsed.chunks.starts == ()
+    assert parsed.chunks.total_samples == 2160 * _CHUNK_SAMPLES
     assert len(parsed.runs) == 1
     assert parsed.audio.credible_chunks == 2160
     assert parsed.audio.compensation_seconds == attempt.audio.compensation_seconds
@@ -976,6 +980,7 @@ def test_workspace_metadata_rejects_inconsistent_chunk_evidence(
     [
         ("analysis", "analysis_rate", 44100, "analysis rate must be 8000"),
         ("analysis", "max_offset_seconds", 0.5, "max_offset_seconds"),
+        ("chunks", "total_samples", True, "must be an integer"),
         ("collection", "elapsed_seconds", -1.0, "elapsed"),
         ("collection_failure", "side", "bogus", "must be one of"),
         ("collection_failure", "category", "boom", "must be one of"),
@@ -997,8 +1002,12 @@ def test_workspace_metadata_rejects_malformed_audio_facts(
         fact = cast(list[dict[str, object]], attempt["collection"])[0]
         fact[field] = value
     elif section == "chunks":
-        column = cast(list[object], cast(dict[str, object], attempt["chunks"])[field])
-        column[0] = value
+        chunks = cast(dict[str, object], attempt["chunks"])
+        if field == "total_samples":
+            chunks[field] = value
+        else:
+            column = cast(list[object], chunks[field])
+            column[0] = value
     else:
         cast(dict[str, object], attempt["audio"])[field] = value
 

@@ -185,6 +185,7 @@ def _agreed_attempt(*, ordinal: int, frame_offset: int, reason: str) -> AudioAli
             psrs=(_AGREE_PSR, _AGREE_PSR, _AGREE_PSR, _AGREE_PSR),
             credible=(True, True, True, True),
             agrees=(True, True, True, True),
+            total_samples=chunk_count * _CHUNK_SAMPLES,
         ),
         runs=(
             AudioChunkRun(
@@ -244,6 +245,7 @@ def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
         psrs=(),
         credible=(),
         agrees=(),
+        total_samples=4 * _CHUNK_SAMPLES,
         rows_omitted=True,
     )
     return AudioAlignmentAttempt(

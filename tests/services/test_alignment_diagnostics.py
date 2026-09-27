@@ -132,6 +132,7 @@ def audio_attempt() -> AudioAlignmentAttempt:
             psrs=(88.5,) * _PLANNED_CHUNKS,
             credible=(True,) * _PLANNED_CHUNKS,
             agrees=(True,) * _PLANNED_CHUNKS,
+            total_samples=_PLANNED_CHUNKS * _CHUNK_SAMPLES,
         ),
         runs=(
             AudioChunkRun(
@@ -196,6 +197,7 @@ def maximum_audio_attempt() -> AudioAlignmentAttempt:
             psrs=(88.5,) * planned,
             credible=(True,) * planned,
             agrees=(True,) * planned,
+            total_samples=planned * 240000,
         ),
         runs=(AudioChunkRun(first_index=0, last_index=planned - 1, lag=lag, chunk_count=planned),),
         audio=AudioStageOutcome(

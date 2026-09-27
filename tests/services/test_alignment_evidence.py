@@ -114,6 +114,7 @@ def attempt_with_chunks(planned: int, *, lag: int = 1177) -> AudioAlignmentAttem
             psrs=(88.5,) * planned,
             credible=(True,) * planned,
             agrees=(True,) * planned,
+            total_samples=planned * 240000,
         ),
         runs=(AudioChunkRun(first_index=0, last_index=planned - 1, lag=lag, chunk_count=planned),)
         if planned
@@ -267,6 +268,7 @@ def test_native_compact_projection_retains_authoritative_target_context() -> Non
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(projected))
     assert projected.chunks.rows_omitted is True
     assert projected.chunks.starts == ()
+    assert projected.chunks.total_samples == 1_440_000
     assert parsed == projected
     assert parsed.video_check.targets[0] == _populated_video_attempt().video_check.targets[0]
 
@@ -349,7 +351,7 @@ def test_full_run_target_requires_credible_members_with_nominal_bounds() -> None
 
     payload = asdict(_populated_video_attempt())
     payload["chunks"]["counts"] = [240_000, 240_000, 1, 240_000, 240_000, 240_000]
-    with pytest.raises(ValueError, match="member end does not match its chunk"):
+    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
@@ -375,7 +377,7 @@ def test_partial_final_target_bounds_survive_compact_projection() -> None:
     )
     populated = replace(
         attempt,
-        chunks=chunks,
+        chunks=replace(chunks, total_samples=840_000),
         video_check=VideoCheckObservation(
             observation="observed",
             scored_offsets=(144, 145, 146, 147, 148),
@@ -390,11 +392,68 @@ def test_partial_final_target_bounds_survive_compact_projection() -> None:
     compact = _project_audio_attempt_for_review(populated)
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(compact))
     assert compact.chunks.rows_omitted is True
+    assert compact.chunks.counts == ()
+    assert compact.chunks.total_samples == 840_000
     assert parsed.video_check.targets[0] == target
     assert (
         target.start_sample / populated.analysis.analysis_rate,
         target.end_sample / populated.analysis.analysis_rate,
     ) == (60.0, 105.0)
+
+    for candidate in (populated, compact):
+        final_base_end = min(
+            candidate.analysis.planned_chunk_count * candidate.analysis.chunk_samples,
+            candidate.chunks.total_samples,
+        )
+        same_frame = AudioSameFrameContext(3, 1177, 146.23, 146)
+        final_same_frame_end = min(
+            (same_frame.chunk_index + 1) * candidate.analysis.chunk_samples,
+            candidate.chunks.total_samples,
+        )
+        assert final_base_end / candidate.analysis.analysis_rate == 105.0
+        assert final_same_frame_end / candidate.analysis.analysis_rate == 105.0
+
+
+def test_chunk_total_samples_rejects_invalid_plan_spans() -> None:
+    attempt = attempt_with_chunks(4)
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        replace(attempt.chunks, total_samples=True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="cover every planned chunk"):
+        replace(attempt, chunks=replace(attempt.chunks, total_samples=0))
+    with pytest.raises(ValueError, match="cover every planned chunk"):
+        replace(attempt, chunks=replace(attempt.chunks, total_samples=720_000))
+    with pytest.raises(ValueError, match="cover every planned chunk"):
+        replace(attempt, chunks=replace(attempt.chunks, total_samples=960_001))
+    with pytest.raises(ValueError, match="zero planned chunks require zero total samples"):
+        replace(attempt, analysis=replace(attempt.analysis, planned_chunk_count=0))
+
+
+def test_full_chunk_rows_require_exact_total_and_nominal_tiling() -> None:
+    payload = asdict(attempt_with_chunks(4))
+    payload["chunks"]["counts"] = [240_000, 120_000, 240_000, 240_000]
+    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(attempt_with_chunks(4))
+    payload["chunks"]["counts"] = [240_000, 240_000, 240_000, 240_001]
+    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(attempt_with_chunks(4))
+    payload["chunks"]["counts"] = [240_000, 240_000, 240_000, 0]
+    with pytest.raises(ValueError, match="counts must be >= 1"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(attempt_with_chunks(4))
+    payload["chunks"]["total_samples"] = 840_000
+    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(attempt_with_chunks(4))
+    payload["chunks"]["starts"] = [0, 240_000, 480_001, 720_000]
+    with pytest.raises(ValueError, match="nominal tiling"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
 @pytest.mark.parametrize(
@@ -533,6 +592,7 @@ def test_round_trip_complete_rejected_and_aborted() -> None:
     }
     for key in ("starts", "counts", "active", "lags", "psrs", "credible", "agrees"):
         rejected_payload["chunks"][key] = []
+    rejected_payload["chunks"]["total_samples"] = 0
     rejected_payload["runs"] = []
     rejected_payload["audio"] = {
         "status": "no_usable_audio",
@@ -612,6 +672,10 @@ def test_parser_rejects_unknown_and_missing_keys() -> None:
         evidence_from_payload(AudioAlignmentAttempt, nested)
     nested = asdict(attempt_with_chunks(2))
     del nested["chunks"]["rows_omitted"]
+    with pytest.raises(ValueError, match="missing keys"):
+        evidence_from_payload(AudioAlignmentAttempt, nested)
+    nested = asdict(attempt_with_chunks(2))
+    del nested["chunks"]["total_samples"]
     with pytest.raises(ValueError, match="missing keys"):
         evidence_from_payload(AudioAlignmentAttempt, nested)
 
@@ -763,6 +827,7 @@ def test_producer_construction_of_invalid_attempt_raises() -> None:
             psrs=(float("inf"),),
             credible=(True,),
             agrees=(True,),
+            total_samples=240000,
         )
     with pytest.raises(ValueError, match="must share one length"):
         AudioChunkColumns(
@@ -773,6 +838,7 @@ def test_producer_construction_of_invalid_attempt_raises() -> None:
             psrs=(88.5, 88.5),
             credible=(True, True),
             agrees=(True, True),
+            total_samples=480000,
         )
     unavailable_timeout = replace(
         valid.decision,

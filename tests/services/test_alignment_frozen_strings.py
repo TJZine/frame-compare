@@ -559,7 +559,11 @@ def _partial_final_target_attempt():
     target = replace(attempt.video_check.targets[0], end_sample=840_000)
     return replace(
         attempt,
-        chunks=replace(attempt.chunks, counts=(240_000, 240_000, 240_000, 120_000)),
+        chunks=replace(
+            attempt.chunks,
+            counts=(240_000, 240_000, 240_000, 120_000),
+            total_samples=840_000,
+        ),
         video_check=replace(attempt.video_check, targets=(target,)),
     )
 

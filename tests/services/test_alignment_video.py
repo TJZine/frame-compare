@@ -319,6 +319,7 @@ def test_v3a_conversion_and_excluded_alternative(tmp_path: Path) -> None:
             psrs=(100.0,),
             credible=(True,),
             agrees=(False,),
+            total_samples=8000,
         ),
         runs=(),
         audio=AudioStageOutcome(

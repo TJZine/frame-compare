@@ -156,6 +156,7 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
             psrs=(88.5,) * 5,
             credible=(True,) * 5,
             agrees=(True,) * 5,
+            total_samples=200000,
         ),
         runs=(AudioChunkRun(first_index=0, last_index=4, lag=0, chunk_count=5),),
         audio=AudioStageOutcome(

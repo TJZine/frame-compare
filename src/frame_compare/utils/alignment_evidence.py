@@ -378,6 +378,7 @@ class AudioChunkColumns:
     Empty columns mean chunk rows were omitted for the native projection
     (``rows_omitted``) or were never observed (a rejection or an aborted
     collection); otherwise every column has one entry per planned chunk.
+    ``total_samples`` always retains the exact analyzed 8 kHz reference span.
     """
 
     starts: tuple[int, ...]
@@ -387,6 +388,7 @@ class AudioChunkColumns:
     psrs: tuple[AudioPeakRatio | None, ...]
     credible: tuple[bool, ...]
     agrees: tuple[bool, ...]
+    total_samples: int
     rows_omitted: bool = False
 
     def __post_init__(self) -> None:
@@ -404,6 +406,7 @@ class AudioChunkColumns:
             raise ValueError("chunk columns must share one length")
         if self.rows_omitted and self.starts:
             raise ValueError("omitted chunk rows must be empty")
+        _check_int("total_samples", self.total_samples, minimum=0)
         for item in self.starts:
             _check_int("starts", item, minimum=0)
         for item in self.counts:
@@ -847,12 +850,37 @@ class AudioAlignmentAttempt:
             raise ValueError("observed collection facts need both paired sides in order")
         planned = self.analysis.planned_chunk_count
         lag_radius = self.analysis.lag_samples
+        total_samples = self.chunks.total_samples
+        if planned == 0:
+            if total_samples != 0:
+                raise ValueError("zero planned chunks require zero total samples")
+        elif not (
+            (planned - 1) * self.analysis.chunk_samples
+            < total_samples
+            <= planned * self.analysis.chunk_samples
+        ):
+            raise ValueError("total samples must cover every planned chunk")
         if not self.chunks.rows_omitted:
             if self.status == "complete":
                 if len(self.chunks.starts) != planned:
                     raise ValueError("chunk columns must be empty or cover every planned chunk")
             elif self.chunks.starts and len(self.chunks.starts) != planned:
                 raise ValueError("chunk columns must be empty or cover every planned chunk")
+            if self.chunks.starts:
+                for index, (start, count) in enumerate(
+                    zip(self.chunks.starts, self.chunks.counts, strict=True)
+                ):
+                    if start != index * self.analysis.chunk_samples:
+                        raise ValueError("chunk starts must follow the nominal tiling")
+                    expected_count = (
+                        total_samples - start
+                        if index == planned - 1
+                        else self.analysis.chunk_samples
+                    )
+                    if count != expected_count:
+                        raise ValueError("chunk counts must match the total sample span")
+                if sum(self.chunks.counts) != total_samples:
+                    raise ValueError("chunk counts must sum to total samples")
         for lag in self.chunks.lags:
             if lag is not None and abs(lag) > lag_radius:
                 raise ValueError("chunk lag exceeds the search radius")
@@ -865,18 +893,19 @@ class AudioAlignmentAttempt:
             raise ValueError("global lag exceeds the search radius")
         if self.audio.active_chunks > planned:
             raise ValueError("active chunks exceed the planned chunks")
+        if any(item.chunk_index >= planned for item in self.video_check.same_frame_context):
+            raise ValueError("same-frame context exceeds the planned chunks")
         for target in self.video_check.targets:
             if target.last_chunk_index >= planned:
                 raise ValueError("video target exceeds the planned chunks")
             expected_start = target.first_chunk_index * self.analysis.chunk_samples
-            maximum_end = (target.last_chunk_index + 1) * self.analysis.chunk_samples
-            minimum_end = target.last_chunk_index * self.analysis.chunk_samples
+            expected_end = min(
+                (target.last_chunk_index + 1) * self.analysis.chunk_samples,
+                total_samples,
+            )
             if target.start_sample != expected_start:
                 raise ValueError("video target start does not match its first chunk")
-            includes_final_chunk = target.last_chunk_index == planned - 1
-            if target.end_sample != maximum_end and not (
-                includes_final_chunk and minimum_end < target.end_sample < maximum_end
-            ):
+            if target.end_sample != expected_end:
                 raise ValueError("video target end does not match its last chunk")
             if not self.chunks.rows_omitted:
                 for index in range(target.first_chunk_index, target.last_chunk_index + 1):

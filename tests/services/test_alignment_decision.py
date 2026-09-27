@@ -697,6 +697,7 @@ def test_aborted_stage_discards_estimate() -> None:
     assert decided.decision.primary_reason == "timeout"
     assert decided.decision.failed_gates == ("timeout",)
     assert decided.analysis.planned_chunk_count == len(plan.chunks)
+    assert decided.chunks.total_samples == sum(count for _start, count in plan.chunks)
     assert decided.stability.classification == "insufficient_evidence"
     assert decided.correlation_score == 0.0
 
@@ -709,6 +710,7 @@ def test_rejected_stage_has_no_plan() -> None:
     assert decided.attempt_status == "preanalysis_rejection"
     assert decided.analysis.planned_chunk_count == 0
     assert decided.analysis.chunk_samples == 0
+    assert decided.chunks.total_samples == 0
     assert decided.decision.state == "unavailable"
     assert decided.decision.primary_reason == "selected_audio_timeline_unavailable"
     assert decided.audio.compensation_seconds is None

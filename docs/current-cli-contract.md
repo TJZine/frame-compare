@@ -1422,9 +1422,11 @@ The generated session carries an explicit UUID session identity, one reference r
 ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
 hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v5. The panel derives display bounds from public
-output clip lengths, while the alignment service validates raw result indices against
-the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
+schema v5. The projection omits per-chunk rows while retaining the required exact
+8 kHz analyzed-reference sample total, including a final partial chunk. The panel
+derives display bounds from public output clip lengths, while the alignment service
+validates raw result indices against the authoritative
+`AlignmentClipRequest.source_frame_count` facts. The trusted result
 sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
 exact ordered whole-set decision shape. Only metadata v5 is accepted; older,
 unknown versions, and mixed Frame Compare sessions are rejected

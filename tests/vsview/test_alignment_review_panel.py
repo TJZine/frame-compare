@@ -161,6 +161,7 @@ def _agreed_columns(*, lag: int, chunk_count: int) -> AudioChunkColumns:
         psrs=tuple(_AGREE_PSR for _ in range(chunk_count)),
         credible=tuple(True for _ in range(chunk_count)),
         agrees=tuple(True for _ in range(chunk_count)),
+        total_samples=chunk_count * _CHUNK_SAMPLES,
     )
 
 
@@ -325,6 +326,7 @@ def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
             psrs=(_AGREE_PSR, _AGREE_PSR, _AGREE_PSR, _AGREE_PSR),
             credible=(True, True, True, True),
             agrees=(True, True, False, False),
+            total_samples=chunk_count * _CHUNK_SAMPLES,
         ),
         runs=(
             AudioChunkRun(first_index=0, last_index=1, lag=near_lag, chunk_count=2),

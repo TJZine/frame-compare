@@ -484,6 +484,7 @@ def _evidence_columns(estimate: ChunkedAudioEstimate) -> AudioChunkColumns:
         psrs=tuple(psrs),
         credible=tuple(item.credible for item in estimate.observations),
         agrees=tuple(item.agrees for item in estimate.observations),
+        total_samples=sum(item.reference_count for item in estimate.observations),
         rows_omitted=False,
     )
 
@@ -500,7 +501,7 @@ def _evidence_runs(estimate: ChunkedAudioEstimate) -> tuple[AudioChunkRun, ...]:
     )
 
 
-def _empty_evidence() -> tuple[AudioChunkColumns, tuple[AudioChunkRun, ...]]:
+def _empty_evidence(total_samples: int) -> tuple[AudioChunkColumns, tuple[AudioChunkRun, ...]]:
     columns = AudioChunkColumns(
         starts=(),
         counts=(),
@@ -509,6 +510,7 @@ def _empty_evidence() -> tuple[AudioChunkColumns, tuple[AudioChunkRun, ...]]:
         psrs=(),
         credible=(),
         agrees=(),
+        total_samples=total_samples,
         rows_omitted=False,
     )
     return columns, ()
@@ -783,7 +785,9 @@ def decide_aborted_stage(
     runs and stability stay empty per A7a. The compensation is the real A5
     value when start facts are known, else null (m14).
     """
-    columns, runs = _empty_evidence()
+    columns, runs = _empty_evidence(
+        sum(count for _start, count in plan.chunks) if plan is not None else 0
+    )
     return DecidedAudioStage(
         attempt_status="aborted",
         analysis=_analysis_facts(plan, max_offset_seconds=max_offset_seconds),
@@ -822,7 +826,7 @@ def decide_rejected_stage(
     The compensation is the real A5 value when start facts are known, else
     null (m14).
     """
-    columns, runs = _empty_evidence()
+    columns, runs = _empty_evidence(0)
     return DecidedAudioStage(
         attempt_status="preanalysis_rejection",
         analysis=_analysis_facts(None, max_offset_seconds=max_offset_seconds),
