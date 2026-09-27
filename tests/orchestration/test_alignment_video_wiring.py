@@ -76,9 +76,18 @@ def test_align_phase_passes_loader_and_active_rect_primitives(
     assert output.comparisons[0].alignment is not None
 
 
-def test_unapplied_result_never_reaches_alignment_trims(
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "competing_offset",
+        "unresolved_audio_disagreement",
+        "competing_offset_confirmed_by_video",
+    ],
+)
+def test_each_v6_failure_never_reaches_alignment_trims(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    diagnostic: str,
 ) -> None:
     comparison = _clip(tmp_path / "comparison.mkv", label="Comparison")
     ctx = _context(tmp_path, comparisons=[comparison])
@@ -95,7 +104,7 @@ def test_unapplied_result_never_reaches_alignment_trims(
                 algorithm="cross_correlation",
                 source="computed",
                 applied=False,
-                diagnostic="video_check_inconclusive",
+                diagnostic=diagnostic,
             )
         ],
     )

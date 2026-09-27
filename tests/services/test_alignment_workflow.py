@@ -152,7 +152,7 @@ def _align(
     return run_request(request, config, reference_fps=FPS)
 
 
-def test_agreed_pair_is_provisional_pending_video_check(
+def test_agreed_pair_without_loader_is_video_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reference, comparison = _media(tmp_path)
@@ -167,7 +167,7 @@ def test_agreed_pair_is_provisional_pending_video_check(
     assert result.time_offset_seconds is None
     assert result.source == "computed"
     assert result.algorithm == "cross_correlation"
-    assert result.diagnostic == "video_check_pending"
+    assert result.diagnostic == "video_check_unavailable"
     assert result.correlation_score == pytest.approx(1.0)
     assert result.stability is not None
     assert result.stability.classification == "stable"
@@ -194,7 +194,7 @@ def test_agreed_pair_is_provisional_pending_video_check(
     assert attempt.video_check.scored_offsets == ()
     decision = attempt.decision
     assert decision.state == "provisional"
-    assert decision.primary_reason == "video_check_pending"
+    assert decision.primary_reason == "video_check_unavailable"
     assert decision.candidate is not None
     assert decision.candidate.frame_offset == 0
     assert decision.candidate.basis == "audio_only"
@@ -545,7 +545,7 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
 
     untouched = by_name[ok.name]
     assert untouched.applied is False
-    assert untouched.diagnostic == "video_check_pending"
+    assert untouched.diagnostic == "video_check_unavailable"
     assert untouched.audio_attempt is not None
     assert untouched.audio_attempt.status == "complete"
 
@@ -555,7 +555,9 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
     assert overridden.frame_offset == 3
 
 
-def test_no_computed_cache_write_in_u3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_computed_cache_write_without_video_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     reference, comparison = _media(tmp_path)
     program = make_program(SEED, _DURATION_SECONDS)
     _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
@@ -573,6 +575,7 @@ def test_no_computed_cache_write_in_u3(tmp_path: Path, monkeypatch: pytest.Monke
     (result,) = run_request(request, config, reference_fps=FPS)
 
     assert result.applied is False
+    assert result.diagnostic == "video_check_unavailable"
     assert not (generated / "shared" / "alignment_reuse.toml").exists()
 
 
