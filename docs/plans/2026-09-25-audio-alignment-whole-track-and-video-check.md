@@ -444,8 +444,14 @@ Confirmed with the maintainer on 2026-09-25.
   runs (always), per-chunk rows (start, lag, PSR, active/credible/agree flags), global
   lag, sub-frame estimate, the video table (per-position differences for each scored
   offset, index-build time), decision and reason. Per-chunk rows are stored as
-  compact arrays; about 22 KB for 3 h keeps the artifact well within the existing
-  128 KiB cap, so no truncation path is added. Native metadata carries runs, not
+  compact arrays; about 22 KB for 3 h. (Amended 2026-09-27: the per-comparison
+  cap is 2 MiB, one shared constant used by the diagnostic writer, the native
+  metadata and the VSView contract. It is a file-size sanity bound on JSON written
+  to disk; alignment memory does not scale with it. `MAX_AUDIO_CHUNKS` stays 4096,
+  which is 34 h at 30 s sections. The U4 video evidence measured 207 KB at a
+  1024-chunk worst case, which scales to about 830 KB at 4096, over the old
+  128 KiB. The artifact must fit the cap for every admitted input, so no truncation
+  or compaction path is added.) Native metadata carries runs, not
   per-chunk rows. Native result v1 is unchanged. Older metadata is rejected and
   regenerated.
 - P4. Terminal and VSView copy keeps the existing decision-first hierarchy and adds
