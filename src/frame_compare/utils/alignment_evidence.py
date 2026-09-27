@@ -1251,9 +1251,10 @@ class AudioReviewPresentation:
                 "differ by less than a frame (sub-frame); not a disagreement."
             )
         if self.resolved_regions:
-            lines.append(
-                f"Audio differed in {_review_region_text(self.resolved_regions[0], panel=panel)}; "
+            lines.extend(
+                f"Audio differed in {_review_region_text(region, panel=panel)}; "
                 "the video confirmed the offset there."
+                for region in self.resolved_regions
             )
         return tuple(lines)
 
@@ -1273,11 +1274,13 @@ class AudioReviewPresentation:
             ranges = ", ".join(
                 _review_region_text(region, panel=panel) for region in self.resolved_regions
             )
-            count = sum(
-                max(1, target.last_chunk_index - target.first_chunk_index + 1)
+            resolved_indexes = {
+                index
                 for target in self.attempt.video_check.targets
-                if target.resolution == "resolved" and target.kind == "chunk"
-            )
+                if target.resolution == "resolved" and target.credible
+                for index in range(target.first_chunk_index, target.last_chunk_index + 1)
+            }
+            count = len(resolved_indexes)
             return (
                 f"Noted: audio differed in {count or len(self.resolved_regions)} section"
                 f"{'s' if (count or len(self.resolved_regions)) != 1 else ''} ({ranges}); "
@@ -1781,8 +1784,6 @@ def build_audio_review_presentation(attempt: AudioAlignmentAttempt) -> AudioRevi
     )
     resolved_regions: list[AudioReviewRegion] = []
     for target in video.targets:
-        if target.kind != "chunk":
-            continue
         start, end = _review_target_bounds(attempt, target)
         target_region = AudioReviewRegion(
             (video.confirmed_offset if video.confirmed_offset is not None else suggested or 0),

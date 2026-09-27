@@ -58,6 +58,7 @@ from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
     _multi_context_attempt,
     _producer_count_attempt,
+    _producer_run_context_attempt,
     _producer_target_context_attempt,
     _production_nested_targets_attempt,
     _review_attempt,
@@ -907,6 +908,70 @@ def test_panel_target_context_matches_full_and_compact_evidence(
         assert [field.text() for field in panel.frame_inputs] == ["", ""]
         assert [field.text() for field in panel.offset_inputs] == [""]
         assert not panel.use_positions_button.isEnabled()
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected_noted", "expected_context"),
+    [
+        (
+            "run",
+            "Noted: audio differed in 2 sections (1:00–2:00); the video confirmed +0f there.",
+            ("Context: Audio differed in 1:00–2:00; the video confirmed the offset there.",),
+        ),
+        (
+            "run_and_chunk",
+            "Noted: audio differed in 3 sections (1:00–2:00, 3:30–4:00); the video confirmed +0f there.",
+            (
+                "Context: Audio differed in 1:00–2:00; the video confirmed the offset there.",
+                "         Audio differed in 3:30–4:00; the video confirmed the offset there.",
+            ),
+        ),
+        (
+            "two_runs",
+            "Noted: audio differed in 4 sections (1:00–2:00, 5:00–6:00); the video confirmed +0f there.",
+            (
+                "Context: Audio differed in 1:00–2:00; the video confirmed the offset there.",
+                "         Audio differed in 5:00–6:00; the video confirmed the offset there.",
+            ),
+        ),
+    ],
+)
+def test_panel_resolved_run_context_matches_full_and_compact_evidence(
+    tmp_path: Path,
+    shape: str,
+    expected_noted: str,
+    expected_context: tuple[str, ...],
+) -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    resolutions = ("resolved",) if shape == "run" else ("resolved", "resolved")
+    attempt = _producer_run_context_attempt(shape=shape, resolutions=resolutions)
+    compact = _project_audio_attempt_for_review(attempt)
+    summaries: list[str] = []
+    details: list[str] = []
+    for label, candidate in (("full", attempt), ("compact", compact)):
+        audio_review = json.dumps(
+            {
+                "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": asdict(candidate),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        panel_dir = tmp_path / label
+        panel_dir.mkdir()
+        panel, _api, _script = _panel(panel_dir, suggestion=0, audio_review=audio_review)
+        summaries.append(panel.audio_summary_labels[0].text())
+        detail_group = panel.audio_detail_groups[0]
+        detail_group.setChecked(True)
+        details.append(cast(QLabel, detail_group.findChild(QLabel)).text())
+
+    assert summaries[0] == summaries[1]
+    assert details[0] == details[1]
+    assert expected_noted in summaries[0]
+    for line in expected_context:
+        assert line in details[0]
 
 
 @pytest.mark.parametrize(
