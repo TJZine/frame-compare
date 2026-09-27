@@ -306,6 +306,7 @@ def check_video_alignment(
             confirmed=confirmed,
             scored_offsets=scored_offsets,
             fps_reference=fps_reference,
+            chunks=chunks,
         )
         return VideoCheckResult(
             observation=VideoCheckObservation(
@@ -748,16 +749,72 @@ def _check_points(
     confirmed: int,
     scored_offsets: Sequence[int],
     fps_reference: Fraction,
+    chunks: Sequence[_Chunk] = (),
 ) -> tuple[VideoCheckPoint, ...]:
     points: list[VideoCheckPoint] = []
     selected_base_positions: set[int] = set()
-    target_regions = [target for target in targets if target.positions][:4]
     selected_points: set[tuple[int, int]] = set()
+    chunks_by_index = {chunk.index: chunk for chunk in chunks}
 
-    def add_point(reference_frame: int, suggested: int) -> None:
+    def target_bounds(target: VideoTargetEvidence) -> tuple[int, int]:
+        members = [
+            chunks_by_index.get(index)
+            for index in range(target.first_chunk_index, target.last_chunk_index + 1)
+        ]
+        if members and all(member is not None for member in members):
+            present = [member for member in members if member is not None]
+            return present[0].start, present[-1].start + present[-1].count
+        return target.first_chunk_index, target.last_chunk_index + 1
+
+    def target_psr(target: VideoTargetEvidence) -> float:
+        values = [
+            member.psr
+            for index in range(target.first_chunk_index, target.last_chunk_index + 1)
+            if (member := chunks_by_index.get(index)) is not None and member.psr is not None
+        ]
+        return max(values, default=float("-inf"))
+
+    candidates = [
+        (
+            *target_bounds(target),
+            target.alternative_offsets[0],
+            (
+                "confirmed by video"
+                if target.resolution in {"resolved", "alternative_confirmed"}
+                else "not checked"
+                if target.resolution == "unexamined"
+                else "not settled"
+            ),
+            order,
+            target_psr(target),
+            target,
+        )
+        for order, target in enumerate(targets)
+        if target.positions
+    ]
+    candidates.sort(key=lambda candidate: (candidate[0], candidate[1], candidate[5]))
+    grouped: list[list[tuple[int, int, int, str, int, float, VideoTargetEvidence]]] = []
+    for candidate in candidates:
+        if grouped:
+            previous = grouped[-1]
+            previous_end = max(item[1] for item in previous)
+            if (
+                candidate[0] <= previous_end
+                and candidate[2] == previous[0][2]
+                and candidate[3] == previous[0][3]
+            ):
+                previous.append(candidate)
+                continue
+        grouped.append([candidate])
+    target_regions = [
+        max(region, key=lambda candidate: (candidate[5], -candidate[4]))[6]
+        for region in grouped[:4]
+    ]
+
+    def add_point(reference_frame: int, suggested: int) -> bool:
         key = (reference_frame, suggested)
         if key in selected_points:
-            return
+            return False
         points.append(
             VideoCheckPoint(
                 timestamp_seconds=reference_frame / float(fps_reference),
@@ -766,6 +823,7 @@ def _check_points(
             )
         )
         selected_points.add(key)
+        return True
 
     def add_target_point(target: VideoTargetEvidence, position: VideoTargetPosition) -> None:
         suggested = confirmed if position.winner == "confirmed" else target.alternative_offsets[0]
@@ -780,7 +838,9 @@ def _check_points(
             return False
         if position.position_index in selected_base_positions:
             return False
-        add_point(position.reference_frame, confirmed)
+        inserted = add_point(position.reference_frame, confirmed)
+        if not inserted:
+            return False
         selected_base_positions.add(position.position_index)
         return True
 

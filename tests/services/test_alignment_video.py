@@ -458,7 +458,11 @@ def test_check_points_cover_each_target_before_filling_the_five_point_cap() -> N
     )
     targets = (
         target(1, (110, 111, 112, 113)),
-        target(2, (500, 501, 502, 503)),
+        target(3, (500, 501, 502, 503)),
+    )
+    chunks = (
+        alignment_video._Chunk(1, 0, 10, True, 0, 100.0, True, False),
+        alignment_video._Chunk(3, 100, 10, True, 0, 90.0, True, False),
     )
 
     points = alignment_video._check_points(
@@ -467,6 +471,7 @@ def test_check_points_cover_each_target_before_filling_the_five_point_cap() -> N
         confirmed=0,
         scored_offsets=(-2, -1, 0, 1, 2),
         fps_reference=FPS,
+        chunks=chunks,
     )
 
     assert [point.reference_frame for point in points] == [110, 500, 900, 111, 112]
@@ -502,17 +507,37 @@ def test_check_points_use_producer_scored_offsets_for_confirmed_contrast(
 
 @pytest.mark.parametrize("target_count", (5, 6))
 def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: int) -> None:
-    def target(index: int) -> alignment_video.VideoTargetEvidence:
+    if target_count == 5:
+        specifications = (
+            (1, 100, 1, 50.0),
+            (2, 200, 1, 90.0),
+            (3, 300, 2, 80.0),
+            (4, 400, 3, 70.0),
+            (5, 500, 4, 60.0),
+        )
+        expected = [200, 300, 400, 500, 900]
+    else:
+        specifications = (
+            (1, 100, 1, 50.0),
+            (2, 200, 1, 90.0),
+            (3, 300, 2, 40.0),
+            (4, 400, 2, 80.0),
+            (5, 500, 3, 70.0),
+            (6, 600, 4, 60.0),
+        )
+        expected = [200, 400, 500, 600, 900]
+
+    def target(index: int, frame: int, alternative: int) -> alignment_video.VideoTargetEvidence:
         return alignment_video.VideoTargetEvidence(
             kind="chunk",
             first_chunk_index=index,
             last_chunk_index=index,
-            alternative_offsets=(index + 1,),
+            alternative_offsets=(alternative,),
             resolution="unresolved",
             positions=(
                 alignment_video.VideoTargetPosition(
                     position_index=index,
-                    reference_frame=100 * index,
+                    reference_frame=frame,
                     confirmed_score=1.0,
                     alternative_score=1.0,
                     winner="neither",
@@ -520,22 +545,37 @@ def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: 
             ),
         )
 
+    targets = tuple(
+        target(index, frame, alternative) for index, frame, alternative, _ in specifications
+    )
+    chunks = tuple(
+        alignment_video._Chunk(
+            index,
+            (index - 1) * 10,
+            10,
+            True,
+            0,
+            psr,
+            True,
+            False,
+        )
+        for index, _frame, _alternative, psr in specifications
+    )
     base_position = alignment_video.VideoPositionDifference(
         position_index=0,
         reference_frame=900,
         score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
     )
-    targets = tuple(target(index) for index in range(1, target_count + 1))
-
     points = alignment_video._check_points(
         (base_position,),
         targets,
         confirmed=0,
         scored_offsets=(-2, -1, 0, 1, 2),
         fps_reference=FPS,
+        chunks=chunks,
     )
 
-    assert [point.reference_frame for point in points] == [100, 200, 300, 400, 900]
+    assert [point.reference_frame for point in points] == expected
     assert len(points) == 5
     assert points == alignment_video._check_points(
         (base_position,),
@@ -543,6 +583,7 @@ def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: 
         confirmed=0,
         scored_offsets=(-2, -1, 0, 1, 2),
         fps_reference=FPS,
+        chunks=chunks,
     )
 
 
@@ -574,10 +615,14 @@ def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
                 score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
             ),
         ),
-        (target(1, (100, 101)), target(2, (100, 201))),
+        (target(1, (100, 101)), target(3, (100, 201))),
         confirmed=0,
         scored_offsets=(-2, -1, 0, 1, 2),
         fps_reference=FPS,
+        chunks=(
+            alignment_video._Chunk(1, 0, 10, True, 0, 100.0, True, False),
+            alignment_video._Chunk(3, 20, 10, True, 0, 90.0, True, False),
+        ),
     )
 
     assert [(point.reference_frame, point.suggested_comparison_frame) for point in points] == [
@@ -589,6 +634,56 @@ def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
     assert len(
         {(point.reference_frame, point.suggested_comparison_frame) for point in points}
     ) == len(points)
+
+
+def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
+    def target(index: int) -> alignment_video.VideoTargetEvidence:
+        return alignment_video.VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            alternative_offsets=(index,),
+            resolution="resolved",
+            positions=(
+                alignment_video.VideoTargetPosition(
+                    position_index=index,
+                    reference_frame=100 * index,
+                    confirmed_score=0.1,
+                    alternative_score=1.0,
+                    winner="confirmed",
+                ),
+            ),
+        )
+
+    base_positions = (
+        alignment_video.VideoPositionDifference(
+            position_index=0,
+            reference_frame=100,
+            score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+        ),
+        alignment_video.VideoPositionDifference(
+            position_index=1,
+            reference_frame=900,
+            score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
+        ),
+    )
+    targets = tuple(target(index) for index in range(1, 5))
+    chunks = tuple(
+        alignment_video._Chunk(index, (index - 1) * 10, 10, True, 0, 100.0, True, False)
+        for index in range(1, 5)
+    )
+
+    points = alignment_video._check_points(
+        base_positions,
+        targets,
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+        chunks=chunks,
+    )
+
+    assert [point.reference_frame for point in points] == [100, 200, 300, 400, 900]
+    assert len(points) == 5
 
 
 def test_evidence_failures_are_not_constructed_as_observed() -> None:
