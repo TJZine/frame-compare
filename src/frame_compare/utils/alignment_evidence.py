@@ -873,9 +873,23 @@ class AudioAlignmentAttempt:
             minimum_end = target.last_chunk_index * self.analysis.chunk_samples
             if target.start_sample != expected_start:
                 raise ValueError("video target start does not match its first chunk")
-            if not minimum_end < target.end_sample <= maximum_end:
+            includes_final_chunk = target.last_chunk_index == planned - 1
+            if target.end_sample != maximum_end and not (
+                includes_final_chunk and minimum_end < target.end_sample < maximum_end
+            ):
                 raise ValueError("video target end does not match its last chunk")
             if not self.chunks.rows_omitted:
+                for index in range(target.first_chunk_index, target.last_chunk_index + 1):
+                    member_start = self.chunks.starts[index]
+                    member_end = member_start + self.chunks.counts[index]
+                    nominal_start = index * self.analysis.chunk_samples
+                    nominal_end = (index + 1) * self.analysis.chunk_samples
+                    if member_start != nominal_start:
+                        raise ValueError("video target member start does not match its chunk")
+                    if member_end != nominal_end and not (
+                        index == planned - 1 and nominal_start < member_end < nominal_end
+                    ):
+                        raise ValueError("video target member end does not match its chunk")
                 expected_end = (
                     self.chunks.starts[target.last_chunk_index]
                     + self.chunks.counts[target.last_chunk_index]
@@ -886,6 +900,10 @@ class AudioAlignmentAttempt:
                     target.credible != self.chunks.credible[target.first_chunk_index]
                 ):
                     raise ValueError("video target credibility does not match chunk evidence")
+                if target.kind == "run" and not all(
+                    self.chunks.credible[target.first_chunk_index : target.last_chunk_index + 1]
+                ):
+                    raise ValueError("credible run targets require credible member chunks")
         if self.authority_recount is not None:
             if self.video_check.confirmed_offset is None:
                 raise ValueError("authority recount needs a confirmed video offset")

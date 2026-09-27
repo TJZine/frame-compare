@@ -519,6 +519,11 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="ordered target-offset neighbourhood"):
         evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
 
+    payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 6
+    payload["original_audio_attempt"]["video_check"]["targets"][0]["end_sample"] = 1
+    with pytest.raises(ValueError, match="end does not match its last chunk"):
+        evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
+
 
 def test_symlinked_diagnostic_directory_is_rejected(tmp_path: Path) -> None:
     outside = tmp_path / "outside"

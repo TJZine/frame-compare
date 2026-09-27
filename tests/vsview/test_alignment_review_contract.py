@@ -595,7 +595,7 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
         positions=(VideoTargetPosition(0, 500, 1.0, 1.0, "neither"),),
     )
     attempt = replace(
-        provisional_audio_attempt(chunk_count=1),
+        provisional_audio_attempt(chunk_count=2),
         video_check=VideoCheckObservation(
             observation="observed",
             scored_offsets=(144, 145, 146, 147, 148),
@@ -629,6 +629,21 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
     contradictory["audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 999999
 
     with pytest.raises(AlignmentReviewContractError, match="ordered target-offset neighbourhood"):
+        parse_alignment_review_workspace_metadata(
+            (
+                _reference_output(0),
+                _comparison_output(
+                    1,
+                    1,
+                    suggestion=None,
+                    audio_review=json.dumps(contradictory),
+                ),
+            )
+        )
+
+    contradictory["audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 246
+    contradictory["audio_attempt"]["video_check"]["targets"][0]["end_sample"] = 1
+    with pytest.raises(AlignmentReviewContractError, match="end does not match its last chunk"):
         parse_alignment_review_workspace_metadata(
             (
                 _reference_output(0),

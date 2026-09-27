@@ -330,8 +330,26 @@ def test_compact_target_context_rejects_impossible_kind_and_bounds() -> None:
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
     payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
-    payload["video_check"]["targets"][0]["end_sample"] = 480_001
+    payload["video_check"]["targets"][0]["end_sample"] = 1
     with pytest.raises(ValueError, match="end does not match its last chunk"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
+    payload["video_check"]["targets"][2]["end_sample"] = 720_001
+    with pytest.raises(ValueError, match="end does not match its last chunk"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+
+def test_full_run_target_requires_credible_members_with_nominal_bounds() -> None:
+    payload = asdict(_populated_video_attempt())
+    payload["chunks"]["credible"] = [True, True, True, False, True, True]
+    payload["chunks"]["agrees"] = [True, True, True, False, True, True]
+    with pytest.raises(ValueError, match="credible member chunks"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(_populated_video_attempt())
+    payload["chunks"]["counts"] = [240_000, 240_000, 1, 240_000, 240_000, 240_000]
+    with pytest.raises(ValueError, match="member end does not match its chunk"):
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
@@ -368,6 +386,7 @@ def test_partial_final_target_bounds_survive_compact_projection() -> None:
         ),
     )
 
+    assert evidence_from_payload(AudioAlignmentAttempt, asdict(populated)) == populated
     compact = _project_audio_attempt_for_review(populated)
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(compact))
     assert compact.chunks.rows_omitted is True
