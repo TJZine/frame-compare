@@ -7,9 +7,9 @@ video-check warm-up built/reused the L-SMASH index, then three direct
 `time.perf_counter()`.
 
 - Samples: 3 warmed per-comparison checks
-- Observed durations: 2.801 s, 2.720 s, 3.014 s
-- Mean: 2.845 s per comparison
-- Command: `bash tools/verify_docker_integration.sh --no-build --pytest-path tests/integration/test_alignment_u4_acceptance.py`
+- Observed durations: 2.863 s, 2.758 s, 2.690 s
+- Mean: 2.770 s per comparison
+- Command: `docker compose run --rm frame-compare-test -lc 'export LIBGL_ALWAYS_SOFTWARE=1 PATH="/home/framecompare/.local/bin:$PATH"; export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json; pytest -s -q tests/integration/test_alignment_u4_acceptance.py -k video_check_cost'`
 - Runtime: Docker FFmpeg 7.1.5, VapourSynth R80, L-SMASH-Works 1310
 
 This is below the plan estimate of about 4 seconds of extra video-check cost

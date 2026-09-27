@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
-from collections.abc import Callable, Iterator
+import math
+import statistics
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.alignment_evidence import build_audio_review_presentation
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader
@@ -39,6 +46,14 @@ _VIDEO_SIZE = "128x72"
 _SAMPLE_RATE = 48000
 _BASE_AUDIO = f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed=1101"
 _OTHER_AUDIO = f"anoisesrc=color=pink:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed=3303"
+_MUSIC_CUE = "aevalsrc=0.30*sin(2*PI*220*t)+0.20*sin(2*PI*330*t)+0.12*sin(2*PI*440*t):s=48000:d=30"
+_MUSIC_STEM = (
+    "aevalsrc=0.18*sin(2*PI*196*t)+0.12*sin(2*PI*294*t)+0.08*sin(2*PI*392*t):s=48000:d=600"
+)
+_SURROUND_SOURCES = tuple(
+    f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed={seed}"
+    for seed in (1101, 2202, 3303, 4404, 5505, 6606)
+)
 
 
 @dataclass(frozen=True)
@@ -46,6 +61,7 @@ class _MediaSet:
     reference: Path
     comparisons: dict[str, Path]
     multipath_reference: Path
+    references: dict[str, Path]
 
 
 def _run_ffmpeg(argv: list[str], *, timeout_seconds: int = 600) -> None:
@@ -66,11 +82,12 @@ def _write_media(
     *,
     audio_graph: str = "[1:a]anull[a]",
     video_graph: str = "[0:v]null[v]",
+    base_audio: str = _BASE_AUDIO,
     audio_sources: tuple[str, ...] = (),
     video_sources: tuple[str, ...] = (),
 ) -> None:
     video_inputs = (_source("video", _DURATION), *video_sources)
-    audio_inputs = (_BASE_AUDIO, *audio_sources)
+    audio_inputs = (base_audio, *audio_sources)
     argv: list[str] = []
     for source in (*video_inputs, *audio_inputs):
         argv.extend(["-f", "lavfi", "-i", source])
@@ -217,19 +234,89 @@ def _write_active_tail(path: Path) -> None:
     _write_insert(path, 540, noisy_tail=True)
 
 
+def _write_repeated_music_cue(path: Path, *, reference: bool) -> None:
+    if reference:
+        audio_graph = (
+            "[1:a]atrim=start=0:end=330,asetpts=PTS-STARTPTS[a0];"
+            "[2:a]asetpts=PTS-STARTPTS[a1];"
+            "[1:a]atrim=start=360:end=600,asetpts=PTS-STARTPTS[a2];"
+            "[a0][a1][a2]concat=n=3:v=0:a=1[a]"
+        )
+    else:
+        audio_graph = (
+            "[2:a]asplit=2[cue0][cue1];"
+            "[1:a]atrim=start=0:end=300,asetpts=PTS-STARTPTS[a0];"
+            "[cue0]asetpts=PTS-STARTPTS[a1];"
+            "[cue1]asetpts=PTS-STARTPTS[a2];"
+            "[1:a]atrim=start=360:end=600,asetpts=PTS-STARTPTS[a3];"
+            "[a0][a1][a2][a3]concat=n=4:v=0:a=1[a]"
+        )
+    _write_media(path, audio_graph=audio_graph, audio_sources=(_MUSIC_CUE,))
+
+
+def _write_surround(path: Path, *, downmix: bool) -> None:
+    channels = "".join(f"[{index}:a]" for index in range(1, 7))
+    layout = (
+        "pan=stereo|FL=0.80*c0+0.50*c2+0.30*c4+0.10*c3|FR=0.80*c1+0.50*c2+0.30*c5+0.10*c3"
+        if downmix
+        else "pan=5.1|FL=c0|FR=c1|FC=c2|LFE=c3|BL=c4|BR=c5"
+    )
+    _write_media(
+        path,
+        base_audio=_SURROUND_SOURCES[0],
+        audio_sources=_SURROUND_SOURCES[1:],
+        audio_graph=f"{channels}amerge=inputs=6,{layout}[a]",
+    )
+
+
+def _write_music_stem(path: Path) -> None:
+    _write_media(
+        path,
+        audio_sources=(_MUSIC_STEM,),
+        audio_graph=(
+            r"[2:a]volume=0.45:enable=between(t\,270\,300)[stem];"
+            "[1:a][stem]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
+        ),
+    )
+
+
+def _atomic_write(path: Path, writer: Callable[[Path], None]) -> None:
+    temporary = path.with_name(f".{path.stem}.tmp{path.suffix}")
+    temporary.unlink(missing_ok=True)
+    try:
+        writer(temporary)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _write_media_set(root: Path) -> _MediaSet:
     reference = root / "u4-reference.mkv"
+    references = {
+        "repeated-music-cue": root / "u4-repeated-music-cue-reference.mkv",
+        "surround": root / "u4-surround-reference.mkv",
+    }
     if not reference.exists():
-        _write_media(reference)
+        _atomic_write(reference, _write_media)
     multipath_reference = root / "u4-multipath-reference.mkv"
     if not multipath_reference.exists():
-        _write_media(multipath_reference, audio_graph=_multipath_graph(reverse_chunks=()))
+        _atomic_write(
+            multipath_reference,
+            lambda path: _write_media(path, audio_graph=_multipath_graph(reverse_chunks=())),
+        )
+    if not references["repeated-music-cue"].exists():
+        _atomic_write(
+            references["repeated-music-cue"],
+            lambda path: _write_repeated_music_cue(path, reference=True),
+        )
+    if not references["surround"].exists():
+        _atomic_write(references["surround"], lambda path: _write_surround(path, downmix=False))
     comparisons: dict[str, Path] = {}
 
     def add(name: str, writer: Callable[[Path], None]) -> None:
         path = root / f"u4-{name}.mkv"
         if not path.exists():
-            writer(path)
+            _atomic_write(path, writer)
         comparisons[name] = path
 
     add("insert-60", lambda path: _write_insert(path, 60))
@@ -238,10 +325,7 @@ def _write_media_set(root: Path) -> _MediaSet:
     add("insert-60-low-motion", lambda path: _write_insert(path, 60, low_motion=True))
     add("replacement-4", lambda path: _write_replacement(path, 4))
     add("replacement-30", lambda path: _write_replacement(path, 30))
-    add(
-        "false-cue",
-        lambda path: _write_media(path, audio_graph=_splice_graph(delayed=(10,), delay_ms=100)),
-    )
+    add("repeated-music-cue", lambda path: _write_repeated_music_cue(path, reference=False))
     add("false-cue-low-motion", _write_low_motion_cue)
     add(
         "budget",
@@ -288,24 +372,8 @@ def _write_media_set(root: Path) -> _MediaSet:
             ),
         ),
     )
-    add(
-        "surround",
-        lambda path: _write_media(
-            path,
-            audio_graph="[1:a]pan=stereo|FL=c0|FR=0.35*c0[a]",
-        ),
-    )
-    add(
-        "music-stem",
-        lambda path: _write_media(
-            path,
-            audio_graph=(
-                r"[2:a]volume=0.5:enable=between(t\,400\,460)[stem];"
-                "[1:a][stem]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
-            ),
-            audio_sources=(_OTHER_AUDIO,),
-        ),
-    )
+    add("surround", lambda path: _write_surround(path, downmix=True))
+    add("music-stem", _write_music_stem)
     add(
         "budget-7",
         lambda path: _write_media(
@@ -317,17 +385,13 @@ def _write_media_set(root: Path) -> _MediaSet:
         reference=reference,
         comparisons=comparisons,
         multipath_reference=multipath_reference,
+        references=references,
     )
 
 
 @pytest.fixture(scope="session")
-def u4_media() -> Iterator[_MediaSet]:
-    root = Path("generated") / "alignment-u4"
-    root.mkdir(parents=True, exist_ok=True)
-    try:
-        yield _write_media_set(root)
-    finally:
-        shutil.rmtree(root)
+def u4_media(tmp_path_factory: pytest.TempPathFactory) -> _MediaSet:
+    return _write_media_set(tmp_path_factory.mktemp("alignment-u4"))
 
 
 def _align_pair(
@@ -336,7 +400,11 @@ def _align_pair(
     generated_dir: Path,
 ) -> AlignmentResult:
     comparison = media.comparisons[name]
-    reference = media.multipath_reference if name == "multipath" else media.reference
+    reference = (
+        media.multipath_reference
+        if name == "multipath"
+        else media.references.get(name, media.reference)
+    )
     config = AlignmentConfig(cache_results=False, max_offset_seconds=30.0)
     request = alignment_request(
         reference=reference,
@@ -349,6 +417,33 @@ def _align_pair(
     return result
 
 
+def _video_request(path: Path) -> VideoClipRequest:
+    stat = path.stat()
+    return VideoClipRequest(
+        path=path,
+        identity=AlignmentClipIdentity(path, stat.st_size, stat.st_mtime_ns),
+    )
+
+
+def _audio_channel_count(path: Path) -> int:
+    probe = run_subprocess(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=channels",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        timeout_seconds=30,
+    )
+    return int(probe.stdout.decode().strip())
+
+
 def _assert_label(result: AlignmentResult, *, state: str, reason: str) -> None:
     assert result.applied is (state == "trusted_automatic")
     assert result.diagnostic == reason
@@ -357,20 +452,137 @@ def _assert_label(result: AlignmentResult, *, state: str, reason: str) -> None:
     assert result.audio_attempt.decision.primary_reason == reason
 
 
+def _assert_audio(
+    result: AlignmentResult,
+    *,
+    global_lag: int,
+    subframe: float,
+    rounded_frame: int,
+    credible: int,
+    agreeing: int,
+    active: int | None = None,
+    authority_agreeing: int | None = None,
+    authority_status: str | None = None,
+    authority_passed: bool | None = None,
+    raw_status: str | None = None,
+) -> None:
+    assert result.audio_attempt is not None
+    audio = result.audio_attempt.audio
+    assert audio.global_lag == global_lag
+    assert audio.subframe_estimate == pytest.approx(subframe, abs=0.01)
+    assert audio.rounded_frame == rounded_frame
+    if active is not None:
+        assert audio.active_chunks == active
+    assert audio.credible_chunks == credible
+    assert audio.agreeing_chunks == agreeing
+    if raw_status is not None:
+        assert audio.status == raw_status
+    if authority_agreeing is not None:
+        assert result.audio_attempt.authority_recount is not None
+        recount = result.audio_attempt.authority_recount
+        assert recount.authority_agreeing_chunks == authority_agreeing
+        if authority_status is not None:
+            assert recount.authority_status == authority_status
+        if authority_passed is not None:
+            assert recount.passed is authority_passed
+
+
+def _assert_video(
+    result: AlignmentResult,
+    *,
+    confirmed_offset: int,
+    wins: int = 12,
+    informative: int = 12,
+    expected_margin: float = math.inf,
+) -> None:
+    assert result.audio_attempt is not None
+    video = result.audio_attempt.video_check
+    review = build_audio_review_presentation(result.audio_attempt)
+    assert video.observation == "observed"
+    assert video.confirmed_offset == confirmed_offset
+    assert len(video.positions) == 12
+    assert review.video_wins == wins
+    assert review.video_informative == informative
+    assert review.video_margin is not None
+    if math.isinf(expected_margin):
+        assert math.isinf(review.video_margin)
+    else:
+        assert review.video_margin == pytest.approx(expected_margin, abs=1e-12)
+
+
+def _assert_targets(
+    result: AlignmentResult,
+    expected: tuple[tuple[str, int, int, tuple[int, ...], str, int], ...],
+) -> None:
+    assert result.audio_attempt is not None
+    actual = tuple(
+        (
+            target.kind,
+            target.first_chunk_index,
+            target.last_chunk_index,
+            target.alternative_offsets,
+            target.resolution,
+            len(target.positions),
+        )
+        for target in result.audio_attempt.video_check.targets
+    )
+    assert actual == expected
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("name", "reason"),
+    ("name", "reason", "global_lag", "rounded_frame", "target"),
     [
-        ("insert-60", "competing_offset_confirmed_by_video"),
-        ("insert-540", "competing_offset_confirmed_by_video"),
-        ("insert-570", "competing_offset_confirmed_by_video"),
+        (
+            "insert-60",
+            "competing_offset_confirmed_by_video",
+            -32000,
+            -96,
+            ("run", 0, 1, (-1, 0, 1), "alternative_confirmed", 4),
+        ),
+        (
+            "insert-540",
+            "competing_offset_confirmed_by_video",
+            0,
+            0,
+            ("run", 18, 19, (-97, -96, -95), "alternative_confirmed", 4),
+        ),
+        (
+            "insert-570",
+            "competing_offset_confirmed_by_video",
+            0,
+            0,
+            ("chunk", 19, 19, (-97, -96, -95), "alternative_confirmed", 4),
+        ),
     ],
 )
 def test_length_changing_inserts_are_not_applied(
-    u4_media: _MediaSet, tmp_path: Path, name: str, reason: str
+    u4_media: _MediaSet,
+    tmp_path: Path,
+    name: str,
+    reason: str,
+    global_lag: int,
+    rounded_frame: int,
+    target: tuple[str, int, int, tuple[int, ...], str, int],
 ) -> None:
     result = _align_pair(u4_media, name, tmp_path / "generated")
     _assert_label(result, state="provisional", reason=reason)
+    _assert_audio(
+        result,
+        global_lag=global_lag,
+        subframe=global_lag / 8000 * _FPS,
+        rounded_frame=rounded_frame,
+        credible=20,
+        agreeing=18 if name != "insert-570" else 19,
+    )
+    _assert_video(
+        result,
+        confirmed_offset=rounded_frame,
+        wins=11 if name == "insert-60" else 12,
+        informative=11 if name == "insert-60" else 12,
+        expected_margin=2.34863955329464 if name == "insert-60" else math.inf,
+    )
+    _assert_targets(result, (target,))
 
 
 @pytest.mark.integration
@@ -379,11 +591,22 @@ def test_low_motion_insert_remains_a_competing_offset_hint(
 ) -> None:
     result = _align_pair(u4_media, "insert-60-low-motion", tmp_path / "generated")
     _assert_label(result, state="provisional", reason="competing_offset")
-    assert result.audio_attempt is not None
-    assert any(
-        target.kind == "run" and target.resolution == "unresolved"
-        for target in result.audio_attempt.video_check.targets
+    _assert_audio(
+        result,
+        global_lag=-32000,
+        subframe=-96.0,
+        rounded_frame=-96,
+        credible=20,
+        agreeing=18,
     )
+    _assert_video(
+        result,
+        confirmed_offset=-96,
+        wins=11,
+        informative=11,
+        expected_margin=2.34863955329464,
+    )
+    _assert_targets(result, (("run", 0, 1, (-1, 0, 1), "unresolved", 4),))
 
 
 @pytest.mark.integration
@@ -392,16 +615,45 @@ def test_same_length_replacements_apply(u4_media: _MediaSet, tmp_path: Path, nam
     result = _align_pair(u4_media, name, tmp_path / "generated")
     _assert_label(result, state="trusted_automatic", reason="audio_video_confirmed")
     assert result.frame_offset == 0
+    _assert_audio(
+        result,
+        global_lag=0,
+        subframe=0.0,
+        rounded_frame=0,
+        credible=20,
+        agreeing=20,
+    )
+    _assert_video(
+        result,
+        confirmed_offset=0,
+        wins=11 if name == "replacement-30" else 12,
+        informative=11 if name == "replacement-30" else 12,
+    )
+    _assert_targets(result, ())
 
 
 @pytest.mark.integration
-def test_repeated_cue_is_resolved_by_identical_moving_video(
+def test_repeated_music_cue_is_resolved_by_identical_moving_video(
     u4_media: _MediaSet, tmp_path: Path
 ) -> None:
-    result = _align_pair(u4_media, "false-cue", tmp_path / "generated")
+    result = _align_pair(u4_media, "repeated-music-cue", tmp_path / "generated")
     _assert_label(result, state="trusted_automatic", reason="audio_video_confirmed")
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.video_check.targets
+    _assert_audio(
+        result,
+        global_lag=0,
+        subframe=0.0,
+        rounded_frame=0,
+        credible=18,
+        agreeing=18,
+    )
+    _assert_video(result, confirmed_offset=0)
+    _assert_targets(
+        result,
+        (
+            ("chunk", 11, 11, (719, 720, 721), "resolved", 2),
+            ("chunk", 10, 10, (694, 695, 696), "resolved", 2),
+        ),
+    )
 
 
 @pytest.mark.integration
@@ -410,6 +662,16 @@ def test_low_motion_credible_disagreement_stays_unresolved(
 ) -> None:
     result = _align_pair(u4_media, "false-cue-low-motion", tmp_path / "generated")
     _assert_label(result, state="provisional", reason="unresolved_audio_disagreement")
+    _assert_audio(
+        result,
+        global_lag=0,
+        subframe=0.0,
+        rounded_frame=0,
+        credible=20,
+        agreeing=19,
+    )
+    _assert_video(result, confirmed_offset=0, wins=11, informative=11)
+    _assert_targets(result, (("chunk", 10, 10, (-3, -2, -1), "unresolved", 4),))
 
 
 @pytest.mark.integration
@@ -419,15 +681,46 @@ def test_budget_exhaustion_leaves_later_credible_targets_unexamined(
 ) -> None:
     result = _align_pair(u4_media, name, tmp_path / "generated")
     _assert_label(result, state="provisional", reason="unresolved_audio_disagreement")
+    disagreement_indices = (1, 5, 9, 13) if name == "budget" else (1, 3, 5, 7, 9, 11, 13)
+    _assert_audio(
+        result,
+        global_lag=0,
+        subframe=0.0,
+        rounded_frame=0,
+        credible=20,
+        agreeing=16 if name == "budget" else 13,
+        authority_agreeing=16 if name == "budget" else 13,
+        authority_status="agreed" if name == "budget" else "no_single_offset",
+        authority_passed=name == "budget",
+        raw_status="agreed" if name == "budget" else "no_single_offset",
+    )
+    _assert_video(result, confirmed_offset=0)
     assert result.audio_attempt is not None
-    targets = result.audio_attempt.video_check.targets
-    assert len(targets) >= 4
-    assert any(target.resolution == "unexamined" for target in targets)
-    assert all(target.kind == "chunk" for target in targets)
-    if name == "budget-7":
-        assert result.audio_attempt.audio.credible_chunks == 20
-        assert result.audio_attempt.audio.agreeing_chunks == 13
-        assert len(targets) >= 7
+    assert tuple(
+        (run.first_index, run.last_index, run.lag, run.chunk_count)
+        for run in result.audio_attempt.runs
+        if run.lag != 0
+    ) == tuple((index, index, -800, 1) for index in disagreement_indices)
+    expected = (
+        (
+            ("chunk", 13, 13, (-3, -2, -1), "resolved", 4),
+            ("chunk", 1, 1, (-3, -2, -1), "resolved", 4),
+            ("chunk", 5, 5, (-3, -2, -1), "resolved", 4),
+            ("chunk", 9, 9, (-3, -2, -1), "unexamined", 0),
+        )
+        if name == "budget"
+        else (
+            ("chunk", 11, 11, (-3, -2, -1), "resolved", 4),
+            ("chunk", 13, 13, (-3, -2, -1), "resolved", 4),
+            ("chunk", 5, 5, (-3, -2, -1), "resolved", 4),
+            ("chunk", 1, 1, (-3, -2, -1), "unexamined", 0),
+            ("chunk", 3, 3, (-3, -2, -1), "unexamined", 0),
+            ("chunk", 7, 7, (-3, -2, -1), "unexamined", 0),
+            ("chunk", 9, 9, (-3, -2, -1), "unexamined", 0),
+        )
+    )
+    _assert_targets(result, expected)
+    assert sum(len(target.positions) for target in result.audio_attempt.video_check.targets) == 12
 
 
 @pytest.mark.integration
@@ -436,14 +729,26 @@ def test_active_noncredible_shifted_tail_is_resolved_by_video(
 ) -> None:
     result = _align_pair(u4_media, "active-tail", tmp_path / "generated")
     _assert_label(result, state="provisional", reason="competing_offset_confirmed_by_video")
-    assert result.audio_attempt is not None
-    assert any(
-        index >= 18 and not credible
-        for index, credible in enumerate(result.audio_attempt.chunks.credible)
+    _assert_audio(
+        result,
+        global_lag=0,
+        subframe=0.0,
+        rounded_frame=0,
+        active=20,
+        credible=18,
+        agreeing=18,
     )
-    assert any(
-        target.resolution == "alternative_confirmed"
-        for target in result.audio_attempt.video_check.targets
+    _assert_video(result, confirmed_offset=0)
+    assert result.audio_attempt is not None
+    assert tuple(
+        index for index, credible in enumerate(result.audio_attempt.chunks.credible) if not credible
+    ) == (18, 19)
+    _assert_targets(
+        result,
+        (
+            ("chunk", 19, 19, (-97, -96, -95), "alternative_confirmed", 2),
+            ("chunk", 18, 18, (-97, -96, -95), "alternative_confirmed", 2),
+        ),
     )
 
 
@@ -457,20 +762,94 @@ def test_mix_caused_disagreements_still_apply(
     assert result.frame_offset == 0
     assert result.audio_attempt is not None
     attempt = result.audio_attempt
-    if name in {"multipath", "run-resolved"}:
-        assert attempt.audio.credible_chunks == 20
-        assert attempt.audio.agreeing_chunks == 18
-        assert [(target.kind, target.resolution) for target in attempt.video_check.targets] == [
-            ("run", "resolved")
-        ]
+    if name == "multipath":
+        _assert_audio(
+            result,
+            global_lag=0,
+            subframe=0.0,
+            rounded_frame=0,
+            active=20,
+            credible=20,
+            agreeing=18,
+            authority_agreeing=18,
+            authority_status="agreed",
+            authority_passed=True,
+        )
+        _assert_video(result, confirmed_offset=0)
+        assert tuple(
+            (run.first_index, run.last_index, run.lag, run.chunk_count)
+            for run in attempt.runs
+            if run.lag != 0
+        ) == ((8, 9, -240, 2),)
+        _assert_targets(result, (("run", 8, 9, (-2, -1), "resolved", 4),))
+    elif name == "run-resolved":
+        _assert_audio(
+            result,
+            global_lag=0,
+            subframe=0.0,
+            rounded_frame=0,
+            active=20,
+            credible=20,
+            agreeing=18,
+            authority_agreeing=18,
+            authority_status="agreed",
+            authority_passed=True,
+        )
+        _assert_video(result, confirmed_offset=0)
+        assert tuple(
+            (run.first_index, run.last_index, run.lag, run.chunk_count)
+            for run in attempt.runs
+            if run.lag != 0
+        ) == ((6, 7, -800, 2),)
+        _assert_targets(result, (("run", 6, 7, (-3, -2, -1), "resolved", 4),))
     elif name == "same-frame":
-        assert attempt.audio.agreeing_chunks == 19
+        _assert_audio(
+            result,
+            global_lag=0,
+            subframe=0.0,
+            rounded_frame=0,
+            active=20,
+            credible=20,
+            agreeing=19,
+            authority_agreeing=20,
+            authority_status="agreed",
+            authority_passed=True,
+        )
+        _assert_video(result, confirmed_offset=0)
+        assert tuple(
+            (run.first_index, run.last_index, run.lag, run.chunk_count)
+            for run in attempt.runs
+            if run.lag != 0
+        ) == ((10, 10, -80, 1),)
+        assert tuple(
+            (item.chunk_index, item.lag_samples, item.rounded_frame)
+            for item in attempt.video_check.same_frame_context
+        ) == ((10, -80, 0),)
         assert attempt.video_check.targets == ()
-        assert len(attempt.video_check.same_frame_context) == 1
     else:
-        assert attempt.audio.status == "no_single_offset"
-        assert attempt.audio.agreeing_chunks == 14
-        assert len(attempt.video_check.same_frame_context) == 6
+        _assert_audio(
+            result,
+            global_lag=0,
+            subframe=0.0,
+            rounded_frame=0,
+            active=20,
+            credible=20,
+            agreeing=14,
+            authority_agreeing=20,
+            authority_status="agreed",
+            authority_passed=True,
+            raw_status="no_single_offset",
+        )
+        _assert_video(result, confirmed_offset=0)
+        assert tuple(
+            (run.first_index, run.last_index, run.lag, run.chunk_count)
+            for run in attempt.runs
+            if run.lag != 0
+        ) == tuple((index, index, -80, 1) for index in (2, 5, 8, 11, 14, 17))
+        assert tuple(
+            (item.chunk_index, item.lag_samples, item.rounded_frame)
+            for item in attempt.video_check.same_frame_context
+        ) == tuple((index, -80, 0) for index in (2, 5, 8, 11, 14, 17))
         assert attempt.video_check.targets == ()
 
 
@@ -482,3 +861,55 @@ def test_refusal_principle_mix_changes_still_apply(
     result = _align_pair(u4_media, name, tmp_path / "generated")
     _assert_label(result, state="trusted_automatic", reason="audio_video_confirmed")
     assert result.frame_offset == 0
+    _assert_audio(
+        result,
+        global_lag=0,
+        subframe=0.0,
+        rounded_frame=0,
+        active=20,
+        credible=20,
+        agreeing=20,
+        authority_agreeing=20,
+        authority_status="agreed",
+        authority_passed=True,
+    )
+    _assert_video(result, confirmed_offset=0)
+    _assert_targets(result, ())
+    if name == "surround":
+        assert _audio_channel_count(u4_media.references["surround"]) == 6
+        assert _audio_channel_count(u4_media.comparisons["surround"]) == 2
+
+
+@pytest.mark.integration
+def test_video_check_cost_measurement(u4_media: _MediaSet, tmp_path: Path) -> None:
+    result = _align_pair(u4_media, "replacement-4", tmp_path / "generated")
+    assert result.audio_attempt is not None
+    reference = _video_request(u4_media.reference)
+    comparison = _video_request(u4_media.comparisons["replacement-4"])
+    loader = DefaultVSLoader()
+    warmup = alignment_video.check_video_alignment(
+        reference=reference,
+        comparison=comparison,
+        attempt=result.audio_attempt,
+        fps_reference=Fraction(_FPS, 1),
+        loader=loader,
+    )
+    assert warmup.observation.confirmed_offset == 0
+
+    samples: list[float] = []
+    for _ in range(3):
+        started = time.perf_counter()
+        measured = alignment_video.check_video_alignment(
+            reference=reference,
+            comparison=comparison,
+            attempt=result.audio_attempt,
+            fps_reference=Fraction(_FPS, 1),
+            loader=loader,
+        )
+        samples.append(time.perf_counter() - started)
+        assert measured.observation.confirmed_offset == 0
+    mean = statistics.fmean(samples)
+    print(
+        "U4_VIDEO_CHECK_COST "
+        f"samples={','.join(f'{sample:.3f}s' for sample in samples)} mean={mean:.3f}s"
+    )
