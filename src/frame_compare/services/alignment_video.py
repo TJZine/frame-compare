@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -97,6 +97,20 @@ class _Target:
     start_sample: int
     end_sample: int
     requested_positions: int
+
+
+type _TargetKey = tuple[Literal["chunk", "run"], int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class _CheckPointTarget:
+    start: int
+    end: int
+    offset: int
+    status: str
+    order: int
+    psr: float
+    frames: tuple[int, ...]
 
 
 def sample_to_reference_frame(
@@ -212,6 +226,7 @@ def check_video_alignment(
             fps_reference=fps_reference,
         )
         target_evidence: list[VideoTargetEvidence] = []
+        planned_target_frames: dict[_TargetKey, tuple[int, ...]] = {}
         remaining = _TARGET_POSITION_LIMIT
         next_position_index = len(base_positions)
         for target in targets:
@@ -235,6 +250,7 @@ def check_video_alignment(
                 reference_frame_count=reference_source.num_frames,
                 comparison_frame_count=comparison_source.num_frames,
             )
+            planned_target_frames[(target.kind, target.first_index, target.last_index)] = desired
             selected = desired[:remaining]
             positions_for_target: list[VideoTargetPosition] = []
             if selected:
@@ -289,6 +305,7 @@ def check_video_alignment(
             scored_offsets=scored_offsets,
             fps_reference=fps_reference,
             chunks=chunks,
+            planned_target_frames=planned_target_frames,
         )
         return VideoCheckResult(
             observation=VideoCheckObservation(
@@ -508,7 +525,7 @@ def _chunks(attempt: AudioAlignmentAttempt) -> tuple[_Chunk, ...]:
             columns.counts,
             columns.active,
             columns.lags,
-            tuple(None if psr == "unbounded" else psr for psr in columns.psrs),
+            tuple(math.inf if psr == "unbounded" else psr for psr in columns.psrs),
             columns.credible,
             columns.agrees,
             strict=True,
@@ -735,21 +752,12 @@ def _check_points(
     scored_offsets: Sequence[int],
     fps_reference: Fraction,
     chunks: Sequence[_Chunk] = (),
+    planned_target_frames: Mapping[_TargetKey, Sequence[int]] | None = None,
 ) -> tuple[VideoCheckPoint, ...]:
     points: list[VideoCheckPoint] = []
     selected_base_positions: set[int] = set()
     selected_points: set[tuple[int, int]] = set()
     chunks_by_index = {chunk.index: chunk for chunk in chunks}
-
-    def target_bounds(target: VideoTargetEvidence) -> tuple[int, int]:
-        members = [
-            chunks_by_index.get(index)
-            for index in range(target.first_chunk_index, target.last_chunk_index + 1)
-        ]
-        if members and all(member is not None for member in members):
-            present = [member for member in members if member is not None]
-            return present[0].start, present[-1].start + present[-1].count
-        return target.first_chunk_index, target.last_chunk_index + 1
 
     def target_psr(target: VideoTargetEvidence) -> float:
         values = [
@@ -759,40 +767,72 @@ def _check_points(
         ]
         return max(values, default=float("-inf"))
 
-    candidates = [
-        (
-            *target_bounds(target),
-            target.target_offset,
-            (
-                "confirmed by video"
-                if target.resolution in {"resolved", "alternative_confirmed"}
-                else "not checked"
-                if target.resolution == "unexamined"
-                else "not settled"
-            ),
-            order,
-            target_psr(target),
-            target,
+    def target_frames(target: VideoTargetEvidence) -> tuple[int, ...]:
+        if target.resolution == "unexamined":
+            if planned_target_frames is None:
+                return ()
+            key = (target.kind, target.first_chunk_index, target.last_chunk_index)
+            return tuple(planned_target_frames.get(key, ()))[:1]
+        preferred_winner = {
+            "resolved": "confirmed",
+            "alternative_confirmed": "alternative",
+            "unresolved": "neither",
+        }[target.resolution]
+        preferred = tuple(
+            position.reference_frame
+            for position in target.positions
+            if position.winner == preferred_winner
         )
-        for order, target in enumerate(targets)
-        if target.positions
-    ]
-    candidates.sort(key=lambda candidate: (candidate[0], candidate[1], candidate[5]))
-    grouped: list[list[tuple[int, int, int, str, int, float, VideoTargetEvidence]]] = []
+        if target.resolution != "unresolved":
+            return preferred
+        remaining = tuple(
+            position.reference_frame
+            for position in target.positions
+            if position.winner != preferred_winner
+        )
+        return (*preferred, *remaining)
+
+    def target_offset(target: VideoTargetEvidence) -> int:
+        return confirmed if target.resolution == "resolved" else target.target_offset
+
+    candidates: list[_CheckPointTarget] = []
+    for order, target in enumerate(targets):
+        frames = target_frames(target)
+        if not frames:
+            continue
+        candidates.append(
+            _CheckPointTarget(
+                start=target.start_sample,
+                end=target.end_sample,
+                offset=target_offset(target),
+                status=(
+                    "confirmed by video"
+                    if target.resolution in {"resolved", "alternative_confirmed"}
+                    else "not checked"
+                    if target.resolution == "unexamined"
+                    else "not settled"
+                ),
+                order=order,
+                psr=target_psr(target),
+                frames=frames,
+            )
+        )
+    candidates.sort(key=lambda candidate: (candidate.start, candidate.end, candidate.order))
+    grouped: list[list[_CheckPointTarget]] = []
     for candidate in candidates:
         if grouped:
             previous = grouped[-1]
-            previous_end = max(item[1] for item in previous)
+            previous_end = max(item.end for item in previous)
             if (
-                candidate[0] <= previous_end
-                and candidate[2] == previous[0][2]
-                and candidate[3] == previous[0][3]
+                candidate.start <= previous_end
+                and candidate.offset == previous[0].offset
+                and candidate.status == previous[0].status
             ):
                 previous.append(candidate)
                 continue
         grouped.append([candidate])
     target_regions = [
-        max(region, key=lambda candidate: (candidate[5], -candidate[4]))[6]
+        sorted(region, key=lambda candidate: (-candidate.psr, candidate.order))
         for region in grouped[:4]
     ]
 
@@ -810,10 +850,6 @@ def _check_points(
         selected_points.add(key)
         return True
 
-    def add_target_point(target: VideoTargetEvidence, position: VideoTargetPosition) -> None:
-        suggested = confirmed if position.winner == "confirmed" else target.target_offset
-        add_point(position.reference_frame, suggested)
-
     def add_confirmed_point(position: VideoPositionDifference) -> bool:
         winner, _margin = _position_winner(
             position.score_by_offset,
@@ -829,19 +865,29 @@ def _check_points(
         selected_base_positions.add(position.position_index)
         return True
 
-    for target in target_regions:
-        add_target_point(target, target.positions[0])
+    for region in target_regions:
+        represented = False
+        for candidate in region:
+            for frame in candidate.frames:
+                if add_point(frame, candidate.offset):
+                    represented = True
+                    break
+            if represented:
+                break
 
     if len(points) < 5:
         for position in base_positions:
             if add_confirmed_point(position):
                 break
 
-    for target in target_regions:
-        for position in target.positions[1:]:
+    for region in target_regions:
+        for candidate in region:
+            for frame in candidate.frames:
+                if len(points) >= 5:
+                    break
+                add_point(frame, candidate.offset)
             if len(points) >= 5:
                 break
-            add_target_point(target, position)
         if len(points) >= 5:
             break
 

@@ -672,7 +672,7 @@ def test_check_points_reserve_contrast_after_four_ordered_regions(target_count: 
 
 
 def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
-    def target(index: int, frames: tuple[int, int]) -> alignment_video.VideoTargetEvidence:
+    def target(index: int, frames: tuple[int, ...]) -> alignment_video.VideoTargetEvidence:
         return alignment_video.VideoTargetEvidence(
             kind="chunk",
             first_chunk_index=index,
@@ -703,25 +703,199 @@ def test_check_points_deduplicate_and_fill_in_deterministic_order() -> None:
                 score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
             ),
         ),
-        (target(1, (100, 101)), target(3, (100, 201))),
+        (target(1, (100, 101)), target(3, (100,)), target(4, (201,))),
         confirmed=0,
         scored_offsets=(-2, -1, 0, 1, 2),
         fps_reference=FPS,
         chunks=(
             alignment_video._Chunk(1, 0, 10, True, 0, 100.0, True, False),
             alignment_video._Chunk(3, 20, 10, True, 0, 90.0, True, False),
+            alignment_video._Chunk(4, 30, 10, True, 0, 80.0, True, False),
         ),
     )
 
     assert [(point.reference_frame, point.suggested_comparison_frame) for point in points] == [
         (100, 99),
+        (201, 200),
         (900, 900),
         (101, 100),
-        (201, 200),
     ]
     assert len(
         {(point.reference_frame, point.suggested_comparison_frame) for point in points}
     ) == len(points)
+
+
+def test_check_points_follow_target_resolution_and_track_order() -> None:
+    resolved = alignment_video.VideoTargetEvidence(
+        kind="chunk",
+        first_chunk_index=4,
+        last_chunk_index=4,
+        credible=True,
+        start_sample=40,
+        end_sample=50,
+        target_offset=4,
+        alternative_offsets=(3, 4, 5),
+        resolution="resolved",
+        positions=(
+            alignment_video.VideoTargetPosition(0, 400, 1.0, 1.0, "neither"),
+            alignment_video.VideoTargetPosition(1, 401, 0.1, 1.0, "confirmed"),
+        ),
+    )
+    alternative = alignment_video.VideoTargetEvidence(
+        kind="chunk",
+        first_chunk_index=2,
+        last_chunk_index=2,
+        credible=True,
+        start_sample=20,
+        end_sample=30,
+        target_offset=2,
+        alternative_offsets=(1, 2, 3),
+        resolution="alternative_confirmed",
+        positions=(
+            alignment_video.VideoTargetPosition(2, 200, 1.0, 1.0, "neither"),
+            alignment_video.VideoTargetPosition(3, 201, 1.0, 0.1, "alternative"),
+        ),
+    )
+    unresolved = alignment_video.VideoTargetEvidence(
+        kind="run",
+        first_chunk_index=0,
+        last_chunk_index=1,
+        credible=True,
+        start_sample=0,
+        end_sample=20,
+        target_offset=1,
+        alternative_offsets=(1,),
+        resolution="unresolved",
+        positions=(
+            alignment_video.VideoTargetPosition(4, 100, 0.1, 1.0, "confirmed"),
+            alignment_video.VideoTargetPosition(5, 101, 1.0, 1.0, "neither"),
+        ),
+    )
+
+    points = alignment_video._check_points(
+        (alignment_video.VideoPositionDifference(0, 900, (2.0, 1.0, 0.1, 1.0, 2.0)),),
+        (resolved, alternative, unresolved),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+        chunks=(
+            alignment_video._Chunk(0, 0, 10, True, 0, 80.0, True, False),
+            alignment_video._Chunk(1, 10, 10, True, 0, 80.0, True, False),
+            alignment_video._Chunk(2, 20, 10, True, 0, 90.0, True, False),
+            alignment_video._Chunk(4, 40, 10, True, 0, 100.0, True, False),
+        ),
+    )
+
+    assert [(point.reference_frame, point.suggested_comparison_frame) for point in points] == [
+        (101, 100),
+        (201, 199),
+        (401, 401),
+        (900, 900),
+        (100, 99),
+    ]
+
+
+def test_unexamined_target_keeps_unscored_planned_review_point() -> None:
+    target = alignment_video.VideoTargetEvidence(
+        kind="chunk",
+        first_chunk_index=1,
+        last_chunk_index=1,
+        credible=True,
+        start_sample=10,
+        end_sample=20,
+        target_offset=3,
+        alternative_offsets=(2, 3, 4),
+        resolution="unexamined",
+        positions=(),
+    )
+
+    points = alignment_video._check_points(
+        (),
+        (target,),
+        confirmed=0,
+        scored_offsets=(-2, -1, 0, 1, 2),
+        fps_reference=FPS,
+        chunks=(alignment_video._Chunk(1, 10, 10, True, 0, 100.0, True, False),),
+        planned_target_frames={("chunk", 1, 1): (123,)},
+    )
+
+    assert points == (alignment_video.VideoCheckPoint(123 / float(FPS), 123, 120),)
+
+
+def test_budget_exhaustion_keeps_planned_point_without_scoring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    targets = tuple(
+        alignment_video._Target(
+            kind="chunk",
+            first_index=index,
+            last_index=index,
+            lag=400 * (index + 1),
+            credible=True,
+            start_sample=index * 240_000,
+            end_sample=(index + 1) * 240_000,
+            requested_positions=4,
+        )
+        for index in range(4)
+    )
+    scored_frames: list[int] = []
+
+    monkeypatch.setattr(
+        alignment_video,
+        "_build_targets",
+        lambda *_args, **_kwargs: (targets, ()),
+    )
+    monkeypatch.setattr(
+        alignment_video,
+        "_target_frames",
+        lambda target, **_kwargs: tuple(target.first_index * 10 + offset for offset in range(1, 5)),
+    )
+
+    def score_hypotheses(
+        _reference_node: object,
+        _comparison_node: object,
+        reference_frame: int,
+        _confirmed: int,
+        _alternative_offsets: object,
+    ) -> tuple[float, float]:
+        scored_frames.append(reference_frame)
+        return 0.1, 1.0
+
+    monkeypatch.setattr(alignment_video, "_score_hypotheses", score_hypotheses)
+
+    result = _run(tmp_path, truth=0, attempt=_attempt(rounded=0, planned=4))
+
+    assert len(scored_frames) == 12
+    assert result.observation.targets[-1].resolution == "unexamined"
+    assert result.observation.targets[-1].positions == ()
+    assert any(
+        point.reference_frame == 31 and point.suggested_comparison_frame == 26
+        for point in result.observation.check_points
+    )
+
+
+def test_unbounded_psr_target_ranks_above_finite_target() -> None:
+    attempt = _attempt(rounded=0, planned=2)
+    attempt = replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            lags=(400, 800),
+            psrs=(100.0, "unbounded"),
+            agrees=(False, False),
+        ),
+        runs=(),
+    )
+
+    chunks = alignment_video._chunks(attempt)
+    targets, _same_frame = alignment_video._build_targets(
+        attempt,
+        chunks,
+        confirmed=0,
+        fps_reference=FPS,
+    )
+
+    assert [target.first_index for target in targets] == [1, 0]
 
 
 def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
@@ -774,7 +948,7 @@ def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
         chunks=chunks,
     )
 
-    assert [point.reference_frame for point in points] == [100, 200, 300, 400, 900]
+    assert [point.reference_frame for point in points] == [100, 900, 200, 300, 400]
     assert len(points) == 5
 
 
