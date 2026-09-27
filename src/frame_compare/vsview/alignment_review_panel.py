@@ -25,8 +25,10 @@ from vsview.api import PluginAPI, VideoOutputProxy, WidgetPluginBase, hookimpl, 
 
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentDecision,
-    audio_evidence_rows,
     audio_unavailable_phrase,
+)
+from frame_compare.utils.alignment_review_projection import (
+    audio_evidence_rows,
     build_audio_review_presentation,
 )
 from frame_compare.vsview.alignment_review_contract import (

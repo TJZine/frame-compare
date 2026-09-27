@@ -302,11 +302,8 @@ def _parse_audio_stream(
     )
 
 
-def _parse_video_start(stream_obj: object) -> VideoStreamStart | None:
+def _parse_video_start(stream: dict[str, Any]) -> VideoStreamStart | None:
     """Return the start of the first non-attached-pic video stream, if present."""
-    if not isinstance(stream_obj, dict):
-        return None
-    stream = cast(dict[str, object], stream_obj)
     if stream.get("codec_type") != "video":
         return None
     disposition_obj = stream.get("disposition", {})

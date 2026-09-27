@@ -37,6 +37,8 @@ from frame_compare.utils.alignment_evidence import (  # noqa: E402
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
+)
+from frame_compare.utils.alignment_review_projection import (  # noqa: E402
     build_audio_review_presentation,
 )
 from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
@@ -268,7 +270,7 @@ def provisional_audio_attempt(
                 subframe_estimate=subframe,
                 basis="audio_only",
             ),
-            primary_reason="video_check_pending",
+            primary_reason="audio_only",
             failed_gates=(),
         ),
         stability=_stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),
@@ -821,7 +823,15 @@ def test_panel_matches_compact_projection_for_authoritative_nested_targets(
             "Noted: audio differed in 1 section (1:00–1:30); the video confirmed +0f there.",
         ),
         (False, "resolved", "trusted_automatic", None),
-        (False, "unresolved", "trusted_automatic", None),
+        (
+            False,
+            "unresolved",
+            "trusted_automatic",
+            (
+                "Noted: weak audio in 1:00–1:30 pointed elsewhere; the video could not "
+                "settle it, so it was not counted."
+            ),
+        ),
         (True, "unexamined", "provisional", None),
         (False, "unexamined", "trusted_automatic", None),
         (True, "alternative_confirmed", "provisional", None),
@@ -977,10 +987,10 @@ def test_panel_resolved_run_context_matches_full_and_compact_evidence(
 @pytest.mark.parametrize(
     ("planned", "active", "credible", "agreeing", "expected"),
     [
-        (4, 4, 3, 3, "(0 differ; 1 active with weak evidence; 0 inactive)."),
-        (4, 3, 3, 3, "(0 differ; 0 active with weak evidence; 1 inactive)."),
-        (5, 4, 3, 3, "(0 differ; 1 active with weak evidence; 1 inactive)."),
-        (4, 0, 0, 0, "(0 differ; 0 active with weak evidence; 4 inactive)."),
+        (4, 4, 3, 3, "(0 differ; 1 weak, 0 quiet not counted)."),
+        (4, 3, 3, 3, "(0 differ; 0 weak, 1 quiet not counted)."),
+        (5, 4, 3, 3, "(0 differ; 1 weak, 1 quiet not counted)."),
+        (4, 0, 0, 0, "(0 differ; 0 weak, 4 quiet not counted)."),
     ],
 )
 def test_panel_established_counts_match_full_and_compact_evidence(
@@ -1000,7 +1010,7 @@ def test_panel_established_counts_match_full_and_compact_evidence(
         agreeing=agreeing,
     )
     compact = _project_audio_attempt_for_review(attempt)
-    expected_line = f"Audio: {agreeing} of {credible} credible sections agree on +0f {expected}"
+    expected_line = f"Audio: {agreeing} of {credible} clear sections agree on +0f {expected}"
     summaries: list[str] = []
     details: list[str] = []
     for label, candidate in (("full", attempt), ("compact", compact)):

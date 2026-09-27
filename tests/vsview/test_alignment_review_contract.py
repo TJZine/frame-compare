@@ -255,7 +255,7 @@ def provisional_audio_attempt(
                 subframe_estimate=subframe,
                 basis="audio_only",
             ),
-            primary_reason="video_check_pending",
+            primary_reason="audio_only",
             failed_gates=(),
         ),
         stability=_stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),

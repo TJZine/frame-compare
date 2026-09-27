@@ -1080,3 +1080,31 @@ Return to the controller or maintainer if:
     frames, and the winning offset rather than reconstructing them from compact
     presentation rows; and the shared projection may merge/split overlapping run and
     chunk regions only while retaining their authoritative target keys/resolutions.
+- 2026-09-27: U4 adversarial-review remediation was authorized and integrated on the
+  accepted fix base. The unintended 12-record limits on retained targets and
+  same-frame context were removed; the 12 **scored targeted-position** budget remains.
+  Repeated chunk/target collections now use a lossless standard-library packed JSON
+  projection only when large, so full diagnostic and compact native attempts round-trip
+  at `MAX_AUDIO_CHUNKS` below 128 KiB without truncation.
+  - A4a run formation now requires a complete adjacent lag span of at most 16 samples.
+    V5a uses the true run median and preserves half-sample centres. Per maintainer
+    clarification, V5 confirmation keeps the median of margins won by the candidate,
+    not all informative margins.
+  - Local video evidence retains the unique offset that actually won; tied alternatives
+    confirm nothing. Region endpoints use reference-video time, the load/index timer
+    stops after both native loads, and raw audio plus video failures are both retained
+    in prescribed order. The historical copy mockup remains unchanged; its approved
+    `exact match`, lowercase status words, ASCII `x`, and local-inconclusive wording are
+    implemented in the shared projection owner.
+  - Presentation policy moved from the schema module to
+    `utils/alignment_review_projection.py`; pure compensation, conversion, voting, and
+    confirmation policy moved to `utils/alignment_policy.py`. The schema remains the
+    single strict evidence owner, and orchestration now calls the current typed loader
+    seam directly with no signature introspection or legacy fallback.
+  - Proof adds literal A02/A03/A04 counterexamples, a real-estimator 13-same-frame
+    acceptance case, maximum full/compact serialization, controlled timing, nonzero
+    reference-start rendering, actual alternative-offset copy/checkpoints, and a real
+    seven-case phase/cache matrix. That matrix isolates A4b, V5, unresolved-run,
+    unexamined-credible, and noncredible-alternative failures; proves a noncredible
+    neither-win remains applicable; and covers trusted replay, manual precedence,
+    active crop, and a localized surround/downmix change.

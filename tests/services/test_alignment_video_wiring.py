@@ -72,6 +72,7 @@ def _target(
                 confirmed_score=1.0,
                 alternative_score=0.1 if resolution == "alternative_confirmed" else 1.0,
                 winner="alternative" if resolution == "alternative_confirmed" else "neither",
+                alternative_offset=1 if resolution == "alternative_confirmed" else None,
             ),
         )
     )

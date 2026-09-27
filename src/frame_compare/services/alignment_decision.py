@@ -6,6 +6,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from statistics import median
 from typing import get_args
 
 from frame_compare.services.alignment_correlation import (
@@ -31,10 +32,15 @@ from frame_compare.utils.alignment_evidence import (
     VideoCheckObservation,
     VideoTargetEvidence,
 )
+from frame_compare.utils.alignment_policy import (
+    compensated_lag_to_frame,
+    compensated_offset_seconds,
+)
+from frame_compare.utils.alignment_policy import (
+    rounded_frame as _rounded_frame,
+)
 
 ALIGNMENT_ESTIMATOR_POLICY = "whole-track-chunked-phat-video-check-20260925"
-
-VIDEO_CHECK_PENDING_REASON = "video_check_pending"
 
 
 @dataclass(frozen=True)
@@ -72,30 +78,9 @@ V6_PRIMARY_REASON_ORDER = (
 )
 
 
-def compensated_offset_seconds(
-    *,
-    global_lag: int,
-    reference_audio_start: Fraction,
-    reference_video_start: Fraction,
-    comparison_audio_start: Fraction,
-    comparison_video_start: Fraction,
-) -> float:
-    """Apply A5 container-start compensation to a chunked global lag (samples)."""
-    lag_seconds = global_lag / AUDIO_ANALYSIS_SAMPLE_RATE
-    compensation = (reference_audio_start - reference_video_start) - (
-        comparison_audio_start - comparison_video_start
-    )
-    return lag_seconds + float(compensation)
-
-
 def subframe_estimate(*, offset_seconds: float, fps_reference: Fraction) -> float:
     """Keep the A6 sub-frame estimate ``x = offset_seconds * fps`` as evidence."""
     return offset_seconds * float(fps_reference)
-
-
-def rounded_frame(subframe: float) -> int:
-    """Round the sub-frame estimate to the neighbouring integer frame (A6)."""
-    return math.floor(subframe + 0.5)
 
 
 def correlation_score(estimate: ChunkedAudioEstimate) -> float:
@@ -103,19 +88,6 @@ def correlation_score(estimate: ChunkedAudioEstimate) -> float:
     if estimate.credible_count <= 0:
         return 0.0
     return estimate.agreeing_count / estimate.credible_count
-
-
-def _compensated_lag_to_frame(
-    lag: int,
-    *,
-    compensation_seconds: float,
-    fps_reference: Fraction,
-) -> int:
-    """Project one chunk lag to frames through A5 compensation and A6 rounding."""
-    offset_seconds = lag / AUDIO_ANALYSIS_SAMPLE_RATE + compensation_seconds
-    return rounded_frame(
-        subframe_estimate(offset_seconds=offset_seconds, fps_reference=fps_reference)
-    )
 
 
 def _audio_agrees(left: int, right: int) -> bool:
@@ -130,7 +102,7 @@ def _observation_frame(
 ) -> int:
     if observation.lag is None:
         raise ValueError(f"chunk {observation.index} is missing its lag")
-    return _compensated_lag_to_frame(
+    return compensated_lag_to_frame(
         observation.lag,
         compensation_seconds=compensation_seconds,
         fps_reference=fps_reference,
@@ -169,8 +141,10 @@ def _adjacent_competing_runs(
         if (
             observation.index == previous.index + 1
             and previous.lag is not None
-            and members[0].lag is not None
-            and _audio_agrees(observation.lag, members[0].lag)
+            and all(item.lag is not None for item in members)
+            and max(observation.lag, *(item.lag for item in members if item.lag is not None))
+            - min(observation.lag, *(item.lag for item in members if item.lag is not None))
+            <= AUDIO_ANALYSIS_SAMPLE_RATE * 2 // 1000
         ):
             members.append(observation)
             continue
@@ -178,6 +152,21 @@ def _adjacent_competing_runs(
         members = [observation]
     close_run()
     return tuple(runs)
+
+
+def competing_run_center(
+    run: ChunkRun,
+    observations: Sequence[ChunkObservation],
+) -> float:
+    """Return V5a's true median lag for one A4a run."""
+    lags = [
+        item.lag
+        for item in observations
+        if run.first_index <= item.index <= run.last_index and item.lag is not None
+    ]
+    if len(lags) != run.chunk_count:
+        raise ValueError("competing run members must all have lags")
+    return float(median(lags))
 
 
 def classify_audio_disagreements(
@@ -357,7 +346,7 @@ def v6_failure_reasons(
             failures.append(V6_PRIMARY_REASON_ORDER[3])
     else:
         failures.append(V6_PRIMARY_REASON_ORDER[4])
-    if not authority_recount.passed and not failures:
+    if not authority_recount.passed:
         failures.append(authority_recount.authority_status)
     return tuple(failures)
 
@@ -438,7 +427,7 @@ def derive_stability(
             change_position_seconds=None,
         )
     frames = [
-        _compensated_lag_to_frame(
+        compensated_lag_to_frame(
             item.lag or 0,
             compensation_seconds=compensation_seconds,
             fps_reference=fps_reference,
@@ -603,14 +592,14 @@ def decide_after_video(
             else "video_check_inconclusive"
         )
         candidate = stage.decision.candidate
-        decision = stage.decision
-        if candidate is not None and stage.audio.status != "search_edge":
-            decision = replace(
-                decision,
-                state="provisional",
-                primary_reason=reason,
-                failed_gates=(reason,),
-            )
+        raw_reason = stage.audio.status
+        failures = (reason,) + ((raw_reason,) if raw_reason != "agreed" else ())
+        decision = replace(
+            stage.decision,
+            state="provisional" if candidate is not None else "unavailable",
+            primary_reason=reason,
+            failed_gates=failures,
+        )
         return replace(stage, video_check=video, decision=decision)
 
     compensation_seconds = stage.audio.compensation_seconds
@@ -693,9 +682,9 @@ def decide_completed_stage(
 
     Takes the raw A5 start facts and computes the compensation, the sub-frame
     estimate ``x`` and the rounded frame ``r`` itself, so every frame number
-    comes from this module. An agreed audio stage is ``provisional`` with
-    reason ``video_check_pending``; every other outcome is ``unavailable``
-    with its own reason and no candidate.
+    comes from this module. An agreed audio stage is an internal provisional
+    audio-only candidate; every other outcome is ``unavailable`` with its own
+    reason and no candidate.
     """
     if estimate.outcome not in get_args(AudioOutcomeStatus.__value__):
         raise ValueError(f"unknown chunked audio outcome: {estimate.outcome!r}")
@@ -715,7 +704,7 @@ def decide_completed_stage(
     if estimate.global_lag is not None:
         offset_seconds = estimate.global_lag / AUDIO_ANALYSIS_SAMPLE_RATE + compensation_seconds
         subframe = subframe_estimate(offset_seconds=offset_seconds, fps_reference=fps_reference)
-        rounded = rounded_frame(subframe)
+        rounded = _rounded_frame(offset_seconds, fps_reference)
     audio = AudioStageOutcome(
         status=outcome if estimate.global_lag is not None else "no_usable_audio",
         global_lag=estimate.global_lag,
@@ -741,7 +730,7 @@ def decide_completed_stage(
         decision = AudioAlignmentDecision(
             state="provisional",
             candidate=candidate,
-            primary_reason=VIDEO_CHECK_PENDING_REASON,
+            primary_reason="audio_only",
             failed_gates=(),
         )
     else:
@@ -854,11 +843,9 @@ def decide_rejected_stage(
 __all__ = [
     "ALIGNMENT_ESTIMATOR_POLICY",
     "AudioFrameDisagreements",
-    "VIDEO_CHECK_PENDING_REASON",
     "V6_PRIMARY_REASON_ORDER",
     "DecidedAudioStage",
     "classify_audio_disagreements",
-    "compensated_offset_seconds",
     "correlation_score",
     "decide_aborted_stage",
     "decide_completed_stage",
@@ -867,7 +854,6 @@ __all__ = [
     "derive_stability",
     "is_trusted_automatic",
     "recount_audio_authority",
-    "rounded_frame",
     "subframe_estimate",
     "v6_failure_reasons",
 ]

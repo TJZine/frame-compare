@@ -7,23 +7,33 @@ import math
 import statistics
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from frame_compare.analysis.window import SelectionWindow
+from frame_compare.orchestration.context import (
+    ClipActiveRect,
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+    RunContext,
+)
 from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_evidence import build_audio_review_presentation
+from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader
+from tests.orchestration.phase_task_helpers import _create_config, _run_align_phase, _workspace
 from tests.services.alignment_request_test_support import alignment_request
 
 vs_mod = pytest.importorskip("vapoursynth")
@@ -226,6 +236,10 @@ def _write_replacement(path: Path, duration_seconds: int) -> None:
     _write_media(path, video_graph=video)
 
 
+def _write_flat_video(path: Path) -> None:
+    _write_media(path, video_graph="[0:v]drawbox=x=0:y=0:w=128:h=72:color=black:t=fill[v]")
+
+
 def _write_low_motion_cue(path: Path) -> None:
     video = r"[0:v]drawbox=x=0:y=0:w=128:h=72:color=black:t=fill:enable=between(t\,299\,331)[v]"
     _write_media(path, video_graph=video, audio_graph=_splice_graph(delayed=(10,), delay_ms=100))
@@ -233,6 +247,50 @@ def _write_low_motion_cue(path: Path) -> None:
 
 def _write_active_tail(path: Path) -> None:
     _write_insert(path, 540, noisy_tail=True)
+
+
+def _write_active_tail_inconclusive(path: Path) -> None:
+    _write_insert(path, 540, noisy_tail=True)
+    temporary = path.with_name(f".{path.stem}.flat{path.suffix}")
+    path.replace(temporary)
+    try:
+        _run_ffmpeg(
+            [
+                "-i",
+                str(temporary),
+                "-vf",
+                r"drawbox=x=0:y=0:w=128:h=72:color=black:t=fill:enable=gte(t\,539)",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "18",
+                "-c:a",
+                "copy",
+                str(path),
+            ]
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_local_surround(path: Path) -> None:
+    channels = "".join(f"[{index}:a]" for index in range(1, 7))
+    normal = "pan=stereo|FL=0.80*c0+0.50*c2+0.30*c4+0.10*c3|FR=0.80*c1+0.50*c2+0.30*c5+0.10*c3"
+    changed = "pan=stereo|FL=0.55*c0+0.70*c2+0.15*c4+0.10*c3|FR=0.55*c1+0.70*c2+0.15*c5+0.10*c3"
+    _write_media(
+        path,
+        base_audio=_SURROUND_SOURCES[0],
+        audio_sources=_SURROUND_SOURCES[1:],
+        audio_graph=(
+            f"{channels}amerge=inputs=6,asplit=3[s0][s1][s2];"
+            f"[s0]atrim=start=0:end=270,asetpts=PTS-STARTPTS,{normal}[a0];"
+            f"[s1]atrim=start=270:end=300,asetpts=PTS-STARTPTS,{changed}[a1];"
+            f"[s2]atrim=start=300:end=600,asetpts=PTS-STARTPTS,{normal}[a2];"
+            "[a0][a1][a2]concat=n=3:v=0:a=1[a]"
+        ),
+    )
 
 
 def _write_repeated_music_cue(path: Path, *, reference: bool) -> None:
@@ -298,6 +356,8 @@ def _write_media_set(root: Path) -> _MediaSet:
     references = {
         "repeated-music-cue": root / "u4-repeated-music-cue-reference.mkv",
         "surround": root / "u4-surround-reference.mkv",
+        "surround-local": root / "u4-surround-reference.mkv",
+        "flat-video": root / "u4-flat-video-reference.mkv",
     }
     if not reference.exists():
         _atomic_write(reference, _write_media)
@@ -314,6 +374,8 @@ def _write_media_set(root: Path) -> _MediaSet:
         )
     if not references["surround"].exists():
         _atomic_write(references["surround"], lambda path: _write_surround(path, downmix=False))
+    if not references["flat-video"].exists():
+        _atomic_write(references["flat-video"], _write_flat_video)
     comparisons: dict[str, Path] = {}
 
     def add(name: str, writer: Callable[[Path], None]) -> None:
@@ -338,6 +400,11 @@ def _write_media_set(root: Path) -> _MediaSet:
         ),
     )
     add("active-tail", _write_active_tail)
+    add("active-tail-inconclusive", _write_active_tail_inconclusive)
+    add(
+        "authority-fail", lambda path: _write_media(path, audio_graph=_span_delay_graph(6, 10, 100))
+    )
+    add("flat-video", _write_flat_video)
     add("multipath", lambda path: _write_media(path, audio_graph=_multipath_graph()))
     add("same-frame", lambda path: _write_media(path, audio_graph=_splice_graph(delayed=(10,))))
     add(
@@ -376,6 +443,7 @@ def _write_media_set(root: Path) -> _MediaSet:
         ),
     )
     add("surround", lambda path: _write_surround(path, downmix=True))
+    add("surround-local", _write_local_surround)
     add("music-stem", _write_music_stem)
     add(
         "budget-7",
@@ -418,6 +486,165 @@ def _align_pair(
     )
     (result,) = asyncio.run(align_clips_from_request(request, config, vs_loader=DefaultVSLoader()))
     return result
+
+
+_PHASE_CONFIG = """\
+[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[analysis]
+random_frame_count = 0
+random_seed = 7
+user_frames = [100]
+
+[audio_alignment]
+enable = true
+max_offset_seconds = 30.0
+use_vsview = false
+force_interactive = false
+cache_results = true
+channel_strategy = "mono_downmix"
+previous_offsets = "disabled"
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+
+
+def _real_clip(path: Path, label: str, *, crop: bool) -> ClipState:
+    stat = path.stat()
+    active_rect = (
+        ClipActiveRect(
+            x=8,
+            y=4,
+            width=112,
+            height=64,
+            source="metadata",
+            detection_mode="provided",
+        )
+        if crop
+        else None
+    )
+    probe = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns),
+        width=128,
+        height=72,
+        num_frames=_DURATION * _FPS,
+        fps=Fraction(_FPS),
+        is_hdr=False,
+    )
+    return ClipState(
+        path=path,
+        label=label,
+        probe=probe,
+        source_fps=probe.fps,
+        effective_fps=probe.fps,
+        active_rect=active_rect,
+    )
+
+
+def _phase_context(media: _MediaSet, name: str, root: Path, *, crop: bool) -> RunContext:
+    reference_path = (
+        media.multipath_reference
+        if name == "multipath"
+        else media.references.get(name, media.reference)
+    )
+    workspace = _workspace(root)
+    run_dir = workspace.generated_root / "run"
+    workspace = replace(
+        workspace,
+        run_dir=run_dir,
+        generated_dir=run_dir,
+        screenshots_dir=run_dir / "screenshots",
+    )
+    reference = _real_clip(reference_path, "Reference", crop=crop)
+    comparison = _real_clip(media.comparisons[name], "Comparison", crop=crop)
+    return RunContext(
+        config=_create_config(root, _PHASE_CONFIG),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[comparison],
+        analysis_selection_domain="u4-phase",
+        selection_window=SelectionWindow(0, _DURATION * _FPS),
+        analysis_clip=reference,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("name", "reason", "applied", "target_resolution", "crop"),
+    [
+        ("authority-fail", "no_single_offset", False, "resolved", False),
+        ("flat-video", "video_check_inconclusive", False, None, False),
+        ("insert-60-low-motion", "competing_offset", False, "unresolved", False),
+        ("budget", "unresolved_audio_disagreement", False, "unexamined", False),
+        (
+            "active-tail",
+            "competing_offset_confirmed_by_video",
+            False,
+            "alternative_confirmed",
+            False,
+        ),
+        (
+            "active-tail-inconclusive",
+            "audio_video_confirmed",
+            True,
+            "local_video_inconclusive",
+            False,
+        ),
+        ("surround-local", "audio_video_confirmed", True, None, True),
+    ],
+)
+def test_real_phase_v6_cache_matrix(
+    u4_media: _MediaSet,
+    tmp_path: Path,
+    name: str,
+    reason: str,
+    applied: bool,
+    target_resolution: str | None,
+    crop: bool,
+) -> None:
+    ctx = _phase_context(u4_media, name, tmp_path, crop=crop)
+
+    output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+    comparison = output.comparisons[0]
+    attempt = comparison.audio_attempt
+
+    assert attempt is not None
+    assert attempt.decision.primary_reason == reason
+    assert (comparison.alignment is not None) is applied
+    assert output.reference.trim.trim_start_frames == 0
+    assert comparison.trim.trim_start_frames == 0
+    if target_resolution is not None:
+        assert target_resolution in {target.resolution for target in attempt.video_check.targets}
+
+    cache_path = ctx.workspace.shared_alignment_cache_dir / "alignment_reuse.toml"
+    assert cache_path.exists() is applied
+    if not applied:
+        return
+
+    replay = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+    assert replay.comparisons[0].alignment is not None
+    assert replay.comparisons[0].alignment.source == "cached"
+
+    save_manual_override(
+        ctx.workspace.generated_dir,
+        ManualOverride(
+            reference_clip=ctx.reference.path.stem,
+            comparison_clip=ctx.comparisons[0].path.stem,
+            frame_offset=1,
+            timestamp="2026-09-27T00:00:00Z",
+        ),
+    )
+    manual = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+    assert manual.comparisons[0].alignment is not None
+    assert manual.comparisons[0].alignment.source == "manual"
+    assert manual.comparisons[0].alignment.relative_offset_frames == 1
 
 
 def _video_request(path: Path) -> VideoClipRequest:
@@ -531,7 +758,7 @@ def _assert_video(
     confirmed_offset: int,
     wins: int = 12,
     informative: int = 12,
-    expected_margin: float = math.inf,
+    finite_margin: bool = False,
 ) -> None:
     assert result.audio_attempt is not None
     video = result.audio_attempt.video_check
@@ -542,10 +769,11 @@ def _assert_video(
     assert review.video_wins == wins
     assert review.video_informative == informative
     assert review.video_margin is not None
-    if math.isinf(expected_margin):
-        assert math.isinf(review.video_margin)
+    if finite_margin:
+        assert math.isfinite(review.video_margin)
+        assert review.video_margin >= 1.5
     else:
-        assert review.video_margin == pytest.approx(expected_margin, abs=1e-12)
+        assert math.isinf(review.video_margin)
 
 
 def _assert_targets(
@@ -618,7 +846,7 @@ def test_length_changing_inserts_are_not_applied(
         confirmed_offset=rounded_frame,
         wins=11 if name == "insert-60" else 12,
         informative=11 if name == "insert-60" else 12,
-        expected_margin=2.34863955329464 if name == "insert-60" else math.inf,
+        finite_margin=name == "insert-60",
     )
     _assert_targets(result, (target,))
 
@@ -642,7 +870,7 @@ def test_low_motion_insert_remains_a_competing_offset_hint(
         confirmed_offset=-96,
         wins=11,
         informative=11,
-        expected_margin=2.34863955329464,
+        finite_margin=True,
     )
     _assert_targets(result, (("run", 0, 1, (-1, 0, 1), "unresolved", 4),))
 
@@ -696,20 +924,14 @@ def test_repeated_music_cue_is_resolved_by_identical_moving_video(
         (("chunk", 10, 10, (119, 120, 121), "resolved", 4),),
     )
     target = result.audio_attempt.video_check.targets[0]
-    expected_positions = (
-        (12, 7199, 0.0, 0.07938361167907715, "confirmed"),
-        (13, 7439, 0.0, 0.12232393771409988, "confirmed"),
-        (14, 7679, 0.0, 0.07214097678661346, "confirmed"),
-        (15, 7919, 0.0, 0.11072836071252823, "confirmed"),
-    )
+    expected_positions = ((12, 7199), (13, 7439), (14, 7679), (15, 7919))
     assert len(target.positions) == len(expected_positions)
     for position, expected in zip(target.positions, expected_positions, strict=True):
-        position_index, reference_frame, confirmed_score, alternative_score, winner = expected
+        position_index, reference_frame = expected
         assert position.position_index == position_index
         assert position.reference_frame == reference_frame
-        assert position.confirmed_score == pytest.approx(confirmed_score, abs=1e-12)
-        assert position.alternative_score == pytest.approx(alternative_score, abs=1e-12)
-        assert position.winner == winner
+        assert position.confirmed_score < position.alternative_score
+        assert position.winner == "confirmed"
 
 
 @pytest.mark.integration

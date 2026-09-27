@@ -736,7 +736,7 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
                     "decision": {
                         "state": "provisional",
                         "candidate": candidate,
-                        "primary_reason": "video_check_pending",
+                        "primary_reason": "audio_only",
                         "failed_gates": [],
                     }
                 },

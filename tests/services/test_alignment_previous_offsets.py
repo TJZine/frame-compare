@@ -492,13 +492,13 @@ def test_stale_policy_entry_is_not_replayed_or_applied(
         frame_offset=None,
         time_offset_seconds=None,
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="audio_only",
         audio_attempt=replace(
             attempt,
             decision=replace(
                 attempt.decision,
                 state="provisional",
-                primary_reason="video_check_pending",
+                primary_reason="audio_only",
             ),
         ),
     )
@@ -511,7 +511,7 @@ def test_stale_policy_entry_is_not_replayed_or_applied(
     assert result.source == "computed"
     assert result.applied is False
     assert result.frame_offset is None
-    assert result.diagnostic == "video_check_pending"
+    assert result.diagnostic == "audio_only"
 
 
 def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_without_prompt(

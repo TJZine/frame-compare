@@ -379,7 +379,12 @@ def test_unrelated_seeds_are_unavailable(
     assert result.time_offset_seconds is None
     assert result.audio_attempt is not None
     assert result.audio_attempt.decision.state == "unavailable"
-    assert result.diagnostic in {"no_single_offset", "no_usable_audio"}
+    assert result.diagnostic == "video_check_inconclusive"
+    assert result.audio_attempt.decision.failed_gates[0] == "video_check_inconclusive"
+    assert result.audio_attempt.decision.failed_gates[1] in {
+        "no_single_offset",
+        "no_usable_audio",
+    }
 
 
 @pytest.mark.integration
@@ -393,8 +398,12 @@ def test_insert_gives_no_single_offset(
 
     result = _align_pair(reference, comparison, _config(), tmp_path / "cache", lsmash_loader)
 
-    _assert_unavailable(result, reason="no_single_offset")
+    _assert_unavailable(result, reason="video_check_inconclusive")
     assert result.audio_attempt is not None
+    assert result.audio_attempt.decision.failed_gates == (
+        "video_check_inconclusive",
+        "no_single_offset",
+    )
     assert len(result.audio_attempt.runs) >= 2
 
 

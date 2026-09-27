@@ -9,7 +9,7 @@ import math
 import threading
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -74,6 +74,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioCollectionObservation,
     AudioPairSide,
     VideoCheckObservation,
+    audio_attempt_payload,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
@@ -176,7 +177,7 @@ def _build_audio_review_map(
             },
             "evidence_availability": provenance.evidence_availability,
             "audio_attempt": (
-                asdict(_project_audio_attempt_for_review(result.audio_attempt))
+                audio_attempt_payload(_project_audio_attempt_for_review(result.audio_attempt))
                 if result.audio_attempt is not None
                 else None
             ),
@@ -453,11 +454,9 @@ def _video_clip_request(clip: AlignmentClipRequest) -> alignment_video.VideoClip
         clip.active_rect_width,
         clip.active_rect_height,
     )
-    active_rect: alignment_video.ActiveRect | None = None
-    if any(value is not None for value in values):
-        if not all(isinstance(value, int) for value in values):
-            raise AudioAlignmentError("alignment active rectangle is incomplete")
-        active_rect = cast(alignment_video.ActiveRect, values)
+    active_rect = (
+        cast(alignment_video.ActiveRect, values) if clip.active_rect_x is not None else None
+    )
     return alignment_video.VideoClipRequest(
         path=clip.path,
         identity=clip.identity,

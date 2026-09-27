@@ -15,9 +15,11 @@ import numpy as np
 import numpy.typing as npt
 
 from frame_compare.services.alignment_correlation import ChunkObservation
-from frame_compare.services.alignment_decision import classify_audio_observations
+from frame_compare.services.alignment_decision import (
+    classify_audio_observations,
+    competing_run_center,
+)
 from frame_compare.utils.alignment_evidence import (
-    AUDIO_ANALYSIS_SAMPLE_RATE,
     AudioAlignmentAttempt,
     AudioSameFrameContext,
     VideoCheckObservation,
@@ -25,6 +27,17 @@ from frame_compare.utils.alignment_evidence import (
     VideoPositionDifference,
     VideoTargetEvidence,
     VideoTargetPosition,
+)
+from frame_compare.utils.alignment_policy import (
+    CONFIRMATION_MARGIN,
+    compensated_lag_to_frame,
+    sample_to_reference_frame,
+)
+from frame_compare.utils.alignment_policy import (
+    confirmed_offset as _confirmed_offset,
+)
+from frame_compare.utils.alignment_policy import (
+    position_winner as _position_winner,
 )
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import VSLoader
@@ -45,10 +58,6 @@ FloatFrame = npt.NDArray[np.float32]
 _FRAME_WIDTH = 320
 _FRAME_HEIGHT = 180
 _BASE_POSITION_COUNT = 12
-_MIN_INFORMATIVE_POSITIONS = 6
-_INFORMATIVE_MARGIN = 1.1
-_CONFIRMATION_MARGIN = 1.5
-_CONFIRMATION_FRACTION = 0.75
 _TARGET_POSITION_LIMIT = 12
 
 
@@ -76,23 +85,11 @@ class VideoCheckResult:
 
 
 @dataclass(frozen=True, slots=True)
-class _Chunk:
-    index: int
-    start: int
-    count: int
-    active: bool
-    lag: int | None
-    psr: float | None
-    credible: bool
-    agrees: bool
-
-
-@dataclass(frozen=True, slots=True)
 class _Target:
     kind: Literal["chunk", "run"]
     first_index: int
     last_index: int
-    lag: int
+    lag: float
     credible: bool
     start_sample: int
     end_sample: int
@@ -111,24 +108,6 @@ class _CheckPointTarget:
     order: int
     psr: float
     points: tuple[tuple[int, int], ...]
-
-
-def sample_to_reference_frame(
-    sample_index: int,
-    *,
-    fps_reference: Fraction,
-    audio_start_reference: Fraction,
-    video_start_reference: Fraction,
-) -> int:
-    """Map an 8 kHz reference PCM sample to its raw reference video frame."""
-    if sample_index < 0:
-        raise ValueError("sample_index must be non-negative")
-    timestamp = (
-        Fraction(sample_index, AUDIO_ANALYSIS_SAMPLE_RATE)
-        + audio_start_reference
-        - video_start_reference
-    )
-    return math.floor(timestamp * fps_reference)
 
 
 def check_video_alignment(
@@ -152,8 +131,8 @@ def check_video_alignment(
     if not _identities_match(reference) or not _identities_match(comparison):
         return _failed("source_identity_changed")
 
-    load_started = time.monotonic()
     try:
+        load_started = time.monotonic()
         reference_source = loader.load(reference.path)
         if _is_cancelled(cancellation):
             return _failed("cancelled")
@@ -167,7 +146,11 @@ def check_video_alignment(
             return _failed("source_identity_changed")
         if not _identities_match(reference) or not _identities_match(comparison):
             return _failed("source_identity_changed")
+        index_build_seconds = time.monotonic() - load_started
+    except Exception:
+        return _failed("video_check_unavailable")
 
+    try:
         reference_node = _prepare_luma(reference_source.clip, reference.active_rect)
         comparison_node = _prepare_luma(comparison_source.clip, comparison.active_rect)
         overlap = _frame_overlap(
@@ -198,7 +181,6 @@ def check_video_alignment(
             winners,
             margins,
         )
-        index_build_seconds = time.monotonic() - load_started
         if confirmed is None:
             return VideoCheckResult(
                 observation=VideoCheckObservation(
@@ -268,19 +250,28 @@ def check_video_alignment(
                     )
                     if scored is None:
                         return _failed("video_check_unavailable")
-                    confirmed_score, alternative_score = scored
-                    winner = _hypothesis_winner(confirmed_score, alternative_score)
+                    confirmed_score, alternative_score, alternative_offset = scored
+                    winner = _hypothesis_winner(
+                        confirmed_score,
+                        alternative_score,
+                        alternative_offset=alternative_offset,
+                    )
                     position = VideoTargetPosition(
                         position_index=next_position_index,
                         reference_frame=frame,
                         confirmed_score=confirmed_score,
                         alternative_score=alternative_score,
                         winner=winner,
+                        alternative_offset=alternative_offset,
                     )
                     positions_for_target.append(position)
                     next_position_index += 1
                 remaining -= len(positions_for_target)
-                resolution = _target_resolution(target.kind, positions_for_target)
+                resolution = _target_resolution(
+                    target.kind,
+                    positions_for_target,
+                    credible=target.credible,
+                )
             else:
                 resolution = "unexamined"
             target_evidence.append(
@@ -319,6 +310,8 @@ def check_video_alignment(
                 check_points=check_points,
             )
         )
+    except ValueError:
+        raise
     except Exception:
         return _failed("video_check_unavailable")
 
@@ -461,48 +454,6 @@ def _frame_difference(reference: FloatFrame, comparison: FloatFrame) -> float:
     return float(np.mean(np.abs(_average_ranks(reference) - _average_ranks(comparison))))
 
 
-def _position_winner(scores: Sequence[float], offsets: Sequence[int]) -> tuple[int | None, float]:
-    best_index = min(range(len(scores)), key=scores.__getitem__)
-    if best_index == 0 or best_index == len(scores) - 1:
-        return None, 0.0
-    best = scores[best_index]
-    if not best < scores[best_index - 1] or not best < scores[best_index + 1]:
-        return None, 0.0
-    runner_up = min(score for index, score in enumerate(scores) if index != best_index)
-    if best == 0.0:
-        return (offsets[best_index], math.inf) if runner_up > 0.0 else (None, 0.0)
-    margin = runner_up / best
-    if margin < _INFORMATIVE_MARGIN:
-        return None, 0.0
-    return offsets[best_index], margin
-
-
-def _confirmed_offset(
-    rounded_frame: int,
-    winners: Sequence[int | None],
-    margins: Sequence[float],
-) -> int | None:
-    informative = [
-        (winner, margin)
-        for winner, margin in zip(winners, margins, strict=True)
-        if winner is not None
-    ]
-    if len(informative) < _MIN_INFORMATIVE_POSITIONS:
-        return None
-    candidates = tuple(range(rounded_frame - 1, rounded_frame + 2))
-    counts = {
-        candidate: sum(winner == candidate for winner, _ in informative) for candidate in candidates
-    }
-    best_count = max(counts.values())
-    best = [candidate for candidate, count in counts.items() if count == best_count]
-    if len(best) != 1 or best_count / len(informative) < _CONFIRMATION_FRACTION:
-        return None
-    winning_margins = [margin for winner, margin in informative if winner == best[0]]
-    if float(np.median(winning_margins)) < _CONFIRMATION_MARGIN:
-        return None
-    return best[0]
-
-
 def _stream_start(
     attempt: AudioAlignmentAttempt,
     *,
@@ -515,10 +466,10 @@ def _stream_start(
     return Fraction(stream.stream_start_num, stream.stream_start_den)
 
 
-def _chunks(attempt: AudioAlignmentAttempt) -> tuple[_Chunk, ...]:
+def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
     columns = attempt.chunks
     return tuple(
-        _Chunk(*values)
+        ChunkObservation(*values)
         for values in zip(
             range(len(columns.starts)),
             columns.starts,
@@ -533,13 +484,14 @@ def _chunks(attempt: AudioAlignmentAttempt) -> tuple[_Chunk, ...]:
     )
 
 
-def _lag_to_frame(lag: int, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction) -> int:
-    return math.floor(_lag_to_subframe(lag, attempt=attempt, fps_reference=fps_reference) + 0.5)
-
-
-def _lag_to_subframe(lag: int, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction) -> float:
-    compensation = _compensation_seconds(attempt)
-    return float((Fraction(lag, AUDIO_ANALYSIS_SAMPLE_RATE) + compensation) * fps_reference)
+def _lag_to_frame(
+    lag: int | float, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction
+) -> int:
+    return compensated_lag_to_frame(
+        lag,
+        compensation_seconds=float(_compensation_seconds(attempt)),
+        fps_reference=fps_reference,
+    )
 
 
 def _compensation_seconds(attempt: AudioAlignmentAttempt) -> Fraction:
@@ -553,7 +505,7 @@ def _compensation_seconds(attempt: AudioAlignmentAttempt) -> Fraction:
 
 def _build_targets(
     attempt: AudioAlignmentAttempt,
-    chunks: tuple[_Chunk, ...],
+    chunks: tuple[ChunkObservation, ...],
     *,
     confirmed: int,
     fps_reference: Fraction,
@@ -562,21 +514,8 @@ def _build_targets(
     if global_lag is None:
         return (), ()
     by_index = {chunk.index: chunk for chunk in chunks}
-    observations = tuple(
-        ChunkObservation(
-            index=chunk.index,
-            reference_start=chunk.start,
-            reference_count=chunk.count,
-            active=chunk.active,
-            lag=chunk.lag,
-            psr=chunk.psr,
-            credible=chunk.credible,
-            agrees=chunk.agrees,
-        )
-        for chunk in chunks
-    )
     classification = classify_audio_observations(
-        observations=observations,
+        observations=chunks,
         global_lag=attempt.audio.global_lag,
         confirmed_offset=confirmed,
         fps_reference=fps_reference,
@@ -595,10 +534,10 @@ def _build_targets(
                 kind="run",
                 first_index=run.first_index,
                 last_index=run.last_index,
-                lag=run.lag,
+                lag=competing_run_center(run, chunks),
                 credible=True,
-                start_sample=valid_members[0].start,
-                end_sample=valid_members[-1].start + valid_members[-1].count,
+                start_sample=valid_members[0].reference_start,
+                end_sample=(valid_members[-1].reference_start + valid_members[-1].reference_count),
                 requested_positions=4,
             )
         )
@@ -616,8 +555,8 @@ def _build_targets(
                 last_index=chunk.index,
                 lag=chunk.lag,
                 credible=True,
-                start_sample=chunk.start,
-                end_sample=chunk.start + chunk.count,
+                start_sample=chunk.reference_start,
+                end_sample=chunk.reference_start + chunk.reference_count,
                 requested_positions=4,
             )
         )
@@ -633,8 +572,8 @@ def _build_targets(
                     last_index=chunk.index,
                     lag=chunk.lag,
                     credible=False,
-                    start_sample=chunk.start,
-                    end_sample=chunk.start + chunk.count,
+                    start_sample=chunk.reference_start,
+                    end_sample=chunk.reference_start + chunk.reference_count,
                     requested_positions=2,
                 )
             )
@@ -692,55 +631,75 @@ def _score_hypotheses(
     reference_frame: int,
     confirmed: int,
     alternative_offsets: Sequence[int],
-) -> tuple[float, float] | None:
+) -> tuple[float, float, int | None] | None:
     try:
         reference_image = _read_frame(reference_node, reference_frame)
         confirmed_score = _frame_difference(
             reference_image,
             _read_frame(comparison_node, reference_frame - confirmed),
         )
-        alternative_score = min(
-            _frame_difference(
-                reference_image, _read_frame(comparison_node, reference_frame - offset)
+        alternative_scores = tuple(
+            (
+                offset,
+                _frame_difference(
+                    reference_image,
+                    _read_frame(comparison_node, reference_frame - offset),
+                ),
             )
             for offset in alternative_offsets
         )
     except Exception:
         return None
-    return confirmed_score, alternative_score
+    alternative_score = min(score for _offset, score in alternative_scores)
+    winning_offsets = [offset for offset, score in alternative_scores if score == alternative_score]
+    return (
+        confirmed_score,
+        alternative_score,
+        winning_offsets[0] if len(winning_offsets) == 1 else None,
+    )
 
 
 def _hypothesis_winner(
-    confirmed_score: float, alternative_score: float
+    confirmed_score: float,
+    alternative_score: float,
+    *,
+    alternative_offset: int | None,
 ) -> Literal["confirmed", "alternative", "neither"]:
     if confirmed_score == alternative_score:
         return "neither"
     if confirmed_score == 0.0:
         return "confirmed" if alternative_score > 0.0 else "neither"
     if alternative_score == 0.0:
-        return "alternative" if confirmed_score > 0.0 else "neither"
+        return (
+            "alternative" if confirmed_score > 0.0 and alternative_offset is not None else "neither"
+        )
     if (
         confirmed_score < alternative_score
-        and alternative_score / confirmed_score >= _CONFIRMATION_MARGIN
+        and alternative_score / confirmed_score >= CONFIRMATION_MARGIN
     ):
         return "confirmed"
     if (
         alternative_score < confirmed_score
-        and confirmed_score / alternative_score >= _CONFIRMATION_MARGIN
+        and confirmed_score / alternative_score >= CONFIRMATION_MARGIN
     ):
-        return "alternative"
+        return "alternative" if alternative_offset is not None else "neither"
     return "neither"
 
 
 def _target_resolution(
-    kind: Literal["chunk", "run"], positions: Sequence[VideoTargetPosition]
-) -> Literal["resolved", "unresolved", "alternative_confirmed"]:
+    kind: Literal["chunk", "run"],
+    positions: Sequence[VideoTargetPosition],
+    *,
+    credible: bool,
+) -> Literal["resolved", "unresolved", "alternative_confirmed", "local_video_inconclusive"]:
     winners = [position.winner for position in positions]
     if "alternative" in winners:
         return "alternative_confirmed"
     required = 2 if kind == "run" else 1
     if winners.count("confirmed") >= required:
         return "resolved"
+    if not credible and "neither" in winners:
+        return "local_video_inconclusive"
     return "unresolved"
 
 
@@ -751,7 +710,7 @@ def _check_points(
     confirmed: int,
     scored_offsets: Sequence[int],
     fps_reference: Fraction,
-    chunks: Sequence[_Chunk] = (),
+    chunks: Sequence[ChunkObservation] = (),
     planned_target_frames: Mapping[_TargetKey, Sequence[int]] | None = None,
 ) -> tuple[VideoCheckPoint, ...]:
     points: list[VideoCheckPoint] = []
@@ -779,6 +738,7 @@ def _check_points(
             "resolved": "confirmed",
             "alternative_confirmed": "alternative",
             "unresolved": "neither",
+            "local_video_inconclusive": "neither",
         }[target.resolution]
         preferred = tuple(
             position for position in target.positions if position.winner == preferred_winner
@@ -789,13 +749,27 @@ def _check_points(
         return tuple(
             (
                 position.reference_frame,
-                confirmed if position.winner == "confirmed" else target.target_offset,
+                (
+                    confirmed
+                    if position.winner == "confirmed"
+                    else position.alternative_offset or target.target_offset
+                ),
             )
             for position in (*preferred, *remaining)
         )
 
     def target_offset(target: VideoTargetEvidence) -> int:
-        return confirmed if target.resolution == "resolved" else target.target_offset
+        if target.resolution == "resolved":
+            return confirmed
+        if target.resolution == "alternative_confirmed":
+            winners = {
+                position.alternative_offset
+                for position in target.positions
+                if position.winner == "alternative"
+            }
+            if len(winners) == 1:
+                return next(iter(winners)) or target.target_offset
+        return target.target_offset
 
     candidates: list[_CheckPointTarget] = []
     for order, target in enumerate(targets):
@@ -882,22 +856,6 @@ def _check_points(
             if add_confirmed_point(position):
                 break
 
-    for region in target_regions:
-        for candidate in region:
-            for frame, offset in candidate.points:
-                if len(points) >= 5:
-                    break
-                add_point(frame, offset)
-            if len(points) >= 5:
-                break
-        if len(points) >= 5:
-            break
-
-    if len(points) < 5:
-        for position in base_positions:
-            if len(points) >= 5:
-                break
-            add_confirmed_point(position)
     return tuple(points)
 
 
@@ -923,5 +881,4 @@ __all__ = [
     "VideoCheckResult",
     "VideoClipRequest",
     "check_video_alignment",
-    "sample_to_reference_frame",
 ]

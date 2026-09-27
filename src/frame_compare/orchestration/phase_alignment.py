@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -102,29 +101,20 @@ async def run_align_phase(
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    alignment_kwargs: dict[str, Any] = {
-        "progress": ctx.reporter,
-        "review_summary": review_summary,
-        "reference_fps": ctx.reference.effective_fps,
-        "frame_props_by_stem": {
-            ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
-            **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
-        },
-        "verbose": verbose,
-        "quiet": quiet,
-        "json_output": json_output,
-    }
-    alignment_signature = inspect.signature(align_clips_from_request)
-    accepts_vs_loader = "vs_loader" in alignment_signature.parameters or any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in alignment_signature.parameters.values()
-    )
-    if vs_loader is not None and accepts_vs_loader:
-        alignment_kwargs["vs_loader"] = vs_loader
     results = await align_clips_from_request(
         alignment_request,
         alignment_config,
-        **alignment_kwargs,
+        progress=ctx.reporter,
+        review_summary=review_summary,
+        reference_fps=ctx.reference.effective_fps,
+        frame_props_by_stem={
+            ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
+            **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
+        },
+        vs_loader=vs_loader,
+        verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
     )
 
     updated_comparisons: list[ClipState] = []

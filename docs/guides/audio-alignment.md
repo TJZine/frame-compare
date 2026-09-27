@@ -138,7 +138,7 @@ run is examined and resolved for that frame, and no target confirms an alternati
 `provisional` preserves a candidate but withholds authority for a confirmed
 alternative, unresolved/unexamined credible evidence, an inconclusive base video
 vote, or an unavailable video read. `unavailable` means no candidate can be
-established, and Frame Compare does not invent zero. `video_check_pending` is only
+established, and Frame Compare does not invent zero. `audio_only` is only
 the internal audio-to-video handoff state. Manual confirmation is a separate fact and
 does not rewrite the original audio attempt. The replacement policy identity invalidates stale shared source-set
 entries, including embedded computed results and prior interactive confirmations; cache
@@ -148,6 +148,9 @@ Each run retains that attempt in
 `alignment_diagnostics/comparison-<ordinal>.json` beneath the run folder. The bounded
 schema-v4 file records selected stream metadata with start-time compensation, chunk
 runs, compact per-chunk rows (start, lag, PSR, active/credible/agree flags), the
+actual winning offset for each resolved local video comparison, and losslessly packs
+large repeated row/target collections rather than truncating them. Review region
+times are expressed on the reference-video timeline. The artifact also retains the
 global lag, the sub-frame estimate, the audio decision, and the final review
 resolution. Video evidence includes the base five-offset table, targeted checks,
 same-frame context, and bounded review check points. Diagnostic v4 retains compact

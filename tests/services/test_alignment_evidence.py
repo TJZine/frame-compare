@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from frame_compare.utils.alignment_evidence import (
+    MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
@@ -27,6 +28,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoPositionDifference,
     VideoTargetEvidence,
     VideoTargetPosition,
+    audio_attempt_payload,
     evidence_from_payload,
 )
 
@@ -146,7 +148,7 @@ def attempt_with_chunks(planned: int, *, lag: int = 1177) -> AudioAlignmentAttem
                 subframe_estimate=146.23,
                 basis="audio_only",
             ),
-            primary_reason="video_check_pending",
+            primary_reason="audio_only",
             failed_gates=(),
         ),
         stability=AlignmentStabilitySummary(
@@ -163,8 +165,55 @@ def attempt_with_chunks(planned: int, *, lag: int = 1177) -> AudioAlignmentAttem
 
 
 def test_three_hour_attempt_serializes_within_128kib() -> None:
-    payload = json.dumps(asdict(attempt_with_chunks(360)), allow_nan=False)
+    payload = json.dumps(audio_attempt_payload(attempt_with_chunks(360)), allow_nan=False)
     assert len(payload.encode("utf-8")) <= 128 * 1024
+
+
+def test_maximum_attempt_and_retained_targets_round_trip_within_128kib() -> None:
+    attempt = attempt_with_chunks(MAX_AUDIO_CHUNKS)
+    attempt = replace(
+        attempt,
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(144, 145, 146, 147, 148),
+            confirmed_offset=146,
+            index_build_seconds=0.0,
+            positions=(),
+            targets=tuple(
+                VideoTargetEvidence(
+                    kind="chunk",
+                    first_chunk_index=index,
+                    last_chunk_index=index,
+                    credible=True,
+                    start_sample=index * 240_000,
+                    end_sample=(index + 1) * 240_000,
+                    target_offset=148,
+                    alternative_offsets=(147, 148, 149),
+                    resolution="unexamined",
+                    positions=(),
+                )
+                for index in range(MAX_AUDIO_CHUNKS)
+            ),
+        ),
+    )
+
+    full_payload = audio_attempt_payload(attempt)
+    full_json = json.dumps(full_payload, separators=(",", ":"), allow_nan=False)
+    assert len(full_json.encode("utf-8")) <= 128 * 1024
+    assert evidence_from_payload(AudioAlignmentAttempt, full_payload) == attempt
+
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    compact = _project_audio_attempt_for_review(attempt)
+    compact_payload = audio_attempt_payload(compact)
+    compact_json = json.dumps(compact_payload, separators=(",", ":"), allow_nan=False)
+    assert len(compact_json.encode("utf-8")) <= 128 * 1024
+    assert evidence_from_payload(AudioAlignmentAttempt, compact_payload) == compact
+
+    broken = audio_attempt_payload(attempt)
+    broken["chunks"]["packed_rows"] = "not base64"  # type: ignore[index]
+    with pytest.raises(ValueError, match="packed chunk rows is invalid"):
+        evidence_from_payload(AudioAlignmentAttempt, broken)
 
 
 def _populated_video_attempt() -> AudioAlignmentAttempt:
@@ -217,7 +266,7 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
             target_offset=155,
             alternative_offsets=(154, 155, 156),
             resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(2, 300, 1.0, 0.1, "alternative"),),
+            positions=(VideoTargetPosition(2, 300, 1.0, 0.1, "alternative", 155),),
         ),
     )
     return replace(
@@ -400,19 +449,6 @@ def test_partial_final_target_bounds_survive_compact_projection() -> None:
         target.end_sample / populated.analysis.analysis_rate,
     ) == (60.0, 105.0)
 
-    for candidate in (populated, compact):
-        final_base_end = min(
-            candidate.analysis.planned_chunk_count * candidate.analysis.chunk_samples,
-            candidate.chunks.total_samples,
-        )
-        same_frame = AudioSameFrameContext(3, 1177, 146.23, 146)
-        final_same_frame_end = min(
-            (same_frame.chunk_index + 1) * candidate.analysis.chunk_samples,
-            candidate.chunks.total_samples,
-        )
-        assert final_base_end / candidate.analysis.analysis_rate == 105.0
-        assert final_same_frame_end / candidate.analysis.analysis_rate == 105.0
-
 
 def test_chunk_total_samples_rejects_invalid_plan_spans() -> None:
     attempt = attempt_with_chunks(4)
@@ -546,7 +582,7 @@ def test_native_projection_of_large_attempt_stays_within_bound() -> None:
         algorithm="cross_correlation",
         source="computed",
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="audio_only",
         stability=attempt.stability,
         audio_attempt=attempt,
     )

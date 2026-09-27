@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.types import AlignmentResult
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt
+from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt, audio_attempt_payload
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 
@@ -32,7 +31,7 @@ def _bounded_label(value: str) -> str:
 
 
 def _attempt_payload(attempt: AudioAlignmentAttempt | None) -> dict[str, object] | None:
-    return asdict(attempt) if attempt is not None else None
+    return audio_attempt_payload(attempt) if attempt is not None else None
 
 
 def canonical_attempt_bytes(attempt: AudioAlignmentAttempt) -> bytes:

@@ -52,8 +52,8 @@ from frame_compare.utils.alignment_evidence import (
     VideoPositionDifference,
     VideoTargetEvidence,
     VideoTargetPosition,
-    build_audio_review_presentation,
 )
+from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.logging import configure_logging
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
@@ -62,6 +62,21 @@ from tests.services.test_alignment_evidence import attempt_with_chunks
 
 def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
     attempt = attempt_with_chunks(2)
+    attempt = replace(
+        attempt,
+        decision=replace(
+            attempt.decision,
+            primary_reason="video_check_inconclusive",
+            failed_gates=("video_check_inconclusive",),
+        ),
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=(144, 145, 146, 147, 148),
+            confirmed_offset=None,
+            index_build_seconds=0.1,
+            positions=(),
+        ),
+    )
     return AlignmentResult(
         reference_clip=reference.name,
         comparison_clip=comparison.name,
@@ -71,7 +86,7 @@ def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
         algorithm="cross_correlation",
         source="computed",
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="video_check_inconclusive",
         stability=attempt.stability,
         audio_attempt=attempt,
     )
@@ -182,6 +197,9 @@ def _review_attempt(reason: str):
                             if reason == "competing_offset_confirmed_by_video"
                             else "neither"
                         ),
+                        alternative_offset=(
+                            243 if reason == "competing_offset_confirmed_by_video" else None
+                        ),
                     ),
                 ),
             ),
@@ -274,10 +292,23 @@ def _four_region_attempt():
 
 def _unexamined_attempt():
     attempt = _review_attempt("unresolved_audio_disagreement")
-    target = replace(attempt.video_check.targets[0], resolution="unexamined", positions=())
+    target = attempt.video_check.targets[0]
+    targets = tuple(
+        replace(
+            target,
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            start_sample=index * 240_000,
+            end_sample=(index + 1) * 240_000,
+            resolution="unexamined",
+            positions=(),
+        )
+        for index in (2, 3)
+    )
     return replace(
         attempt,
-        video_check=replace(attempt.video_check, targets=(target,)),
+        video_check=replace(attempt.video_check, targets=targets),
     )
 
 
@@ -294,7 +325,7 @@ def _mixed_resolved_unresolved_attempt():
             target_offset=243,
             alternative_offsets=(242, 243, 244),
             resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(1, 13_123, 1.0, 0.1, "alternative"),),
+            positions=(VideoTargetPosition(1, 13_123, 1.0, 0.1, "alternative", 243),),
         ),
         VideoTargetEvidence(
             kind="chunk",
@@ -328,22 +359,25 @@ def _mixed_resolved_unresolved_attempt():
 
 def _mixed_unresolved_unexamined_attempt():
     attempt = _review_attempt("unresolved_audio_disagreement")
-    unexamined = VideoTargetEvidence(
-        kind="run",
-        first_chunk_index=0,
-        last_chunk_index=1,
-        credible=True,
-        start_sample=(0) * 240_000,
-        end_sample=((1) + 1) * 240_000,
-        target_offset=250,
-        alternative_offsets=(249, 250, 251),
-        resolution="unexamined",
-        positions=(),
+    unexamined = tuple(
+        VideoTargetEvidence(
+            kind="chunk",
+            first_chunk_index=index,
+            last_chunk_index=index,
+            credible=True,
+            start_sample=index * 240_000,
+            end_sample=(index + 1) * 240_000,
+            target_offset=250,
+            alternative_offsets=(249, 250, 251),
+            resolution="unexamined",
+            positions=(),
+        )
+        for index in (0, 1)
     )
     return replace(
         attempt,
         video_check=replace(
-            attempt.video_check, targets=(*attempt.video_check.targets, unexamined)
+            attempt.video_check, targets=(*attempt.video_check.targets, *unexamined)
         ),
     )
 
@@ -459,7 +493,7 @@ def _nested_alternative_confirmed_chunk_attempt():
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(2, 9_001, 1.0, 0.1, "alternative"),),
+            positions=(VideoTargetPosition(2, 9_001, 1.0, 0.1, "alternative", 250),),
         ),
     )
     return replace(
@@ -518,7 +552,7 @@ def _production_nested_targets_attempt():
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative"),),
+            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative", 250),),
         ),
     )
     return replace(
@@ -614,19 +648,32 @@ def _producer_target_context_attempt(*, credible: bool, resolution: str):
         if scores is None
         else (
             VideoTargetPosition(
-                1,
-                1_800,
-                *scores,
-                alignment_video._hypothesis_winner(*scores),
+                position_index=1,
+                reference_frame=1_800,
+                confirmed_score=scores[0],
+                alternative_score=scores[1],
+                winner=alignment_video._hypothesis_winner(
+                    *scores,
+                    alternative_offset=target_offset,
+                ),
+                alternative_offset=(
+                    target_offset if resolution == "alternative_confirmed" else None
+                ),
             ),
         )
     )
     target_resolution = (
         "unexamined"
         if resolution == "unexamined"
-        else alignment_video._target_resolution(producer_target.kind, positions)
+        else alignment_video._target_resolution(
+            producer_target.kind,
+            positions,
+            credible=producer_target.credible,
+        )
     )
-    assert target_resolution == resolution
+    assert target_resolution == (
+        "local_video_inconclusive" if not credible and resolution == "unresolved" else resolution
+    )
     target = VideoTargetEvidence(
         kind=producer_target.kind,
         first_chunk_index=producer_target.first_index,
@@ -788,6 +835,7 @@ def _producer_run_context_attempt(
                     0.1 if winner == "confirmed" else 1.0,
                     0.1 if winner == "alternative" else 1.0,
                     winner,  # type: ignore[arg-type]
+                    target_offset if winner == "alternative" else None,
                 )
                 for offset in range(position_count)
             )
@@ -796,7 +844,11 @@ def _producer_run_context_attempt(
         target_resolution = (
             "unexamined"
             if resolution == "unexamined"
-            else alignment_video._target_resolution(producer_target.kind, positions)
+            else alignment_video._target_resolution(
+                producer_target.kind,
+                positions,
+                credible=producer_target.credible,
+            )
         )
         assert target_resolution == resolution
         targets.append(
@@ -998,7 +1050,7 @@ def _resolved_before_alternative_confirmed_attempt():
             target_offset=250,
             alternative_offsets=(249, 250, 251),
             resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative"),),
+            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative", 250),),
         ),
     )
     return replace(
@@ -1254,7 +1306,10 @@ def test_normal_provisional_copy_is_frozen(
         "Visual confirmation required to use this hint. Align manually or keep the current alignment."
         not in err
     )
-    assert "Video confirmation pending; not applied." in err
+    assert (
+        "The audio points to +146f, but the video could not confirm the exact frame "
+        "(little motion or different framing at the checked points)."
+    ) in err
 
 
 @pytest.mark.parametrize(
@@ -1418,7 +1473,7 @@ def test_json_mode_logs_review_warning(tmp_path: Path, capsys: pytest.CaptureFix
     assert "audio_alignment_requires_review" in captured.err
     assert '"decision_state": "provisional"' in captured.err
     assert '"candidate_frame": 146' in captured.err
-    assert '"reason": "video_check_pending"' in captured.err
+    assert '"reason": "video_check_inconclusive"' in captured.err
 
 
 @pytest.mark.parametrize(
@@ -1486,6 +1541,23 @@ def test_p4a_reason_copy_is_plain_and_shows_check_points(
     assert "audio_alignment_requires_review" in captured.err
     assert f'"reason": "{reason}"' in captured.err
     assert expected not in captured.err
+
+
+def test_combined_raw_audio_and_video_failures_both_render() -> None:
+    attempt = _review_attempt("video_check_unavailable")
+    attempt = replace(
+        attempt,
+        audio=replace(attempt.audio, status="no_single_offset"),
+        decision=replace(
+            attempt.decision,
+            failed_gates=("video_check_unavailable", "no_single_offset"),
+        ),
+    )
+
+    assert build_audio_review_presentation(attempt).reason_lines() == (
+        "The audio points to +146f, but the video could not be read to confirm the exact frame.",
+        "The audio does not agree on one offset across the track.",
+    )
 
 
 def test_audio_failed_but_video_confirmed_gets_v6_reason(
@@ -1821,7 +1893,7 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         build_audio_review_presentation(compact_unexamined).region_lines()
     )
     assert (
-        "+250f  1:00-2:00  not checked"
+        "+250f  1:00-1:30  not checked"
         in build_audio_review_presentation(compact_unexamined).region_lines()
     )
 
@@ -1867,7 +1939,20 @@ def test_authoritative_nested_targets_match_compact_native_projection(
             "Noted: audio differed in 1 section (1:00-1:30); the video confirmed +0f there.",
         ),
         (False, "resolved", "trusted_automatic", "audio_video_confirmed", (), None),
-        (False, "unresolved", "trusted_automatic", "audio_video_confirmed", (), None),
+        (
+            False,
+            "unresolved",
+            "trusted_automatic",
+            "audio_video_confirmed",
+            (
+                "Weak audio in 1:00-1:30 pointed to +2f; video inconclusive there "
+                "(+0f scored 1.000, +2f scored 1.000); not counted.",
+            ),
+            (
+                "Noted: weak audio in 1:00-1:30 pointed elsewhere; the video could "
+                "not settle it, so it was not counted."
+            ),
+        ),
         (True, "unexamined", "provisional", "unresolved_audio_disagreement", (), None),
         (False, "unexamined", "trusted_automatic", "audio_video_confirmed", (), None),
         (
@@ -1992,6 +2077,49 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
         assert json_streams.err == ""
     else:
         assert json.loads(json_streams.err)["reason"] == expected_reason
+
+
+def test_nonzero_reference_start_shifts_full_and_compact_region_times() -> None:
+    from frame_compare.services.alignment import _project_audio_attempt_for_review
+
+    attempt = _producer_target_context_attempt(credible=True, resolution="unresolved")
+    reference, comparison = attempt.selected_streams
+    attempt = replace(
+        attempt,
+        selected_streams=(
+            replace(reference, stream_start_num=10, stream_start_den=1),
+            comparison,
+        ),
+    )
+    compact = _project_audio_attempt_for_review(attempt)
+
+    for candidate in (attempt, compact):
+        review = build_audio_review_presentation(candidate)
+        assert "+2f  1:10-1:40  not settled" in review.region_lines()
+        assert "+2f  1:10–1:40  not settled" in review.region_lines(panel=True)
+
+
+def test_zero_is_retained_as_the_actual_alternative_winner() -> None:
+    attempt = _producer_target_context_attempt(credible=True, resolution="alternative_confirmed")
+    (target,) = attempt.video_check.targets
+    (position,) = target.positions
+    target = replace(
+        target,
+        target_offset=0,
+        alternative_offsets=(-1, 0, 1),
+        positions=(replace(position, alternative_offset=0),),
+    )
+    attempt = replace(
+        attempt,
+        video_check=replace(
+            attempt.video_check,
+            scored_offsets=(0, 1, 2, 3, 4),
+            confirmed_offset=2,
+            targets=(target,),
+        ),
+    )
+
+    assert any(region.offset == 0 for region in build_audio_review_presentation(attempt).regions)
 
 
 def test_resolved_credible_run_context_matches_full_and_compact_terminal(
@@ -2342,7 +2470,7 @@ def test_video_vote_uses_only_strict_informative_positions() -> None:
     assert review.video_informative == 6
     assert review.video_margin == pytest.approx(2.0)
     assert review.established_video_line() == (
-        "Video: confirmed +146f at 6 of 7 check points (median margin 2.0×)."
+        "Video: confirmed +146f at 6 of 7 check points (median margin 2.0x)."
     )
 
 
@@ -2369,7 +2497,10 @@ def test_applied_noted_line_only_exists_with_context(
     reference, comparison, request = _request_for(tmp_path, config)
     plain = _producer_target_context_attempt(credible=False, resolution="unresolved")
     _present(request, _applied_result(reference, comparison, plain), config)
-    assert "Noted:" not in capsys.readouterr().err
+    assert (
+        "Noted: weak audio in 1:00-1:30 pointed elsewhere; the video could not settle it, "
+        "so it was not counted."
+    ) in capsys.readouterr().err
 
     contextual = replace(
         plain,
@@ -2409,7 +2540,7 @@ def test_p4a_verbose_rows_include_established_context_and_all_checks(
     _present(request, result, config, verbose=True)
 
     err = capsys.readouterr().err
-    assert "Established: Audio: 4 of 4 credible sections agree on +146f" in err
+    assert "Established: Audio: 4 of 4 clear sections agree on +146f" in err
     assert "Video: confirmed +146f at 1 of 1 check points" in err
     assert "Regions: +146f" in err
     assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in err
@@ -2429,32 +2560,28 @@ def test_p4a_verbose_rows_include_established_context_and_all_checks(
             4,
             3,
             3,
-            "Audio: 3 of 3 credible sections agree on +0f "
-            "(0 differ; 1 active with weak evidence; 0 inactive).",
+            "Audio: 3 of 3 clear sections agree on +0f (0 differ; 1 weak, 0 quiet not counted).",
         ),
         (
             4,
             3,
             3,
             3,
-            "Audio: 3 of 3 credible sections agree on +0f "
-            "(0 differ; 0 active with weak evidence; 1 inactive).",
+            "Audio: 3 of 3 clear sections agree on +0f (0 differ; 0 weak, 1 quiet not counted).",
         ),
         (
             5,
             4,
             3,
             3,
-            "Audio: 3 of 3 credible sections agree on +0f "
-            "(0 differ; 1 active with weak evidence; 1 inactive).",
+            "Audio: 3 of 3 clear sections agree on +0f (0 differ; 1 weak, 1 quiet not counted).",
         ),
         (
             4,
             0,
             0,
             0,
-            "Audio: 0 of 0 credible sections agree on +0f "
-            "(0 differ; 0 active with weak evidence; 4 inactive).",
+            "Audio: 0 of 0 clear sections agree on +0f (0 differ; 0 weak, 4 quiet not counted).",
         ),
     ],
 )

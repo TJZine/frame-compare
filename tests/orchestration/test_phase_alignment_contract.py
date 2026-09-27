@@ -33,6 +33,7 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
+from frame_compare.vs.loader import VSLoader
 from tests.orchestration.phase_task_helpers import _clip, _run_align_phase, _workspace
 
 _REFERENCE_DIGEST = "a" * 64
@@ -232,7 +233,7 @@ def _agreed_attempt(*, ordinal: int, frame_offset: int, reason: str) -> AudioAli
 
 def provisional_audio_attempt(*, ordinal: int = 1, frame_offset: int = 0) -> AudioAlignmentAttempt:
     """Agreed audio stage awaiting video confirmation (the U3 applied-nothing state)."""
-    return _agreed_attempt(ordinal=ordinal, frame_offset=frame_offset, reason="video_check_pending")
+    return _agreed_attempt(ordinal=ordinal, frame_offset=frame_offset, reason="audio_only")
 
 
 def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
@@ -420,7 +421,7 @@ def test_provisional_audio_candidate_cannot_reach_trim_authority(
                 algorithm="cross_correlation",
                 source="computed",
                 applied=False,
-                diagnostic="video_check_pending",
+                diagnostic="audio_only",
                 audio_attempt=attempt,
             )
         ],
@@ -478,7 +479,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         algorithm="cross_correlation",
         source="computed",
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="audio_only",
         audio_attempt=attempt,
     )
     monkeypatch.setattr(
@@ -500,6 +501,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         quiet: bool = False,
         json_output: bool = False,
         review_summary: AlignmentReviewSummary | None = None,
+        vs_loader: VSLoader | None = None,
     ) -> list[AlignmentResult]:
         results = await real_align(
             request,
@@ -511,6 +513,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             quiet=quiet,
             json_output=json_output,
             review_summary=review_summary,
+            vs_loader=vs_loader,
         )
         assert len(results) == 1
         assert results[0].audio_attempt == attempt

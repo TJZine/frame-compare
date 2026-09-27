@@ -297,7 +297,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
         algorithm="cross_correlation",
         source="computed",
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="audio_only",
         stability=attempt.stability,
         audio_attempt=attempt,
     )

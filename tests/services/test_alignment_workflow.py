@@ -249,7 +249,12 @@ def test_insert_gives_no_single_offset_with_runs(
 
     assert result.applied is False
     assert result.frame_offset is None
-    assert result.diagnostic == "no_single_offset"
+    assert result.diagnostic == "video_check_unavailable"
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.decision.failed_gates == (
+        "video_check_unavailable",
+        "no_single_offset",
+    )
     attempt = result.audio_attempt
     assert attempt is not None
     assert attempt.audio.status == "no_single_offset"

@@ -160,7 +160,7 @@ def audio_attempt() -> AudioAlignmentAttempt:
                 subframe_estimate=0.0,
                 basis="audio_only",
             ),
-            primary_reason="video_check_pending",
+            primary_reason="audio_only",
             failed_gates=(),
         ),
         stability=AlignmentStabilitySummary(
@@ -220,7 +220,7 @@ def maximum_audio_attempt() -> AudioAlignmentAttempt:
                 subframe_estimate=subframe,
                 basis="audio_only",
             ),
-            primary_reason="video_check_pending",
+            primary_reason="audio_only",
             failed_gates=(),
         ),
         stability=AlignmentStabilitySummary(
@@ -323,7 +323,7 @@ def _result(attempt: AudioAlignmentAttempt, *, manual: bool = False) -> Alignmen
         algorithm=None if manual else "cross_correlation",
         source="manual" if manual else "computed",
         applied=manual,
-        diagnostic=None if manual else "video_check_pending",
+        diagnostic=None if manual else "audio_only",
         stability=attempt.stability,
         audio_attempt=attempt,
     )
@@ -506,7 +506,9 @@ def test_maximum_chunked_artifact_fits_the_fixed_byte_bound(tmp_path: Path) -> N
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert size < 128 * 1024
-    assert len(payload["original_audio_attempt"]["chunks"]["starts"]) == 360
+    assert "packed_rows" in payload["original_audio_attempt"]["chunks"]
+    parsed = evidence_from_payload(AudioAlignmentAttempt, payload["original_audio_attempt"])
+    assert len(parsed.chunks.starts) == 360
     assert len(payload["original_audio_attempt"]["collection"]) == 2
     assert payload["original_audio_attempt"]["video_check"]["targets"][0]["target_offset"] == 6
     assert payload["original_audio_attempt"]["video_check"]["targets"][0]["credible"] is True

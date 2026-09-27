@@ -19,9 +19,11 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
+    audio_unavailable_phrase,
+)
+from frame_compare.utils.alignment_review_projection import (
     EvidenceRow,
     audio_evidence_rows,
-    audio_unavailable_phrase,
     build_audio_review_presentation,
 )
 from frame_compare.utils.progress import RichProgressReporter

@@ -17,10 +17,7 @@ from frame_compare.services.alignment_correlation import (
     plan_audio_chunks,
 )
 from frame_compare.services.alignment_decision import (
-    V6_PRIMARY_REASON_ORDER,
-    VIDEO_CHECK_PENDING_REASON,
     classify_audio_disagreements,
-    compensated_offset_seconds,
     correlation_score,
     decide_aborted_stage,
     decide_after_video,
@@ -29,7 +26,6 @@ from frame_compare.services.alignment_decision import (
     derive_stability,
     is_trusted_automatic,
     recount_audio_authority,
-    rounded_frame,
     subframe_estimate,
     v6_failure_reasons,
 )
@@ -40,6 +36,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetEvidence,
     VideoTargetPosition,
 )
+from frame_compare.utils.alignment_policy import compensated_offset_seconds, rounded_frame
 from tests.services.alignment_synthetic_audio import (
     insert_program,
     make_program,
@@ -115,14 +112,14 @@ def test_subframe_estimate_and_rounding() -> None:
     assert subframe_estimate(offset_seconds=6.1, fps_reference=Fraction(24, 1)) == pytest.approx(
         146.4
     )
-    assert rounded_frame(146.4) == 146
-    assert rounded_frame(146.5) == 147
-    assert rounded_frame(-2.0) == -2
-    assert rounded_frame(-2.5) == -2
-    assert rounded_frame(-2.51) == -3
+    assert rounded_frame(146.4, Fraction(1)) == 146
+    assert rounded_frame(146.5, Fraction(1)) == 147
+    assert rounded_frame(-2.0, Fraction(1)) == -2
+    assert rounded_frame(-2.5, Fraction(1)) == -2
+    assert rounded_frame(-2.51, Fraction(1)) == -3
 
 
-def test_agreed_decision_is_provisional_pending_video_check() -> None:
+def test_agreed_decision_is_internal_audio_only_candidate() -> None:
     reference = make_program(SEED, 35.0)
     comparison = shift_signal(reference, 1668)
     decided = decide(reference, comparison)
@@ -131,7 +128,7 @@ def test_agreed_decision_is_provisional_pending_video_check() -> None:
     assert decided.audio.status == "agreed"
     assert decided.audio.global_lag == -1668
     assert decided.decision.state == "provisional"
-    assert decided.decision.primary_reason == VIDEO_CHECK_PENDING_REASON == "video_check_pending"
+    assert decided.decision.primary_reason == "audio_only"
     assert decided.decision.failed_gates == ()
     candidate = decided.decision.candidate
     assert candidate is not None
@@ -145,50 +142,37 @@ def test_agreed_decision_is_provisional_pending_video_check() -> None:
     assert decided.stability.classification == "stable"
 
 
-def test_compensation_flows_into_candidate() -> None:
+@pytest.mark.parametrize(
+    ("reference_start", "comparison_start", "seconds", "frame"),
+    [
+        (Fraction(1, 5), Fraction(0), 0.2, 5),
+        (Fraction(0), Fraction(1, 2), -0.5, -12),
+        (Fraction(1, 2), Fraction(0), 0.5, 12),
+    ],
+)
+def test_start_compensation_flows_into_candidate(
+    reference_start: Fraction,
+    comparison_start: Fraction,
+    seconds: float,
+    frame: int,
+) -> None:
     reference = make_program(SEED, 35.0)
     comparison = shift_signal(reference, 0)
-    decided = decide(reference, comparison, reference_audio_start=Fraction(1, 5))
-
-    candidate = decided.decision.candidate
-    assert candidate is not None
-    assert candidate.time_offset_seconds == pytest.approx(0.2)
-    expected_subframe = 0.2 * float(FPS)
-    assert candidate.subframe_estimate == pytest.approx(expected_subframe)
-    assert candidate.frame_offset == math.floor(expected_subframe + 0.5)
-    assert decided.audio.compensation_seconds == pytest.approx(0.2)
-
-
-def test_completed_stage_compensates_delayed_comparison() -> None:
-    """A +0.5 s comparison audio start lands on a negative candidate frame."""
-    reference = make_program(SEED, 35.0)
-    comparison = shift_signal(reference, 0)
-    decided = decide(reference, comparison, comparison_audio_start=Fraction(1, 2))
+    decided = decide(
+        reference,
+        comparison,
+        reference_audio_start=reference_start,
+        comparison_audio_start=comparison_start,
+    )
 
     assert decided.audio.global_lag == 0
-    assert decided.audio.compensation_seconds == pytest.approx(-0.5)
+    assert decided.audio.compensation_seconds == pytest.approx(seconds)
     candidate = decided.decision.candidate
     assert candidate is not None
-    assert candidate.time_offset_seconds == pytest.approx(-0.5)
-    expected_subframe = -0.5 * float(FPS)
+    assert candidate.time_offset_seconds == pytest.approx(seconds)
+    expected_subframe = seconds * float(FPS)
     assert candidate.subframe_estimate == pytest.approx(expected_subframe)
-    assert candidate.frame_offset == math.floor(expected_subframe + 0.5) == -12
-
-
-def test_completed_stage_compensates_delayed_reference() -> None:
-    """A +0.5 s reference audio start lands on a positive candidate frame."""
-    reference = make_program(SEED, 35.0)
-    comparison = shift_signal(reference, 0)
-    decided = decide(reference, comparison, reference_audio_start=Fraction(1, 2))
-
-    assert decided.audio.global_lag == 0
-    assert decided.audio.compensation_seconds == pytest.approx(0.5)
-    candidate = decided.decision.candidate
-    assert candidate is not None
-    assert candidate.time_offset_seconds == pytest.approx(0.5)
-    expected_subframe = 0.5 * float(FPS)
-    assert candidate.subframe_estimate == pytest.approx(expected_subframe)
-    assert candidate.frame_offset == math.floor(expected_subframe + 0.5) == 12
+    assert candidate.frame_offset == frame
 
 
 def test_half_second_in_sync_delay_stability_matches_zero_candidate() -> None:
@@ -367,7 +351,16 @@ def _target(
     if resolution == "unexamined":
         positions = ()
     elif resolution == "alternative_confirmed":
-        positions = (VideoTargetPosition(position_index, position_index, 1.0, 0.1, "alternative"),)
+        positions = (
+            VideoTargetPosition(
+                position_index,
+                position_index,
+                1.0,
+                0.1,
+                "alternative",
+                1,
+            ),
+        )
     elif resolution == "resolved":
         count = 2 if kind == "run" else 1
         positions = tuple(
@@ -452,6 +445,18 @@ def test_decide_after_video_trusts_the_recounted_authority() -> None:
         comparison_audio_start=Fraction(0),
         comparison_video_start=Fraction(0),
         fps_reference=Fraction(24),
+    )
+
+    unavailable = decide_after_video(
+        stage=stage,
+        estimate=estimate,
+        plan=plan,
+        video=_video(observed=False),
+        fps_reference=Fraction(24),
+    )
+    assert unavailable.decision.failed_gates == (
+        "video_check_unavailable",
+        "no_single_offset",
     )
 
     decided = decide_after_video(
@@ -588,7 +593,11 @@ def test_v6_reason_ordering_uses_the_plan_order() -> None:
         competing_runs=(run,),
         credible_disagreements=(credible,),
     )
-    assert ordered[:3] == V6_PRIMARY_REASON_ORDER[:3]
+    assert ordered == (
+        "competing_offset_confirmed_by_video",
+        "competing_offset",
+        "unresolved_audio_disagreement",
+    )
 
 
 @pytest.mark.parametrize(

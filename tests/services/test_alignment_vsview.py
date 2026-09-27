@@ -327,7 +327,7 @@ def test_pending_review_without_launch_marks_review_unresolved(
         algorithm="cross_correlation",
         source="computed",
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="audio_only",
         stability=attempt.stability,
         audio_attempt=attempt,
     )

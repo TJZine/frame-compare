@@ -445,7 +445,7 @@ facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
 compensation, the sub-frame estimate, the A4b authority recount, the video
 observation, and the final decision. Under the shipped
 `whole-track-chunked-phat-video-check-20260925` policy, the audio-only decision is an
-internal `video_check_pending` seam. When a global lag exists, `alignment_video`
+internal `audio_only` seam. When a global lag exists, `alignment_video`
 checks the run's own L-SMASH sources in the same worker thread and
 `alignment_decision` combines the result. Only `trusted_automatic` with reason
 `audio_video_confirmed` is applied, trimmed, or written to the computed cache;
@@ -527,9 +527,11 @@ crop/downscale/rank scoring, cancellation and source-identity checks, and bounde
 review check-point construction. It never falls back to FFMS2. A missing or failing
 loader becomes `video_check_unavailable`, not a run failure.
 `frame_compare.utils.alignment_evidence` is the single definition of the v4
-evidence schema and shared P4/P4a presentation projection: frozen dataclasses, one
-strict standard-library payload walker/parser, and decision/region/check-point
-strings consumed by both terminal and panel renderers. `alignment_presentation`
+evidence schema: frozen dataclasses, one strict standard-library payload walker/parser,
+and lossless packing for large repeated row/target collections. Pure shared alignment
+math and vote policy live in `utils.alignment_policy`; the shared P4/P4a
+decision/region/check-point projection lives in `utils.alignment_review_projection`
+and is consumed by both terminal and panel renderers. `alignment_presentation`
 owns the terminal/Rich and structured-warning rendering of that projection;
 `alignment_review_panel` renders the same projection in VSView. Native metadata v5
 uses a bounded compact projection: per-chunk columns are empty, but runs,
@@ -1023,7 +1025,9 @@ Runtime ownership matrix:
 | Pure numeric chunked GCC-PHAT estimation: chunk planning, per-chunk prominence, global-lag accumulation, and agreement gating | `frame_compare.services.alignment_correlation` |
 | Audio/video authority decision: compensation and rounding, A4a/A4b classification and recount, V6 trusted predicate/reason ordering, stability, and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
 | Bounded L-SMASH video confirmation, V3/V3a sampling, V5/V5a scoring, cancellation/identity checks, and review check points | `frame_compare.services.alignment_video` |
-| Single definition of diagnostic-v4 evidence, metadata-v5 compact projection facts, strict payload parsing, and shared P4/P4a presentation policy | `frame_compare.utils.alignment_evidence` |
+| Single definition of diagnostic-v4 evidence, metadata-v5 compact projection facts, strict payload parsing, and lossless repeated-evidence packing | `frame_compare.utils.alignment_evidence` |
+| Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.utils.alignment_policy` |
+| Shared P4/P4a terminal/panel presentation projection | `frame_compare.utils.alignment_review_projection` |
 | Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |

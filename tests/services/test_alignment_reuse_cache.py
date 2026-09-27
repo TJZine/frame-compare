@@ -449,7 +449,7 @@ def test_computed_this_run_provisional_result_is_not_write_eligible(
         decision=replace(
             attempt.decision,
             state="provisional",
-            primary_reason="video_check_pending",
+            primary_reason="audio_only",
         ),
     )
     result = replace(
@@ -457,7 +457,7 @@ def test_computed_this_run_provisional_result_is_not_write_eligible(
         frame_offset=None,
         time_offset_seconds=None,
         applied=False,
-        diagnostic="video_check_pending",
+        diagnostic="audio_only",
         audio_attempt=provisional,
     )
 
@@ -472,9 +472,7 @@ def test_applied_result_cannot_carry_provisional_evidence(tmp_path: Path) -> Non
     attempt = _trusted_attempt(42)
     provisional = replace(
         attempt,
-        decision=replace(
-            attempt.decision, state="provisional", primary_reason="video_check_pending"
-        ),
+        decision=replace(attempt.decision, state="provisional", primary_reason="audio_only"),
     )
     with pytest.raises(ValueError, match="untrusted audio evidence"):
         replace(_result(request), audio_attempt=provisional)
