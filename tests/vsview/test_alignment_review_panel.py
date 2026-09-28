@@ -63,6 +63,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
 from tests.services.test_alignment_evidence import retimed_comparison_stream, stream
 from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
+    _boundary_video_inconclusive_attempt,
     _multi_context_attempt,
     _producer_count_attempt,
     _producer_run_context_attempt,
@@ -1653,6 +1654,37 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     assert cast(QLabel, details.findChild(QLabel)).textInteractionFlags() & selectable == selectable
 
 
+def test_p4a_panel_shows_boundary_video_hint_as_provisional(
+    tmp_path: Path,
+) -> None:
+    attempt = _boundary_video_inconclusive_attempt()
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=audio_review,
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert (
+        "The sound and picture suggest different starting points. Audio suggests +146 frames; "
+        "the checked scenes favor +148 frames. No automatic change was made. Open VSView to "
+        "choose the frame where the pictures line up."
+    ) in summary
+    assert "confirmed +148f" not in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert not panel.use_positions_button.isEnabled()
+
+
 def test_p4a_panel_context_rows_use_one_key_and_continuations(tmp_path: Path) -> None:
     attempt = _multi_context_attempt()
     audio_review = json.dumps(
@@ -1698,7 +1730,7 @@ def test_p4a_panel_context_rows_use_one_key_and_continuations(tmp_path: Path) ->
         ),
         (
             "video_check_inconclusive",
-            "The audio points to +146f, but the video could not confirm the exact frame",
+            "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures.",
         ),
         (
             "video_check_unavailable",

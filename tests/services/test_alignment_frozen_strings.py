@@ -253,6 +253,19 @@ def _review_attempt(reason: str):
     )
 
 
+def _boundary_video_inconclusive_attempt(*, position_count: int = 6):
+    attempt = _review_attempt("video_check_inconclusive")
+    positions = tuple(
+        VideoPositionDifference(
+            position_index=index,
+            reference_frame=6_474 + index,
+            score_by_offset=(2.0, 1.8, 1.4, 1.2, 0.1),
+        )
+        for index in range(position_count)
+    )
+    return replace(attempt, video_check=replace(attempt.video_check, positions=positions))
+
+
 def _early_competing_run_attempt():
     attempt = _review_attempt("competing_offset_confirmed_by_video")
     target = replace(
@@ -1308,9 +1321,28 @@ def test_normal_provisional_copy_is_frozen(
         not in err
     )
     assert (
-        "The audio points to +146f, but the video could not confirm the exact frame "
-        "(little motion or different framing at the checked points)."
+        "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures. "
+        "No automatic change was made. Open VSView to check the lineup."
     ) in err
+
+
+def test_inconclusive_copy_reports_a_strong_boundary_hint_without_confirming_it() -> None:
+    review = build_audio_review_presentation(_boundary_video_inconclusive_attempt())
+
+    assert review.reason_lines() == (
+        "The sound and picture suggest different starting points. Audio suggests +146 frames; "
+        "the checked scenes favor +148 frames. No automatic change was made. Open VSView to "
+        "choose the frame where the pictures line up.",
+    )
+
+
+def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -> None:
+    review = build_audio_review_presentation(_boundary_video_inconclusive_attempt(position_count=4))
+
+    assert review.reason_lines() == (
+        "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures. "
+        "No automatic change was made. Open VSView to check the lineup.",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1517,7 +1549,7 @@ def test_json_mode_logs_review_warning(tmp_path: Path, capsys: pytest.CaptureFix
         ),
         (
             "video_check_inconclusive",
-            "The audio points to +146f, but the video could not confirm the exact frame",
+            "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures.",
         ),
         (
             "video_check_unavailable",
