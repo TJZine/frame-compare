@@ -1711,8 +1711,10 @@ states under `whole-track-chunked-phat-video-check-20260925`:
   `unresolved_audio_disagreement`, `video_check_inconclusive`,
   `video_check_unavailable`. `failed_gates` retains every applicable reason. When
   raw audio is `no_single_offset` but still has a global lag and video confirms a
-  review frame, the final state is provisional with `no_single_offset` rather than
-  trusted.
+  frame, the post-video agreement recount decides: sections that round to the
+  confirmed frame count as agreeing, and if the recount passes with every other V6
+  conjunct the result is `trusted_automatic`. If the recount fails, the final state
+  is provisional and keeps `no_single_offset`.
 - `unavailable`: no candidate can be established. Final reasons include
   `no_single_offset`, `search_edge`, `no_usable_audio`,
   `selected_audio_timeline_unavailable`, `analysis_budget_exceeded`,
@@ -1721,8 +1723,7 @@ states under `whole-track-chunked-phat-video-check-20260925`:
   into a provisional review hint, but never into trusted authority unless every V6
   conjunct passes.
 
-`video_check_pending` is only the internal pre-video decision and is not the final
-fresh result when the video stage has run. A provisional value never applies, trims,
+A provisional value never applies, trims,
 writes the computed cache, prefills manual fields, moves a VSView playhead, marks a
 source visited, increases readiness, or enables confirmation. A manual result keeps
 the original attempt as separate diagnostic history. Whole-track support does not
