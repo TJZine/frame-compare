@@ -116,7 +116,9 @@ def _stub_transport(
         lambda *args, **kwargs: _selection(),
     )
 
-    def argv(path: Path, stream: object, *, channel_strategy: str) -> list[str]:
+    def argv(
+        path: Path, stream: object, *, channel_strategy: str, timeline_scale: Fraction
+    ) -> list[str]:
         pcm = reference_pcm if Path(path).stem == "reference" else comparison_pcm
         return _writer_argv(pcm)
 
@@ -175,7 +177,7 @@ def test_agreed_pair_without_loader_is_video_unavailable(
     assert attempt is not None
     assert attempt.status == "complete"
     assert attempt.comparison_ordinal == 1
-    assert attempt.estimator_policy == "whole-track-chunked-phat-video-check-20260925"
+    assert attempt.estimator_policy == "whole-track-chunked-phat-video-check-retimed-20260928"
     assert attempt.diagnostic_policy == "retained-audio-evidence-v1"
     assert (attempt.fps_num, attempt.fps_den) == (FPS.numerator, FPS.denominator)
     assert [s.role for s in attempt.selected_streams] == ["reference", "comparison"]

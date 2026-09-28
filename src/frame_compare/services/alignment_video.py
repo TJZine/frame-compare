@@ -459,8 +459,8 @@ def _stream_start(
 ) -> Fraction:
     stream = next(item for item in attempt.selected_streams if item.role == role)
     if video:
-        return Fraction(stream.video_start_num, stream.video_start_den)
-    return Fraction(stream.stream_start_num, stream.stream_start_den)
+        return stream.analysis_video_start
+    return stream.analysis_audio_start
 
 
 def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:

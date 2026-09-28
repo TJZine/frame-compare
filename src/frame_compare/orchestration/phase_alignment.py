@@ -424,6 +424,8 @@ def _alignment_clip_request(
         trim_end_frame_inclusive=clip.trim.trim_end_frame_inclusive,
         effective_fps_num=clip.effective_fps.numerator,
         effective_fps_den=clip.effective_fps.denominator,
+        source_fps_num=clip.source_fps.numerator,
+        source_fps_den=clip.source_fps.denominator,
         source_frame_count=clip.probe.num_frames,
         selected_audio_stream=selected_audio_stream,
         active_rect_x=None if clip.active_rect is None else clip.active_rect.x,

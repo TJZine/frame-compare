@@ -67,7 +67,7 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
         comparison_identity_digest="e" * 64,
         comparison_ordinal=1,
         status="complete",
-        estimator_policy="whole-track-chunked-phat-video-check-20260925",
+        estimator_policy="whole-track-chunked-phat-video-check-retimed-20260928",
         diagnostic_policy="retained-audio-evidence-v1",
         media_runtime_fingerprint="alignment-runtime",
         ffmpeg_version="not_observed",
@@ -107,6 +107,8 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
                 video_start_num=0,
                 video_start_den=1,
                 video_start_basis="default_zero",
+                timeline_scale_num=1,
+                timeline_scale_den=1,
             ),
             SelectedAudioStreamEvidence(
                 role="comparison",
@@ -139,6 +141,8 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
                 video_start_num=0,
                 video_start_den=1,
                 video_start_basis="default_zero",
+                timeline_scale_num=1,
+                timeline_scale_den=1,
             ),
         ),
         analysis=AudioAnalysisFacts(

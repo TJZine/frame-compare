@@ -63,7 +63,7 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
         comparison_identity_digest="e" * 64,
         comparison_ordinal=1,
         status="complete",
-        estimator_policy="whole-track-chunked-phat-video-check-20260925",
+        estimator_policy="whole-track-chunked-phat-video-check-retimed-20260928",
         diagnostic_policy="retained-audio-evidence-v1",
         media_runtime_fingerprint="alignment-runtime",
         ffmpeg_version="not_observed",
@@ -103,6 +103,8 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
                 video_start_num=0,
                 video_start_den=1,
                 video_start_basis="default_zero",
+                timeline_scale_num=1,
+                timeline_scale_den=1,
             ),
             SelectedAudioStreamEvidence(
                 role="comparison",
@@ -135,6 +137,8 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
                 video_start_num=0,
                 video_start_den=1,
                 video_start_basis="default_zero",
+                timeline_scale_num=1,
+                timeline_scale_den=1,
             ),
         ),
         analysis=AudioAnalysisFacts(
@@ -208,6 +212,8 @@ def _clip(path: Path, *, label: str, stream: int | None = None) -> AlignmentClip
         trim_end_frame_inclusive=None,
         effective_fps_num=24000,
         effective_fps_den=1001,
+        source_fps_num=24000,
+        source_fps_den=1001,
         source_frame_count=100,
         selected_audio_stream=stream,
     )
@@ -611,7 +617,7 @@ def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
     settings = _first_entry(data)["settings"]
     assert isinstance(settings, dict)
     assert settings == {
-        "estimator_policy": "whole-track-chunked-phat-video-check-20260925",
+        "estimator_policy": "whole-track-chunked-phat-video-check-retimed-20260928",
         "max_offset_seconds": 30.0,
         "channel_strategy": "mono_downmix",
     }

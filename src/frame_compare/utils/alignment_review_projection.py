@@ -363,6 +363,13 @@ class AudioReviewPresentation:
 
     def context_lines(self, *, panel: bool = False) -> tuple[str, ...]:
         lines: list[str] = []
+        for stream in self.attempt.selected_streams:
+            if stream.timeline_scale != 1:
+                role = "Reference" if stream.role == "reference" else "Comparison"
+                lines.append(
+                    f"{role} audio retimed x{float(stream.timeline_scale):.4f} "
+                    "to its effective frame rate."
+                )
         recount = self.attempt.authority_recount
         if recount is not None and recount.raw_agreeing_chunks != recount.authority_agreeing_chunks:
             lines.append(
@@ -550,14 +557,8 @@ def _review_sample_time(attempt: AudioAlignmentAttempt, sample: int) -> float:
     return float(
         sample_to_reference_video_time(
             sample,
-            audio_start_reference=Fraction(
-                reference.stream_start_num,
-                reference.stream_start_den,
-            ),
-            video_start_reference=Fraction(
-                reference.video_start_num,
-                reference.video_start_den,
-            ),
+            audio_start_reference=reference.analysis_audio_start,
+            video_start_reference=reference.analysis_video_start,
         )
     )
 

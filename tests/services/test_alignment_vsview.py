@@ -54,6 +54,8 @@ def _clip(path: Path, *, frame_count: int = 200) -> AlignmentClipRequest:
         trim_end_frame_inclusive=None,
         effective_fps_num=24,
         effective_fps_den=1,
+        source_fps_num=24,
+        source_fps_den=1,
         source_frame_count=frame_count,
         presentation_name=path.stem.title(),
     )

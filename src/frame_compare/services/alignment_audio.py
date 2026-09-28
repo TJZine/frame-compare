@@ -25,6 +25,8 @@ from frame_compare.utils.subproc import run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 
+MAX_RETIME_RATE = 384_000
+
 
 @dataclass(frozen=True)
 class AudioStreamTimeline:
@@ -518,6 +520,7 @@ def selected_stream_evidence(
     source_identity_digest: str,
     explicit_override: bool,
     video_start: VideoStreamStart,
+    timeline_scale: Fraction,
     reference_stream: AudioStreamInfo | None = None,
 ) -> SelectedAudioStreamEvidence:
     """Project the resolved choice into bounded, pathless diagnostic facts."""
@@ -576,6 +579,8 @@ def selected_stream_evidence(
         video_start_num=video_start.start_time.numerator,
         video_start_den=video_start.start_time.denominator,
         video_start_basis=video_start.basis,
+        timeline_scale_num=timeline_scale.numerator,
+        timeline_scale_den=timeline_scale.denominator,
     )
 
 
@@ -583,7 +588,7 @@ def normalized_extraction_recipe() -> str:
     """Describe extraction without retaining media paths or a concrete command line."""
     return (
         "ffmpeg -i <role_input> -map 0:a:<selected_ordinal> -vn "
-        "[channel] -af <channel>,aresample=8000 -f f32le -"
+        "[channel] -af <channel>[,aresample=<r1>,asetrate=<r2>],aresample=8000 -f f32le -"
     )
 
 
@@ -603,11 +608,32 @@ def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
     return "pan=mono|c0=c0"
 
 
+def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
+    """Exact resample/relabel rates that stretch audio time by ``timeline_scale``.
+
+    Returns ``None`` for a scale of 1. Raises ``AudioAlignmentError`` with
+    category ``selected_audio_timeline_unavailable`` when a rate would exceed
+    ``MAX_RETIME_RATE``.
+    """
+    if timeline_scale == 1:
+        return None
+    p, q = timeline_scale.numerator, timeline_scale.denominator
+    m = -(-AUDIO_ANALYSIS_SAMPLE_RATE // min(p, q))
+    if max(p, q) * m > MAX_RETIME_RATE:
+        raise AudioAlignmentError(
+            "retimed audio rate is not supported",
+            category="selected_audio_timeline_unavailable",
+            stage="planning",
+        )
+    return p * m, q * m
+
+
 def collection_argv(
     video_path: Path,
     stream: AudioStreamInfo,
     *,
     channel_strategy: AlignmentChannelStrategy,
+    timeline_scale: Fraction,
 ) -> list[str]:
     """Build the canonical whole-track 8 kHz mono float32 FFmpeg recipe."""
     filters: list[str] = []
@@ -616,7 +642,14 @@ def collection_argv(
     else:
         channel_args = []
         filters.append(_best_channel_audio_filter(stream))
-    filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
+    rates = retime_rates(timeline_scale)
+    if rates is None:
+        filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
+    else:
+        first_rate, second_rate = rates
+        filters.append(f"aresample={first_rate}")
+        filters.append(f"asetrate={second_rate}")
+        filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
     return [
         "ffmpeg",
         "-i",

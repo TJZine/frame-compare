@@ -374,9 +374,14 @@ def _evidence_collection_facts(
 
 def _selection_start_facts(
     selection: alignment_audio.AudioStreamSelection,
+    *,
+    timeline_scale: Fraction,
 ) -> tuple[Fraction, Fraction]:
     """Return the (audio start, video start) A5 facts for one selection."""
-    return (selection.stream.timeline.start_time, selection.video_start.start_time)
+    return (
+        selection.stream.timeline.start_time * timeline_scale,
+        selection.video_start.start_time * timeline_scale,
+    )
 
 
 def _build_audio_attempt(
@@ -413,6 +418,7 @@ def _build_audio_attempt(
                 source_identity_digest=_clip_identity_digest(reference),
                 explicit_override=config.reference_stream is not None,
                 video_start=reference_selection.video_start,
+                timeline_scale=reference.timeline_scale,
             ),
             alignment_audio.selected_stream_evidence(
                 comparison_selection.stream,
@@ -420,6 +426,7 @@ def _build_audio_attempt(
                 source_identity_digest=_clip_identity_digest(comparison),
                 explicit_override=config.comparison_streams.get(comparison.path.stem) is not None,
                 video_start=comparison_selection.video_start,
+                timeline_scale=comparison.timeline_scale,
                 reference_stream=reference_selection.stream,
             ),
         ),
@@ -476,9 +483,11 @@ def _rejected_result(
 ) -> AlignmentResult:
     """Build a preanalysis rejection, with an attempt when streams were selected."""
     if reference_selection is not None and comparison_selection is not None:
-        reference_audio_start, reference_video_start = _selection_start_facts(reference_selection)
+        reference_audio_start, reference_video_start = _selection_start_facts(
+            reference_selection, timeline_scale=reference_request.timeline_scale
+        )
         comparison_audio_start, comparison_video_start = _selection_start_facts(
-            comparison_selection
+            comparison_selection, timeline_scale=comparison_request.timeline_scale
         )
     else:
         reference_audio_start = reference_video_start = None
@@ -609,9 +618,15 @@ def _plan_audio_pair(
             reference_selection=reference_selection,
             comparison_selection=comparison_selection,
         )
+    reference_scale = reference_request.timeline_scale
+    comparison_scale = comparison_request.timeline_scale
+    reference_duration = reference_duration * reference_scale
+    comparison_duration = comparison_duration * comparison_scale
     reference_samples = math.floor(reference_duration * AUDIO_ANALYSIS_SAMPLE_RATE)
     comparison_samples = math.floor(comparison_duration * AUDIO_ANALYSIS_SAMPLE_RATE)
     try:
+        alignment_audio.retime_rates(reference_scale)
+        alignment_audio.retime_rates(comparison_scale)
         plan = plan_audio_chunks(
             reference_samples,
             comparison_samples,
@@ -681,8 +696,12 @@ def _collect_and_decide_audio_pair(
     comparison_selection = planned.comparison_selection
     plan = planned.plan
 
-    reference_audio_start, reference_video_start = _selection_start_facts(reference_selection)
-    comparison_audio_start, comparison_video_start = _selection_start_facts(comparison_selection)
+    reference_audio_start, reference_video_start = _selection_start_facts(
+        reference_selection, timeline_scale=reference_request.timeline_scale
+    )
+    comparison_audio_start, comparison_video_start = _selection_start_facts(
+        comparison_selection, timeline_scale=comparison_request.timeline_scale
+    )
 
     def finish(
         decided: DecidedAudioStage,
@@ -766,11 +785,13 @@ def _collect_and_decide_audio_pair(
             reference,
             reference_selection.stream,
             channel_strategy=config.channel_strategy,
+            timeline_scale=reference_request.timeline_scale,
         ),
         alignment_audio.collection_argv(
             comparison,
             comparison_selection.stream,
             channel_strategy=config.channel_strategy,
+            timeline_scale=comparison_request.timeline_scale,
         ),
         chunks=plan.chunks,
         lag_samples=plan.lag_samples,

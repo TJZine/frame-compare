@@ -13,6 +13,7 @@ from frame_compare.services.alignment_audio import (
     AudioStreamInfo,
     AudioStreamTimeline,
     collection_argv,
+    retime_rates,
     select_matching_audio_stream,
     select_reference_audio_stream,
 )
@@ -690,7 +691,10 @@ def test_probe_with_no_audio_streams_is_alignment_error() -> None:
 
 def test_collection_argv_is_whole_track_mono_8khz() -> None:
     downmix = collection_argv(
-        Path("comparison.mkv"), _test_stream(), channel_strategy="mono_downmix"
+        Path("comparison.mkv"),
+        _test_stream(),
+        channel_strategy="mono_downmix",
+        timeline_scale=Fraction(1),
     )
     assert downmix[:3] == ["ffmpeg", "-i", "comparison.mkv"]
     assert downmix[3:6] == ["-map", "0:a:2", "-vn"]
@@ -699,10 +703,45 @@ def test_collection_argv_is_whole_track_mono_8khz() -> None:
     assert downmix[-3:] == ["-f", "f32le", "-"]
     assert "atrim" not in " ".join(downmix)
 
-    best = collection_argv(Path("comparison.mkv"), _test_stream(), channel_strategy="best_channel")
+    best = collection_argv(
+        Path("comparison.mkv"),
+        _test_stream(),
+        channel_strategy="best_channel",
+        timeline_scale=Fraction(1),
+    )
     assert "-ac" not in best
     assert "pan=mono" in best[best.index("-af") + 1]
     assert "aresample=8000" in best[best.index("-af") + 1]
+
+
+@pytest.mark.parametrize(
+    ("scale", "expected"),
+    [
+        (Fraction(1), None),
+        (Fraction(1001, 1000), (8008, 8000)),
+        (Fraction(25, 24), (8350, 8016)),
+        (Fraction(25025, 24000), (9009, 8640)),
+        (Fraction(1001, 1200), (8008, 9600)),
+        (Fraction(400001, 400000), "unsupported"),
+    ],
+)
+def test_retime_rates_are_exact(scale: Fraction, expected: tuple[int, int] | None | str) -> None:
+    if expected == "unsupported":
+        with pytest.raises(AudioAlignmentError) as exc_info:
+            retime_rates(scale)
+        assert exc_info.value.category == "selected_audio_timeline_unavailable"
+        return
+    assert retime_rates(scale) == expected
+
+
+def test_collection_argv_retime_filters_stretch_audio_time() -> None:
+    argv = collection_argv(
+        Path("comparison.mkv"),
+        _test_stream(),
+        channel_strategy="mono_downmix",
+        timeline_scale=Fraction(1001, 1000),
+    )
+    assert argv[argv.index("-af") + 1].endswith("aresample=8008,asetrate=8000,aresample=8000")
 
 
 def _test_stream() -> AudioStreamInfo:

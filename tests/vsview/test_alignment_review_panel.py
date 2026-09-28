@@ -4,7 +4,7 @@ import json
 import math
 import os
 from collections.abc import Callable, Generator
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -60,6 +60,7 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
+from tests.services.test_alignment_evidence import retimed_comparison_stream, stream
 from tests.services.test_alignment_frozen_strings import (
     _audio_failed_video_confirmed_attempt,
     _multi_context_attempt,
@@ -161,6 +162,8 @@ def _stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
         video_start_num=0,
         video_start_den=1,
         video_start_basis="metadata",
+        timeline_scale_num=1,
+        timeline_scale_den=1,
     )
 
 
@@ -1735,3 +1738,22 @@ def test_p4a_panel_covers_each_non_applied_reason(
     assert expected in summary
     assert [field.text() for field in panel.frame_inputs] == ["", ""]
     assert not panel.use_positions_button.isEnabled()
+
+
+def test_panel_details_show_retimed_context(tmp_path: Path) -> None:
+    base = _producer_target_context_attempt(credible=False, resolution="unexamined")
+    assert base.decision.state == "trusted_automatic"
+    attempt = replace(
+        base,
+        selected_streams=(stream("reference"), retimed_comparison_stream()),
+    )
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=0,
+        audio_review=_attempt_audio_review(attempt, applied=True),
+    )
+
+    detail_group = panel.audio_detail_groups[0]
+    detail_group.setChecked(True)
+    detail_text = cast(QLabel, detail_group.findChild(QLabel)).text()
+    assert "Context: Comparison audio retimed x1.0417 to its effective frame rate." in detail_text

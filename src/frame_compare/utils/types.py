@@ -4,6 +4,7 @@ This module contains cross-cutting type definitions used by multiple layers.
 """
 
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal, cast
 
@@ -161,6 +162,8 @@ class AlignmentClipRequest:
     trim_end_frame_inclusive: int | None
     effective_fps_num: int
     effective_fps_den: int
+    source_fps_num: int
+    source_fps_den: int
     source_frame_count: int
     selected_audio_stream: int | None = None
     active_rect_x: int | None = None
@@ -173,6 +176,10 @@ class AlignmentClipRequest:
     short_name: str | None = None
 
     def __post_init__(self) -> None:
+        if not _is_positive_int(self.source_fps_num):
+            raise ValueError("source_fps_num must be a positive integer")
+        if not _is_positive_int(self.source_fps_den):
+            raise ValueError("source_fps_den must be a positive integer")
         if not _is_positive_int(self.source_frame_count):
             raise ValueError("source_frame_count must be a positive integer")
         active_rect = (
@@ -192,6 +199,13 @@ class AlignmentClipRequest:
                 raise ValueError(
                     "active rectangle fields must describe a positive source rectangle"
                 )
+
+    @property
+    def timeline_scale(self) -> Fraction:
+        """Native-to-analysis time factor: source fps over effective fps (1 when not retimed)."""
+        return Fraction(self.source_fps_num, self.source_fps_den) / Fraction(
+            self.effective_fps_num, self.effective_fps_den
+        )
 
 
 def _is_positive_int(value: object) -> bool:

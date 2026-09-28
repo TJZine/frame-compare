@@ -1,13 +1,17 @@
 """Pure edge cases shared by audio decision, video scoring, and review projection."""
 
+from dataclasses import replace
 from fractions import Fraction
+
+import pytest
 
 from frame_compare.services.alignment_correlation import ChunkObservation, ChunkRun
 from frame_compare.services.alignment_decision import (
     classify_audio_observations,
     competing_run_center,
 )
-from frame_compare.utils.alignment_policy import confirmed_offset
+from frame_compare.utils.alignment_policy import compensated_offset_seconds, confirmed_offset
+from tests.services.test_alignment_evidence import stream
 
 
 def _observation(index: int, lag: int) -> ChunkObservation:
@@ -40,3 +44,24 @@ def test_v5_uses_winner_only_margin_population() -> None:
     margins = [1.1] * 4 + [1.6] * 5 + [1.1] * 3
 
     assert confirmed_offset(0, winners, margins) == 0
+
+
+def test_retimed_start_uses_the_analysis_timeline() -> None:
+    evidence = replace(
+        stream("reference"),
+        stream_start_num=1,
+        stream_start_den=10,
+        video_start_num=0,
+        video_start_den=1,
+        timeline_scale_num=1001,
+        timeline_scale_den=1000,
+    )
+
+    assert evidence.analysis_audio_start == Fraction(1001, 10000)
+    assert compensated_offset_seconds(
+        global_lag=0,
+        reference_audio_start=evidence.analysis_audio_start,
+        reference_video_start=Fraction(0),
+        comparison_audio_start=Fraction(0),
+        comparison_video_start=Fraction(0),
+    ) == pytest.approx(0.1001)

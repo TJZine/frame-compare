@@ -57,7 +57,11 @@ from frame_compare.utils.alignment_review_projection import build_audio_review_p
 from frame_compare.utils.logging import configure_logging
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
-from tests.services.test_alignment_evidence import attempt_with_chunks
+from tests.services.test_alignment_evidence import (
+    attempt_with_chunks,
+    retimed_comparison_stream,
+    stream,
+)
 
 
 def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
@@ -1349,7 +1353,30 @@ def test_verbose_provisional_shows_chunk_facts(
     assert "compensation=+0.000s" in err
     assert "sub-frame=audio +146.23f" in err
     assert "planned=2" in err
-    assert "whole-track-chunked-phat-video-check-20260925" in err
+    assert "whole-track-chunked-phat-video-check-retimed-20260928" in err
+
+
+def test_verbose_provisional_shows_retimed_context(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    result = _provisional_result(reference, comparison)
+    assert result.audio_attempt is not None
+    result = replace(
+        result,
+        audio_attempt=replace(
+            result.audio_attempt,
+            selected_streams=(stream("reference"), retimed_comparison_stream()),
+        ),
+    )
+    _present(request, result, config, verbose=True)
+
+    err = capsys.readouterr().err
+    assert "Context: Comparison audio retimed x1.0417 to its effective frame rate." in err
+
+    _present(request, result, config)
+    assert "retimed" not in capsys.readouterr().err
 
 
 def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

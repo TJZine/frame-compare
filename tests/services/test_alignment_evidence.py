@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from dataclasses import asdict, replace
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -35,7 +36,7 @@ from frame_compare.utils.alignment_evidence import (
 
 DIGEST = "b" * 64
 OTHER_DIGEST = "c" * 64
-POLICY = "whole-track-chunked-phat-video-check-20260925"
+POLICY = "whole-track-chunked-phat-video-check-retimed-20260928"
 
 
 def stream(role: str, digest: str = DIGEST) -> SelectedAudioStreamEvidence:
@@ -70,6 +71,17 @@ def stream(role: str, digest: str = DIGEST) -> SelectedAudioStreamEvidence:
         video_start_num=0,
         video_start_den=1,
         video_start_basis="default_zero",
+        timeline_scale_num=1,
+        timeline_scale_den=1,
+    )
+
+
+def retimed_comparison_stream() -> SelectedAudioStreamEvidence:
+    """Shared R5 fixture: a comparison retimed 25/24 against an unretimed reference."""
+    return replace(
+        stream("comparison", OTHER_DIGEST),
+        timeline_scale_num=25,
+        timeline_scale_den=24,
     )
 
 
@@ -247,8 +259,17 @@ def _populated_video_attempt() -> AudioAlignmentAttempt:
 
 def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None:
     attempt = _populated_video_attempt()
+    attempt = replace(
+        attempt,
+        selected_streams=tuple(
+            replace(entry, timeline_scale_num=25, timeline_scale_den=24)
+            for entry in attempt.selected_streams
+        ),
+    )
     parsed = evidence_from_payload(AudioAlignmentAttempt, asdict(attempt))
     assert parsed == attempt
+    assert parsed.selected_streams[0].timeline_scale == Fraction(25, 24)
+    assert parsed.selected_streams[1].timeline_scale == Fraction(25, 24)
     assert parsed.authority_recount is not None
     assert parsed.video_check.targets[0].target_offset == 147
     assert parsed.video_check.targets[0].credible is True
@@ -336,6 +357,13 @@ def test_extended_video_evidence_rejects_bad_values() -> None:
     payload["video_check"]["check_points"][0]["timestamp_seconds"] = -1
     with pytest.raises(ValueError, match="non-negative"):
         evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    for scale_num, scale_den in ((2, 2), (0, 1), (1, 0)):
+        payload = asdict(_populated_video_attempt())
+        payload["selected_streams"][0]["timeline_scale_num"] = scale_num
+        payload["selected_streams"][0]["timeline_scale_den"] = scale_den
+        with pytest.raises(ValueError, match="timeline scale must be a reduced positive fraction"):
+            evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
 @pytest.mark.parametrize(

@@ -107,6 +107,8 @@ def _stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
         video_start_num=0,
         video_start_den=1,
         video_start_basis="metadata",
+        timeline_scale_num=1,
+        timeline_scale_den=1,
     )
 
 

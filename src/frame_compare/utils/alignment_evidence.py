@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, fields, is_dataclass
+from fractions import Fraction
 from types import UnionType
 from typing import (
     Any,
@@ -311,6 +312,22 @@ class SelectedAudioStreamEvidence:
     video_start_num: int
     video_start_den: int
     video_start_basis: AudioStartBasis
+    timeline_scale_num: int
+    timeline_scale_den: int
+
+    @property
+    def timeline_scale(self) -> Fraction:
+        return Fraction(self.timeline_scale_num, self.timeline_scale_den)
+
+    @property
+    def analysis_audio_start(self) -> Fraction:
+        """Audio stream start on the analysis (effective) timeline."""
+        return Fraction(self.stream_start_num, self.stream_start_den) * self.timeline_scale
+
+    @property
+    def analysis_video_start(self) -> Fraction:
+        """Video stream start on the analysis (effective) timeline."""
+        return Fraction(self.video_start_num, self.video_start_den) * self.timeline_scale
 
     def __post_init__(self) -> None:
         _check_shallow(self)
@@ -335,6 +352,12 @@ class SelectedAudioStreamEvidence:
         if self.duration_den is not None:
             _check_int("duration_den", self.duration_den, minimum=1)
         _check_int("video_start_den", self.video_start_den, minimum=1)
+        if (
+            self.timeline_scale_num < 1
+            or self.timeline_scale_den < 1
+            or math.gcd(self.timeline_scale_num, self.timeline_scale_den) != 1
+        ):
+            raise ValueError("timeline scale must be a reduced positive fraction")
 
 
 @dataclass(frozen=True, slots=True)

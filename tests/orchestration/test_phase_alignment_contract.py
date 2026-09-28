@@ -140,6 +140,8 @@ def _stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
         video_start_num=0,
         video_start_den=1,
         video_start_basis="metadata",
+        timeline_scale_num=1,
+        timeline_scale_den=1,
     )
 
 
@@ -362,6 +364,8 @@ def test_alignment_request_requires_positive_integer_source_frame_count(
             trim_end_frame_inclusive=None,
             effective_fps_num=24,
             effective_fps_den=1,
+            source_fps_num=24,
+            source_fps_den=1,
             source_frame_count=cast(int, value),
         )
 
