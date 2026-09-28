@@ -828,23 +828,33 @@ from -28.6 s to -20.0 s in time but holds a constant frame offset.
 
 ### U5 - Acceptance and closeout
 
+- Close the U4b acceptance-proof gaps: run the generated 24 vs 24000/1001 and
+  25 vs 24000/1001 pairs through the real phase after the configured
+  `sources.match_fps = "assume_reference"` preparation path. The U4b Docker
+  fixtures set effective FPS directly, and their 25 fps case uses a 24 fps
+  reference; the exact rates have only unit coverage. Exercise the labelled
+  real `speed-1` pair through the same configuration path.
 - Full command canon (pyright, ruff check/format, bandit, pytest, lint-imports, API
   docs check), `bash tools/verify_docker_integration.sh`, and a strict docs build.
 - Real-media gate in Docker: `tools/alignment_benchmark.py` is reduced to production
   path plus labels (the v0.1.0 comparator stays local and untracked) and tracked. It
   takes a local, untracked label file. Every labelled pair must equal its visually
-  confirmed frame: currently the three Black Sails pairs above (0, 147, 147).
+  confirmed frame. The original development baseline is three pairs with
+  expected frames 0, 147 and 147; run all supplied labels.
 - Independent real-media set (merge gate, added 2026-09-26). Besides the
   development episode, at least one labelled pair from each of:
   - a different title;
   - real HDR vs SDR mastering (Dolby Vision profile 5 if available);
   - a foreign-language dub;
-  - a different cut or extended edition (expected: never applied automatically);
   - an MKV with a container track delay.
 
-  The maintainer supplies the pairs and their visually confirmed frames. If a
-  category can't be sourced, record it as missing in the execution record and get
-  the maintainer's explicit sign-off before merge; don't silently drop it.
+  The maintainer supplies the pairs and their visually confirmed frames. A
+  different-cut or extended-edition real-media pair is explicitly waived by the
+  maintainer (2026-09-28): no such media is available, and edit matching is outside
+  this project's alignment scope. This waiver does not change the synthetic
+  edit/drift refusal checks or the rule against applying a wrong offset. If any
+  remaining category can't be sourced, record it as missing in the execution
+  record and get the maintainer's explicit sign-off before merge.
 - Report outcomes in four separate counts, not one accuracy figure:
   - correct and applied;
   - wrong and applied (must be 0; any is a stop condition);
@@ -1237,3 +1247,63 @@ Return to the controller or maintainer if:
   speed filters; the 300 s insert control (`insert-300`) was added because no
   unretimed 300 s insert case existed to compare the retimed refusal against;
   retimed fixture frame counts come from `ffprobe -count_frames`.
+- 2026-09-28: Controller review found no implementation deviation from R1-R6 or
+  unnecessary abstraction, dependency, or configuration. The U4b Docker tests
+  do not literally satisfy two acceptance clauses: they inject effective FPS
+  instead of exercising `match_fps`, and the 25 fps case runs against 24 fps
+  rather than 24000/1001. Existing preparation tests prove FPS matching
+  separately; U5 must close the combined real-phase proof before final acceptance.
+- 2026-09-28: The maintainer explicitly waived the different-cut or
+  extended-edition real-media category for U5. Such releases may have different
+  audio throughout or be substantially longer; edit matching is a non-goal, and
+  the maintainer does not want to source a pair for this gate. The other U5
+  real-media categories, all supplied labels, and synthetic edit/drift refusal
+  checks remain required.
+- 2026-09-28: U5 acceptance and closeout implemented on
+  `agent/audio-alignment-parity` (controller session; U5 base `061736ba`).
+  - W1a tracked `tools/alignment_benchmark.py` (production path plus labels;
+    `--labels`/`--output` only; `speed_change` pairs run with the comparison's
+    effective FPS set to the reference's probed FPS) with a pure-logic
+    classification/refusal-rate test. W1b closed the U4b proof gaps through the
+    configured `sources.match_fps = "assume_reference"` preparation path into
+    the real phase in Docker: 24-vs-24000/1001 and 25-vs-24000/1001 apply at
+    +48f with scales 1001/1000 and 1001/960, and a retimed insert refuses with
+    its control's reason.
+  - Real-media gate (Docker, 10 labelled pairs, 9 same-content with an
+    expected frame): correct_applied 4, wrong_applied 0, provisional 5,
+    unavailable 0, correctly_withheld 1 (negative control, `no_single_offset`
+    with 0 credible chunks plus `video_check_inconclusive`). Refusal rate 5/9
+    (0.56). No stop condition: nothing wrong applied, the negative control
+    withheld, no threshold implicated, no refusal diagnosed as a product
+    defect. The high refusal rate is reported as a parity failure for
+    maintainer adjudication before merge.
+  - Refusals (all `provisional` / `video_check_inconclusive`; audio authority
+    passed in every case, V5 confirmation failed, no targets):
+    - `different_title` (truth at r+2): (a) genuine A/V-sync difference
+      (~2.4f between strong audio at -363.4f and 11/12 video positions best at
+      the -361f truth, at the unconfirmable r+2 edge).
+    - `dub` (truth 0 = r+2): (a) genuine ~75 ms sync difference between the
+      compared dub tracks (209/209 credible chunks at one lag; dialogue chunks
+      decorrelate as expected; all 12 video positions exact-match at 0, at the
+      r+2 edge). Stream selection verified correct per spec (default 5.1
+      reference, only available comparison track, mismatch recorded).
+    - `container_delay` (truth 0): (a) genuine 500 ms internal A/V desync in
+      the timestamp-shifted comparison (lag 0 at 10/10 chunks plus a -0.5 s
+      compensation gives x = -12f; video bit-identity proven independently;
+      truth outside the scored r+/-2 range).
+    - `hdr_vs_sdr` (truth = r): (a) globally inconclusive video (4/12
+      informative, all for the truth, below the required 6; no dissent).
+    - `hdr_vs_sdr` (truth = r-1): (a) globally inconclusive video (0/12
+      informative; re-grade defeats rank discrimination; the same-category
+      control discriminates, so the stage is not broken).
+  - Category coverage: `different_title`, `hdr_vs_sdr` (2 pairs), `dub`, and
+    `container_delay` each have at least one pair; no required category is
+    missing. The different-cut waiver (2026-09-28) stands. `speed_change`
+    applied its labelled frame with retiming engaged (scale 1000/1001); its 55
+    non-credible targets stayed correctly non-blocking.
+  - Per-pair wall time (seconds): development 62/57/36, different_title 147,
+    dub 73, container_delay 152, speed_change 59, hdr_vs_sdr 31/102,
+    negative_control 48; 826 s total.
+  - Windows portable acceptance is recorded as pending release proof, not a
+    merge gate. The plan stays Active; the maintainer closes it after sign-off
+    and the final review.

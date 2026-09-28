@@ -344,6 +344,41 @@ different edit.
 | Reused offset no longer looks correct | Source or runtime changed outside the reusable identity assumptions | Reject reuse, clear the alignment cache entry, and recompute |
 | Selected frames disappear after alignment | Shared overlap is smaller than the initial reference-domain plan | Reduce trims or requested counts and review the warning/error context |
 
+## Labelled-pair benchmark
+
+`tools/alignment_benchmark.py` runs every pair in a maintainer-supplied label
+file through the production alignment path (result cache disabled, per-pair
+diagnostics) and classifies each pair as `correct_applied`, `wrong_applied`,
+`provisional`, `unavailable`, or `correctly_withheld` for pairs that must never
+apply. It prints a sanitized summary (pair ids and categories only) and writes
+the full per-pair JSON plus diagnostics to the output directory. Native macOS
+L-SMASH is broken, so run it in the Docker test service:
+
+```bash
+mkdir -p /tmp/u5-real-media
+docker compose run --rm \
+  --volume "$PWD/comparison_videos:/media:ro" \
+  --volume "/tmp/u5-real-media:/proof" \
+  frame-compare-test -lc \
+  'python tools/alignment_benchmark.py --labels /media/alignment_labels.json --output /proof'
+```
+
+Label schema (media paths are relative to the label file's directory):
+
+```json
+{
+  "pairs": [
+    {"id": "pair-1", "category": "development", "reference": "A.mkv",
+     "comparison": "B.mkv", "expected_frame": 0},
+    {"id": "control-1", "category": "negative_control", "reference": "C.mkv",
+     "comparison": "D.mkv", "expected": "not_applied"}
+  ]
+}
+```
+
+`speed_change` pairs run with the comparison's effective FPS set to the
+reference's probed FPS, matching `sources.match_fps = "assume_reference"`.
+
 ## Validation standard
 
 Automatic correlation is a strong starting point, not a substitute for visual review.
