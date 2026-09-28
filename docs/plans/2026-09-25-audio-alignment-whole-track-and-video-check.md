@@ -259,10 +259,12 @@ Confirmed with the maintainer on 2026-09-25.
   run's own L-SMASH sources through the existing `VSLoader`. No FFMS2 or other loader
   fallback.
 - V2. Scored offsets: `r - 2 ... r + 2`. Only `r - 1, r, r + 1` can be confirmed.
-- V3. Positions: 12, evenly spaced over the middle 90% of the raw-frame overlap valid
-  for all candidates. Each position compares reference frame `n` with comparison frame
-  `n - candidate` in raw source frames (public sign convention; base trims do not
-  enter).
+- V3. Positions: 12 by default, configurable from 6 through 48, evenly spaced over
+  the middle 90% of the raw-frame overlap valid for all candidates. Each position
+  compares reference frame `n` with comparison frame `n - candidate` in raw source
+  frames (public sign convention; base trims do not enter). The 2026-09-28 U5
+  adjudication below adds the position-count setting while preserving the original
+  default of 12; V5's evidence thresholds are unchanged.
 - V3a. Targeted positions (added 2026-09-26, revised the same day). In addition to
   the V3 positions, sample positions inside the reference time range of each target
   chunk: 4 evenly spaced positions for a credible disagreeing chunk, 2 for a
@@ -838,9 +840,12 @@ from -28.6 s to -20.0 s in time but holds a constant frame offset.
   docs check), `bash tools/verify_docker_integration.sh`, and a strict docs build.
 - Real-media gate in Docker: `tools/alignment_benchmark.py` is reduced to production
   path plus labels (the v0.1.0 comparator stays local and untracked) and tracked. It
-  takes a local, untracked label file. Every labelled pair must equal its visually
-  confirmed frame. The original development baseline is three pairs with
-  expected frames 0, 147 and 147; run all supplied labels.
+  takes a local, untracked label file and exercises configured production preparation.
+  Labels retain the visually confirmed frame separately from whether automatic
+  application is expected. Applied pairs must equal their visual frame; pairs
+  deliberately labelled for review must remain unapplied and provisional for VSView.
+  The original development baseline is three pairs with expected frames 0, 147 and
+  147; run all supplied labels.
 - Independent real-media set (merge gate, added 2026-09-26). Besides the
   development episode, at least one labelled pair from each of:
   - a different title;
@@ -861,10 +866,13 @@ from -28.6 s to -20.0 s in time but holds a constant frame offset.
   - provisional;
   - unavailable.
 
-  Also record the provisional-plus-unavailable rate on true-positive pairs as the
-  refusal rate. **Every refusal on a labelled same-content pair is investigated
-  and adjudicated with the maintainer before merge.** Record its reason and
-  evidence; a refusal caused by local weak evidence (refusal principle) is a defect.
+  Also record the provisional-plus-unavailable rate on pairs expected to apply
+  automatically as the refusal rate. **Every unexpected refusal on a labelled
+  same-content pair is investigated and adjudicated with the maintainer before
+  merge.** Deliberate audio/video disagreements remain labelled with visual truth
+  and an expected provisional VSView outcome; they are not counted as automatic
+  refusals. Record each refusal's reason and evidence; a refusal caused by local
+  weak evidence (refusal principle) is a defect.
   Such a failure is diagnosed to its cause first; it is never by itself a
   justification to weaken a threshold (the threshold stop condition still applies). The v0.1.0 parity goal means a high refusal rate on same-content
   pairs is a failure to report, even when nothing wrong was applied.
@@ -905,7 +913,9 @@ branch). The old policy token is never reused.
 
 Return to the controller or maintainer if:
 
-- a labelled real pair disagrees with its visually confirmed frame;
+- an automatically applied labelled real pair disagrees with its visually confirmed frame;
+- a pair labelled for provisional VSView review is applied automatically or becomes
+  unavailable instead of preserving a reviewable candidate;
 - a negative control is applied;
 - a PSR, agreement or video threshold needs changing to pass a case (record the
   evidence and decide with the maintainer rather than tuning quietly);
@@ -918,8 +928,8 @@ Return to the controller or maintainer if:
   pair;
 - the A4a run length, the V3a position counts, or the V5a margin (1.5) need changing
   to pass a case;
-- a refusal-principle case, or a labelled same-content real pair, is not
-  automatically applied.
+- a refusal-principle case, or a labelled real pair expected to apply automatically,
+  is not automatically applied.
 
 ## Execution record
 
@@ -1273,9 +1283,8 @@ Return to the controller or maintainer if:
     expected frame): correct_applied 4, wrong_applied 0, provisional 5,
     unavailable 0, correctly_withheld 1 (negative control, `no_single_offset`
     with 0 credible chunks plus `video_check_inconclusive`). Refusal rate 5/9
-    (0.56). No stop condition: nothing wrong applied, the negative control
-    withheld, no threshold implicated, no refusal diagnosed as a product
-    defect. The high refusal rate is reported as a parity failure for
+    (0.56). The five same-content refusals triggered the plan's stop condition;
+    nothing wrong applied, but the refusal and parity outcomes required
     maintainer adjudication before merge.
   - Refusals (all `provisional` / `video_check_inconclusive`; audio authority
     passed in every case, V5 confirmation failed, no targets):
@@ -1307,3 +1316,58 @@ Return to the controller or maintainer if:
   - Windows portable acceptance is recorded as pending release proof, not a
     merge gate. The plan stays Active; the maintainer closes it after sign-off
     and the final review.
+- 2026-09-28: Maintainer adjudication after reviewing the U5 stop condition.
+  Visual truth remains in every label, but automatic application is expected
+  only when audio and video timing are compatible. `title-1` (audio about
+  -363.4f and pictures -361f) and `delay-1` (the
+  constructed 500 ms audio delay, audio about -12f and identical video at 0f)
+  are expected to stay provisional for VSView. The normal crop makes all 12
+  sampled Witch positions favor -361f; an expanded diagnostic window gives
+  12/12 informative wins with a 7.6x median margin. That does not authorize
+  an automatic video-led override of the persistent audio disagreement. The
+  user-facing provisional explanation should state the two suggestions in
+  plain language and invite visual confirmation, while keeping detailed
+  evidence available.
+  `dub-1` must select the matching English reference audio stream (ordinal 1),
+  correcting the prior diagnosis of an intrinsic dub offset. `hdr-2` must use
+  configured `active_rect_detection = "auto"`, correcting the prior diagnosis
+  that HDR grading alone defeated it. The benchmark must run configured
+  preparation, including those settings and real `match_fps`, and fail its
+  process status for a wrong application or an unexpected refusal. The
+  intentionally withheld pairs retain their visual labels and require a
+  provisional, reviewable result; the unrelated negative control may be
+  unavailable.
+- 2026-09-28: The maintainer approved measuring and adjusting V3's position
+  count while retaining V5's thresholds. On `hdr-1` in
+  Docker, 6 positions gave 2 informative votes and no confirmation; 12 gave
+  4 and no confirmation; 24 gave 7 and confirmed the labelled +120f; 48 gave
+  13 and also confirmed. Warm video scoring took about 7.9 s at 6, 19.4 s at
+  12, and 41.5 s at 24.
+  The approximately 104.5 s 48-position run overlapped another Docker job and
+  is only indicative. The first 24-position corpus run applied six pairs
+  correctly and withheld three as labelled, but unexpectedly refused `speed-1`:
+  eight of nine informative positions favored the correct +692f, with a 1.4465x
+  median margin below V5's 1.5x requirement. Its earlier 12-position run
+  confirmed +692f with a 1.7564x median margin. `hdr-2` also confirmed 0f at
+  12 after configured active-picture detection. The final setting therefore
+  defaults to the original 12, permits 6..48 as a config-only override, and
+  sets 24 only for `hdr-1` in its local benchmark label. The setting
+  participates in shared alignment cache identity. The existing libplacebo
+  tonemap preset yielded 3/12 informative positions on `hdr-1` in a diagnostic
+  probe, so tonemapping is not added to alignment. Integrated verification and
+  the revised full real-media gate follow this decision record.
+- 2026-09-28: Final configured Docker real-media gate passed (10/10 labelled
+  pairs; 842.6 s): seven `correct_applied`, three `correctly_withheld`, zero
+  `wrong_applied`, and zero unexpected provisional or unavailable results
+  (automatic refusal rate 0/7). The three withheld outcomes are `title-1`
+  and `delay-1` as provisional VSView cases, plus the unavailable unrelated
+  negative control. `speed-1` applied +692f through configured
+  `match_fps = "assume_reference"`; `hdr-1` applied +120f with 24 positions;
+  `hdr-2` applied 0f with automatic active-picture detection at the default
+  12 positions; and `dub-1` applied 0f using the matching English reference
+  stream. No confirmation threshold changed. `bash tools/verify_docker_integration.sh`
+  passed with 272 tests and zero skips, including the generated U4b retiming
+  acceptance cases and runtime proof. The full native pytest suite, Pyright,
+  Ruff check and format, Bandit, import contracts, API-docs drift check,
+  strict docs build, and `git diff --check` also passed. The plan remains
+  Active for the maintainer's final sign-off and handoff.
