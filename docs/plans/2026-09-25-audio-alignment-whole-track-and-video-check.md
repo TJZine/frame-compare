@@ -822,7 +822,7 @@ from -28.6 s to -20.0 s in time but holds a constant frame offset.
     `match_fps = "assume_reference"` in Docker;
   - the same for 25 fps against 24000/1001;
   - a retimed pair whose comparison also has a real edit still refuses;
-  - the recipe rates are pinned for 1001/1000, 25025/24000 and 1001/1200;
+  - the recipe rates are pinned for 1001/1000, 1001/960 (PAL 25 against 24000/1001) and 1001/1200;
   - the unsupported-ratio path is covered;
   - the real `speed-1` pair becomes a labelled U5 pair.
 
