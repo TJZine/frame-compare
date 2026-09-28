@@ -921,6 +921,7 @@ def test_retimed_sources_align_on_the_effective_timeline(
         assert attempt is not None
         assert attempt.decision.state != "trusted_automatic"
         assert attempt.selected_streams[1].timeline_scale == expected_scale
+        assert attempt.extraction_recipe == _RETIMED_RECIPE
 
         control_ctx = _phase_context(u4_media, "insert-300", control_root, crop=False)
         control_output = _run_align_phase(
