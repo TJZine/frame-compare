@@ -38,7 +38,8 @@ refuse, rather than apply, when it detects that no single constant offset exists
 unrelated. Memory stays bounded; the v0.1.0 whole-track FFT (several GB) is not
 reintroduced.
 
-Non-goals: drift or speed correction (24 vs 23.976, PAL speed-up), edit matching or
+Non-goals: drift correction (a timeline that drifts for any reason other than the
+declared frame-rate retiming below), edit matching or
 per-segment offsets, variable-frame-rate sources (expected outcome: provisional,
 usually `video_check_inconclusive`), new CLI flags, native macOS L-SMASH support
 (Docker and Windows are the supported routes), a VSView redesign, and cache or
@@ -781,6 +782,49 @@ covers real L-SMASH on generated media.
 
 Risk: medium-high (new service boundary, thread use of VapourSynth, native-panel
 schema).
+
+### U4b - Frame-rate retimed audio (added 2026-09-28)
+
+Maintainer decision: when a source is retimed to a different effective frame rate
+(`sources.match_fps` or a per-source `effective_fps` override, the AssumeFPS-style
+timing that keeps frames one to one), alignment analyses that source's audio on the
+retimed timeline. A 24 fps release of 23.976 content, or a PAL 25 fps release, then
+aligns like any other pair. Real-media evidence: a 24 vs 23.976 WEB-DL pair drifts
+from -28.6 s to -20.0 s in time but holds a constant frame offset.
+
+- R1. Per clip, `timeline_scale = source_fps / effective_fps`, an exact reduced
+  `Fraction`. It is 1 for unretimed clips. Native seconds times the scale gives
+  analysis seconds.
+- R2. Audio with a scale other than 1 is retimed in the FFmpeg recipe, exactly:
+  `aresample=p*m,asetrate=q*m,aresample=8000`, where `p/q` is the reduced scale and
+  `m = ceil(8000 / min(p, q))`. If `max(p, q) * m > 384000`, the pair is unavailable
+  with `selected_audio_timeline_unavailable`. A scale of 1 leaves the recipe
+  unchanged.
+- R3. Everything computed from native audio or video times uses the scaled times:
+  - the chunk plan's sample counts;
+  - the collection output limits and timeouts;
+  - the A5 start compensation (both starts of a side scale by that side's scale);
+  - the V3a sample-to-frame conversion and the P4 region times.
+
+  A6 keeps using the reference's effective frame rate. The video stage is unchanged,
+  because retiming keeps frame indices one to one.
+- R4. P3 (in place, no version bump): `SelectedAudioStreamEvidence` gains
+  `timeline_scale_num` and `timeline_scale_den`. The native starts stay recorded,
+  and scaled starts are derived in one place.
+- R5. P4 (verbose and panel details only): when either side is retimed, one
+  `Context` row reads, for example,
+  `Comparison audio retimed x1.0010 to its effective frame rate.` It is MUTED,
+  with 4 decimals, ASCII `x` in the terminal, and one row per retimed side.
+- R6. The policy token changes to `whole-track-chunked-phat-video-check-retimed-20260928`.
+- Acceptance:
+  - a generated 10-minute program at 24000/1001 against the same frames and audio
+    sped to 24 fps, with a known frame offset, applied through the real phase with
+    `match_fps = "assume_reference"` in Docker;
+  - the same for 25 fps against 24000/1001;
+  - a retimed pair whose comparison also has a real edit still refuses;
+  - the recipe rates are pinned for 1001/1000, 25025/24000 and 1001/1200;
+  - the unsupported-ratio path is covered;
+  - the real `speed-1` pair becomes a labelled U5 pair.
 
 ### U5 - Acceptance and closeout
 
