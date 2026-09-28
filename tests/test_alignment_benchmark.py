@@ -67,6 +67,7 @@ def test_refusal_rate_counts_same_content_pairs_only() -> None:
     ]
 
     assert script.refusal_rate(records) == pytest.approx(0.5)
+    assert script.refusal_counts(records) == (2, 4)
 
 
 def test_refusal_rate_without_eligible_pairs_is_none() -> None:

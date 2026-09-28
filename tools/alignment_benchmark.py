@@ -88,13 +88,19 @@ def classify_outcome(
     return "unavailable" if state == "unavailable" else "provisional"
 
 
+def refusal_counts(records: Sequence[Mapping[str, object]]) -> tuple[int, int]:
+    """Count (refused, eligible) pairs for the refusal rate."""
+    eligible = [record for record in records if record["expected_frame"] is not None]
+    refused = [record for record in eligible if record["outcome"] in ("provisional", "unavailable")]
+    return len(refused), len(eligible)
+
+
 def refusal_rate(records: Sequence[Mapping[str, object]]) -> float | None:
     """Provisional-plus-unavailable share over pairs carrying an expected frame."""
-    eligible = [record for record in records if record["expected_frame"] is not None]
+    refused, eligible = refusal_counts(records)
     if not eligible:
         return None
-    refused = [record for record in eligible if record["outcome"] in ("provisional", "unavailable")]
-    return len(refused) / len(eligible)
+    return refused / eligible
 
 
 def load_labels(path: Path) -> list[LabelledPair]:
@@ -320,13 +326,7 @@ async def run_benchmark(labels: Path, output: Path) -> None:
     if rate is None:
         print("refusal_rate=n/a (no same-content pairs with an expected frame)", flush=True)
     else:
-        eligible = sum(1 for record in records if record["expected_frame"] is not None)
-        refused = sum(
-            1
-            for record in records
-            if record["expected_frame"] is not None
-            and record["outcome"] in ("provisional", "unavailable")
-        )
+        refused, eligible = refusal_counts(records)
         print(f"refusal_rate={rate:.2f} ({refused}/{eligible} same-content pairs)", flush=True)
     payload = {
         "pairs": records,
