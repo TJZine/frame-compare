@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import shutil
 import statistics
 import time
 import tomllib
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from frame_compare.analysis.window import SelectionWindow
+from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import (
     ClipActiveRect,
     ClipFingerprint,
@@ -23,6 +25,8 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
+from frame_compare.orchestration.execution_types import AlignPhaseOutput, PrepState
+from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import (
@@ -38,6 +42,9 @@ from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader
 from tests.orchestration.phase_task_helpers import _create_config, _run_align_phase, _workspace
+from tests.orchestration.preparation_test_support import (
+    create_config as _create_prep_config,
+)
 from tests.services.alignment_request_test_support import alignment_request
 
 vs_mod = pytest.importorskip("vapoursynth")
@@ -296,6 +303,10 @@ def _write_retimed_25(path: Path, reference: Path) -> None:
     _write_retimed(path, reference, fps="25", setpts="PTS*24/25", asetrate=50000)
 
 
+def _write_retimed_25_ntsc(path: Path, reference: Path) -> None:
+    _write_retimed(path, reference, fps="25", setpts="PTS*960/1001", asetrate=50050)
+
+
 def _write_retimed_ntsc(path: Path, reference: Path) -> None:
     _write_retimed(path, reference, fps="24", setpts="PTS*1000/1001", asetrate=48048)
 
@@ -429,6 +440,7 @@ def _write_media_set(root: Path) -> _MediaSet:
         "surround-local": root / "u4-surround-reference.mkv",
         "flat-video": root / "u4-flat-video-reference.mkv",
         "retimed-ntsc": root / "u4-retimed-ntsc-reference.mkv",
+        "retimed-25-ntsc": root / "u4-retimed-ntsc-reference.mkv",
     }
     if not reference.exists():
         _atomic_write(reference, _write_media)
@@ -545,6 +557,7 @@ def _write_media_set(root: Path) -> _MediaSet:
     )
     add("retimed-25", lambda path: _write_retimed_25(path, reference))
     add("retimed-ntsc", lambda path: _write_retimed_ntsc(path, references["retimed-ntsc"]))
+    add("retimed-25-ntsc", lambda path: _write_retimed_25_ntsc(path, references["retimed-ntsc"]))
     add("retimed-insert", _write_retimed_insert)
     add("insert-300", lambda path: _write_insert(path, 300))
     return _MediaSet(
@@ -992,6 +1005,103 @@ def test_unretimed_source_keeps_the_plain_recipe(u4_media: _MediaSet, tmp_path: 
     audio_filters = argv[argv.index("-af") + 1]
     assert audio_filters.count("aresample") == 1
     assert "asetrate" not in audio_filters
+
+
+_MATCH_FPS_PREP_CONFIG = (
+    _PHASE_CONFIG + '\n[sources]\nreference = "00-reference.mkv"\nmatch_fps = "assume_reference"\n'
+)
+
+
+def _configured_prep_alignment(
+    media: _MediaSet, name: str, root: Path
+) -> tuple[PrepState, AlignPhaseOutput]:
+    """Run one pair through match_fps preparation into the real align phase (U5)."""
+    reference_path = media.references.get(name, media.reference)
+    input_dir = root / "comparison_videos"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(reference_path, input_dir / "00-reference.mkv")
+    shutil.copy2(media.comparisons[name], input_dir / "01-comparison.mkv")
+    _create_prep_config(root, content=_MATCH_FPS_PREP_CONFIG)
+    prep = asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=root),
+            RunDependencies(vs_loader=DefaultVSLoader()),
+        )
+    )
+    assert [clip.path.name for clip in prep.clips] == ["00-reference.mkv", "01-comparison.mkv"]
+    ctx = RunContext(
+        config=prep.config,
+        workspace=prep.workspace,
+        reference=prep.clips[0],
+        comparisons=prep.clips[1:],
+        analysis_selection_domain=prep.analysis_selection_domain,
+        selection_window=prep.selection_window,
+        analysis_clip=prep.analysis_clip,
+    )
+    output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+    return prep, output
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("name", "comparison_source_fps", "expected_scale"),
+    [
+        ("retimed-ntsc", Fraction(24), Fraction(1001, 1000)),
+        ("retimed-25-ntsc", Fraction(25), Fraction(1001, 960)),
+    ],
+)
+def test_configured_match_fps_retimed_pairs_align(
+    u4_media: _MediaSet,
+    tmp_path: Path,
+    name: str,
+    comparison_source_fps: Fraction,
+    expected_scale: Fraction,
+) -> None:
+    prep, output = _configured_prep_alignment(u4_media, name, tmp_path)
+    reference, comparison = prep.clips
+    assert reference.source_fps == Fraction(24000, 1001)
+    assert reference.effective_fps == Fraction(24000, 1001)
+    assert comparison.source_fps == comparison_source_fps
+    assert comparison.effective_fps == Fraction(24000, 1001)
+
+    attempt = output.comparisons[0].audio_attempt
+    assert attempt is not None
+    assert attempt.decision.state == "trusted_automatic"
+    assert attempt.decision.primary_reason == "audio_video_confirmed"
+    assert output.comparisons[0].alignment is not None
+    assert output.comparisons[0].alignment.relative_offset_frames == 48
+    assert output.reference.trim.trim_start_frames == 48
+    assert output.comparisons[0].trim.trim_start_frames == 0
+    assert attempt.selected_streams[0].timeline_scale == 1
+    assert attempt.selected_streams[1].timeline_scale == expected_scale
+    assert attempt.extraction_recipe == _RETIMED_RECIPE
+
+
+@pytest.mark.integration
+def test_configured_match_fps_retimed_insert_still_refuses(
+    u4_media: _MediaSet, tmp_path: Path
+) -> None:
+    retimed_root = tmp_path / "retimed"
+    control_root = tmp_path / "control"
+    retimed_root.mkdir()
+    control_root.mkdir()
+    retimed_prep, retimed_output = _configured_prep_alignment(
+        u4_media, "retimed-insert", retimed_root
+    )
+    attempt = retimed_output.comparisons[0].audio_attempt
+    assert attempt is not None
+    assert attempt.decision.state != "trusted_automatic"
+    assert retimed_prep.clips[0].source_fps == Fraction(24)
+    assert retimed_prep.clips[1].source_fps == Fraction(25)
+    assert retimed_prep.clips[1].effective_fps == Fraction(24)
+    assert attempt.selected_streams[1].timeline_scale == Fraction(25, 24)
+    assert attempt.extraction_recipe == _RETIMED_RECIPE
+
+    _, control_output = _configured_prep_alignment(u4_media, "insert-300", control_root)
+    control_attempt = control_output.comparisons[0].audio_attempt
+    assert control_attempt is not None
+    assert control_attempt.decision.state != "trusted_automatic"
+    assert attempt.decision.primary_reason == control_attempt.decision.primary_reason
 
 
 def _video_request(path: Path) -> VideoClipRequest:
