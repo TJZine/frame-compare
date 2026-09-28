@@ -444,7 +444,7 @@ warning-only for optional alignment. The attempt retains resolved pathless strea
 facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
 compensation, the sub-frame estimate, the A4b authority recount, the video
 observation, and the final decision. Under the shipped
-`whole-track-chunked-phat-video-check-20260925` policy, the audio-only decision is an
+`whole-track-chunked-phat-video-check-retimed-20260928` policy, the audio-only decision is an
 internal `audio_only` seam. When a global lag exists, `alignment_video`
 checks the run's own L-SMASH sources in the same worker thread and
 `alignment_decision` combines the result. Only `trusted_automatic` with reason
@@ -464,7 +464,9 @@ stale-policy shared entries miss and recompute.
 Computed alignment work runs whole-track chunked correlation over each selected audio
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
-whole-track 8 kHz mono FFmpeg recipe. Reference chunks of length
+whole-track 8 kHz mono FFmpeg recipe. Each source's audio is analysed on its
+effective timeline, so a retimed source's exact resample/relabel filters stretch
+its audio by `source_fps / effective_fps` before chunking. Reference chunks of length
 `C = clamp(floor(D/3), 5 s, 30 s)` (one chunk of length `D` when the shorter
 selected-stream duration `D` is below 5 s) are tiled from reference sample 0, each
 searched over lags `[-M, +M]` where `M = max_offset_seconds`; comparison samples

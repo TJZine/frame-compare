@@ -180,7 +180,8 @@ Current fields:
   it falls back to the selected reference effective FPS and emits a human
   warning diagnostic.
   This is an AssumeFPS-style timing override; it does not resample, drop,
-  interpolate, or duplicate frames.
+  interpolate, or duplicate frames. Alignment analyses retimed sources' audio on
+  their effective timeline.
 - `label_mode`: display-label policy. `stem` is the default; `filename` includes
   the extension; `parsed` composes available release group, title,
   season/episode marker, and episode title.
@@ -1663,7 +1664,9 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   comparison clip audio stream for that stem.
 
 Computed alignment decodes the whole selected audio stream at 8 kHz mono rather
-than sampling distributed windows. Reference chunks of length
+than sampling distributed windows. A source retimed to a different effective
+frame rate is decoded through exact resample/relabel filters onto its effective
+timeline before chunking. Reference chunks of length
 `C = clamp(floor(D/3), 5 s, 30 s)` tile from reference sample 0 (one chunk of
 length `D` when the shorter selected-stream duration `D` is below 5 s); a final
 partial chunk is analyzed at `>= C / 2` and dropped otherwise. Each chunk is
@@ -1698,7 +1701,7 @@ flag, configuration field, signal-handler framework, or successful JSON field.
 Every fresh completed attempt retains immutable selected-stream facts, per-chunk
 columnar evidence, chunk runs, the global lag, start compensation, sub-frame
 estimate, A4b authority recount, bounded video evidence, and one of three final
-states under `whole-track-chunked-phat-video-check-20260925`:
+states under `whole-track-chunked-phat-video-check-retimed-20260928`:
 
 - `trusted_automatic` / `audio_video_confirmed`: the A4b authority gate passes,
   V5 confirms the exact frame, every frame-distinct credible disagreement/run is

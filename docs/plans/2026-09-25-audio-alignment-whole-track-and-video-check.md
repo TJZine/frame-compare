@@ -1213,3 +1213,27 @@ Return to the controller or maintainer if:
     `+1362/-1181` (net `+181`), tests `+1277/-921` (net `+356`). Final U4 totals
     versus `5019e6ad`: source `+2961/-326` (net `+2635`), tests `+6990/-168`
     (net `+6822`).
+- 2026-09-28: U4b implemented on `agent/audio-alignment-parity`. Each clip's
+  audio is analysed on its effective timeline: `AlignmentClipRequest` carries
+  the source FPS and exposes `timeline_scale = source_fps / effective_fps`; the
+  collection recipe stretches retimed audio with exact
+  `aresample=r1,asetrate=r2,aresample=8000` filters (`retime_rates`, capped at
+  384000, else `selected_audio_timeline_unavailable`); the chunk plan, output
+  limits, timeouts, A5 compensation, V3a conversion, and P4 region times all use
+  scaled times; `SelectedAudioStreamEvidence` gains the reduced scale with
+  derived analysis starts; verbose and panel-details Context rows note each
+  retimed side; the policy token is
+  `whole-track-chunked-phat-video-check-retimed-20260928`. Proof:
+  `test_retime_rates_are_exact` (1001/1000, 25/24, 1001/960, 1001/1200, and the
+  unsupported 400001/400000 refusal), `test_retimed_start_uses_the_analysis_timeline`,
+  the extended evidence round-trip (25/24) and rejection (2/2, 0/1, 1/0)
+  coverage, verbose and panel-details frozen R5 rows, and the Docker real-phase
+  `test_retimed_sources_align_on_the_effective_timeline` (25 fps, NTSC, and
+  retimed-insert cases, all at truth +48f) plus
+  `test_unretimed_source_keeps_the_plain_recipe`. No R1-R6 deviation. Recorded
+  readings: `normalized_extraction_recipe()` keeps its signature and returns
+  the template form with the bracketed retime filters; the NTSC comparison
+  reuses the 25 fps audio-trim construction (`atrim=start=2`) with its own
+  speed filters; the 300 s insert control (`insert-300`) was added because no
+  unretimed 300 s insert case existed to compare the retimed refusal against;
+  retimed fixture frame counts come from `ffprobe -count_frames`.

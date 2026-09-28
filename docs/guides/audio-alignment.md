@@ -60,6 +60,15 @@ chunked lag, so sources with container audio delays align to video rather than t
 a confidently wrong sample offset. A missing start time counts as 0 and is
 recorded as `default_zero`.
 
+### Retimed sources
+
+Mixed-frame-rate pairs need `match_fps` or a per-source `effective_fps` override
+first, and then align like any other pair: each source's audio is analysed on its
+effective timeline, stretched by the exact ratio of source FPS over effective FPS.
+A 24 fps release of 23.976 content, or a PAL 25 fps release, therefore holds a
+constant frame offset instead of drifting. Drift for any other reason still
+refuses rather than applying.
+
 Disagreement (`no_single_offset`) keeps contiguous chunk runs grouped by lag. After
 video confirmation, credible chunks that round to the confirmed frame count as
 frame-level agreement; a coherent frame-distinct run still requires targeted video
@@ -125,7 +134,7 @@ from trim authority; explicit or human-confirmed offsets remain authoritative.
 Alignment reuse cache
 schema v2 requires the compact summary and the reference-minus-comparison sign
 convention. The internal estimator policy token
-`whole-track-chunked-phat-video-check-20260925`
+`whole-track-chunked-phat-video-check-retimed-20260928`
 is part of the full shared source-set identity for both computed and interactively confirmed
 entries. A stale-policy shared entry misses and is recomputed or reviewed normally. Schema-v1 entries are ignored and recomputed;
 there is no cache migration or compatibility path. Run-local `manual_overrides.toml`

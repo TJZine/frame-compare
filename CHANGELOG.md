@@ -9,6 +9,13 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Changed
 
+- Analyse retimed sources' audio on their effective timeline: when a source's
+  effective frame rate differs from its native rate (`match_fps` or a per-source
+  `effective_fps` override), alignment stretches its audio by the exact
+  source-over-effective ratio before chunking, so 24 fps releases of 23.976
+  content and PAL 25 fps releases hold a constant frame offset. Verbose output
+  and panel details note each retimed side, and stale entries miss and recompute
+  under the `whole-track-chunked-phat-video-check-retimed-20260928` policy.
 - Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT
   correlation plus container start compensation and bounded L-SMASH video
   confirmation. Fresh results apply only when global audio authority, the exact-frame
@@ -24,7 +31,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   to v5 (both extended in place with explicit chunk/run/context records under one
   shared 2 MiB per-comparison bound; native metadata omits per-chunk rows), and stale
   computed or shared entries miss and recompute under the new
-  `whole-track-chunked-phat-video-check-20260925` policy. Cache schema v2 and the
+  `whole-track-chunked-phat-video-check-retimed-20260928` policy. Cache schema v2 and the
   manual-override schema are unchanged.
   Review regions now use reference-video time, retain the actual winning local
   video offset, and report every applicable audio/video refusal reason.
