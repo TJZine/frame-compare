@@ -1,22 +1,23 @@
 """Production-path audio-alignment benchmark over a labelled pair file.
 
-Reads a maintainer-supplied label file (pair ids, categories, expected frames),
-drives the production alignment path once per pair (result cache disabled,
-per-pair diagnostics directories), classifies each pair, prints a sanitized
-summary (pair ids and categories only; no media paths or titles), and writes
-the full per-pair JSON to the output directory.
+Reads a maintainer-supplied label file, prepares each pair through the normal
+orchestration path, runs production alignment once (result cache disabled),
+prints a sanitized summary (pair ids and categories only; no media paths or
+titles), and writes the full per-pair JSON to the output directory.
 
 Label schema (media paths are relative to the label file's directory)::
 
     {"pairs": [
         {"id": "bs-1", "category": "development",
-         "reference": "A.mkv", "comparison": "B.mkv", "expected_frame": 0},
+         "reference": "A.mkv", "comparison": "B.mkv", "expected_frame": 0,
+         "expected_automatic": "applied"},
         {"id": "neg-1", "category": "negative_control",
          "reference": "C.mkv", "comparison": "D.mkv",
-         "expected": "not_applied"}]}
+         "expected_automatic": "not_applied"}]}
 
-``speed_change`` pairs run with the comparison's effective FPS set to the
-reference's probed FPS, matching ``sources.match_fps = "assume_reference"``.
+Pair labels may set ``active_rect_detection``, ``reference_stream``,
+``comparison_stream``, and ``video_check_positions``. ``speed_change`` pairs use the production
+``sources.match_fps = "assume_reference"`` preparation setting.
 
 Docker invocation (native macOS L-SMASH is broken; run in the test service):
 
@@ -35,24 +36,22 @@ import json
 import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from fractions import Fraction
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
-from frame_compare.services.alignment import align_clips_from_request
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
+from frame_compare.orchestration import preparation
+from frame_compare.orchestration.context import ClipActiveRect, RunContext
+from frame_compare.orchestration.phase_alignment import run_align_phase
+from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
-from frame_compare.utils.types import (
-    AlignmentCacheSettings,
-    AlignmentClipIdentity,
-    AlignmentClipRequest,
-    AlignmentRequest,
-)
 from frame_compare.vs.loader import DefaultVSLoader
 
 SPEED_CHANGE_CATEGORY = "speed_change"
 NOT_APPLIED = "not_applied"
+APPLIED = "applied"
+type ExpectedAutomatic = Literal["applied", "not_applied"]
 OUTCOME_NAMES = (
     "correct_applied",
     "wrong_applied",
@@ -71,18 +70,30 @@ class LabelledPair:
     reference: Path
     comparison: Path
     expected_frame: int | None
+    expected_automatic: ExpectedAutomatic
+    active_rect_detection: ScreenshotActiveRectDetection
+    reference_stream: int | None
+    comparison_stream: int | None
+    video_check_positions: int | None
 
 
 def classify_outcome(
     *,
     expected_frame: int | None,
+    expected_automatic: ExpectedAutomatic,
     applied: bool,
     frame_offset: int | None,
     state: str,
 ) -> str:
-    """Classify one pair; a withheld ``not_applied`` pair reports separately."""
+    """Classify visual correctness independently from expected automation."""
+    if expected_automatic == NOT_APPLIED:
+        if applied:
+            return "wrong_applied"
+        if expected_frame is not None and state != "provisional":
+            return "unavailable"
+        return "correctly_withheld"
     if expected_frame is None:
-        return "correctly_withheld" if not applied else "wrong_applied"
+        raise ValueError("an automatically applied pair requires expected_frame")
     if applied:
         return "correct_applied" if frame_offset == expected_frame else "wrong_applied"
     return "unavailable" if state == "unavailable" else "provisional"
@@ -90,28 +101,37 @@ def classify_outcome(
 
 def refusal_counts(records: Sequence[Mapping[str, object]]) -> tuple[int, int]:
     """Count (refused, eligible) pairs for the refusal rate."""
-    eligible = [record for record in records if record["expected_frame"] is not None]
+    eligible = [record for record in records if record["expected_automatic"] == APPLIED]
     refused = [record for record in eligible if record["outcome"] in ("provisional", "unavailable")]
     return len(refused), len(eligible)
 
 
 def refusal_rate(records: Sequence[Mapping[str, object]]) -> float | None:
-    """Provisional-plus-unavailable share over pairs carrying an expected frame."""
+    """Provisional-plus-unavailable share over expected automatic applications."""
     refused, eligible = refusal_counts(records)
     if not eligible:
         return None
     return refused / eligible
 
 
+def benchmark_passed(records: Sequence[Mapping[str, object]]) -> bool:
+    """Require every pair to reach its labelled automatic outcome."""
+    return all(record["outcome"] in ("correct_applied", "correctly_withheld") for record in records)
+
+
 def load_labels(path: Path) -> list[LabelledPair]:
     """Parse and validate the label file, failing closed on any defect."""
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload_raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"cannot read label file {path}: {exc}") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("pairs"), list):
+    if not isinstance(payload_raw, dict):
         raise ValueError(f"label file {path} must hold a top-level 'pairs' list")
-    entries: list[Any] = payload["pairs"]
+    payload = cast(dict[str, Any], payload_raw)
+    entries_raw = payload.get("pairs")
+    if not isinstance(entries_raw, list):
+        raise ValueError(f"label file {path} must hold a top-level 'pairs' list")
+    entries = cast(list[Any], entries_raw)
     if not entries:
         raise ValueError(f"label file {path} must hold at least one pair")
     pairs: list[LabelledPair] = []
@@ -125,6 +145,7 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
     where = f"label file {path} pair index {index}"
     if not isinstance(entry, dict):
         raise ValueError(f"{where} must be an object")
+    entry = cast(dict[str, Any], entry)
     pair_id = entry.get("id")
     category = entry.get("category")
     reference = entry.get("reference")
@@ -142,7 +163,11 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
     if pair_id in seen:
         raise ValueError(f"{where} duplicates pair id '{pair_id}'")
     seen.add(pair_id)
-    expected_frame = _parse_expected(where, entry)
+    expected_frame, expected_automatic = _parse_expected(where, entry)
+    active_rect_detection = _parse_active_rect_detection(where, entry)
+    reference_stream = _parse_stream(where, entry, "reference_stream")
+    comparison_stream = _parse_stream(where, entry, "comparison_stream")
+    video_check_positions = _parse_video_check_positions(where, entry)
     media_root = path.parent
     reference_path = media_root / reference
     comparison_path = media_root / comparison
@@ -155,45 +180,142 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
         reference=reference_path,
         comparison=comparison_path,
         expected_frame=expected_frame,
+        expected_automatic=expected_automatic,
+        active_rect_detection=active_rect_detection,
+        reference_stream=reference_stream,
+        comparison_stream=comparison_stream,
+        video_check_positions=video_check_positions,
     )
 
 
-def _parse_expected(where: str, entry: dict[str, Any]) -> int | None:
-    has_frame = "expected_frame" in entry
-    has_marker = "expected" in entry
-    if has_frame == has_marker:
-        raise ValueError(
-            f'{where} needs exactly one of \'expected_frame\' or "expected": "not_applied"'
-        )
-    if has_marker:
-        if entry["expected"] != NOT_APPLIED:
-            raise ValueError(f"{where} has an unknown 'expected' marker: {entry['expected']!r}")
+def _parse_expected(where: str, entry: dict[str, Any]) -> tuple[int | None, ExpectedAutomatic]:
+    expected_automatic = entry.get("expected_automatic")
+    if expected_automatic not in (APPLIED, NOT_APPLIED):
+        raise ValueError(f'{where} needs "expected_automatic": "applied" or "not_applied"')
+    expected_frame = entry.get("expected_frame")
+    if expected_frame is not None and (
+        isinstance(expected_frame, bool) or not isinstance(expected_frame, int)
+    ):
+        raise ValueError(f"{where} 'expected_frame' must be an integer when present")
+    if expected_automatic == APPLIED and expected_frame is None:
+        raise ValueError(f"{where} expected automatic application needs 'expected_frame'")
+    return expected_frame, expected_automatic
+
+
+def _parse_active_rect_detection(
+    where: str, entry: dict[str, Any]
+) -> ScreenshotActiveRectDetection:
+    value = entry.get("active_rect_detection", ScreenshotActiveRectDetection.ASPECT_RATIO.value)
+    try:
+        return ScreenshotActiveRectDetection(value)
+    except ValueError as exc:
+        raise ValueError(f"{where} has invalid 'active_rect_detection': {value!r}") from exc
+
+
+def _parse_stream(where: str, entry: dict[str, Any], name: str) -> int | None:
+    value = entry.get(name)
+    if value is None:
         return None
-    expected_frame = entry["expected_frame"]
-    if isinstance(expected_frame, bool) or not isinstance(expected_frame, int):
-        raise ValueError(f"{where} 'expected_frame' must be an integer")
-    return expected_frame
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{where} '{name}' must be a non-negative integer")
+    return value
 
 
-def _clip_request(
-    path: Path,
-    *,
-    effective_fps: Fraction,
-    source_fps: Fraction,
-    source_frame_count: int,
-) -> AlignmentClipRequest:
-    stat = path.stat()
-    return AlignmentClipRequest(
-        path=path,
-        label=path.stem,
-        identity=AlignmentClipIdentity(path, stat.st_size, stat.st_mtime_ns),
-        trim_start_frames=0,
-        trim_end_frame_inclusive=None,
-        effective_fps_num=effective_fps.numerator,
-        effective_fps_den=effective_fps.denominator,
-        source_fps_num=source_fps.numerator,
-        source_fps_den=source_fps.denominator,
-        source_frame_count=source_frame_count,
+def _parse_video_check_positions(where: str, entry: dict[str, Any]) -> int | None:
+    value = entry.get("video_check_positions")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 6 <= value <= 48:
+        raise ValueError(f"{where} 'video_check_positions' must be an integer from 6 through 48")
+    return value
+
+
+def _ensure_media_link(link: Path, target: Path) -> None:
+    if link.is_symlink() and link.resolve() == target.resolve():
+        return
+    if link.exists() or link.is_symlink():
+        raise RuntimeError(f"benchmark workspace path already exists: {link}")
+    link.symlink_to(target)
+
+
+def _pair_config(pair: LabelledPair, comparison_stem: str) -> str:
+    reference_stream = (
+        "" if pair.reference_stream is None else f"reference_stream = {pair.reference_stream}\n"
+    )
+    comparison_streams = (
+        ""
+        if pair.comparison_stream is None
+        else f'comparison_streams = {{ "{comparison_stem}" = {pair.comparison_stream} }}\n'
+    )
+    video_check_positions = (
+        ""
+        if pair.video_check_positions is None
+        else f"video_check_positions = {pair.video_check_positions}\n"
+    )
+    match_fps = "assume_reference" if pair.category == SPEED_CHANGE_CATEGORY else "disabled"
+    return f'''[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = true
+max_offset_seconds = 30.0
+use_vsview = false
+force_interactive = false
+cache_results = false
+channel_strategy = "mono_downmix"
+previous_offsets = "disabled"
+{reference_stream}{comparison_streams}{video_check_positions}
+[screenshots]
+use_ffmpeg = true
+active_rect_detection = "{pair.active_rect_detection.value}"
+
+[report]
+enable = false
+
+[sources]
+reference = "00-reference{pair.reference.suffix}"
+match_fps = "{match_fps}"
+'''
+
+
+def _active_rect_payload(rect: ClipActiveRect | None) -> dict[str, object] | None:
+    if rect is None:
+        return None
+    return {
+        "x": rect.x,
+        "y": rect.y,
+        "width": rect.width,
+        "height": rect.height,
+        "source": rect.source,
+        "detection_mode": rect.detection_mode,
+    }
+
+
+async def _prepare_pair(
+    pair: LabelledPair, pair_root: Path, loader: DefaultVSLoader
+) -> preparation.PrepState:
+    workspace_root = pair_root / "workspace"
+    input_dir = workspace_root / "comparison_videos"
+    config_dir = workspace_root / "config"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    reference_link = input_dir / f"00-reference{pair.reference.suffix}"
+    comparison_link = input_dir / f"01-comparison{pair.comparison.suffix}"
+    _ensure_media_link(reference_link, pair.reference)
+    _ensure_media_link(comparison_link, pair.comparison)
+    (config_dir / "config.toml").write_text(
+        _pair_config(pair, comparison_link.stem), encoding="utf-8"
+    )
+    return await preparation.execute_prep(
+        RunRequest(
+            root=workspace_root,
+            skip_analysis=True,
+            skip_metadata=True,
+            no_upload=True,
+        ),
+        RunDependencies(vs_loader=loader),
     )
 
 
@@ -203,66 +325,50 @@ async def align_pair(
     loader: DefaultVSLoader,
 ) -> dict[str, object]:
     """Align one pair through the production path and record its evidence."""
-    reference_source = loader.load(pair.reference)
-    comparison_source = loader.load(pair.comparison)
-    reference_fps = reference_source.fps
-    comparison_effective_fps = (
-        reference_fps if pair.category == SPEED_CHANGE_CATEGORY else comparison_source.fps
-    )
-    reference = _clip_request(
-        pair.reference,
-        effective_fps=reference_fps,
-        source_fps=reference_source.fps,
-        source_frame_count=reference_source.num_frames,
-    )
-    comparison = _clip_request(
-        pair.comparison,
-        effective_fps=comparison_effective_fps,
-        source_fps=comparison_source.fps,
-        source_frame_count=comparison_source.num_frames,
-    )
     pair_root = output_dir / "pairs" / pair.pair_id
     pair_root.mkdir(parents=True, exist_ok=True)
-    config = AlignmentConfig(
-        cache_results=False,
-        max_offset_seconds=30.0,
-        use_vsview=False,
-        channel_strategy="mono_downmix",
-    )
-    request = AlignmentRequest(
-        reference=reference,
-        selected_reference_relationship="auto",
-        comparisons=[comparison],
-        previous_offsets="disabled",
-        generated_dir=pair_root,
-        shared_alignment_cache_dir=output_dir / "cache",
-        settings=AlignmentCacheSettings(30.0, "mono_downmix"),
-        alignment_diagnostics_dir=pair_root / "alignment_diagnostics",
-        alignment_diagnostics_root=output_dir / "pairs",
-    )
     started = time.monotonic()
-    (result,) = await align_clips_from_request(
-        request,
-        config,
-        reference_fps=Fraction(reference.effective_fps_num, reference.effective_fps_den),
+    prep = await _prepare_pair(pair, pair_root, loader)
+    ctx = RunContext(
+        config=prep.config,
+        workspace=prep.workspace,
+        reference=prep.clips[0],
+        comparisons=prep.clips[1:],
+        analysis_selection_domain=prep.analysis_selection_domain,
+        selection_window=prep.selection_window,
+        analysis_clip=prep.analysis_clip,
+    )
+    phase = await run_align_phase(
+        ctx,
+        selected_frames=[],
         vs_loader=loader,
         quiet=True,
     )
+    (comparison,) = phase.comparisons
     elapsed = time.monotonic() - started
-    attempt = result.audio_attempt
+    attempt = comparison.audio_attempt
     if attempt is None:
         raise RuntimeError(f"production result for {pair.pair_id} omitted its attempt")
     review = build_audio_review_presentation(attempt)
+    applied_frame = (
+        None if comparison.alignment is None else comparison.alignment.relative_offset_frames
+    )
+    applied = comparison.alignment is not None
     return {
         "pair_id": pair.pair_id,
         "category": pair.category,
         "expected_frame": pair.expected_frame,
+        "expected_automatic": pair.expected_automatic,
         "reference": pair.reference.name,
         "comparison": pair.comparison.name,
+        "active_rect_detection": pair.active_rect_detection.value,
+        "reference_active_rect": _active_rect_payload(prep.clips[0].active_rect),
+        "comparison_active_rect": _active_rect_payload(prep.clips[1].active_rect),
+        "selected_streams": [asdict(stream) for stream in attempt.selected_streams],
         "x_subframe": attempt.audio.subframe_estimate,
         "r_audio_rounded": attempt.audio.rounded_frame,
         "c_video_confirmed": attempt.video_check.confirmed_offset,
-        "applied_frame": result.frame_offset,
+        "applied_frame": applied_frame,
         "state": attempt.decision.state,
         "primary_reason": attempt.decision.primary_reason,
         "reasons": list(review.reasons),
@@ -272,8 +378,9 @@ async def align_pair(
         "elapsed_seconds": elapsed,
         "outcome": classify_outcome(
             expected_frame=pair.expected_frame,
-            applied=result.applied,
-            frame_offset=result.frame_offset,
+            expected_automatic=pair.expected_automatic,
+            applied=applied,
+            frame_offset=applied_frame,
             state=attempt.decision.state,
         ),
     }
@@ -307,7 +414,7 @@ def _print_table_row(record: Mapping[str, object]) -> None:
     )
 
 
-async def run_benchmark(labels: Path, output: Path) -> None:
+async def run_benchmark(labels: Path, output: Path) -> bool:
     """Run every labelled pair, print the sanitized summary, and write the JSON."""
     pairs = load_labels(labels)
     output.mkdir(parents=True, exist_ok=True)
@@ -330,12 +437,17 @@ async def run_benchmark(labels: Path, output: Path) -> None:
         print(f"refusal_rate={rate:.2f} ({refused}/{eligible} same-content pairs)", flush=True)
     payload = {
         "pairs": records,
-        "summary": {"counts": summary_counts, "refusal_rate": rate},
+        "summary": {
+            "counts": summary_counts,
+            "refusal_rate": rate,
+            "passed": benchmark_passed(records),
+        },
         "total_elapsed_seconds": time.monotonic() - started,
     }
     (output / "pair-results.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
     )
+    return benchmark_passed(records)
 
 
 def main() -> None:
@@ -346,7 +458,8 @@ def main() -> None:
     parser.add_argument("--labels", type=Path, required=True, help="Label file to run.")
     parser.add_argument("--output", type=Path, required=True, help="Directory for JSON output.")
     args = parser.parse_args()
-    asyncio.run(run_benchmark(labels=args.labels, output=args.output))
+    if not asyncio.run(run_benchmark(labels=args.labels, output=args.output)):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
