@@ -58,7 +58,6 @@ FloatFrame = npt.NDArray[np.float32]
 
 _FRAME_WIDTH = 320
 _FRAME_HEIGHT = 180
-_BASE_POSITION_COUNT = 12
 _TARGET_POSITION_LIMIT = 12
 
 
@@ -118,6 +117,7 @@ def check_video_alignment(
     attempt: AudioAlignmentAttempt,
     fps_reference: Fraction,
     loader: VSLoader | None,
+    position_count: int = 12,
     cancellation: Event | None = None,
 ) -> VideoCheckResult:
     """Run V1-V5 and return bounded W0 evidence without throwing runtime failures."""
@@ -161,7 +161,7 @@ def check_video_alignment(
         )
         if overlap is None:
             return _failed("video_check_unavailable")
-        positions = _base_positions(overlap)
+        positions = _base_positions(overlap, position_count)
         if not positions:
             return _failed("video_check_unavailable")
         scored_offsets = tuple(range(rounded_frame - 2, rounded_frame + 3))
@@ -376,10 +376,10 @@ def _evenly_spaced(start: float | int, end: float | int, count: int) -> tuple[in
     return tuple(dict.fromkeys(values))
 
 
-def _base_positions(overlap: tuple[int, int]) -> tuple[int, ...]:
+def _base_positions(overlap: tuple[int, int], count: int) -> tuple[int, ...]:
     start, end = overlap
     span = end - start
-    return _evenly_spaced(start + span * 0.05, start + span * 0.95, _BASE_POSITION_COUNT)
+    return _evenly_spaced(start + span * 0.05, start + span * 0.95, count)
 
 
 def _score_base_positions(

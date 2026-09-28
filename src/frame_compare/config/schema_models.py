@@ -95,6 +95,7 @@ class AudioAlignmentConfig(BaseModel):
 
     enable: bool = True
     max_offset_seconds: float = Field(default=30.0, ge=1.0, allow_inf_nan=False)
+    video_check_positions: int = Field(default=12, ge=6, le=48)
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True

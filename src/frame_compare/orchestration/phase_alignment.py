@@ -83,6 +83,7 @@ async def run_align_phase(
     alignment_config = AlignmentConfig(
         enable=ctx.config.audio_alignment.enable,
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
+        video_check_positions=ctx.config.audio_alignment.video_check_positions,
         use_vsview=ctx.config.audio_alignment.use_vsview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
@@ -317,6 +318,7 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
     settings = AlignmentCacheSettings(
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
         channel_strategy=ctx.config.audio_alignment.channel_strategy,
+        video_check_positions=ctx.config.audio_alignment.video_check_positions,
     )
     clips = [ctx.reference, *ctx.comparisons]
     identities = [clip.release_identity for clip in clips]

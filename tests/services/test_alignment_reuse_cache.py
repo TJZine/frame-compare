@@ -620,6 +620,7 @@ def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
         "estimator_policy": "whole-track-chunked-phat-video-check-retimed-20260928",
         "max_offset_seconds": 30.0,
         "channel_strategy": "mono_downmix",
+        "video_check_positions": 12,
     }
     comparison = _first_entry(data)["comparison"]
     assert isinstance(comparison, dict)
@@ -865,6 +866,10 @@ def test_shared_reuse_cache_can_load_requested_subset_from_full_source_set(
         lambda request, _path: replace(
             request,
             settings=replace(request.settings, channel_strategy="best_channel"),
+        ),
+        lambda request, _path: replace(
+            request,
+            settings=replace(request.settings, video_check_positions=24),
         ),
     ],
 )

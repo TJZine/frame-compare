@@ -81,6 +81,7 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     }
     assert captured["config"].enable is True
     assert captured["config"].max_offset_seconds == 4.5
+    assert captured["config"].video_check_positions == 18
     assert captured["config"].use_vsview is True
     assert captured["config"].cache_results is False
     assert captured["config"].channel_strategy == "best_channel"
@@ -129,6 +130,7 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert alignment_request.previous_offsets == "disabled"
     assert alignment_request.settings.max_offset_seconds == 4.5
     assert alignment_request.settings.channel_strategy == "best_channel"
+    assert alignment_request.settings.video_check_positions == 18
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].alignment is not None

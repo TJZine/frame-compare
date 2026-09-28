@@ -1662,6 +1662,9 @@ this sign convention before decision evidence, hints, caching, and trim applicat
 - `comparison_streams` is a mapping from comparison filename stem to non-negative
   audio stream ordinal, defaulting to an empty map. Matching entries select the
   comparison clip audio stream for that stem.
+- `video_check_positions` is the number of positions sampled for global video
+  confirmation. It accepts 6 through 48 and defaults to 12. More positions can
+  confirm difficult HDR/SDR release pairs, at the cost of additional frame decoding.
 
 Computed alignment decodes the whole selected audio stream at 8 kHz mono rather
 than sampling distributed windows. A source retimed to a different effective

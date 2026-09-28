@@ -1226,9 +1226,9 @@ def _assert_video(
     assert review.video_wins == wins
     assert review.video_informative == informative
     assert review.video_margin is not None
+    assert review.video_margin >= 1.5
     if finite_margin:
         assert math.isfinite(review.video_margin)
-        assert review.video_margin >= 1.5
     else:
         assert math.isinf(review.video_margin)
 

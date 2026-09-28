@@ -218,6 +218,7 @@ class AlignmentCacheSettings:
 
     max_offset_seconds: float
     channel_strategy: str
+    video_check_positions: int = 12
 
 
 @dataclass(frozen=True, slots=True)

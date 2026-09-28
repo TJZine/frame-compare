@@ -730,6 +730,7 @@ def _collect_and_decide_audio_pair(
                 attempt=attempt,
                 fps_reference=fps_reference,
                 loader=vs_loader,
+                position_count=config.video_check_positions,
                 cancellation=cancellation,
             )
             decided = alignment_decision.decide_after_video(

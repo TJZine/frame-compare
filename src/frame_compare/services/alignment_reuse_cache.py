@@ -76,6 +76,7 @@ def _settings_identity_dict(request: AlignmentRequest) -> dict[str, _TomlValue]:
         "estimator_policy": ALIGNMENT_ESTIMATOR_POLICY,
         "max_offset_seconds": settings.max_offset_seconds,
         "channel_strategy": settings.channel_strategy,
+        "video_check_positions": settings.video_check_positions,
     }
 
 

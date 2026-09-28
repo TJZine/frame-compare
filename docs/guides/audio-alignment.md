@@ -81,12 +81,27 @@ both decodes succeed with complete cleanup.
 ### Video confirmation and refusal limits
 
 Whenever audio produces a global lag, Frame Compare uses the run's L-SMASH loader;
-there is no FFMS2 fallback. It scores 12 base positions across the middle 90% of the
-raw-frame overlap at offsets `r-2` through `r+2`. A strict local minimum must have a
-runner-up/best margin of at least 1.1. The exact frame is confirmed only within
-`r-1..r+1`, with at least 6 informative positions, at least 75% wins, and median
+there is no FFMS2 fallback. It scores 12 base positions by default across the middle
+90% of the raw-frame overlap at offsets `r-2` through `r+2`. A strict local minimum
+must have a runner-up/best margin of at least 1.1. The exact frame is confirmed only
+within `r-1..r+1`, with at least 6 informative positions, at least 75% wins, and median
 winning margin at least 1.5. Static, tied, repeated, or aliased frames are
 uninformative rather than false confirmation.
+
+Set `audio_alignment.video_check_positions` from 6 through 48 to trade video-check
+runtime for additional temporal coverage. A setting of 24 confirmed a difficult
+HDR/SDR pair that produced only four informative positions at the default 12. In a
+measured Docker software-runtime run, scoring that pair averaged about 7.9 seconds
+at 6 positions, 19.4 seconds at 12, and 41.5 seconds at 24; results vary with codec,
+GOP structure, source length, and hardware. The setting does not relax any
+confirmation threshold.
+
+To give a difficult pair more temporal coverage:
+
+```toml
+[audio_alignment]
+video_check_positions = 24
+```
 
 After that global confirmation, V5a checks frame-distinct disagreement regions.
 Competing runs receive four positions first, single credible chunks receive four

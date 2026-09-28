@@ -312,6 +312,7 @@ def _run(
     comparison_clip: vs.VideoNode | None = None,
     loader: _Loader | None = None,
     attempt: AudioAlignmentAttempt | None = None,
+    position_count: int = 12,
     cancellation: Event | None = None,
 ) -> alignment_video.VideoCheckResult:
     reference_clip = reference_clip or _moving_clip()
@@ -328,6 +329,7 @@ def _run(
         attempt=current_attempt,
         fps_reference=FPS,
         loader=loader,
+        position_count=position_count,
         cancellation=cancellation,
     )
 
@@ -343,6 +345,13 @@ def test_video_confirmation_only_accepts_neighbouring_truths(
     assert result.reason is None
     assert result.observation.confirmed_offset == expected
     assert len(result.observation.positions) == 12
+
+
+def test_video_confirmation_uses_configured_position_count(tmp_path: Path) -> None:
+    result = _run(tmp_path, truth=0, position_count=6)
+
+    assert result.observation.confirmed_offset == 0
+    assert len(result.observation.positions) == 6
 
 
 def test_static_content_is_uninformative(tmp_path: Path) -> None:
