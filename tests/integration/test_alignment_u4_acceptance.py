@@ -25,6 +25,10 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment_audio import (
+    collection_argv,
+    select_reference_audio_stream,
+)
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
@@ -52,6 +56,8 @@ _DURATION = 600
 _CHUNK_SECONDS = 30
 _CHUNK_COUNT = _DURATION // _CHUNK_SECONDS
 _FPS = 24
+_NTSC_RATE = "24000/1001"
+_RETIMED_TRIM_FRAMES = 48
 _VIDEO_SIZE = "128x72"
 _SAMPLE_RATE = 48000
 _BASE_AUDIO = f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}:duration={_DURATION}:seed=1101"
@@ -82,9 +88,9 @@ def _run_ffmpeg(argv: list[str], *, timeout_seconds: int = 600) -> None:
     )
 
 
-def _source(kind: str, duration: float) -> str:
+def _source(kind: str, duration: float, *, fps: str = str(_FPS)) -> str:
     if kind == "video":
-        return f"testsrc2=size={_VIDEO_SIZE}:rate={_FPS}:duration={duration}"
+        return f"testsrc2=size={_VIDEO_SIZE}:rate={fps}:duration={duration}"
     return kind
 
 
@@ -96,8 +102,9 @@ def _write_media(
     base_audio: str = _BASE_AUDIO,
     audio_sources: tuple[str, ...] = (),
     video_sources: tuple[str, ...] = (),
+    fps: str = str(_FPS),
 ) -> None:
-    video_inputs = (_source("video", _DURATION), *video_sources)
+    video_inputs = (_source("video", _DURATION, fps=fps), *video_sources)
     audio_inputs = (base_audio, *audio_sources)
     argv: list[str] = []
     for source in (*video_inputs, *audio_inputs):
@@ -256,6 +263,52 @@ def _write_low_motion_cue(path: Path) -> None:
     _write_media(path, video_graph=video, audio_graph=_splice_graph(delayed=(10,), delay_ms=100))
 
 
+def _write_retimed(path: Path, reference: Path, *, fps: str, setpts: str, asetrate: int) -> None:
+    """Trim the first 48 frames, then speed video and audio to ``fps`` (U4b)."""
+    _run_ffmpeg(
+        [
+            "-i",
+            str(reference),
+            "-vf",
+            f"trim=start_frame={_RETIMED_TRIM_FRAMES},setpts=PTS-STARTPTS,setpts={setpts}",
+            "-af",
+            f"atrim=start=2,asetpts=PTS-STARTPTS,asetrate={asetrate},aresample={_SAMPLE_RATE}",
+            "-r",
+            fps,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            str(path),
+        ]
+    )
+
+
+def _write_retimed_25(path: Path, reference: Path) -> None:
+    _write_retimed(path, reference, fps="25", setpts="PTS*24/25", asetrate=50000)
+
+
+def _write_retimed_ntsc(path: Path, reference: Path) -> None:
+    _write_retimed(path, reference, fps="24", setpts="PTS*1000/1001", asetrate=48048)
+
+
+def _write_retimed_insert(path: Path) -> None:
+    staged = path.with_name(f".{path.stem}.insert{path.suffix}")
+    try:
+        _write_insert(staged, 300)
+        _write_retimed_25(path, staged)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def _write_active_tail(path: Path) -> None:
     _write_insert(path, 540, noisy_tail=True)
 
@@ -375,6 +428,7 @@ def _write_media_set(root: Path) -> _MediaSet:
         "surround": root / "u4-surround-reference.mkv",
         "surround-local": root / "u4-surround-reference.mkv",
         "flat-video": root / "u4-flat-video-reference.mkv",
+        "retimed-ntsc": root / "u4-retimed-ntsc-reference.mkv",
     }
     if not reference.exists():
         _atomic_write(reference, _write_media)
@@ -393,6 +447,11 @@ def _write_media_set(root: Path) -> _MediaSet:
         _atomic_write(references["surround"], lambda path: _write_surround(path, downmix=False))
     if not references["flat-video"].exists():
         _atomic_write(references["flat-video"], _write_flat_video)
+    if not references["retimed-ntsc"].exists():
+        _atomic_write(
+            references["retimed-ntsc"],
+            lambda path: _write_media(path, fps=_NTSC_RATE),
+        )
     comparisons: dict[str, Path] = {}
 
     def add(name: str, writer: Callable[[Path], None]) -> None:
@@ -484,6 +543,10 @@ def _write_media_set(root: Path) -> _MediaSet:
             audio_graph=_splice_graph(delayed=(1, 3, 5, 7, 9, 11, 13), delay_ms=100),
         ),
     )
+    add("retimed-25", lambda path: _write_retimed_25(path, reference))
+    add("retimed-ntsc", lambda path: _write_retimed_ntsc(path, references["retimed-ntsc"]))
+    add("retimed-insert", _write_retimed_insert)
+    add("insert-300", lambda path: _write_insert(path, 300))
     return _MediaSet(
         reference=reference,
         comparisons=comparisons,
@@ -548,7 +611,15 @@ enable = false
 """
 
 
-def _real_clip(path: Path, label: str, *, crop: bool) -> ClipState:
+def _real_clip(
+    path: Path,
+    label: str,
+    *,
+    crop: bool,
+    source_fps: Fraction = Fraction(_FPS),
+    fps: Fraction = Fraction(_FPS),
+    num_frames: int = _DURATION * _FPS,
+) -> ClipState:
     stat = path.stat()
     active_rect = (
         ClipActiveRect(
@@ -566,21 +637,50 @@ def _real_clip(path: Path, label: str, *, crop: bool) -> ClipState:
         fingerprint=ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns),
         width=128,
         height=72,
-        num_frames=_DURATION * _FPS,
-        fps=Fraction(_FPS),
+        num_frames=num_frames,
+        fps=fps,
         is_hdr=False,
     )
     return ClipState(
         path=path,
         label=label,
         probe=probe,
-        source_fps=probe.fps,
+        source_fps=source_fps,
         effective_fps=probe.fps,
         active_rect=active_rect,
     )
 
 
-def _phase_context(media: _MediaSet, name: str, root: Path, *, crop: bool) -> RunContext:
+def _probe_frame_count(path: Path) -> int:
+    """Return the real decoded video frame count of a generated file."""
+    probe = run_subprocess(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-count_frames",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        timeout_seconds=300,
+    )
+    return int(probe.stdout.decode().strip())
+
+
+def _phase_context(
+    media: _MediaSet,
+    name: str,
+    root: Path,
+    *,
+    crop: bool,
+    reference_fps: Fraction = Fraction(_FPS),
+    comparison_source_fps: Fraction | None = None,
+) -> RunContext:
     reference_path = (
         media.multipath_reference
         if name == "multipath"
@@ -594,15 +694,33 @@ def _phase_context(media: _MediaSet, name: str, root: Path, *, crop: bool) -> Ru
         generated_dir=run_dir,
         screenshots_dir=run_dir / "screenshots",
     )
-    reference = _real_clip(reference_path, "Reference", crop=crop)
-    comparison = _real_clip(media.comparisons[name], "Comparison", crop=crop)
+    if comparison_source_fps is None:
+        reference = _real_clip(reference_path, "Reference", crop=crop)
+        comparison = _real_clip(media.comparisons[name], "Comparison", crop=crop)
+    else:
+        reference = _real_clip(
+            reference_path,
+            "Reference",
+            crop=crop,
+            source_fps=reference_fps,
+            fps=reference_fps,
+            num_frames=_probe_frame_count(reference_path),
+        )
+        comparison = _real_clip(
+            media.comparisons[name],
+            "Comparison",
+            crop=crop,
+            source_fps=comparison_source_fps,
+            fps=reference_fps,
+            num_frames=_probe_frame_count(media.comparisons[name]),
+        )
     return RunContext(
         config=_create_config(root, _PHASE_CONFIG),
         workspace=workspace,
         reference=reference,
         comparisons=[comparison],
         analysis_selection_domain="u4-phase",
-        selection_window=SelectionWindow(0, _DURATION * _FPS),
+        selection_window=SelectionWindow(0, reference.probe.num_frames),
         analysis_clip=reference,
     )
 
@@ -755,6 +873,124 @@ def test_real_phase_v6_cache_matrix(
         assert isinstance(entry, dict)
         assert entry["frame_offset"] == 0
         assert entry["comparison_clip"] == ctx.comparisons[0].path.name
+
+
+_RETIMED_RECIPE = (
+    "ffmpeg -i <role_input> -map 0:a:<selected_ordinal> -vn "
+    "[channel] -af <channel>[,aresample=<r1>,asetrate=<r2>],aresample=8000 -f f32le -"
+)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("name", "reference_fps", "comparison_source_fps", "expected_scale"),
+    [
+        ("retimed-25", Fraction(_FPS), Fraction(25), Fraction(25, 24)),
+        (
+            "retimed-ntsc",
+            Fraction(24000, 1001),
+            Fraction(24),
+            Fraction(1001, 1000),
+        ),
+        ("retimed-insert", Fraction(_FPS), Fraction(25), Fraction(25, 24)),
+    ],
+)
+def test_retimed_sources_align_on_the_effective_timeline(
+    u4_media: _MediaSet,
+    tmp_path: Path,
+    name: str,
+    reference_fps: Fraction,
+    comparison_source_fps: Fraction,
+    expected_scale: Fraction,
+) -> None:
+    if name == "retimed-insert":
+        retimed_root = tmp_path / "retimed"
+        control_root = tmp_path / "control"
+        retimed_root.mkdir()
+        control_root.mkdir()
+        ctx = _phase_context(
+            u4_media,
+            name,
+            retimed_root,
+            crop=False,
+            reference_fps=reference_fps,
+            comparison_source_fps=comparison_source_fps,
+        )
+        output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+        attempt = output.comparisons[0].audio_attempt
+        assert attempt is not None
+        assert attempt.decision.state != "trusted_automatic"
+        assert attempt.selected_streams[1].timeline_scale == expected_scale
+
+        control_ctx = _phase_context(u4_media, "insert-300", control_root, crop=False)
+        control_output = _run_align_phase(
+            control_ctx, selected_frames=[100], vs_loader=DefaultVSLoader()
+        )
+        control_attempt = control_output.comparisons[0].audio_attempt
+        assert control_attempt is not None
+        assert control_attempt.decision.state != "trusted_automatic"
+        assert attempt.decision.primary_reason == control_attempt.decision.primary_reason
+        return
+
+    ctx = _phase_context(
+        u4_media,
+        name,
+        tmp_path,
+        crop=False,
+        reference_fps=reference_fps,
+        comparison_source_fps=comparison_source_fps,
+    )
+    output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+    comparison = output.comparisons[0]
+    attempt = comparison.audio_attempt
+
+    assert attempt is not None
+    assert attempt.decision.state == "trusted_automatic"
+    assert attempt.decision.primary_reason == "audio_video_confirmed"
+    assert comparison.alignment is not None
+    assert comparison.alignment.relative_offset_frames == 48
+    assert output.reference.trim.trim_start_frames == 48
+    assert comparison.trim.trim_start_frames == 0
+    assert attempt.selected_streams[0].timeline_scale == 1
+    assert attempt.selected_streams[1].timeline_scale == expected_scale
+    assert attempt.extraction_recipe == _RETIMED_RECIPE
+
+    cache_path = ctx.workspace.shared_alignment_cache_dir / "alignment_reuse.toml"
+    assert cache_path.exists()
+    cache = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+    source_sets = cache["source_sets"]
+    assert isinstance(source_sets, dict) and len(source_sets) == 1
+    source_set = next(iter(source_sets.values()))
+    assert isinstance(source_set, dict)
+    entries = source_set["entries"]
+    assert isinstance(entries, dict) and len(entries) == 1
+    entry = next(iter(entries.values()))
+    assert isinstance(entry, dict)
+    assert entry["frame_offset"] == 48
+    assert entry["comparison_clip"] == ctx.comparisons[0].path.name
+
+
+@pytest.mark.integration
+def test_unretimed_source_keeps_the_plain_recipe(u4_media: _MediaSet, tmp_path: Path) -> None:
+    ctx = _phase_context(u4_media, "six-same-frame", tmp_path, crop=False)
+    output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
+    attempt = output.comparisons[0].audio_attempt
+
+    assert attempt is not None
+    assert attempt.decision.state == "trusted_automatic"
+    assert attempt.selected_streams[0].timeline_scale == 1
+    assert attempt.selected_streams[1].timeline_scale == 1
+
+    selection = select_reference_audio_stream(ctx.reference.path)
+    argv = collection_argv(
+        ctx.reference.path,
+        selection.stream,
+        channel_strategy="mono_downmix",
+        timeline_scale=Fraction(1),
+    )
+    audio_filters = argv[argv.index("-af") + 1]
+    assert audio_filters.count("aresample") == 1
+    assert "asetrate" not in audio_filters
 
 
 def _video_request(path: Path) -> VideoClipRequest:
