@@ -1302,7 +1302,7 @@ Return to the controller or maintainer if:
     applied its labelled frame with retiming engaged (scale 1000/1001); its 55
     non-credible targets stayed correctly non-blocking.
   - Per-pair wall time (seconds): development 62/57/36, different_title 147,
-    dub 73, container_delay 152, speed_change 59, hdr_vs_sdr 31/102,
+    dub 73, container_delay 152, speed_change 59, hdr_vs_sdr 31/101,
     negative_control 48; 826 s total.
   - Windows portable acceptance is recorded as pending release proof, not a
     merge gate. The plan stays Active; the maintainer closes it after sign-off
