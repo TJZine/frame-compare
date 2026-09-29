@@ -123,7 +123,7 @@ def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
         comparison_identity_digest="e" * 64,
         comparison_ordinal=1,
         status="complete",
-        estimator_policy="whole-track-chunked-phat-video-check-retimed-20260928",
+        estimator_policy="whole-track-chunked-phat-video-check-motion-20260929",
         diagnostic_policy="retained-audio-evidence-v1",
         media_runtime_fingerprint="alignment-runtime",
         ffmpeg_version="not_observed",

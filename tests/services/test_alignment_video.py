@@ -303,6 +303,33 @@ def _decide_video(
     )
 
 
+def _expected_base_positions(
+    reference_clip: vs.VideoNode,
+    comparison_clip: vs.VideoNode,
+    *,
+    rounded: int,
+) -> tuple[int, ...]:
+    """Recompute M1 motion-selected base positions from the production formula."""
+    overlap = alignment_video._frame_overlap(
+        reference_clip.num_frames,
+        comparison_clip.num_frames,
+        tuple(range(rounded - 2, rounded + 3)),
+    )
+    assert overlap is not None
+    node = alignment_video._prepare_luma(reference_clip, None)
+    start, end = overlap
+    span = end - start
+    positions = alignment_video._motion_positions(
+        node,
+        start + span * 0.05,
+        start + span * 0.95,
+        alignment_video._BASE_POSITION_COUNT,
+        cancellation=None,
+    )
+    assert positions is not None
+    return positions
+
+
 def _run(
     tmp_path: Path,
     *,
@@ -312,7 +339,6 @@ def _run(
     comparison_clip: vs.VideoNode | None = None,
     loader: _Loader | None = None,
     attempt: AudioAlignmentAttempt | None = None,
-    position_count: int = 12,
     cancellation: Event | None = None,
 ) -> alignment_video.VideoCheckResult:
     reference_clip = reference_clip or _moving_clip()
@@ -329,7 +355,6 @@ def _run(
         attempt=current_attempt,
         fps_reference=FPS,
         loader=loader,
-        position_count=position_count,
         cancellation=cancellation,
     )
 
@@ -347,19 +372,42 @@ def test_video_confirmation_only_accepts_neighbouring_truths(
     assert len(result.observation.positions) == 12
 
 
-def test_video_confirmation_uses_configured_position_count(tmp_path: Path) -> None:
-    result = _run(tmp_path, truth=0, position_count=6)
-
-    assert result.observation.confirmed_offset == 0
-    assert len(result.observation.positions) == 6
-
-
 def test_static_content_is_uninformative(tmp_path: Path) -> None:
     clip = vs.core.std.BlankClip(width=64, height=36, length=60, format=vs.GRAYS, color=0)
     result = _run(tmp_path, truth=0, reference_clip=clip, comparison_clip=clip)
     assert result.reason is None
     assert result.observation.confirmed_offset is None
     assert all(set(position.score_by_offset) == {0.0} for position in result.observation.positions)
+
+
+@pytest.mark.parametrize(
+    ("ranges", "start", "end", "count"),
+    [
+        pytest.param((range(60, 80),), 40, 100, 1, id="moving-slot"),
+        pytest.param((), 10, 70, 3, id="static-ties-pick-first"),
+        pytest.param((), 40, 100, 0, id="empty-count"),
+    ],
+)
+def test_motion_positions_pick_the_moving_frame(
+    ranges: tuple[range, ...], start: int, end: int, count: int
+) -> None:
+    node = alignment_video._prepare_luma(_motion_ranges_clip(*ranges), None)
+
+    positions = alignment_video._motion_positions(node, start, end, count, cancellation=None)
+
+    if count == 0:
+        assert positions == ()
+        return
+    assert positions is not None
+    if ranges:
+        assert positions in {(62,), (78,)}
+        return
+    slot = (end - start) / count
+    expected = tuple(
+        round(start + slot * index + slot * 0.5 / alignment_video._MOTION_CANDIDATES)
+        for index in range(count)
+    )
+    assert positions == expected
 
 
 def test_monotonic_tone_curve_preserves_confirmation(tmp_path: Path) -> None:
@@ -661,10 +709,18 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert all(position.confirmed_score > 0.0 for position in target.positions)
     assert all(position.alternative_score == 0.0 for position in target.positions)
     assert target.resolution == "alternative_confirmed"
+    expected_base = _expected_base_positions(reference, comparison, rounded=0)
+    winners = {
+        position.reference_frame: alignment_video._position_winner(
+            position.score_by_offset, result.observation.scored_offsets
+        )[0]
+        for position in result.observation.positions
+    }
+    contrast = next(frame for frame in expected_base if winners[frame] == 0)
     assert [
         (point.reference_frame, point.suggested_comparison_frame)
         for point in result.observation.check_points
-    ] == [(3, 1), (27, 27)]
+    ] == [(3, 1), (contrast, contrast)]
     decided = _decide_video(attempt, result.observation)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
@@ -801,20 +857,9 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
         for position in result.observation.positions
     ]
 
-    assert [position.reference_frame for position in result.observation.positions] == [
-        8,
-        17,
-        27,
-        36,
-        45,
-        55,
-        64,
-        74,
-        83,
-        92,
-        102,
-        111,
-    ]
+    assert [position.reference_frame for position in result.observation.positions] == list(
+        _expected_base_positions(reference, comparison, rounded=0)
+    )
     assert winners_and_margins == [
         (1, float("inf")),
         (1, float("inf")),

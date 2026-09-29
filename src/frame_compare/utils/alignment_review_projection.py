@@ -17,8 +17,8 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetResolution,
 )
 from frame_compare.utils.alignment_policy import (
-    CONFIRMATION_MARGIN,
     compensated_lag_to_frame,
+    edge_consensus_offset,
     position_winner,
     sample_to_reference_video_time,
 )
@@ -34,43 +34,6 @@ _AUDIO_REVIEW_REGION_REASONS = frozenset(
         "unresolved_audio_disagreement",
     }
 )
-
-_BOUNDARY_HINT_MIN_POSITIONS = 6
-
-
-def _video_boundary_hint(video: VideoCheckObservation) -> int | None:
-    """Return a strong shared edge estimate without treating it as confirmed."""
-    if (
-        video.observation != "observed"
-        or len(video.positions) < _BOUNDARY_HINT_MIN_POSITIONS
-        or len(video.scored_offsets) < 3
-    ):
-        return None
-
-    first = 0
-    last = len(video.scored_offsets) - 1
-    votes: list[int] = []
-    for position in video.positions:
-        scores = position.score_by_offset
-        if len(scores) != len(video.scored_offsets):
-            continue
-        best_index = min(range(len(scores)), key=scores.__getitem__)
-        if best_index not in {first, last}:
-            continue
-        best = scores[best_index]
-        runner_up = min(score for index, score in enumerate(scores) if index != best_index)
-        margin = (
-            math.inf
-            if best == 0.0 and runner_up > 0.0
-            else (runner_up / best if best > 0.0 else 0.0)
-        )
-        if margin >= CONFIRMATION_MARGIN:
-            votes.append(video.scored_offsets[best_index])
-
-    if len(votes) < _BOUNDARY_HINT_MIN_POSITIONS or len(votes) * 4 < len(video.positions) * 3:
-        return None
-    candidate = votes[0]
-    return candidate if all(vote == candidate for vote in votes) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,19 +278,22 @@ class AudioReviewPresentation:
                         "elsewhere; they were not checked, so the offset is not applied."
                     )
             elif reason == "video_check_inconclusive" and self.suggested_offset is not None:
-                visual_hint = _video_boundary_hint(self.attempt.video_check)
-                if visual_hint is not None:
+                video = self.attempt.video_check
+                hint = (
+                    edge_consensus_offset(
+                        [position.score_by_offset for position in video.positions],
+                        video.scored_offsets,
+                    )
+                    if video.observation == "observed"
+                    else None
+                )
+                if hint is not None:
                     lines.append(
-                        "The sound and picture suggest different starting points. "
-                        f"Audio suggests {self.suggested_offset:+d} frames; the checked scenes "
-                        f"favor {visual_hint:+d} frames. No automatic change was made. Open "
-                        "VSView to choose the frame where the pictures line up."
+                        f"The audio points to {self.suggested_offset:+d}f, but the pictures line up at {hint:+d}f at the checked points."
                     )
                 else:
                     lines.append(
-                        f"Audio suggests {self.suggested_offset:+d} frames, but Frame Compare could "
-                        "not verify it against the pictures. No automatic change was made. Open "
-                        "VSView to check the lineup."
+                        f"The audio points to {self.suggested_offset:+d}f, but the video could not confirm the exact frame (little motion or different framing at the checked points)."
                     )
             elif reason == "video_check_unavailable" and self.suggested_offset is not None:
                 lines.append(

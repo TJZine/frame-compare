@@ -95,7 +95,6 @@ class AudioAlignmentConfig(BaseModel):
 
     enable: bool = True
     max_offset_seconds: float = Field(default=30.0, ge=1.0, allow_inf_nan=False)
-    video_check_positions: int = Field(default=12, ge=6, le=48)
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
@@ -188,9 +187,7 @@ class ScreenshotsConfig(BaseModel):
     png_compression: int = Field(default=6, ge=0, le=9)
     ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0)
     geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
-    active_rect_detection: ScreenshotActiveRectDetection = (
-        ScreenshotActiveRectDetection.ASPECT_RATIO
-    )
+    active_rect_detection: ScreenshotActiveRectDetection = ScreenshotActiveRectDetection.AUTO
     aligned_scale_policy: ScreenshotAlignedScalePolicy = ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
     aligned_target_width: int | None = None
     aligned_target_height: int | None = None

@@ -45,7 +45,6 @@ random_seed = 7
 [audio_alignment]
 enable = true
 max_offset_seconds = 4.5
-video_check_positions = 18
 use_vsview = true
 force_interactive = false
 cache_results = false

@@ -31,10 +31,12 @@ from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import (
     collection_argv,
-    select_reference_audio_stream,
+    probe_streams,
+    select_audio_pair,
 )
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.alignment_policy import position_winner
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import AlignmentClipIdentity
@@ -998,7 +1000,16 @@ def test_unretimed_source_keeps_the_plain_recipe(u4_media: _MediaSet, tmp_path: 
     assert attempt.selected_streams[0].timeline_scale == 1
     assert attempt.selected_streams[1].timeline_scale == 1
 
-    selection = select_reference_audio_stream(ctx.reference.path)
+    reference_probe = probe_streams(ctx.reference.path)
+    comparison_probe = probe_streams(ctx.comparisons[0].path)
+    selection, _ = select_audio_pair(
+        reference_probe,
+        comparison_probe,
+        reference_path=ctx.reference.path,
+        comparison_path=ctx.comparisons[0].path,
+        reference_override=None,
+        comparison_override=None,
+    )
     argv = collection_argv(
         ctx.reference.path,
         selection.stream,
@@ -1212,6 +1223,10 @@ def _assert_audio(
             assert recount.passed is authority_passed
 
 
+def _near_region_end(n: int, frames: range) -> bool:
+    return min(abs(n - frames.start), abs(n - (frames.stop - 1))) <= 3
+
+
 def _assert_video(
     result: AlignmentResult,
     *,
@@ -1219,6 +1234,7 @@ def _assert_video(
     wins: int = 12,
     informative: int = 12,
     finite_margin: bool = False,
+    regions: tuple[range, range, tuple[range, ...]] | None = None,
 ) -> None:
     assert result.audio_attempt is not None
     video = result.audio_attempt.video_check
@@ -1226,8 +1242,23 @@ def _assert_video(
     assert video.observation == "observed"
     assert video.confirmed_offset == confirmed_offset
     assert len(video.positions) == 12
-    assert review.video_wins == wins
-    assert review.video_informative == informative
+    if regions is None:
+        assert review.video_wins == wins
+        assert review.video_informative == informative
+    else:
+        c_frames, other_frames, flat_frames = regions
+        for position in video.positions:
+            winner, _ = position_winner(position.score_by_offset, video.scored_offsets)
+            n = position.reference_frame
+            if _near_region_end(n, c_frames) or _near_region_end(n, other_frames):
+                continue
+            if any(n in flat for flat in flat_frames):
+                assert winner is None
+            elif n in c_frames:
+                assert winner == confirmed_offset
+            elif n in other_frames:
+                assert winner != confirmed_offset
+        assert review.video_wins == review.video_informative
     assert review.video_margin is not None
     assert review.video_margin >= 1.5
     if finite_margin:
@@ -1301,13 +1332,23 @@ def test_length_changing_inserts_are_not_applied(
         credible=20,
         agreeing=18 if name != "insert-570" else 19,
     )
-    _assert_video(
-        result,
-        confirmed_offset=rounded_frame,
-        wins=11 if name == "insert-60" else 12,
-        informative=11 if name == "insert-60" else 12,
-        finite_margin=name == "insert-60",
-    )
+    if name == "insert-570":
+        _assert_video(result, confirmed_offset=rounded_frame)
+    else:
+        at_seconds = 60 if name == "insert-60" else 540
+        B = at_seconds * _FPS
+        E = _DURATION * _FPS
+        regions = (
+            (range(B, E), range(0, B), ())
+            if name == "insert-60"
+            else (range(0, B), range(B, E), ())
+        )
+        _assert_video(
+            result,
+            confirmed_offset=rounded_frame,
+            regions=regions,
+            finite_margin=name == "insert-60",
+        )
     _assert_targets(result, (target,))
 
 
@@ -1343,13 +1384,27 @@ def test_low_motion_insert_remains_a_provisional_hint(
         credible=20,
         agreeing=19 if seconds == 570 else 18,
     )
-    _assert_video(
-        result,
-        confirmed_offset=-96 if seconds == 60 else 0,
-        wins=11,
-        informative=11,
-        finite_margin=seconds == 60,
-    )
+    if seconds == 540:
+        _assert_video(
+            result,
+            confirmed_offset=0,
+            wins=11,
+            informative=11,
+        )
+    else:
+        E = _DURATION * _FPS
+        if seconds == 60:
+            B = 60 * _FPS
+            regions = (range(B, E), range(0, B), (range(0, B),))
+        else:
+            B = 570 * _FPS
+            regions = (range(0, B), range(B, E), (range(568 * _FPS, E),))
+        _assert_video(
+            result,
+            confirmed_offset=-96 if seconds == 60 else 0,
+            regions=regions,
+            finite_margin=seconds == 60,
+        )
     _assert_targets(result, (target,))
 
 
@@ -1494,7 +1549,9 @@ def test_active_noncredible_shifted_tail_is_resolved_by_video(
         credible=18,
         agreeing=18,
     )
-    _assert_video(result, confirmed_offset=0)
+    B = 540 * _FPS
+    E = _DURATION * _FPS
+    _assert_video(result, confirmed_offset=0, regions=(range(0, B), range(B, E), ()))
     assert result.audio_attempt is not None
     assert tuple(
         index for index, credible in enumerate(result.audio_attempt.chunks.credible) if not credible

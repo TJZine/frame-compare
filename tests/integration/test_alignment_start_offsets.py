@@ -20,7 +20,8 @@ import pytest
 
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_audio import (
-    select_reference_audio_stream,
+    probe_streams,
+    select_audio_pair,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
@@ -135,7 +136,15 @@ def _mux_with_audio_offset(
 
 
 def _probe_starts(path: Path) -> tuple[Fraction, Fraction]:
-    selection = select_reference_audio_stream(path)
+    probed = probe_streams(path)
+    selection, _ = select_audio_pair(
+        probed,
+        probed,
+        reference_path=path,
+        comparison_path=path,
+        reference_override=None,
+        comparison_override=None,
+    )
     return (
         selection.stream.timeline.start_time,
         selection.video_start.start_time,

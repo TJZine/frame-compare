@@ -20,6 +20,7 @@ from frame_compare.services.alignment_audio import (
     AudioStreamInfo,
     AudioStreamSelection,
     AudioStreamTimeline,
+    ProbedStreams,
     VideoStreamStart,
 )
 from frame_compare.services.alignment_streaming import (
@@ -71,6 +72,11 @@ def _selection() -> AudioStreamSelection:
         stream=_stream(),
         video_start=VideoStreamStart(start_time=Fraction(0), basis="default_zero"),
     )
+
+
+def _probe() -> ProbedStreams:
+    selection = _selection()
+    return ProbedStreams(audio=(selection.stream,), video_start=selection.video_start)
 
 
 def _float_writer_argv() -> list[str]:
@@ -437,13 +443,8 @@ def test_cancelled_pair_with_incomplete_cleanup_raises_cleanup_error(
     )
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda _path, **_kwargs: _selection(),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda _path, **_kwargs: _selection(),
+        "probe_streams",
+        lambda _path, **_kwargs: _probe(),
     )
     monkeypatch.setattr(
         alignment,
@@ -484,13 +485,8 @@ def test_identity_change_with_incomplete_cleanup_raises_cleanup_error(
     )
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda _path, **_kwargs: _selection(),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda _path, **_kwargs: _selection(),
+        "probe_streams",
+        lambda _path, **_kwargs: _probe(),
     )
 
     def collect_then_touch(*_args: Any, **_kwargs: Any) -> Any:
@@ -531,13 +527,8 @@ def test_cancelled_pair_with_identity_change_still_cancels(
     )
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda _path, **_kwargs: _selection(),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda _path, **_kwargs: _selection(),
+        "probe_streams",
+        lambda _path, **_kwargs: _probe(),
     )
 
     def collect_then_touch(*_args: Any, **_kwargs: Any) -> Any:
@@ -575,13 +566,8 @@ def test_incomplete_cleanup_after_failed_pair_is_fatal(
     )
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda _path, **_kwargs: _selection(),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda _path, **_kwargs: _selection(),
+        "probe_streams",
+        lambda _path, **_kwargs: _probe(),
     )
     monkeypatch.setattr(
         alignment,

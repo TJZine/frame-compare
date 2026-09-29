@@ -36,7 +36,7 @@ from frame_compare.utils.alignment_evidence import (
 
 DIGEST = "b" * 64
 OTHER_DIGEST = "c" * 64
-POLICY = "whole-track-chunked-phat-video-check-retimed-20260928"
+POLICY = "whole-track-chunked-phat-video-check-motion-20260929"
 
 
 def stream(role: str, digest: str = DIGEST) -> SelectedAudioStreamEvidence:

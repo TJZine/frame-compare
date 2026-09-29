@@ -15,6 +15,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -30,13 +31,11 @@ dark_frame_count = 1
 )
 
 AUTO_METRIC_CONFIG = METRIC_CONFIG.replace(
-    "[screenshots]\nuse_ffmpeg = true",
-    '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "auto"',
+    'active_rect_detection = "aspect_ratio"', 'active_rect_detection = "auto"'
 )
 
 AUTO_MINIMAL_CONFIG = MINIMAL_CONFIG.replace(
-    "[screenshots]\nuse_ffmpeg = true",
-    '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "auto"',
+    'active_rect_detection = "aspect_ratio"', 'active_rect_detection = "auto"'
 )
 
 ALIGNMENT_CONFIG = """\
@@ -50,6 +49,7 @@ enable = true
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false

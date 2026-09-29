@@ -82,7 +82,7 @@ class AudioStreamSelection:
 
 
 @dataclass(frozen=True)
-class _ProbedStreams:
+class ProbedStreams:
     audio: tuple[AudioStreamInfo, ...]
     video_start: VideoStreamStart
 
@@ -320,7 +320,7 @@ def _parse_video_start(stream: dict[str, Any]) -> VideoStreamStart | None:
     return VideoStreamStart(start_time=parsed_start_time, basis="metadata")
 
 
-def _probe_streams(video_path: Path) -> _ProbedStreams:
+def probe_streams(video_path: Path) -> ProbedStreams:
     """Probe audio streams and the companion video start in one ffprobe call."""
     payload = _load_ffprobe_json(
         [
@@ -378,7 +378,7 @@ def _probe_streams(video_path: Path) -> _ProbedStreams:
                 video_found = True
     if not audio:
         raise AudioAlignmentError(f"no audio streams found in {video_path.name}")
-    return _ProbedStreams(audio=tuple(audio), video_start=video_start)
+    return ProbedStreams(audio=tuple(audio), video_start=video_start)
 
 
 def _reference_stream_sort_key(stream: AudioStreamInfo) -> tuple[int, int, int, int]:
@@ -461,44 +461,59 @@ def _select_audio_stream_override(
     )
 
 
-def select_reference_audio_stream(
-    video_path: Path,
+def select_audio_pair(
+    reference: ProbedStreams,
+    comparison: ProbedStreams,
     *,
-    stream_override: int | None = None,
-) -> AudioStreamSelection:
-    """Choose the reference anchor stream deterministically from ffprobe metadata."""
-    probed = _probe_streams(video_path)
-    if stream_override is not None:
-        stream = _select_audio_stream_override(
-            probed.audio,
-            video_path=video_path,
-            stream_override=stream_override,
+    reference_path: Path,
+    comparison_path: Path,
+    reference_override: int | None,
+    comparison_override: int | None,
+) -> tuple[AudioStreamSelection, AudioStreamSelection]:
+    """Choose the reference and comparison audio streams, preferring a shared language (M3)."""
+    fixed_comparison = (
+        _select_audio_stream_override(
+            comparison.audio,
+            video_path=comparison_path,
+            stream_override=comparison_override,
+        )
+        if comparison_override is not None
+        else None
+    )
+    if reference_override is not None:
+        reference_stream = _select_audio_stream_override(
+            reference.audio,
+            video_path=reference_path,
+            stream_override=reference_override,
         )
     else:
-        stream = min(probed.audio, key=_reference_stream_sort_key)
-    return AudioStreamSelection(stream=stream, video_start=probed.video_start)
-
-
-def select_matching_audio_stream(
-    video_path: Path,
-    *,
-    reference_stream: AudioStreamInfo,
-    stream_override: int | None = None,
-) -> AudioStreamSelection:
-    """Choose the comparison stream that best matches the selected reference stream."""
-    probed = _probe_streams(video_path)
-    if stream_override is not None:
-        stream = _select_audio_stream_override(
-            probed.audio,
-            video_path=video_path,
-            stream_override=stream_override,
-        )
-    else:
-        stream = min(
-            probed.audio,
+        default = min(reference.audio, key=_reference_stream_sort_key)
+        comparison_languages = {
+            stream.language
+            for stream in (comparison.audio if fixed_comparison is None else (fixed_comparison,))
+            if not stream.is_commentary and stream.language is not None
+        }
+        if default.language is not None and default.language not in comparison_languages:
+            shared = [
+                stream
+                for stream in reference.audio
+                if not stream.is_commentary and stream.language in comparison_languages
+            ]
+            reference_stream = min(shared, key=_reference_stream_sort_key) if shared else default
+        else:
+            reference_stream = default
+    comparison_stream = (
+        fixed_comparison
+        if fixed_comparison is not None
+        else min(
+            comparison.audio,
             key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
         )
-    return AudioStreamSelection(stream=stream, video_start=probed.video_start)
+    )
+    return (
+        AudioStreamSelection(stream=reference_stream, video_start=reference.video_start),
+        AudioStreamSelection(stream=comparison_stream, video_start=comparison.video_start),
+    )
 
 
 def _bounded_evidence_text(value: str | None) -> str | None:

@@ -158,7 +158,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert analysis.bright_quantile == 0.95
     assert audio.enable is True
     assert audio.max_offset_seconds == 30.0
-    assert audio.video_check_positions == 12
     assert audio.use_vsview is False
     assert audio.force_interactive is False
     assert audio.cache_results is True
@@ -170,7 +169,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
     assert screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
-    assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
+    assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.AUTO
     assert screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
     assert screenshots.aligned_target_width is None
     assert screenshots.aligned_target_height is None
@@ -568,7 +567,6 @@ def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values(
         {
             "enable": False,
             "max_offset_seconds": 10.0,
-            "video_check_positions": 18,
             "use_vsview": True,
             "force_interactive": True,
             "cache_results": False,
@@ -581,7 +579,6 @@ def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values(
 
     assert audio.enable is False
     assert audio.max_offset_seconds == 10.0
-    assert audio.video_check_positions == 18
     assert audio.use_vsview is True
     assert audio.force_interactive is True
     assert audio.cache_results is False
@@ -594,8 +591,6 @@ def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values(
         {"channel_strategy": "first_channel"},
         {"max_offset_seconds": float("inf")},
         {"max_offset_seconds": 0.5},
-        {"video_check_positions": 5},
-        {"video_check_positions": 49},
         {"reference_stream": -1},
         {"previous_offsets": "reuse"},
         {"comparison_streams": {"encode": -1}},

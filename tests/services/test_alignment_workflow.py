@@ -25,6 +25,7 @@ from frame_compare.services.alignment_audio import (
     AudioStreamInfo,
     AudioStreamSelection,
     AudioStreamTimeline,
+    ProbedStreams,
     VideoStreamStart,
 )
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
@@ -94,6 +95,11 @@ def _selection(*, duration_seconds: float = _DURATION_SECONDS) -> AudioStreamSel
     )
 
 
+def _probe(*, duration_seconds: float = _DURATION_SECONDS) -> ProbedStreams:
+    selection = _selection(duration_seconds=duration_seconds)
+    return ProbedStreams(audio=(selection.stream,), video_start=selection.video_start)
+
+
 def _stub_transport(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -107,13 +113,8 @@ def _stub_transport(
     comparison_pcm.write_bytes(_payload(comparison_samples))
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda *args, **kwargs: _selection(),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda *args, **kwargs: _selection(),
+        "probe_streams",
+        lambda *args, **kwargs: _probe(),
     )
 
     def argv(
@@ -177,7 +178,7 @@ def test_agreed_pair_without_loader_is_video_unavailable(
     assert attempt is not None
     assert attempt.status == "complete"
     assert attempt.comparison_ordinal == 1
-    assert attempt.estimator_policy == "whole-track-chunked-phat-video-check-retimed-20260928"
+    assert attempt.estimator_policy == "whole-track-chunked-phat-video-check-motion-20260929"
     assert attempt.diagnostic_policy == "retained-audio-evidence-v1"
     assert (attempt.fps_num, attempt.fps_den) == (FPS.numerator, FPS.denominator)
     assert [s.role for s in attempt.selected_streams] == ["reference", "comparison"]
@@ -238,13 +239,10 @@ def test_insert_gives_no_single_offset_with_runs(
     )
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda *args, **kwargs: _selection(duration_seconds=70.0),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda *args, **kwargs: _selection(duration_seconds=74.0),
+        "probe_streams",
+        lambda path, *args, **kwargs: _probe(
+            duration_seconds=70.0 if Path(path).stem == "reference" else 74.0
+        ),
     )
 
     (result,) = _align(reference, comparison, _config(), tmp_path)
@@ -306,10 +304,12 @@ def test_unknown_duration_rejected_before_decode(
         ),
         video_start=selection.video_start,
     )
+    unknown_probe = ProbedStreams(audio=(unknown.stream,), video_start=unknown.video_start)
     monkeypatch.setattr(
-        alignment_audio, "select_reference_audio_stream", lambda *a, **k: _selection()
+        alignment_audio,
+        "probe_streams",
+        lambda path, *a, **k: _probe() if Path(path).stem == "reference" else unknown_probe,
     )
-    monkeypatch.setattr(alignment_audio, "select_matching_audio_stream", lambda *a, **k: unknown)
 
     def exploding_collect(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("decode must not run without durations")
@@ -354,13 +354,10 @@ def test_long_reference_short_comparison_budget_rejects_before_decode(
     reference_duration = (MAX_AUDIO_CHUNKS + 1) * 5
     monkeypatch.setattr(
         alignment_audio,
-        "select_reference_audio_stream",
-        lambda *args, **kwargs: _selection(duration_seconds=reference_duration),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "select_matching_audio_stream",
-        lambda *args, **kwargs: _selection(duration_seconds=10.0),
+        "probe_streams",
+        lambda path, *args, **kwargs: _probe(
+            duration_seconds=reference_duration if Path(path).stem == "reference" else 10.0
+        ),
     )
     decode_calls: list[tuple[object, ...]] = []
 
@@ -414,12 +411,7 @@ def test_collection_failure_is_aborted_with_category(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reference, comparison = _media(tmp_path)
-    monkeypatch.setattr(
-        alignment_audio, "select_reference_audio_stream", lambda *a, **k: _selection()
-    )
-    monkeypatch.setattr(
-        alignment_audio, "select_matching_audio_stream", lambda *a, **k: _selection()
-    )
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda *a, **k: _probe())
     reference_facts, comparison_facts = _failure_facts()
     failure = PairedAudioCollectionFailure(
         category="timeout",
@@ -452,12 +444,7 @@ def test_collection_failure_is_aborted_with_category(
 
 def test_cleanup_failure_is_fatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reference, comparison = _media(tmp_path)
-    monkeypatch.setattr(
-        alignment_audio, "select_reference_audio_stream", lambda *a, **k: _selection()
-    )
-    monkeypatch.setattr(
-        alignment_audio, "select_matching_audio_stream", lambda *a, **k: _selection()
-    )
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda *a, **k: _probe())
     reference_facts, comparison_facts = _failure_facts()
     failure = PairedAudioCollectionFailure(
         category="timeout",
@@ -509,13 +496,13 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
     program = make_program(SEED, _DURATION_SECONDS)
     _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
 
-    def mutating_select(path: Path, *args: Any, **kwargs: Any) -> AudioStreamSelection:
+    def mutating_probe(path: Path, *args: Any, **kwargs: Any) -> ProbedStreams:
         if Path(path) == mutated:
             with open(mutated, "ab") as handle:
                 handle.write(b"mutated")
-        return _selection()
+        return _probe()
 
-    monkeypatch.setattr(alignment_audio, "select_matching_audio_stream", mutating_select)
+    monkeypatch.setattr(alignment_audio, "probe_streams", mutating_probe)
     generated = tmp_path / "generated"
     generated.mkdir(parents=True)
     save_manual_override(

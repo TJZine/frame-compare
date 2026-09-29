@@ -59,6 +59,9 @@ FloatFrame = npt.NDArray[np.float32]
 _FRAME_WIDTH = 320
 _FRAME_HEIGHT = 180
 _TARGET_POSITION_LIMIT = 12
+_MOTION_CANDIDATES = 4
+_MOTION_STEP = 2
+_BASE_POSITION_COUNT = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +120,6 @@ def check_video_alignment(
     attempt: AudioAlignmentAttempt,
     fps_reference: Fraction,
     loader: VSLoader | None,
-    position_count: int = 12,
     cancellation: Event | None = None,
 ) -> VideoCheckResult:
     """Run V1-V5 and return bounded W0 evidence without throwing runtime failures."""
@@ -161,7 +163,17 @@ def check_video_alignment(
         )
         if overlap is None:
             return _failed("video_check_unavailable")
-        positions = _base_positions(overlap, position_count)
+        start, end = overlap
+        span = end - start
+        positions = _motion_positions(
+            reference_node,
+            start + span * 0.05,
+            start + span * 0.95,
+            _BASE_POSITION_COUNT,
+            cancellation=cancellation,
+        )
+        if positions is None:
+            return _failed("cancelled")
         if not positions:
             return _failed("video_check_unavailable")
         scored_offsets = tuple(range(rounded_frame - 2, rounded_frame + 3))
@@ -376,10 +388,40 @@ def _evenly_spaced(start: float | int, end: float | int, count: int) -> tuple[in
     return tuple(dict.fromkeys(values))
 
 
-def _base_positions(overlap: tuple[int, int], count: int) -> tuple[int, ...]:
-    start, end = overlap
-    span = end - start
-    return _evenly_spaced(start + span * 0.05, start + span * 0.95, count)
+def _motion_positions(
+    node: vs.VideoNode,
+    start: float | int,
+    end: float | int,
+    count: int,
+    *,
+    cancellation: Event | None,
+) -> tuple[int, ...] | None:
+    """One reference frame per equal slot of [start, end]: the candidate with the most motion.
+
+    Motion is the mean absolute luma difference between frames ``n`` and
+    ``n + _MOTION_STEP``. Returns ``None`` when cancelled.
+    """
+    if count < 1 or end < start:
+        return ()
+    slot = (end - start) / count
+    chosen: list[int] = []
+    for index in range(count):
+        if _is_cancelled(cancellation):
+            return None
+        slot_start = start + slot * index
+        best_frame = round(slot_start + slot / 2)
+        best_motion = -1.0
+        for candidate_index in range(_MOTION_CANDIDATES):
+            frame = round(slot_start + slot * (candidate_index + 0.5) / _MOTION_CANDIDATES)
+            if frame < 0 or frame + _MOTION_STEP >= node.num_frames:
+                continue
+            motion = float(
+                np.mean(np.abs(_read_frame(node, frame) - _read_frame(node, frame + _MOTION_STEP)))
+            )
+            if motion > best_motion:
+                best_frame, best_motion = frame, motion
+        chosen.append(best_frame)
+    return tuple(dict.fromkeys(chosen))
 
 
 def _score_base_positions(

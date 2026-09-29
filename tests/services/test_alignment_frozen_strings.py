@@ -1321,8 +1321,8 @@ def test_normal_provisional_copy_is_frozen(
         not in err
     )
     assert (
-        "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures. "
-        "No automatic change was made. Open VSView to check the lineup."
+        "The audio points to +146f, but the video could not confirm the exact frame "
+        "(little motion or different framing at the checked points)."
     ) in err
 
 
@@ -1330,9 +1330,7 @@ def test_inconclusive_copy_reports_a_strong_boundary_hint_without_confirming_it(
     review = build_audio_review_presentation(_boundary_video_inconclusive_attempt())
 
     assert review.reason_lines() == (
-        "The sound and picture suggest different starting points. Audio suggests +146 frames; "
-        "the checked scenes favor +148 frames. No automatic change was made. Open VSView to "
-        "choose the frame where the pictures line up.",
+        "The audio points to +146f, but the pictures line up at +148f at the checked points.",
     )
 
 
@@ -1340,8 +1338,8 @@ def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -
     review = build_audio_review_presentation(_boundary_video_inconclusive_attempt(position_count=4))
 
     assert review.reason_lines() == (
-        "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures. "
-        "No automatic change was made. Open VSView to check the lineup.",
+        "The audio points to +146f, but the video could not confirm the exact frame "
+        "(little motion or different framing at the checked points).",
     )
 
 
@@ -1385,7 +1383,7 @@ def test_verbose_provisional_shows_chunk_facts(
     assert "compensation=+0.000s" in err
     assert "sub-frame=audio +146.23f" in err
     assert "planned=2" in err
-    assert "whole-track-chunked-phat-video-check-retimed-20260928" in err
+    assert "whole-track-chunked-phat-video-check-motion-20260929" in err
 
 
 def test_verbose_provisional_shows_retimed_context(
@@ -1549,7 +1547,7 @@ def test_json_mode_logs_review_warning(tmp_path: Path, capsys: pytest.CaptureFix
         ),
         (
             "video_check_inconclusive",
-            "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures.",
+            "The audio points to +146f, but the video could not confirm the exact frame",
         ),
         (
             "video_check_unavailable",

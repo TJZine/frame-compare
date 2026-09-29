@@ -40,7 +40,7 @@ from frame_compare.utils.alignment_policy import (
     rounded_frame as _rounded_frame,
 )
 
-ALIGNMENT_ESTIMATOR_POLICY = "whole-track-chunked-phat-video-check-retimed-20260928"
+ALIGNMENT_ESTIMATOR_POLICY = "whole-track-chunked-phat-video-check-motion-20260929"
 
 
 @dataclass(frozen=True)

@@ -1676,9 +1676,7 @@ def test_p4a_panel_shows_boundary_video_hint_as_provisional(
 
     summary = panel.audio_summary_labels[0].text()
     assert (
-        "The sound and picture suggest different starting points. Audio suggests +146 frames; "
-        "the checked scenes favor +148 frames. No automatic change was made. Open VSView to "
-        "choose the frame where the pictures line up."
+        "The audio points to +146f, but the pictures line up at +148f at the checked points."
     ) in summary
     assert "confirmed +148f" not in summary
     assert [field.text() for field in panel.frame_inputs] == ["", ""]
@@ -1730,7 +1728,7 @@ def test_p4a_panel_context_rows_use_one_key_and_continuations(tmp_path: Path) ->
         ),
         (
             "video_check_inconclusive",
-            "Audio suggests +146 frames, but Frame Compare could not verify it against the pictures.",
+            "The audio points to +146f, but the video could not confirm the exact frame",
         ),
         (
             "video_check_unavailable",

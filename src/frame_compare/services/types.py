@@ -117,7 +117,6 @@ class AlignmentConfig:
 
     enable: bool = True
     max_offset_seconds: float = 30.0
-    video_check_positions: int = 12
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True

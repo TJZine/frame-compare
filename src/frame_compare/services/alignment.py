@@ -563,7 +563,7 @@ def _plan_audio_pair(
     *,
     config: AlignmentConfig,
     fps_reference: Fraction,
-    reference_stream_loader: Callable[[], alignment_audio.AudioStreamSelection] | None,
+    reference_probe_loader: Callable[[], alignment_audio.ProbedStreams] | None,
     reference_request: AlignmentClipRequest,
     comparison_request: AlignmentClipRequest,
     comparison_ordinal: int,
@@ -590,18 +590,19 @@ def _plan_audio_pair(
             decided=decided,
             attempt=None,
         )
-    reference_selection = (
-        reference_stream_loader()
-        if reference_stream_loader is not None
-        else alignment_audio.select_reference_audio_stream(
-            reference,
-            stream_override=config.reference_stream,
-        )
+    reference_probe = (
+        reference_probe_loader()
+        if reference_probe_loader is not None
+        else alignment_audio.probe_streams(reference)
     )
-    comparison_selection = alignment_audio.select_matching_audio_stream(
-        comparison,
-        reference_stream=reference_selection.stream,
-        stream_override=config.comparison_streams.get(comparison.stem),
+    comparison_probe = alignment_audio.probe_streams(comparison)
+    reference_selection, comparison_selection = alignment_audio.select_audio_pair(
+        reference_probe,
+        comparison_probe,
+        reference_path=reference,
+        comparison_path=comparison,
+        reference_override=config.reference_stream,
+        comparison_override=config.comparison_streams.get(comparison.stem),
     )
     reference_duration = reference_selection.stream.timeline.duration
     comparison_duration = comparison_selection.stream.timeline.duration
@@ -730,7 +731,6 @@ def _collect_and_decide_audio_pair(
                 attempt=attempt,
                 fps_reference=fps_reference,
                 loader=vs_loader,
-                position_count=config.video_check_positions,
                 cancellation=cancellation,
             )
             decided = alignment_decision.decide_after_video(
@@ -857,7 +857,7 @@ def _estimate_audio_pair(
     *,
     config: AlignmentConfig,
     fps_reference: Fraction,
-    reference_stream_loader: Callable[[], alignment_audio.AudioStreamSelection] | None = None,
+    reference_probe_loader: Callable[[], alignment_audio.ProbedStreams] | None = None,
     reference_request: AlignmentClipRequest,
     comparison_request: AlignmentClipRequest,
     comparison_ordinal: int = 1,
@@ -870,7 +870,7 @@ def _estimate_audio_pair(
         comparison,
         config=config,
         fps_reference=fps_reference,
-        reference_stream_loader=reference_stream_loader,
+        reference_probe_loader=reference_probe_loader,
         reference_request=reference_request,
         comparison_request=comparison_request,
         comparison_ordinal=comparison_ordinal,
@@ -911,16 +911,13 @@ def _compute_requested_alignments(
     comparison_ordinals = {
         comparison.path: ordinal for ordinal, comparison in enumerate(request.comparisons, start=1)
     }
-    selected_reference_stream: alignment_audio.AudioStreamSelection | None = None
+    selected_reference_probe: alignment_audio.ProbedStreams | None = None
 
-    def load_reference_stream() -> alignment_audio.AudioStreamSelection:
-        nonlocal selected_reference_stream
-        if selected_reference_stream is None:
-            selected_reference_stream = alignment_audio.select_reference_audio_stream(
-                reference.path,
-                stream_override=config.reference_stream,
-            )
-        return selected_reference_stream
+    def load_reference_probe() -> alignment_audio.ProbedStreams:
+        nonlocal selected_reference_probe
+        if selected_reference_probe is None:
+            selected_reference_probe = alignment_audio.probe_streams(reference.path)
+        return selected_reference_probe
 
     for fallback_ordinal, comp in enumerate(requested_comparisons, start=1):
         raise_if_alignment_cancelled(cancellation)
@@ -931,7 +928,7 @@ def _compute_requested_alignments(
             comp.path,
             config=config,
             fps_reference=resolved_fps,
-            reference_stream_loader=load_reference_stream,
+            reference_probe_loader=load_reference_probe,
             reference_request=reference,
             comparison_request=comp,
             comparison_ordinal=comparison_ordinals.get(comp.path, fallback_ordinal),
