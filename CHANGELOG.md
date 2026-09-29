@@ -9,6 +9,15 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Changed
 
+- Select video-check positions by reference motion instead of even spacing: each
+  base and examined-target slot scores the candidate frame with the most luma
+  motion, while unexamined targets keep evenly spaced planned frames that are
+  never scored. Without stream overrides, the reference now switches to its
+  best-ranked stream in a language both sides share when its default language
+  is missing from the comparison, and `screenshots.active_rect_detection`
+  defaults to `auto`. The `[audio_alignment]` `video_check_positions` key is
+  removed and rejected as an unknown key; stale entries miss and recompute
+  under the `whole-track-chunked-phat-video-check-motion-20260929` policy.
 - Analyse retimed sources' audio on their effective timeline: when a source's
   effective frame rate differs from its native rate (`match_fps` or a per-source
   `effective_fps` override), alignment stretches its audio by the exact

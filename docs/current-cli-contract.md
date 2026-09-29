@@ -1493,25 +1493,25 @@ dedicated `run` flags for them:
   selects the shared active-picture evidence used during preparation.
   `provided` uses only explicit per-source `active_rect` overrides and trusted
   static metadata active rectangles. `dimension` also allows same-height or
-  same-width centered crop inference. `aspect_ratio` is the default and
-  additionally allows conservative centered vertical letterbox inference when a
-  target content aspect ratio has at least two matching sources or one
-  explicit/trusted metadata source. `auto` is opt-in; it first applies the same
-  static evidence as `aspect_ratio`, then conservatively samples luma frames
-  after the shared selectable window is known and only refines clips that still
-  have unresolved full-frame static rectangles. It returns full frame when
-  uncertain and is not ML, OCR, perceptual HDR analysis, or exhaustive scanning.
+  same-width centered crop inference. `aspect_ratio` additionally allows
+  conservative centered vertical letterbox inference when a target content
+  aspect ratio has at least two matching sources or one explicit/trusted
+  metadata source. `auto` is the default; it first applies the same static
+  evidence as `aspect_ratio`, then conservatively samples luma frames after the
+  shared selectable window is known and only refines clips that still have
+  unresolved full-frame static rectangles. It returns full frame when uncertain
+  and is not ML, OCR, perceptual HDR analysis, or exhaustive scanning.
   Metric analysis uses the resolved active picture. Aligned screenshot render
   uses the same resolved active picture for crop/scale/pad planning. Native
   screenshot render remains native/full-frame output. Analysis cache identity
   includes the resolved active rectangle and provenance, including
   `content-derived` rectangles from `auto`.
 
-  Example opt-in configuration:
+  Example explicit configuration:
 
   ```toml
   [screenshots]
-  active_rect_detection = "auto"
+  active_rect_detection = "aspect_ratio"
   ```
 
 - `aligned_scale_policy = "largest_active" | "smallest_active" |
@@ -1662,9 +1662,9 @@ this sign convention before decision evidence, hints, caching, and trim applicat
 - `comparison_streams` is a mapping from comparison filename stem to non-negative
   audio stream ordinal, defaulting to an empty map. Matching entries select the
   comparison clip audio stream for that stem.
-- `video_check_positions` is the number of positions sampled for global video
-  confirmation. It accepts 6 through 48 and defaults to 12. More positions can
-  confirm difficult HDR/SDR release pairs, at the cost of additional frame decoding.
+- Without overrides, the reference keeps its default-ranked stream unless that
+  language is missing from the comparison, in which case the reference switches
+  to its best-ranked stream in a language both sides share.
 
 Computed alignment decodes the whole selected audio stream at 8 kHz mono rather
 than sampling distributed windows. A source retimed to a different effective
@@ -1704,7 +1704,7 @@ flag, configuration field, signal-handler framework, or successful JSON field.
 Every fresh completed attempt retains immutable selected-stream facts, per-chunk
 columnar evidence, chunk runs, the global lag, start compensation, sub-frame
 estimate, A4b authority recount, bounded video evidence, and one of three final
-states under `whole-track-chunked-phat-video-check-retimed-20260928`:
+states under `whole-track-chunked-phat-video-check-motion-20260929`:
 
 - `trusted_automatic` / `audio_video_confirmed`: the A4b authority gate passes,
   V5 confirms the exact frame, every frame-distinct credible disagreement/run is

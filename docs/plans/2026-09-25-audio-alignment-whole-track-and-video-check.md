@@ -1421,3 +1421,53 @@ Return to the controller or maintainer if:
   Ruff check and format, Bandit, import contracts, API-docs drift check,
   strict docs build, and `git diff --check` also passed. The plan remains
   Active for the maintainer's final sign-off and handoff.
+- 2026-09-29: U4c motion-selected positions and review fixes implemented on
+  `agent/audio-alignment-parity` (Muse Code session; U4c base `ddc33be4`).
+  - Shipped: M1 motion-selected base and examined-target positions from the
+    reference alone (4 candidates per slot, step 2, strict-`>` earliest tie
+    break; unexamined targets keep evenly spaced planned frames, never
+    motion-probed); M2 removal of `video_check_positions` everywhere; M3
+    shared-language pair selection (`select_audio_pair`, cached reference
+    probe); M4 `active_rect_detection = "auto"` default; M5 edge-consensus
+    review hint with the locked mockup sentences; M6 policy token
+    `whole-track-chunked-phat-video-check-motion-20260929`. No threshold or
+    constant changed.
+  - Stage 1 (base motion plus M2-M6): full native canon green (3683 collected,
+    0 failed) and Docker gate 272 passed with zero skips. Every U4/U4b
+    acceptance outcome unchanged (state, reason, applied frame, target
+    resolution/kind, confirmed offsets, margins). Five insert-region tests
+    moved by one informative count under M1; per controller ruling their
+    wins/informative literals became a fixture-derived regions check
+    (`_assert_video(regions=...)`), which passes.
+  - Stage 2 (motion-selected targets): full native canon green and Docker gate
+    272 passed with zero skips. All U4/U4b target kinds, resolutions, and
+    `unexamined` counts unchanged.
+  - Recomputed literals (every one derived from the M1 formula in-test, none
+    pasted): stage 1, minority-edit base positions and the V3a contrast check
+    point; stage 2, the tied-alternative rigging frames plus its derived
+    winning offsets and first check point, the V3a target frames and target
+    check point, the run-target frames, the budget-test `_target_range` mock,
+    and the repeated-music-cue Docker target frames.
+  - Real-media gate (Docker, 11 labelled pairs at pure defaults, `bench_exit=0`):
+    8 `correct_applied`, 3 `correctly_withheld`, refusal rate 0.00.
+    `bs-1`/`bs-2`/`bs-3` apply 0/147/147 (12/12 informative); `speed-1` applies
+    692 (9/10, 2.60x margin); `dub-1` applies 0 with the English reference
+    (ordinal 1, no override); `delay-1` applies 0 in sync (12/12, inf);
+    `hdr-1` applies 120 at defaults (7/7 informative at 12 positions, 3.14x
+    margin, up from 4/12 evenly spaced); `hdr-2` applies 0 at defaults (12/12);
+    `title-1` and `desync-1` are provisional `video_check_inconclusive`
+    (title-1 reads "the pictures line up at -361f"); `neg-1` is unavailable
+    and correctly withheld.
+  - Per-pair wall time, U4c seconds vs U5 seconds (U5 had no `desync-1`):
+    development 99/76/64 vs 62/57/36, different_title 184 vs 147, dub 67 vs
+    73, container_delay 282 vs 152, speed_change 69 vs 59, hdr_vs_sdr 53/113
+    vs 31/101, av_desync 271 vs none, negative_control 156 vs 48. L-SMASH
+    index build per pair stayed under 1.1 s; scoring has no isolated timer,
+    so wall time is the comparison basis. Motion probing adds reference frame
+    reads (48 base candidates plus up to 48 target candidates per pair).
+  - Deviations from the U4c specification: none. Two handoff stops were
+    adjudicated by controller ruling without changing the spec: the M4
+    default's shared/inline test configs were pinned to explicit
+    `aspect_ratio` (19 insertions and 6 deletions across 5 orchestration
+    support/test files), and the five M1 wins-count literals became the regions
+    check above.

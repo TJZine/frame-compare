@@ -444,7 +444,7 @@ warning-only for optional alignment. The attempt retains resolved pathless strea
 facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
 compensation, the sub-frame estimate, the A4b authority recount, the video
 observation, and the final decision. Under the shipped
-`whole-track-chunked-phat-video-check-retimed-20260928` policy, the audio-only decision is an
+`whole-track-chunked-phat-video-check-motion-20260929` policy, the audio-only decision is an
 internal `audio_only` seam. When a global lag exists, `alignment_video`
 checks the run's own L-SMASH sources in the same worker thread and
 `alignment_decision` combines the result. Only `trusted_automatic` with reason
@@ -464,7 +464,9 @@ stale-policy shared entries miss and recompute.
 Computed alignment work runs whole-track chunked correlation over each selected audio
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
-whole-track 8 kHz mono FFmpeg recipe. Each source's audio is analysed on its
+whole-track 8 kHz mono FFmpeg recipe. Without overrides, the reference switches
+from its default-ranked stream to its best-ranked stream in a shared language when
+its default language is missing from the comparison. Each source's audio is analysed on its
 effective timeline, so a retimed source's exact resample/relabel filters stretch
 its audio by `source_fps / effective_fps` before chunking. Reference chunks of length
 `C = clamp(floor(D/3), 5 s, 30 s)` (one chunk of length `D` when the shorter
@@ -526,8 +528,10 @@ are not reused.
 `alignment_video` owns V1-V5a: bounded five-offset base scoring, targeted run/chunk
 hypothesis checks, L-SMASH loading through the injected run `VSLoader`, active-rect
 crop/downscale/rank scoring, cancellation and source-identity checks, and bounded
-review check-point construction. It never falls back to FFMS2. A missing or failing
-loader becomes `video_check_unavailable`, not a run failure.
+review check-point construction. Base and examined-target positions are motion-selected
+from the reference alone (the highest-motion candidate per slot), never evenly spaced.
+It never falls back to FFMS2. A missing or failing loader becomes
+`video_check_unavailable`, not a run failure.
 `frame_compare.utils.alignment_evidence` is the single definition of the v4
 evidence schema: frozen dataclasses, one strict standard-library payload walker/parser,
 plain explicit records, and the shared per-comparison byte bound. Pure shared alignment
