@@ -15,8 +15,7 @@ Label schema (media paths are relative to the label file's directory)::
          "reference": "C.mkv", "comparison": "D.mkv",
          "expected_automatic": "not_applied"}]}
 
-Pair labels may set ``active_rect_detection``, ``reference_stream``,
-``comparison_stream``, and ``video_check_positions``. ``speed_change`` pairs use the production
+Labels run at pure defaults. ``speed_change`` pairs use the production
 ``sources.match_fps = "assume_reference"`` preparation setting.
 
 Docker invocation (native macOS L-SMASH is broken; run in the test service):
@@ -40,7 +39,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect, RunContext
 from frame_compare.orchestration.phase_alignment import run_align_phase
@@ -71,10 +69,6 @@ class LabelledPair:
     comparison: Path
     expected_frame: int | None
     expected_automatic: ExpectedAutomatic
-    active_rect_detection: ScreenshotActiveRectDetection
-    reference_stream: int | None
-    comparison_stream: int | None
-    video_check_positions: int | None
 
 
 def classify_outcome(
@@ -164,10 +158,6 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
         raise ValueError(f"{where} duplicates pair id '{pair_id}'")
     seen.add(pair_id)
     expected_frame, expected_automatic = _parse_expected(where, entry)
-    active_rect_detection = _parse_active_rect_detection(where, entry)
-    reference_stream = _parse_stream(where, entry, "reference_stream")
-    comparison_stream = _parse_stream(where, entry, "comparison_stream")
-    video_check_positions = _parse_video_check_positions(where, entry)
     media_root = path.parent
     reference_path = media_root / reference
     comparison_path = media_root / comparison
@@ -181,10 +171,6 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
         comparison=comparison_path,
         expected_frame=expected_frame,
         expected_automatic=expected_automatic,
-        active_rect_detection=active_rect_detection,
-        reference_stream=reference_stream,
-        comparison_stream=comparison_stream,
-        video_check_positions=video_check_positions,
     )
 
 
@@ -202,34 +188,6 @@ def _parse_expected(where: str, entry: dict[str, Any]) -> tuple[int | None, Expe
     return expected_frame, expected_automatic
 
 
-def _parse_active_rect_detection(
-    where: str, entry: dict[str, Any]
-) -> ScreenshotActiveRectDetection:
-    value = entry.get("active_rect_detection", ScreenshotActiveRectDetection.ASPECT_RATIO.value)
-    try:
-        return ScreenshotActiveRectDetection(value)
-    except ValueError as exc:
-        raise ValueError(f"{where} has invalid 'active_rect_detection': {value!r}") from exc
-
-
-def _parse_stream(where: str, entry: dict[str, Any], name: str) -> int | None:
-    value = entry.get(name)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{where} '{name}' must be a non-negative integer")
-    return value
-
-
-def _parse_video_check_positions(where: str, entry: dict[str, Any]) -> int | None:
-    value = entry.get("video_check_positions")
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or not 6 <= value <= 48:
-        raise ValueError(f"{where} 'video_check_positions' must be an integer from 6 through 48")
-    return value
-
-
 def _ensure_media_link(link: Path, target: Path) -> None:
     if link.is_symlink() and link.resolve() == target.resolve():
         return
@@ -238,20 +196,7 @@ def _ensure_media_link(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _pair_config(pair: LabelledPair, comparison_stem: str) -> str:
-    reference_stream = (
-        "" if pair.reference_stream is None else f"reference_stream = {pair.reference_stream}\n"
-    )
-    comparison_streams = (
-        ""
-        if pair.comparison_stream is None
-        else f'comparison_streams = {{ "{comparison_stem}" = {pair.comparison_stream} }}\n'
-    )
-    video_check_positions = (
-        ""
-        if pair.video_check_positions is None
-        else f"video_check_positions = {pair.video_check_positions}\n"
-    )
+def _pair_config(pair: LabelledPair) -> str:
     match_fps = "assume_reference" if pair.category == SPEED_CHANGE_CATEGORY else "disabled"
     return f'''[paths]
 input_dir = "comparison_videos"
@@ -266,10 +211,9 @@ force_interactive = false
 cache_results = false
 channel_strategy = "mono_downmix"
 previous_offsets = "disabled"
-{reference_stream}{comparison_streams}{video_check_positions}
+
 [screenshots]
 use_ffmpeg = true
-active_rect_detection = "{pair.active_rect_detection.value}"
 
 [report]
 enable = false
@@ -305,9 +249,7 @@ async def _prepare_pair(
     comparison_link = input_dir / f"01-comparison{pair.comparison.suffix}"
     _ensure_media_link(reference_link, pair.reference)
     _ensure_media_link(comparison_link, pair.comparison)
-    (config_dir / "config.toml").write_text(
-        _pair_config(pair, comparison_link.stem), encoding="utf-8"
-    )
+    (config_dir / "config.toml").write_text(_pair_config(pair), encoding="utf-8")
     return await preparation.execute_prep(
         RunRequest(
             root=workspace_root,
@@ -361,7 +303,6 @@ async def align_pair(
         "expected_automatic": pair.expected_automatic,
         "reference": pair.reference.name,
         "comparison": pair.comparison.name,
-        "active_rect_detection": pair.active_rect_detection.value,
         "reference_active_rect": _active_rect_payload(prep.clips[0].active_rect),
         "comparison_active_rect": _active_rect_payload(prep.clips[1].active_rect),
         "selected_streams": [asdict(stream) for stream in attempt.selected_streams],

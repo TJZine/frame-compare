@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -150,11 +149,7 @@ def test_load_labels_keeps_visual_truth_separate_from_automatic_outcome(
             "reference": "reference.mkv",
             "comparison": "comparison.mkv",
             "expected_frame": 0,
-            "expected_automatic": "not_applied",
-            "active_rect_detection": "auto",
-            "reference_stream": 1,
-            "comparison_stream": 0,
-            "video_check_positions": 24
+            "expected_automatic": "not_applied"
           }]
         }""",
         encoding="utf-8",
@@ -164,13 +159,9 @@ def test_load_labels_keeps_visual_truth_separate_from_automatic_outcome(
 
     assert pair.expected_frame == 0
     assert pair.expected_automatic == "not_applied"
-    assert pair.active_rect_detection.value == "auto"
-    assert pair.reference_stream == 1
-    assert pair.comparison_stream == 0
-    assert pair.video_check_positions == 24
 
 
-def test_pair_config_uses_production_fps_and_stream_settings(tmp_path: Path) -> None:
+def test_pair_config_uses_production_fps_at_pure_defaults(tmp_path: Path) -> None:
     script = _load_script()
     reference = tmp_path / "reference.mkv"
     comparison = tmp_path / "comparison.mkv"
@@ -183,48 +174,15 @@ def test_pair_config_uses_production_fps_and_stream_settings(tmp_path: Path) -> 
         comparison=comparison,
         expected_frame=692,
         expected_automatic="applied",
-        active_rect_detection=script.ScreenshotActiveRectDetection.AUTO,
-        reference_stream=1,
-        comparison_stream=0,
-        video_check_positions=24,
     )
 
-    config = script._pair_config(pair, "01-comparison")
+    config = script._pair_config(pair)
 
     assert 'match_fps = "assume_reference"' in config
-    assert 'active_rect_detection = "auto"' in config
-    assert "reference_stream = 1" in config
-    assert 'comparison_streams = { "01-comparison" = 0 }' in config
-    assert "video_check_positions = 24" in config
-
-
-@pytest.mark.parametrize("value", [True, 5, 49, "24"])
-def test_load_labels_rejects_invalid_video_check_positions(tmp_path: Path, value: object) -> None:
-    script = _load_script()
-    (tmp_path / "reference.mkv").touch()
-    (tmp_path / "comparison.mkv").touch()
-    labels = tmp_path / "labels.json"
-    labels.write_text(
-        json.dumps(
-            {
-                "pairs": [
-                    {
-                        "id": "pair",
-                        "category": "test",
-                        "reference": "reference.mkv",
-                        "comparison": "comparison.mkv",
-                        "expected_frame": 0,
-                        "expected_automatic": "applied",
-                        "video_check_positions": value,
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="video_check_positions"):
-        script.load_labels(labels)
+    assert "active_rect_detection" not in config
+    assert "reference_stream" not in config
+    assert "comparison_streams" not in config
+    assert "video_check_positions" not in config
 
 
 def test_media_link_rerun_accepts_same_target_and_rejects_stale_target(tmp_path: Path) -> None:
