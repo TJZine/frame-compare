@@ -495,6 +495,15 @@ def test_missing_or_failing_loader_is_unavailable(tmp_path: Path) -> None:
     assert native_value_error.reason == "video_check_unavailable"
 
 
+def test_non_finite_reference_luma_is_unavailable(tmp_path: Path) -> None:
+    float_clip = vs.core.std.BlankClip(format=vs.YUV444PS, width=128, height=72, length=180)
+    nan_clip = vs.core.std.Expr(float_clip, ["0 0 /", "", ""])
+
+    result = _run(tmp_path, truth=0, reference_clip=nan_clip, comparison_clip=_moving_clip())
+
+    assert result.reason == "video_check_unavailable"
+
+
 def test_evidence_invariant_errors_are_not_mapped_to_native_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

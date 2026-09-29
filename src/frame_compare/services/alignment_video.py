@@ -487,7 +487,7 @@ def _read_frame(node: vs.VideoNode, frame: int) -> FloatFrame:
     finally:
         del raw
     if image.size == 0 or not bool(np.all(np.isfinite(image))):
-        raise ValueError("video frame contains non-finite luma")
+        raise RuntimeError("video frame contains non-finite luma")
     return image
 
 
