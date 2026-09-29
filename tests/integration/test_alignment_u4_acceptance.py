@@ -1457,7 +1457,40 @@ def test_repeated_music_cue_is_resolved_by_identical_moving_video(
         (("chunk", 10, 10, (119, 120, 121), "resolved", 4),),
     )
     target = result.audio_attempt.video_check.targets[0]
-    expected_positions = ((12, 7199), (13, 7439), (14, 7679), (15, 7919))
+    comparison_path = u4_media.comparisons["repeated-music-cue"]
+    reference_path = u4_media.references.get("repeated-music-cue", u4_media.reference)
+    loader = DefaultVSLoader()
+    reference_source = loader.load(reference_path)
+    comparison_source = loader.load(comparison_path)
+    node = alignment_video._prepare_luma(reference_source.clip, None)
+    attempt = result.audio_attempt
+    chunks = alignment_video._chunks(attempt)
+    (target_spec,), _same_frame = alignment_video._build_targets(
+        attempt, chunks, confirmed=0, fps_reference=Fraction(_FPS)
+    )
+    alternative_frame = alignment_video._lag_to_frame(
+        target_spec.lag, attempt=attempt, fps_reference=Fraction(_FPS)
+    )
+    starts = alignment_video._stream_start(attempt, role="reference", video=False)
+    video_starts = alignment_video._stream_start(attempt, role="reference", video=True)
+    target_range = alignment_video._target_range(
+        target_spec,
+        fps_reference=Fraction(_FPS),
+        audio_start_reference=starts,
+        video_start_reference=video_starts,
+        alternative_frame=alternative_frame,
+        confirmed=0,
+        reference_frame_count=reference_source.num_frames,
+        comparison_frame_count=comparison_source.num_frames,
+    )
+    assert target_range is not None
+    motion = alignment_video._motion_positions(
+        node, *target_range, target_spec.requested_positions, cancellation=None
+    )
+    assert motion is not None
+    expected_positions = tuple(
+        enumerate(motion, start=len(result.audio_attempt.video_check.positions))
+    )
     assert len(target.positions) == len(expected_positions)
     for position, expected in zip(target.positions, expected_positions, strict=True):
         position_index, reference_frame = expected

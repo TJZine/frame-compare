@@ -235,7 +235,7 @@ def check_video_alignment(
                 for offset in range(alternative_frame - 1, alternative_frame + 2)
                 if offset != confirmed
             )
-            desired = _target_frames(
+            target_range = _target_range(
                 target,
                 fps_reference=fps_reference,
                 audio_start_reference=reference_audio_start,
@@ -245,8 +245,24 @@ def check_video_alignment(
                 reference_frame_count=reference_source.num_frames,
                 comparison_frame_count=comparison_source.num_frames,
             )
-            planned_target_frames[(target.kind, target.first_index, target.last_index)] = desired
-            selected = desired[:remaining]
+            planned = (
+                ()
+                if target_range is None
+                else _evenly_spaced(*target_range, target.requested_positions)
+            )
+            planned_target_frames[(target.kind, target.first_index, target.last_index)] = planned
+            if remaining > 0 and target_range is not None:
+                motion = _motion_positions(
+                    reference_node,
+                    *target_range,
+                    target.requested_positions,
+                    cancellation=cancellation,
+                )
+                if motion is None:
+                    return _failed("cancelled")
+                selected = motion[:remaining]
+            else:
+                selected = ()
             positions_for_target: list[VideoTargetPosition] = []
             if selected:
                 for frame in selected:
@@ -618,7 +634,7 @@ def _build_targets(
     )
 
 
-def _target_frames(
+def _target_range(
     target: _Target,
     *,
     fps_reference: Fraction,
@@ -628,7 +644,7 @@ def _target_frames(
     confirmed: int,
     reference_frame_count: int,
     comparison_frame_count: int,
-) -> tuple[int, ...]:
+) -> tuple[int, int] | None:
     offsets = tuple(
         offset
         for offset in range(alternative_frame - 1, alternative_frame + 2)
@@ -636,7 +652,7 @@ def _target_frames(
     )
     overlap = _frame_overlap(reference_frame_count, comparison_frame_count, (confirmed, *offsets))
     if overlap is None:
-        return ()
+        return None
     start = max(
         overlap[0],
         sample_to_reference_frame(
@@ -655,7 +671,9 @@ def _target_frames(
             video_start_reference=video_start_reference,
         ),
     )
-    return _evenly_spaced(start, end, target.requested_positions)
+    if start > end:
+        return None
+    return (start, end)
 
 
 def _score_hypotheses(

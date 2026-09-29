@@ -330,6 +330,45 @@ def _expected_base_positions(
     return positions
 
 
+def _expected_target_positions(
+    reference_clip: vs.VideoNode,
+    comparison_frame_count: int,
+    attempt: AudioAlignmentAttempt,
+    *,
+    confirmed: int,
+    target_index: int = 0,
+    remaining: int = 12,
+) -> tuple[int, ...]:
+    """Recompute M1 motion-selected target positions from the production formula."""
+    starts = alignment_video._stream_start(attempt, role="reference", video=False)
+    video_starts = alignment_video._stream_start(attempt, role="reference", video=True)
+    chunks = alignment_video._chunks(attempt)
+    targets, _same_frame = alignment_video._build_targets(
+        attempt, chunks, confirmed=confirmed, fps_reference=FPS
+    )
+    target = targets[target_index]
+    alternative_frame = alignment_video._lag_to_frame(
+        target.lag, attempt=attempt, fps_reference=FPS
+    )
+    target_range = alignment_video._target_range(
+        target,
+        fps_reference=FPS,
+        audio_start_reference=starts,
+        video_start_reference=video_starts,
+        alternative_frame=alternative_frame,
+        confirmed=confirmed,
+        reference_frame_count=reference_clip.num_frames,
+        comparison_frame_count=comparison_frame_count,
+    )
+    assert target_range is not None
+    node = alignment_video._prepare_luma(reference_clip, None)
+    motion = alignment_video._motion_positions(
+        node, *target_range, target.requested_positions, cancellation=None
+    )
+    assert motion is not None
+    return motion[:remaining]
+
+
 def _run(
     tmp_path: Path,
     *,
@@ -600,7 +639,15 @@ def test_tied_alternative_minima_choose_the_first_actual_winner(
 
 def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path) -> None:
     reference = _moving_clip(frames=120)
-    target_frames = (3, 10, 17, 24)
+    attempt = _attempt_with_lags(
+        (333, -333, -333, -333, -333, -333, -333, -333, -333, -333),
+        global_lag=-333,
+        chunk_samples=8_000,
+        reference_audio_start=Fraction(1, 24),
+    )
+    target_frames = _expected_target_positions(
+        reference, reference.num_frames, attempt, confirmed=0
+    )
     remap = {
         comparison_frame: reference_frame
         for reference_frame in target_frames
@@ -608,12 +655,6 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
     }
     remap.update(dict.fromkeys(target_frames, 0))
     comparison = _remapped_clip(reference, lambda frame: remap.get(frame, frame))
-    attempt = _attempt_with_lags(
-        (333, -333, -333, -333, -333, -333, -333, -333, -333, -333),
-        global_lag=-333,
-        chunk_samples=8_000,
-        reference_audio_start=Fraction(1, 24),
-    )
 
     result = _run(
         tmp_path,
@@ -625,8 +666,16 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
 
     (target,) = result.observation.targets
     assert target.resolution == "alternative_confirmed"
-    assert [position.alternative_offset for position in target.positions] == [1] * 4
-    assert result.observation.check_points[0].suggested_comparison_frame == 2
+    expected_alternative_offsets = []
+    for frame in target_frames:
+        exact_1 = remap.get(frame - 1, frame - 1) == frame
+        exact_3 = remap.get(frame - 3, frame - 3) == frame
+        assert exact_3
+        expected_alternative_offsets.append(1 if exact_1 else 3)
+    assert [position.alternative_offset for position in target.positions] == (
+        expected_alternative_offsets
+    )
+    assert result.observation.check_points[0].suggested_comparison_frame == target_frames[0] - 1
     decided = _decide_video(attempt, result.observation)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
@@ -704,7 +753,10 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("chunk", 0, 0)
     assert (target.start_sample, target.end_sample, target.target_offset) == (0, 8_000, 2)
     assert target.alternative_offsets == (1, 2, 3)
-    assert [position.reference_frame for position in target.positions] == [3, 10, 17, 24]
+    expected_target = _expected_target_positions(
+        reference, comparison.num_frames, attempt, confirmed=0
+    )
+    assert [position.reference_frame for position in target.positions] == list(expected_target)
     assert [position.winner for position in target.positions] == ["alternative"] * 4
     assert all(position.confirmed_score > 0.0 for position in target.positions)
     assert all(position.alternative_score == 0.0 for position in target.positions)
@@ -720,7 +772,7 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert [
         (point.reference_frame, point.suggested_comparison_frame)
         for point in result.observation.check_points
-    ] == [(3, 1), (contrast, contrast)]
+    ] == [(expected_target[0], expected_target[0] - target.target_offset), (contrast, contrast)]
     decided = _decide_video(attempt, result.observation)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
@@ -769,7 +821,10 @@ def test_real_scoring_run_with_one_winning_position_stays_unresolved(
     assert len(result.observation.targets) == 1
     target = result.observation.targets[0]
     assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("run", 0, 1)
-    assert [position.reference_frame for position in target.positions] == [3, 34, 64, 95]
+    expected_target = _expected_target_positions(
+        reference, reference.num_frames, attempt, confirmed=0
+    )
+    assert [position.reference_frame for position in target.positions] == list(expected_target)
     assert [position.winner for position in target.positions] == [
         "neither",
         "neither",
@@ -1269,8 +1324,11 @@ def test_budget_exhaustion_keeps_planned_point_without_scoring(
     )
     monkeypatch.setattr(
         alignment_video,
-        "_target_frames",
-        lambda target, **_kwargs: tuple(target.first_index * 10 + offset for offset in range(1, 5)),
+        "_target_range",
+        lambda target, **_kwargs: (
+            target.first_index * 10 + 1,
+            target.first_index * 10 + 40,
+        ),
     )
 
     def score_hypotheses(
