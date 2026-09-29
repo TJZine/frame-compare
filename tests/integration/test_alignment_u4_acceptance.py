@@ -59,6 +59,9 @@ except (VapourSynthNotFoundError, VapourSynthError) as exc:
 if not detect_plugins(_core).get("lsmas", False):
     pytest.skip("lsmas plugin not available", allow_module_level=True)
 
+if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+    pytest.skip("ffmpeg/ffprobe not available", allow_module_level=True)
+
 _DURATION = 600
 _CHUNK_SECONDS = 30
 _CHUNK_COUNT = _DURATION // _CHUNK_SECONDS
