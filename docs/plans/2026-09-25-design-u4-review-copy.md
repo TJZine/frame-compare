@@ -63,6 +63,7 @@ Use one sentence per recorded reason, primary reason first, in V6's order.
 | `unresolved_audio_disagreement` | `Audio in {region} points to {alt}, and the video could not rule that out.` |
 | `unresolved_audio_disagreement` (unexamined, budget reached) | `Audio in {n} more sections points elsewhere; they were not checked, so the offset is not applied.` |
 | `video_check_inconclusive` | `The audio points to {o}, but the video could not confirm the exact frame (little motion or different framing at the checked points).` |
+| `video_check_inconclusive` (the pictures agree on a neighbouring frame; amended 2026-09-29) | `The audio points to {o}, but the pictures line up at {hint} at the checked points.` |
 | `video_check_unavailable` | `The audio points to {o}, but the video could not be read to confirm the exact frame.` |
 | audio failed, video confirms (V6) | `The audio does not agree on one offset across the track; the video suggests {o} at the checked points.` |
 

@@ -259,20 +259,22 @@ Confirmed with the maintainer on 2026-09-25.
   run's own L-SMASH sources through the existing `VSLoader`. No FFMS2 or other loader
   fallback.
 - V2. Scored offsets: `r - 2 ... r + 2`. Only `r - 1, r, r + 1` can be confirmed.
-- V3. Positions: 12 by default, configurable from 6 through 48, evenly spaced over
-  the middle 90% of the raw-frame overlap valid for all candidates. Each position
-  compares reference frame `n` with comparison frame `n - candidate` in raw source
-  frames (public sign convention; base trims do not enter). The 2026-09-28 U5
-  adjudication below adds the position-count setting while preserving the original
-  default of 12; V5's evidence thresholds are unchanged.
+- V3. Positions: 12, one per equal slot of the middle 90% of the raw-frame overlap
+  valid for all candidates. Within each slot, the position is the motion-selected
+  frame (M1, U4c). Each position compares reference frame `n` with comparison frame
+  `n - candidate` in raw source frames (public sign convention; base trims do not
+  enter). Amended 2026-09-29 (U4c): the position-count setting added in U5 is
+  removed, and V5's thresholds are unchanged.
 - V3a. Targeted positions (added 2026-09-26, revised the same day). In addition to
   the V3 positions, sample positions inside the reference time range of each target
-  chunk: 4 evenly spaced positions for a credible disagreeing chunk, 2 for a
-  non-credible one. They are mapped to reference frames and kept only where valid
+  chunk: 4 positions for a credible disagreeing chunk, 2 for a non-credible one,
+  one per equal slot of the target's valid range and motion-selected within each
+  slot (M1, U4c). A target that the budget leaves unexamined keeps evenly spaced
+  planned frames for its check points, with no motion probing. They are mapped to reference frames and kept only where valid
   for every frame they are compared at.
   - Targets are chosen after V5 confirms `c`, from frame-distinct disagreements
     only (A4b), in priority order:
-    1. competing runs (A4a): 4 positions spread evenly across the run's time range;
+    1. competing runs (A4a): 4 positions, one per equal slot of the run's time range;
     2. single credible disagreeing chunks: 4 positions each, highest PSR first;
     3. active non-credible disagreeing chunks: 2 positions each, highest PSR first.
   - At most 12 targeted positions in total, in that priority order. A competing run
@@ -827,6 +829,54 @@ from -28.6 s to -20.0 s in time but holds a constant frame offset.
   - the recipe rates are pinned for 1001/1000, 1001/960 (PAL 25 against 24000/1001) and 1001/1200;
   - the unsupported-ratio path is covered;
   - the real `speed-1` pair becomes a labelled U5 pair.
+
+### U4c - Motion-selected positions and review fixes (added 2026-09-29)
+
+Maintainer decisions after the U5 real-media findings. Evidence: evenly spaced
+positions waste checks on static shots and held animation drawings, whatever the
+grading. On the labelled corpus, picking the moving frame inside each slot raised
+the informative positions from 4 to 9 of 12 (HDR anime), from 8 to 12 (4K HDR
+against 1080p SDR), and the Black Sails median margin from 2.21 to 5.50, with every
+winner at the truth. HDR grading was not the cause.
+
+- M1. Motion-selected positions. For a range `[start, end]` and `count` positions:
+  - split it into `count` equal slots;
+  - in each slot, evaluate 4 candidate frames at the slot's quarter midpoints;
+  - each candidate's motion is the mean absolute difference between the prepared
+    reference luma of frames `n` and `n + 2` (a candidate without frame `n + 2`
+    is skipped);
+  - pick the candidate with the highest motion, taking the earliest on a tie. A
+    slot with no valid candidate uses its midpoint.
+
+  The reference alone decides, before any comparison frame is scored, so the
+  selection cannot favour an offset. It applies to V3 and to scored V3a targets.
+- M2. Remove `audio_alignment.video_check_positions`, its cache-identity field, its
+  docs and its per-label override. V3 is fixed at 12.
+- M3. Shared-language stream selection. Without overrides, the reference stream is
+  the best-ranked stream as today. There is one exception: when that stream's
+  language is known and no non-commentary comparison stream has it, the reference
+  becomes the best-ranked non-commentary reference stream whose known language
+  some non-commentary comparison stream has. The comparison stream is then matched
+  to the chosen reference stream as today. A reference override disables the
+  exception. A comparison override applies the exception against that single
+  stream.
+- M4. `screenshots.active_rect_detection` defaults to `auto`.
+- M5. The P4a edge-consensus hint lives in the policy module, from the existing V5
+  constants, and the presentation layer only renders it. Copy for
+  `video_check_inconclusive` with a hint:
+  `The audio points to {o}, but the pictures line up at {hint} at the checked points.`
+  Without a hint, it keeps the locked sentence. The action lines are unchanged.
+- M6. The policy token becomes `whole-track-chunked-phat-video-check-motion-20260929`.
+- Acceptance:
+  - M1 with generated clips, where a static slot next to a moving one picks the
+    moving frame and ties pick the earliest;
+  - every U4 and U4b acceptance outcome unchanged, where any change is a stop;
+  - an M3 selection table;
+  - the real-media gate at pure defaults, with no per-pair settings in the labels:
+    every applied pair equals its label, `hdr-1` and `hdr-2` apply,
+    `dub-1` applies with no stream override, and `delay-1` (an in-sync container
+    delay) applies at 0. `title-1` and `desync-1` stay provisional;
+  - the video-check time per pair, recorded against the U5 measurements.
 
 ### U5 - Acceptance and closeout
 
