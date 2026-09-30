@@ -9,12 +9,13 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from frame_compare.services import alignment_streaming
+from frame_compare.services import alignment_audio, alignment_streaming
 from frame_compare.services.alignment_correlation import plan_audio_chunks
 from frame_compare.services.alignment_streaming import (
     PairedAudioCollection,
@@ -227,24 +228,13 @@ class _CountingConsumer:
 
 
 def _paired_decode_argv(path: Path) -> list[str]:
-    """Real FFmpeg decode to 8 kHz mono float32, as U3 will request it."""
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(path),
-        "-map",
-        "0:a:0",
-        "-ac",
-        "1",
-        "-ar",
-        str(_PAIRED_SAMPLE_RATE),
-        "-f",
-        "f32le",
-        "-",
-    ]
+    """The shipped whole-track collection recipe for the fixture's only stream."""
+    return alignment_audio.collection_argv(
+        path,
+        alignment_audio.probe_streams(path).audio[0],
+        channel_strategy="mono_downmix",
+        timeline_scale=Fraction(1),
+    )
 
 
 def _generate_long_audio(path: Path, *, duration_seconds: int) -> None:
