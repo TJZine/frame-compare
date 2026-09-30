@@ -812,10 +812,11 @@ recovery requirement.
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
   `--from-cache-only` validation.
-- Shared alignment reuse source-set identity includes the scoped standalone-FFmpeg
-  fingerprint. In the managed Windows portable and Debian/Docker profiles, a
-  selected supported FFmpeg lineage change cannot reuse an offset computed under the
-  previous tool build.
+- Shared alignment reuse source-set identity includes the scoped alignment runtime
+  fingerprint: the selected standalone FFmpeg/ffprobe lineage and the selected
+  VapourSynth and L-SMASH-Works decoder identity. In the managed Windows portable and
+  Debian/Docker profiles, a selected supported FFmpeg or decoder lineage change cannot
+  reuse an offset computed under the previous build.
 - Successful low-level TMDB search and alternative-title responses are reused from
   `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
   is cached rather than the final ranked match, so current resolver policy always
