@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import replace
+from fractions import Fraction
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.utils.alignment_evidence import (
@@ -49,10 +50,8 @@ def audio_review(suggestion: int | None) -> str:
 
 
 def frame_lag(frame_offset: int) -> int:
-    """Return the exact 8 kHz lag for the whole-frame offsets used by fixtures."""
-    lag = frame_offset * 8_000 // _FPS_NUM
-    assert lag * _FPS_NUM == frame_offset * 8_000
-    return lag
+    """Return the nearest 8 kHz lag for a whole-frame offset at the fixture FPS."""
+    return round(Fraction(frame_offset * 8_000 * _FPS_DEN, _FPS_NUM))
 
 
 def subframe_estimate(lag: int) -> float:

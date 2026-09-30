@@ -35,15 +35,6 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
-    AudioAlignmentAttempt,
-    AudioAlignmentDecision,
-    AudioAnalysisFacts,
-    AudioChunkColumns,
-    AudioChunkRun,
-    AudioDecisionCandidate,
-    AudioStageOutcome,
-    SelectedAudioStreamEvidence,
-    VideoCheckObservation,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
@@ -52,6 +43,7 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
+from tests.alignment_review_test_support import trusted_audio_attempt
 
 
 def align_clips_from_request(
@@ -74,119 +66,6 @@ _DEFAULT_STABILITY = AlignmentStabilitySummary(
 )
 
 
-def _reuse_stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
-    return SelectedAudioStreamEvidence(
-        role=role,  # type: ignore[arg-type]
-        source_identity_digest=digest,
-        audio_stream_index=0,
-        absolute_stream_index=1,
-        selection_method="automatic_metadata",
-        selection_rank=(0, 0, 0, 0),
-        codec_name="aac",
-        sample_rate=48000,
-        channels=2,
-        channel_layout="stereo",
-        language="eng",
-        is_default=True,
-        is_original=False,
-        is_commentary=False,
-        language_match="not_applicable",
-        commentary_match="not_applicable",
-        stream_start_num=0,
-        stream_start_den=1,
-        stream_start_basis="default_zero",
-        input_start_num=0,
-        input_start_den=1,
-        input_start_basis="default_zero",
-        time_base_num=1,
-        time_base_den=48000,
-        duration_num=120,
-        duration_den=1,
-        duration_basis="duration_ts",
-        video_start_num=0,
-        video_start_den=1,
-        video_start_basis="default_zero",
-        timeline_scale_num=1,
-        timeline_scale_den=1,
-    )
-
-
-def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
-    """Hand-built trusted attempt so reuse tests stay isolated from the estimator.
-
-    The whole-track audio stage never applies on its own in U3 (every audio
-    pass is provisional pending the video check); these precedence tests stub
-    the estimator with a trusted attempt to simulate confirmed authority.
-    """
-    return AudioAlignmentAttempt(
-        reference_identity_digest="d" * 64,
-        comparison_identity_digest="e" * 64,
-        comparison_ordinal=1,
-        status="complete",
-        estimator_policy="whole-track-chunked-phat-video-check-motion-20260929",
-        diagnostic_policy="retained-audio-evidence-v1",
-        media_runtime_fingerprint="alignment-runtime",
-        ffmpeg_version="not_observed",
-        ffprobe_version="not_observed",
-        extraction_recipe="recipe",
-        fps_num=24,
-        fps_den=1,
-        selected_streams=(
-            _reuse_stream("reference", "d" * 64),
-            _reuse_stream("comparison", "e" * 64),
-        ),
-        analysis=AudioAnalysisFacts(
-            analysis_rate=8000,
-            max_offset_seconds=30.0,
-            chunk_samples=40000,
-            lag_samples=240000,
-            planned_chunk_count=5,
-        ),
-        chunks=AudioChunkColumns(
-            starts=(0, 40000, 80000, 120000, 160000),
-            counts=(40000,) * 5,
-            active=(True,) * 5,
-            lags=(0,) * 5,
-            psrs=(88.5,) * 5,
-            credible=(True,) * 5,
-            agrees=(True,) * 5,
-            total_samples=200000,
-        ),
-        runs=(AudioChunkRun(first_index=0, last_index=4, lag=0, chunk_count=5),),
-        audio=AudioStageOutcome(
-            status="agreed",
-            global_lag=0,
-            active_chunks=5,
-            credible_chunks=5,
-            agreeing_chunks=5,
-            compensation_seconds=0.0,
-            subframe_estimate=0.0,
-            rounded_frame=0,
-        ),
-        collection_observation="not_observed",
-        collection=(),
-        video_check=VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        ),
-        decision=AudioAlignmentDecision(
-            state="trusted_automatic",
-            candidate=AudioDecisionCandidate(
-                frame_offset=frame_offset,
-                time_offset_seconds=frame_offset / 24,
-                subframe_estimate=float(frame_offset),
-                basis="audio_only",
-            ),
-            primary_reason="audio_video_confirmed",
-            failed_gates=(),
-        ),
-        stability=_DEFAULT_STABILITY,
-    )
-
-
 def _trusted_computed_result(
     reference: Path,
     comparison: Path,
@@ -201,7 +80,7 @@ def _trusted_computed_result(
         algorithm="cross_correlation",
         source="computed",
         stability=_DEFAULT_STABILITY,
-        audio_attempt=_trusted_attempt(frame_offset),
+        audio_attempt=trusted_audio_attempt(frame_offset=frame_offset),
     )
 
 
@@ -415,7 +294,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         algorithm="cross_correlation",
         source="computed",
         stability=_DEFAULT_STABILITY,
-        audio_attempt=_trusted_attempt(7),
+        audio_attempt=trusted_audio_attempt(frame_offset=7),
     )
     save_reusable_offsets(
         request,
@@ -490,7 +369,7 @@ def test_stale_policy_entry_is_not_replayed_or_applied(
             ],
         )
 
-    attempt = _trusted_attempt(0)
+    attempt = trusted_audio_attempt(frame_offset=0)
     provisional = replace(
         _trusted_computed_result(ref, comp),
         frame_offset=None,
@@ -957,7 +836,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     algorithm="cross_correlation",
                     source="computed",
                     stability=_DEFAULT_STABILITY,
-                    audio_attempt=_trusted_attempt(4),
+                    audio_attempt=trusted_audio_attempt(frame_offset=4),
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
                 provenance="computed_this_run",
@@ -972,7 +851,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     algorithm="cross_correlation",
                     source="computed",
                     stability=_DEFAULT_STABILITY,
-                    audio_attempt=_trusted_attempt(7),
+                    audio_attempt=trusted_audio_attempt(frame_offset=7),
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[1]),
                 provenance="computed_this_run",
