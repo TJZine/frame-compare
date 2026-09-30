@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT correlation plus container start compensation, and add an L-SMASH video frame check that picks the exact applied frame.
 Owner: Audio alignment parity controller session; branch `agent/audio-alignment-parity` in the main checkout, merged into `dev/v0.6.0-review-remediation`.
 
@@ -1471,3 +1471,28 @@ Return to the controller or maintainer if:
     `aspect_ratio` (19 insertions and 6 deletions across 5 orchestration
     support/test files), and the five M1 wins-count literals became the regions
     check above.
+- 2026-09-30: U6 follow-ups and closeout (`b0705827..497c8e1f`).
+  - Video-check cost: reference luma already decoded during motion probing is
+    reused for scoring (at most 12 prepared 320x180 frames, cleared per stage),
+    and each position's comparison frames are read in increasing frame order so
+    they decode forward instead of re-seeking backwards. Evidence and decisions
+    stay bit-identical on all 11 real-media pairs and every U4/U4b acceptance
+    case. The median video check on the three long-keyframe-interval 4K pairs
+    fell from 199.9 s to 93.5 s (-53%), and every pair improved.
+  - Keyframe-placed motion candidates (phase C) measured 30% faster than the
+    reused-frame version on those pairs but 37% slower on `hdr-2`, and relied on
+    reading the decoder's index format. Rejected by the maintainer; M1 is
+    unchanged. The data is kept with the backlog note in `docs/TODO.md`.
+  - The render fail-fast race is fixed at its owner: a cancelled sibling future
+    can no longer mask the first real failure.
+  - New optional `[runtime] memory_limit_mb` (at least 512) caps VapourSynth's
+    frame cache for runs and the VSView process. It is not a hard limit on total
+    process memory.
+  - A second over-engineering pass found no further product deletions, and
+    replaced placement-coupled vote-count test literals with fixture-derived
+    expectations. No clause lost its proof.
+  - Final gates: 3,643 native and 277 Docker tests, strict docs, and 11/11
+    real-media pairs at pure defaults (8 applied correctly, 3 correctly
+    withheld, 0 wrong).
+  - Maintainer sign-off 2026-09-30. Windows portable proof remains a release
+    requirement, tracked in `docs/TODO.md`. The plan is closed as Historical.

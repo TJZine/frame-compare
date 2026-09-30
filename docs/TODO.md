@@ -20,6 +20,21 @@ search:
 
 ---
 
+## Audio Alignment: Release And Performance Follow-Ups
+
+From the [whole-track audio alignment plan](plans/2026-09-25-audio-alignment-whole-track-and-video-check.md)
+closeout (2026-09-30).
+
+- **Windows portable proof (release gate).** Run the retimed, motion-selected
+  alignment path and the new `[runtime] memory_limit_mb` setting in the Windows
+  portable build before release. It can't be proven on macOS or Docker.
+- **Keyframe-placed motion candidates (only if video-check speed becomes a
+  problem again).** Moving each M1 candidate to the first keyframe inside its
+  quarter kept every outcome correct. It was 30% faster than the current version
+  on long-keyframe 4K pairs, but 37% slower on a 2 s-GOP 4K pair, and it
+  depended on the decoder's index file format. Revisit only with a
+  keyframe source the loader exposes, and with no pair slower.
+
 ## Audio Alignment: Region-Limited Automatic Selection
 
 Follow-up to the
