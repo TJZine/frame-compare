@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
-from typing import Any, cast
+from typing import cast
 
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentChannelStrategy
@@ -304,7 +304,7 @@ def _parse_audio_stream(
     )
 
 
-def _parse_video_start(stream: dict[str, Any]) -> VideoStreamStart | None:
+def _parse_video_start(stream: dict[str, object]) -> VideoStreamStart | None:
     """Return the start of the first non-attached-pic video stream, if present."""
     if stream.get("codec_type") != "video":
         return None
@@ -358,7 +358,7 @@ def probe_streams(video_path: Path) -> ProbedStreams:
     for raw_item in stream_items:
         if not isinstance(raw_item, dict):
             raise FFmpegError(f"ffprobe returned invalid stream data for {video_path.name}", 0)
-        stream_item = cast(dict[str, Any], raw_item)
+        stream_item = cast(dict[str, object], raw_item)
         if stream_item.get("codec_type") == "audio":
             audio.append(
                 _parse_audio_stream(
