@@ -33,6 +33,7 @@ from frame_compare.services.alignment_decision import (
     decide_after_video,
     decide_completed_stage,
 )
+from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_presentation import (
     present_alignment_evidence,
     print_pre_review_summary,
@@ -55,6 +56,7 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.logging import configure_logging
+from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.test_alignment_evidence import (
@@ -130,7 +132,7 @@ def _unavailable_result(
 
 
 def _present(
-    request: object,
+    request: AlignmentRequest,
     result: AlignmentResult,
     config: AlignmentConfig,
     *,
@@ -138,11 +140,9 @@ def _present(
     quiet: bool = False,
     json_output: bool = False,
 ) -> None:
-    from frame_compare.services.alignment_keys import alignment_key
-
-    key = alignment_key(request.reference.path, request.comparisons[0].path)  # type: ignore[union-attr]
+    key = alignment_key(request.reference.path, request.comparisons[0].path)
     present_alignment_evidence(
-        request=request,  # type: ignore[arg-type]
+        request=request,
         results_map={key: result},
         provenances={
             key: AlignmentProvenance(
@@ -1290,7 +1290,7 @@ def test_opening_vsview_review_lines_frozen_verbatim(
     assert expected in err
 
 
-def _request_for(tmp_path: Path, config: AlignmentConfig) -> tuple[Path, Path, object]:
+def _request_for(tmp_path: Path, config: AlignmentConfig) -> tuple[Path, Path, AlignmentRequest]:
     reference = tmp_path / "reference.mkv"
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
