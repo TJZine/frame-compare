@@ -8,6 +8,7 @@ from fractions import Fraction
 from pathlib import Path
 from threading import Event
 from typing import Literal
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -34,6 +35,9 @@ from frame_compare.utils.alignment_evidence import (
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.types import SourceInfo
 from tests.services.test_alignment_evidence import attempt_with_chunks
+
+if isinstance(vs, MagicMock):
+    pytest.skip("VapourSynth is not installed", allow_module_level=True)
 
 FPS = Fraction(24, 1)
 
