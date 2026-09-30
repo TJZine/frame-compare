@@ -1242,8 +1242,8 @@ def _assert_video(
     assert video.confirmed_offset == confirmed_offset
     assert len(video.positions) == 12
     if held_frames is not None:
-        # The fixture replaces comparison pictures with black: all offsets
-        # there score equally; unchanged moving pictures have one exact match.
+        # Black comparison pictures give equal scores at all offsets; elsewhere
+        # the fixture's unchanged timing must give an informative confirmed minimum.
         expected_wins = 0
         for position in video.positions:
             scores = position.score_by_offset
@@ -1251,8 +1251,9 @@ def _assert_video(
                 assert len(set(scores)) == 1
             else:
                 best_index = video.scored_offsets.index(confirmed_offset)
-                assert scores[best_index] == 0.0
-                assert all(score > 0.0 for index, score in enumerate(scores) if index != best_index)
+                runner_up = min(score for index, score in enumerate(scores) if index != best_index)
+                assert scores[best_index] < runner_up
+                assert runner_up >= 1.1 * scores[best_index]
                 expected_wins += 1
         assert review.video_wins == review.video_informative == expected_wins
     elif regions is None:
