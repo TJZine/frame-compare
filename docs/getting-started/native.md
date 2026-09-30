@@ -36,7 +36,7 @@ The `vsview` extra pins VSView 0.11.0, the native Frame Compare alignment panel,
 the repository-managed VapourSynth Python package to R80. It uses VSView's base
 dependency graph, including its documented PySide6 backend; the upstream `recommended`
 and `full` extras are intentionally not selected. Its current resolution includes
-vsjetengine 1.7.0, BestSource 22, vspackrgb, and jetpytools 3.1.1. Install and run
+vsjetengine 1.8.0, BestSource 22, vspackrgb, and jetpytools 3.1.1. Install and run
 Frame Compare and VSView from this same environment: a PATH-only VSView executable
 does not provide the panel contract and is unsupported.
 On Windows it also installs the selected `vapoursynth-lsmas 1310.0.0.0` and

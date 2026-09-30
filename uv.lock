@@ -1613,14 +1613,14 @@ wheels = [
 
 [[package]]
 name = "vsjetengine"
-version = "1.7.0"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "vapoursynth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/10/66/ace34ff3b75ff151c414bbae89646790984f3bbfe569519104fb322fee54/vsjetengine-1.7.0.tar.gz", hash = "sha256:386dc930eedee92864d18925459ac80fd68e0ecf9112468ccbe6969fe6504c6f", size = 53645, upload-time = "2026-08-21T16:41:56.852Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/98/e81cc7238fa19885e32363df5a31730e0c60f7e5429792e8ce30e8694a51/vsjetengine-1.8.0.tar.gz", hash = "sha256:c588474aec08bbe2c70f8efb8fb57a15d7b521edacb361ca144b4a1df03a2624", size = 56109, upload-time = "2026-09-25T18:45:20.64Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f9/dc/d1800624ca15a0072e061f24f25004f1e87a48f3efa8d3d3028daae23b99/vsjetengine-1.7.0-py3-none-any.whl", hash = "sha256:d1d1be18479a44e6d8156a01fbbf3b8f82b2b2a4752f3191752a926603854d0a", size = 41219, upload-time = "2026-08-21T16:41:55.786Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/a1/44b5f91c082d119f37b9a463c23d6afe377d7cf3c57f7019eb5bb09b654d/vsjetengine-1.8.0-py3-none-any.whl", hash = "sha256:73575c9c96f9ae57985c14e59b6cbebedfd46ed1ad2f70d819d4b4a7522351ae", size = 42127, upload-time = "2026-09-25T18:45:19.156Z" },
 ]
 
 [[package]]

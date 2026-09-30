@@ -1133,7 +1133,7 @@ def _write_extracted_verifier_fixture(
                 ("vspackrgb", "1.4.0"),
                 ("VSView", "0.11.0"),
                 ("vsview-cli", "1.2.0"),
-                ("vsjetengine", "1.7.0"),
+                ("vsjetengine", "1.8.0"),
             )
         ],
         "schema_version": 2,
@@ -1891,7 +1891,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "vspackrgb": ("1.4.0", "MIT"),
         "VSView": ("0.11.0", "EUPL-1.2"),
         "vsview-cli": ("1.2.0", "Unlicense"),
-        "vsjetengine": ("1.7.0", "MIT"),
+        "vsjetengine": ("1.8.0", "EUPL-1.2"),
     }
     for index, (name, (version, license_expression)) in enumerate(distributions.items()):
         dist_info = site_packages / f"package_{index}-{version}.dist-info"

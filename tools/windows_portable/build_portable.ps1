@@ -971,7 +971,7 @@ def prove_vsview_distribution_contract() -> None:
         "vspackrgb": "1.4.0",
         "vsview": "0.11.0",
         "vsview-cli": "1.2.0",
-        "vsjetengine": "1.7.0",
+        "vsjetengine": "1.8.0",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
     assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
