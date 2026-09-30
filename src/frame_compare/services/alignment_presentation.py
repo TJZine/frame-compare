@@ -99,9 +99,6 @@ def _normal_evidence_rows(
                 else None
             )
         else:
-            # U4 video-confirm seam: U3 never applies a fresh computed
-            # result, so only the reuse/manual branches above are live until
-            # the video check can confirm a fresh candidate.
             heading = "Audio alignment accepted"
             detail = None
         rows: list[_StyledRow] = [

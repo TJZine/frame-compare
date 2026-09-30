@@ -36,7 +36,7 @@ import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal, cast
 
 from frame_compare.orchestration import preparation
@@ -44,6 +44,8 @@ from frame_compare.orchestration.context import ClipActiveRect, RunContext
 from frame_compare.orchestration.phase_alignment import run_align_phase
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
+from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.paths import require_managed_immediate_child
 from frame_compare.vs.loader import DefaultVSLoader
 
 SPEED_CHANGE_CATEGORY = "speed_change"
@@ -154,6 +156,10 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
             raise ValueError(f"{where} needs a non-empty string '{name}'")
     assert isinstance(pair_id, str) and isinstance(category, str)
     assert isinstance(reference, str) and isinstance(comparison, str)
+    if pair_id in (".", "..") or any(
+        path.name != pair_id for path in (PurePosixPath(pair_id), PureWindowsPath(pair_id))
+    ):
+        raise ValueError(f"{where} 'id' must be a single path-free name")
     if pair_id in seen:
         raise ValueError(f"{where} duplicates pair id '{pair_id}'")
     seen.add(pair_id)
@@ -240,16 +246,20 @@ def _active_rect_payload(rect: ClipActiveRect | None) -> dict[str, object] | Non
 async def _prepare_pair(
     pair: LabelledPair, pair_root: Path, loader: DefaultVSLoader
 ) -> preparation.PrepState:
-    workspace_root = pair_root / "workspace"
-    input_dir = workspace_root / "comparison_videos"
-    config_dir = workspace_root / "config"
+    workspace_root = require_managed_immediate_child(pair_root, pair_root / "workspace")
+    input_dir = require_managed_immediate_child(
+        workspace_root, workspace_root / "comparison_videos"
+    )
+    config_dir = require_managed_immediate_child(workspace_root, workspace_root / "config")
+    require_managed_immediate_child(workspace_root, workspace_root / "generated")
+    pair_root.mkdir(parents=True, exist_ok=True)
     input_dir.mkdir(parents=True, exist_ok=True)
     config_dir.mkdir(parents=True, exist_ok=True)
     reference_link = input_dir / f"00-reference{pair.reference.suffix}"
     comparison_link = input_dir / f"01-comparison{pair.comparison.suffix}"
     _ensure_media_link(reference_link, pair.reference)
     _ensure_media_link(comparison_link, pair.comparison)
-    (config_dir / "config.toml").write_text(_pair_config(pair), encoding="utf-8")
+    write_text_atomic(config_dir / "config.toml", _pair_config(pair), encoding="utf-8")
     return await preparation.execute_prep(
         RunRequest(
             root=workspace_root,
@@ -267,8 +277,8 @@ async def align_pair(
     loader: DefaultVSLoader,
 ) -> dict[str, object]:
     """Align one pair through the production path and record its evidence."""
-    pair_root = output_dir / "pairs" / pair.pair_id
-    pair_root.mkdir(parents=True, exist_ok=True)
+    pairs_root = require_managed_immediate_child(output_dir, output_dir / "pairs")
+    pair_root = require_managed_immediate_child(pairs_root, pairs_root / pair.pair_id)
     started = time.monotonic()
     prep = await _prepare_pair(pair, pair_root, loader)
     ctx = RunContext(
@@ -385,8 +395,10 @@ async def run_benchmark(labels: Path, output: Path) -> bool:
         },
         "total_elapsed_seconds": time.monotonic() - started,
     }
-    (output / "pair-results.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    write_text_atomic(
+        output / "pair-results.json",
+        json.dumps(payload, indent=2, sort_keys=True),
+        encoding="utf-8",
     )
     return benchmark_passed(records)
 

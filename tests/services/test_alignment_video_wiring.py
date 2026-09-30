@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from frame_compare.services import alignment as alignment_service
-from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_correlation import (
     ChunkedAudioEstimate,
@@ -38,16 +37,14 @@ def _observed_video(
     confirmed_offset: int,
     *,
     targets: tuple[VideoTargetEvidence, ...] = (),
-) -> alignment_video.VideoCheckResult:
-    return alignment_video.VideoCheckResult(
-        observation=VideoCheckObservation(
-            observation="observed",
-            scored_offsets=tuple(range(confirmed_offset - 2, confirmed_offset + 3)),
-            confirmed_offset=confirmed_offset,
-            index_build_seconds=0.0,
-            positions=(),
-            targets=targets,
-        )
+) -> VideoCheckObservation:
+    return VideoCheckObservation(
+        observation="observed",
+        scored_offsets=tuple(range(confirmed_offset - 2, confirmed_offset + 3)),
+        confirmed_offset=confirmed_offset,
+        index_build_seconds=0.0,
+        positions=(),
+        targets=targets,
     )
 
 

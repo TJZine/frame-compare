@@ -1719,7 +1719,7 @@ def test_video_check_cost_measurement(u4_media: _MediaSet, tmp_path: Path) -> No
         fps_reference=Fraction(_FPS, 1),
         loader=loader,
     )
-    assert warmup.observation.confirmed_offset == 0
+    assert warmup.confirmed_offset == 0
 
     samples: list[float] = []
     for _ in range(3):
@@ -1732,7 +1732,7 @@ def test_video_check_cost_measurement(u4_media: _MediaSet, tmp_path: Path) -> No
             loader=loader,
         )
         samples.append(time.perf_counter() - started)
-        assert measured.observation.confirmed_offset == 0
+        assert measured.confirmed_offset == 0
     mean = statistics.fmean(samples)
     print(
         "U4_VIDEO_CHECK_COST "

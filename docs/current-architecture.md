@@ -239,7 +239,7 @@ recovery requirement.
   loading validates the same typed identity before reporting or accepting a hit,
   with a full-frame
   rectangle representing no crop.
-  Content-derived active rectangles from opt-in `auto` detection are final
+  Content-derived active rectangles from default `auto` detection are final
   prepared rectangles and are included in the same token/provenance fields. It excludes
   frame-selection counts, `user_frames`, random seed, and dark/bright quantile
   thresholds because those affect frame choice rather than metric computation.

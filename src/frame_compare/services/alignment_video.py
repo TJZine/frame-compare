@@ -47,13 +47,9 @@ from frame_compare.vs.loader import VSLoader
 if TYPE_CHECKING:
     import vapoursynth as vs
 
+    from frame_compare.vs.types import SourceInfo
 
-VideoCheckReason = Literal[
-    "cancelled",
-    "no_global_audio_lag",
-    "source_identity_changed",
-    "video_check_unavailable",
-]
+
 ActiveRect = tuple[int, int, int, int]
 FloatFrame = npt.NDArray[np.float32]
 
@@ -71,20 +67,6 @@ class VideoClipRequest:
     path: Path
     identity: AlignmentClipIdentity
     active_rect: ActiveRect | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class VideoCheckResult:
-    """Video evidence plus a non-throwing failure reason for the V6 owner."""
-
-    observation: VideoCheckObservation
-    reason: VideoCheckReason | None = None
-
-    def __post_init__(self) -> None:
-        if self.reason is None and self.observation.observation != "observed":
-            raise ValueError("successful video checks must be observed")
-        if self.reason is not None and self.observation.observation != "not_observed":
-            raise ValueError("failed video checks must be unobserved")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +95,13 @@ class _CheckPointTarget:
     points: tuple[tuple[int, int], ...]
 
 
+def _load_source(loader: VSLoader, path: Path) -> SourceInfo:
+    try:
+        return loader.load(path)
+    except Exception as exc:
+        raise RuntimeError("video source loading failed") from exc
+
+
 def check_video_alignment(
     *,
     reference: VideoClipRequest,
@@ -121,35 +110,35 @@ def check_video_alignment(
     fps_reference: Fraction,
     loader: VSLoader | None,
     cancellation: Event | None = None,
-) -> VideoCheckResult:
+) -> VideoCheckObservation:
     """Run V1-V5 and return bounded W0 evidence without throwing runtime failures."""
     global_lag = attempt.audio.global_lag
     rounded_frame = attempt.audio.rounded_frame
     if global_lag is None or rounded_frame is None:
-        return _failed("no_global_audio_lag")
+        return _failed()
     if loader is None:
-        return _failed("video_check_unavailable")
+        return _failed()
     if _is_cancelled(cancellation):
-        return _failed("cancelled")
+        return _failed()
     if not _identities_match(reference) or not _identities_match(comparison):
-        return _failed("source_identity_changed")
+        return _failed()
 
     try:
         load_started = time.monotonic()
-        reference_source = loader.load(reference.path)
+        reference_source = _load_source(loader, reference.path)
         if _is_cancelled(cancellation):
-            return _failed("cancelled")
+            return _failed()
         if not _identities_match(reference):
-            return _failed("source_identity_changed")
+            return _failed()
 
-        comparison_source = loader.load(comparison.path)
+        comparison_source = _load_source(loader, comparison.path)
         if _is_cancelled(cancellation):
-            return _failed("cancelled")
+            return _failed()
         if not _identities_match(reference) or not _identities_match(comparison):
-            return _failed("source_identity_changed")
+            return _failed()
         index_build_seconds = time.monotonic() - load_started
-    except Exception:
-        return _failed("video_check_unavailable")
+    except RuntimeError:
+        return _failed()
 
     try:
         reference_node = _prepare_luma(reference_source.clip, reference.active_rect)
@@ -160,7 +149,7 @@ def check_video_alignment(
             tuple(range(rounded_frame - 2, rounded_frame + 3)),
         )
         if overlap is None:
-            return _failed("video_check_unavailable")
+            return _failed()
         start, end = overlap
         span = end - start
         positions = _motion_positions(
@@ -171,9 +160,9 @@ def check_video_alignment(
             cancellation=cancellation,
         )
         if positions is None:
-            return _failed("cancelled")
+            return _failed()
         if not positions:
-            return _failed("video_check_unavailable")
+            return _failed()
         scored_offsets = tuple(range(rounded_frame - 2, rounded_frame + 3))
         scored_positions = _score_base_positions(
             reference_node,
@@ -183,9 +172,7 @@ def check_video_alignment(
             cancellation=cancellation,
         )
         if scored_positions is None:
-            return _failed(
-                "cancelled" if _is_cancelled(cancellation) else "video_check_unavailable"
-            )
+            return _failed()
         base_positions, winners, margins = scored_positions
         confirmed = _confirmed_offset(
             rounded_frame,
@@ -193,19 +180,17 @@ def check_video_alignment(
             margins,
         )
         if confirmed is None:
-            return VideoCheckResult(
-                observation=VideoCheckObservation(
-                    observation="observed",
-                    scored_offsets=scored_offsets,
-                    confirmed_offset=None,
-                    index_build_seconds=index_build_seconds,
-                    positions=tuple(base_positions),
-                    check_points=_base_check_points(
-                        base_positions,
-                        suggested_offset=rounded_frame,
-                        fps_reference=fps_reference,
-                    ),
-                )
+            return VideoCheckObservation(
+                observation="observed",
+                scored_offsets=scored_offsets,
+                confirmed_offset=None,
+                index_build_seconds=index_build_seconds,
+                positions=tuple(base_positions),
+                check_points=_base_check_points(
+                    base_positions,
+                    suggested_offset=rounded_frame,
+                    fps_reference=fps_reference,
+                ),
             )
 
         starts = _stream_start(attempt, role="reference", video=False)
@@ -257,7 +242,7 @@ def check_video_alignment(
                     cancellation=cancellation,
                 )
                 if motion is None:
-                    return _failed("cancelled")
+                    return _failed()
                 selected = motion[:remaining]
             else:
                 selected = ()
@@ -265,9 +250,9 @@ def check_video_alignment(
             if selected:
                 for frame in selected:
                     if _is_cancelled(cancellation):
-                        return _failed("cancelled")
+                        return _failed()
                     if not _identities_match(reference) or not _identities_match(comparison):
-                        return _failed("source_identity_changed")
+                        return _failed()
                     scored = _score_hypotheses(
                         reference_node,
                         comparison_node,
@@ -276,7 +261,7 @@ def check_video_alignment(
                         alternative_offsets,
                     )
                     if scored is None:
-                        return _failed("video_check_unavailable")
+                        return _failed()
                     confirmed_score, alternative_score, alternative_offset = scored
                     winner = _hypothesis_winner(confirmed_score, alternative_score)
                     position = VideoTargetPosition(
@@ -321,34 +306,27 @@ def check_video_alignment(
             chunks=chunks,
             planned_target_frames=planned_target_frames,
         )
-        return VideoCheckResult(
-            observation=VideoCheckObservation(
-                observation="observed",
-                scored_offsets=scored_offsets,
-                confirmed_offset=confirmed,
-                index_build_seconds=index_build_seconds,
-                positions=tuple(base_positions),
-                targets=tuple(target_evidence),
-                same_frame_context=tuple(same_frame),
-                check_points=check_points,
-            )
+        return VideoCheckObservation(
+            observation="observed",
+            scored_offsets=scored_offsets,
+            confirmed_offset=confirmed,
+            index_build_seconds=index_build_seconds,
+            positions=tuple(base_positions),
+            targets=tuple(target_evidence),
+            same_frame_context=tuple(same_frame),
+            check_points=check_points,
         )
-    except ValueError:
-        raise
-    except Exception:
-        return _failed("video_check_unavailable")
+    except RuntimeError:
+        return _failed()
 
 
-def _failed(reason: VideoCheckReason) -> VideoCheckResult:
-    return VideoCheckResult(
-        observation=VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        ),
-        reason=reason,
+def _failed() -> VideoCheckObservation:
+    return VideoCheckObservation(
+        observation="not_observed",
+        scored_offsets=(),
+        confirmed_offset=None,
+        index_build_seconds=None,
+        positions=(),
     )
 
 
@@ -367,20 +345,28 @@ def _identities_match(clip: VideoClipRequest) -> bool:
 
 
 def _prepare_luma(clip: vs.VideoNode, active_rect: ActiveRect | None) -> vs.VideoNode:
-    import vapoursynth as vs
-
-    runtime_vs = cast(Any, vs)
-    runtime_clip = cast(Any, clip)
-    if clip.format.color_family != vs.YUV:
-        runtime_clip = runtime_clip.resize.Bicubic(format=runtime_vs.YUV444P8)
-    luma = cast(
-        "vs.VideoNode",
-        runtime_clip.std.ShufflePlanes(planes=0, colorfamily=runtime_vs.GRAY),
-    )
-    if active_rect is not None:
+    if active_rect is None:
+        crop = None
+    else:
         x, y, width, height = active_rect
-        luma = cast(Any, luma).std.CropAbs(width=width, height=height, left=x, top=y)
-    return cast(Any, luma).resize.Bilinear(width=_FRAME_WIDTH, height=_FRAME_HEIGHT)
+        crop = (x, y, width, height)
+    try:
+        import vapoursynth as vs
+
+        runtime_vs = cast(Any, vs)
+        runtime_clip = cast(Any, clip)
+        if clip.format.color_family != vs.YUV:
+            runtime_clip = runtime_clip.resize.Bicubic(format=runtime_vs.YUV444P8)
+        luma = cast(
+            "vs.VideoNode",
+            runtime_clip.std.ShufflePlanes(planes=0, colorfamily=runtime_vs.GRAY),
+        )
+        if crop is not None:
+            x, y, width, height = crop
+            luma = cast(Any, luma).std.CropAbs(width=width, height=height, left=x, top=y)
+        return cast(Any, luma).resize.Bilinear(width=_FRAME_WIDTH, height=_FRAME_HEIGHT)
+    except Exception as exc:
+        raise RuntimeError("video luma preparation failed") from exc
 
 
 def _frame_overlap(
@@ -465,7 +451,7 @@ def _score_base_positions(
                 )
                 for offset in offsets
             )
-        except Exception:
+        except RuntimeError:
             return None
         winner, margin = _position_winner(scores, offsets)
         evidence.append(
@@ -481,13 +467,20 @@ def _score_base_positions(
 
 
 def _read_frame(node: vs.VideoNode, frame: int) -> FloatFrame:
-    if frame < 0 or frame >= node.num_frames:
-        raise IndexError("video frame is outside the source")
-    raw = node.get_frame(frame)
     try:
-        image = np.asarray(raw[0], dtype=np.float32).copy()
-    finally:
-        del raw
+        frame_count = node.num_frames
+    except Exception as exc:
+        raise RuntimeError("video frame count access failed") from exc
+    if frame < 0 or frame >= frame_count:
+        raise IndexError("video frame is outside the source")
+    try:
+        raw = node.get_frame(frame)
+        try:
+            image = np.asarray(raw[0], dtype=np.float32).copy()
+        finally:
+            del raw
+    except Exception as exc:
+        raise RuntimeError("video frame read failed") from exc
     if image.size == 0 or not bool(np.all(np.isfinite(image))):
         raise RuntimeError("video frame contains non-finite luma")
     return image
@@ -699,7 +692,7 @@ def _score_hypotheses(
             )
             for offset in alternative_offsets
         )
-    except Exception:
+    except RuntimeError:
         return None
     alternative_score = min(score for _offset, score in alternative_scores)
     winning_offset = next(
@@ -922,8 +915,6 @@ def _base_check_points(
 
 __all__ = [
     "ActiveRect",
-    "VideoCheckReason",
-    "VideoCheckResult",
     "VideoClipRequest",
     "check_video_alignment",
 ]

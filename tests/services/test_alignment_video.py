@@ -313,7 +313,7 @@ def _run(
     loader: _Loader | None = None,
     attempt: AudioAlignmentAttempt | None = None,
     cancellation: Event | None = None,
-) -> alignment_video.VideoCheckResult:
+) -> VideoCheckObservation:
     reference_clip = reference_clip or _moving_clip()
     comparison_clip = comparison_clip or _shifted_clip(reference_clip, truth)
     if loader is None:
@@ -332,6 +332,52 @@ def _run(
     )
 
 
+def _assert_unobserved(observation: VideoCheckObservation) -> None:
+    assert observation.observation == "not_observed"
+    assert observation.positions == ()
+
+
+def _force_target_scoring(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_positions = [
+        alignment_video.VideoPositionDifference(
+            position_index=index,
+            reference_frame=20 + index,
+            score_by_offset=(2.0, 1.0, 0.0, 1.0, 2.0),
+        )
+        for index in range(6)
+    ]
+    target = alignment_video._Target(
+        kind="chunk",
+        first_index=0,
+        last_index=0,
+        lag=333.0,
+        credible=True,
+        start_sample=0,
+        end_sample=8_000,
+        requested_positions=1,
+    )
+    monkeypatch.setattr(
+        alignment_video,
+        "_score_base_positions",
+        lambda *_args, **_kwargs: (base_positions, [0] * 6, [float("inf")] * 6),
+    )
+    monkeypatch.setattr(
+        alignment_video,
+        "_build_targets",
+        lambda *_args, **_kwargs: ((target,), ()),
+    )
+    monkeypatch.setattr(
+        alignment_video,
+        "_target_range",
+        lambda *_args, **_kwargs: (10, 20),
+    )
+    monkeypatch.setattr(
+        alignment_video,
+        "_motion_positions",
+        lambda *_args, **_kwargs: (20,),
+    )
+
+
 @pytest.mark.parametrize(
     ("truth", "expected"),
     [(-1, -1), (1, 1), (-2, None), (2, None), (-3, None), (3, None)],
@@ -340,17 +386,17 @@ def test_video_confirmation_only_accepts_neighbouring_truths(
     tmp_path: Path, truth: int, expected: int | None
 ) -> None:
     result = _run(tmp_path, truth=truth)
-    assert result.reason is None
-    assert result.observation.confirmed_offset == expected
-    assert len(result.observation.positions) == 12
+    assert result.observation == "observed"
+    assert result.confirmed_offset == expected
+    assert len(result.positions) == 12
 
 
 def test_static_content_is_uninformative(tmp_path: Path) -> None:
     clip = vs.core.std.BlankClip(width=64, height=36, length=60, format=vs.GRAYS, color=0)
     result = _run(tmp_path, truth=0, reference_clip=clip, comparison_clip=clip)
-    assert result.reason is None
-    assert result.observation.confirmed_offset is None
-    assert all(set(position.score_by_offset) == {0.0} for position in result.observation.positions)
+    assert result.observation == "observed"
+    assert result.confirmed_offset is None
+    assert all(set(position.score_by_offset) == {0.0} for position in result.positions)
 
 
 @pytest.mark.parametrize(
@@ -411,7 +457,7 @@ def test_monotonic_tone_curve_preserves_confirmation(tmp_path: Path) -> None:
     reference = _moving_clip()
     comparison = _shifted_clip(_moving_clip(transform=lambda value: min(255, value * 2)), 1)
     result = _run(tmp_path, truth=1, reference_clip=reference, comparison_clip=comparison)
-    assert result.observation.confirmed_offset == 1
+    assert result.confirmed_offset == 1
 
 
 def test_missing_or_failing_loader_is_unavailable(tmp_path: Path) -> None:
@@ -424,7 +470,7 @@ def test_missing_or_failing_loader_is_unavailable(tmp_path: Path) -> None:
         fps_reference=FPS,
         loader=None,
     )
-    assert missing.reason == "video_check_unavailable"
+    _assert_unobserved(missing)
 
     class FailingLoader(_Loader):
         def load(self, path: Path) -> SourceInfo:
@@ -437,7 +483,7 @@ def test_missing_or_failing_loader_is_unavailable(tmp_path: Path) -> None:
         fps_reference=FPS,
         loader=FailingLoader(loader.clips),
     )
-    assert failed.reason == "video_check_unavailable"
+    _assert_unobserved(failed)
 
     class ValueErrorLoader(_Loader):
         def load(self, path: Path) -> SourceInfo:
@@ -450,7 +496,7 @@ def test_missing_or_failing_loader_is_unavailable(tmp_path: Path) -> None:
         fps_reference=FPS,
         loader=ValueErrorLoader(loader.clips),
     )
-    assert native_value_error.reason == "video_check_unavailable"
+    _assert_unobserved(native_value_error)
 
 
 def test_non_finite_reference_luma_is_unavailable(tmp_path: Path) -> None:
@@ -459,7 +505,7 @@ def test_non_finite_reference_luma_is_unavailable(tmp_path: Path) -> None:
 
     result = _run(tmp_path, truth=0, reference_clip=nan_clip, comparison_clip=_moving_clip())
 
-    assert result.reason == "video_check_unavailable"
+    _assert_unobserved(result)
 
 
 def test_evidence_invariant_errors_are_not_mapped_to_native_failure(
@@ -476,6 +522,57 @@ def test_evidence_invariant_errors_are_not_mapped_to_native_failure(
         _run(tmp_path, truth=0)
 
 
+@pytest.mark.parametrize("stage", ("base", "target"))
+@pytest.mark.parametrize("error_type", (ValueError, TypeError))
+def test_rank_programming_errors_propagate_from_checker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    error_type: type[Exception],
+) -> None:
+    if stage == "target":
+        _force_target_scoring(monkeypatch)
+
+    def fail_rank(_values: object) -> np.ndarray:
+        raise error_type("broken rank logic")
+
+    monkeypatch.setattr(alignment_video, "_average_ranks", fail_rank)
+
+    with pytest.raises(error_type, match="broken rank logic"):
+        _run(tmp_path, truth=0)
+
+
+@pytest.mark.parametrize("stage", ("motion", "base", "target"))
+def test_native_frame_read_value_error_is_unavailable_in_each_scoring_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    class NativeReadFailure:
+        num_frames = 180
+
+        def get_frame(self, _frame: int) -> None:
+            raise ValueError("synthetic native read failure")
+
+    monkeypatch.setattr(
+        alignment_video,
+        "_prepare_luma",
+        lambda *_args, **_kwargs: NativeReadFailure(),
+    )
+    if stage == "base":
+        monkeypatch.setattr(
+            alignment_video,
+            "_motion_positions",
+            lambda *_args, **_kwargs: (20,),
+        )
+    elif stage == "target":
+        _force_target_scoring(monkeypatch)
+
+    result = _run(tmp_path, truth=0)
+
+    _assert_unobserved(result)
+
+
 def test_cancellation_after_load_is_observed(tmp_path: Path) -> None:
     cancellation = Event()
     reference, comparison, loader = _media(tmp_path, _moving_clip(), _moving_clip())
@@ -488,7 +585,8 @@ def test_cancellation_after_load_is_observed(tmp_path: Path) -> None:
         loader=loader,
         cancellation=cancellation,
     )
-    assert result.reason == "cancelled"
+    _assert_unobserved(result)
+    assert cancellation.is_set()
     assert len(loader.calls) == 1
 
 
@@ -519,7 +617,7 @@ def test_index_build_timer_excludes_luma_preparation(
         loader=loader,
     )
 
-    assert result.observation.index_build_seconds == 4.0
+    assert result.index_build_seconds == 4.0
 
 
 def test_cancellation_between_positions_is_observed(
@@ -538,7 +636,8 @@ def test_cancellation_between_positions_is_observed(
 
     monkeypatch.setattr(alignment_video, "_read_frame", read_frame)
     result = _run(tmp_path, truth=0, cancellation=cancellation)
-    assert result.reason == "cancelled"
+    _assert_unobserved(result)
+    assert cancellation.is_set()
     assert reads >= 6
 
 
@@ -552,7 +651,8 @@ def test_source_identity_change_after_load_is_unavailable(tmp_path: Path) -> Non
         fps_reference=FPS,
         loader=loader,
     )
-    assert result.reason == "source_identity_changed"
+    _assert_unobserved(result)
+    assert reference.path.stat().st_size != reference.identity.size_bytes
 
 
 def test_out_of_range_overlap_is_unavailable(tmp_path: Path) -> None:
@@ -564,7 +664,7 @@ def test_out_of_range_overlap_is_unavailable(tmp_path: Path) -> None:
         fps_reference=FPS,
         loader=loader,
     )
-    assert result.reason == "video_check_unavailable"
+    _assert_unobserved(result)
 
 
 @pytest.mark.parametrize(
@@ -630,7 +730,7 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
         attempt=attempt,
     )
 
-    (target,) = result.observation.targets
+    (target,) = result.targets
     assert target.resolution == "alternative_confirmed"
     expected_alternative_offsets = []
     for frame in target_frames:
@@ -641,8 +741,8 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
     assert [position.alternative_offset for position in target.positions] == (
         expected_alternative_offsets
     )
-    assert result.observation.check_points[0].suggested_comparison_frame == target_frames[0] - 1
-    decided = _decide_video(attempt, result.observation)
+    assert result.check_points[0].suggested_comparison_frame == target_frames[0] - 1
+    decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
 
@@ -684,9 +784,9 @@ def test_v3a_conversion_and_excluded_alternative(tmp_path: Path) -> None:
         ),
     )
     result = _run(tmp_path, truth=0, attempt=base)
-    assert result.observation.confirmed_offset == 0
-    assert len(result.observation.targets) == 1
-    target = result.observation.targets[0]
+    assert result.confirmed_offset == 0
+    assert len(result.targets) == 1
+    target = result.targets[0]
     assert target.alternative_offsets == (1, 2)
     assert target.credible is True
     assert (target.start_sample, target.end_sample) == (0, 8_000)
@@ -713,9 +813,9 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
         attempt=attempt,
     )
 
-    assert result.observation.confirmed_offset == 0
-    assert len(result.observation.targets) == 1
-    target = result.observation.targets[0]
+    assert result.confirmed_offset == 0
+    assert len(result.targets) == 1
+    target = result.targets[0]
     assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("chunk", 0, 0)
     assert (target.start_sample, target.end_sample, target.target_offset) == (0, 8_000, 2)
     assert target.alternative_offsets == (1, 2, 3)
@@ -729,16 +829,15 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert target.resolution == "alternative_confirmed"
     winners = {
         position.reference_frame: alignment_video._position_winner(
-            position.score_by_offset, result.observation.scored_offsets
+            position.score_by_offset, result.scored_offsets
         )[0]
-        for position in result.observation.positions
+        for position in result.positions
     }
     contrast = next(frame for frame, winner in winners.items() if winner == 0)
     assert [
-        (point.reference_frame, point.suggested_comparison_frame)
-        for point in result.observation.check_points
+        (point.reference_frame, point.suggested_comparison_frame) for point in result.check_points
     ] == [(target_frames[0], target_frames[0] - target.target_offset), (contrast, contrast)]
-    decided = _decide_video(attempt, result.observation)
+    decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
     assert decided.decision.candidate is not None
@@ -782,9 +881,9 @@ def test_real_scoring_run_with_one_winning_position_stays_unresolved(
         attempt=attempt,
     )
 
-    assert result.observation.confirmed_offset == 0
-    assert len(result.observation.targets) == 1
-    target = result.observation.targets[0]
+    assert result.confirmed_offset == 0
+    assert len(result.targets) == 1
+    target = result.targets[0]
     assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("run", 0, 1)
     assert len(target.positions) == 4
     assert all(0 <= position.reference_frame <= 95 for position in target.positions)
@@ -798,14 +897,12 @@ def test_real_scoring_run_with_one_winning_position_stays_unresolved(
     )
     assert target.resolution == "unresolved"
     base_winners = [
-        alignment_video._position_winner(
-            position.score_by_offset, result.observation.scored_offsets
-        )
-        for position in result.observation.positions
+        alignment_video._position_winner(position.score_by_offset, result.scored_offsets)
+        for position in result.positions
     ]
     assert base_winners.count((0, float("inf"))) == 7
     assert base_winners.count((None, 0.0)) == 5
-    decided = _decide_video(attempt, result.observation)
+    decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset"
     assert decided.decision.candidate is not None
@@ -834,20 +931,16 @@ def test_real_cadence_aliases_do_not_confirm_a_wrong_offset(tmp_path: Path, cade
         attempt=attempt,
     )
 
-    assert result.observation.scored_offsets == (-1, 0, 1, 2, 3)
-    assert result.observation.confirmed_offset is None
-    assert len(result.observation.positions) == 12
+    assert result.scored_offsets == (-1, 0, 1, 2, 3)
+    assert result.confirmed_offset is None
+    assert len(result.positions) == 12
     winners = [
-        alignment_video._position_winner(
-            position.score_by_offset, result.observation.scored_offsets
-        )
-        for position in result.observation.positions
+        alignment_video._position_winner(position.score_by_offset, result.scored_offsets)
+        for position in result.positions
     ]
     assert winners == [(None, 0.0)] * 12
-    assert all(
-        position.score_by_offset.count(0.0) >= 2 for position in result.observation.positions
-    )
-    decided = _decide_video(attempt, result.observation)
+    assert all(position.score_by_offset.count(0.0) >= 2 for position in result.positions)
+    decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "video_check_inconclusive"
 
@@ -867,13 +960,11 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
         comparison_clip=comparison,
     )
     winners_and_margins = [
-        alignment_video._position_winner(
-            position.score_by_offset, result.observation.scored_offsets
-        )
-        for position in result.observation.positions
+        alignment_video._position_winner(position.score_by_offset, result.scored_offsets)
+        for position in result.positions
     ]
 
-    assert len(result.observation.positions) == 12
+    assert len(result.positions) == 12
     assert winners_and_margins == [
         (1, float("inf")),
         (1, float("inf")),
@@ -882,20 +973,16 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
     ]
     assert all(
         position.reference_frame in range(5, 28)
-        for position, (winner, _margin) in zip(
-            result.observation.positions, winners_and_margins, strict=True
-        )
+        for position, (winner, _margin) in zip(result.positions, winners_and_margins, strict=True)
         if winner == 1
     )
     assert all(
         position.reference_frame not in range(5, 28)
-        for position, (winner, _margin) in zip(
-            result.observation.positions, winners_and_margins, strict=True
-        )
+        for position, (winner, _margin) in zip(result.positions, winners_and_margins, strict=True)
         if winner == 0
     )
-    assert result.observation.confirmed_offset == 0
-    decided = _decide_video(_attempt_with_lags((0,) * 10), result.observation)
+    assert result.confirmed_offset == 0
+    decided = _decide_video(_attempt_with_lags((0,) * 10), result)
     assert decided.decision.state == "trusted_automatic"
     assert decided.decision.primary_reason == "audio_video_confirmed"
     assert decided.decision.candidate is not None
@@ -905,8 +992,8 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
 def test_inconclusive_video_still_has_review_check_points(tmp_path: Path) -> None:
     clip = vs.core.std.BlankClip(width=64, height=36, length=60, format=vs.GRAYS, color=0)
     result = _run(tmp_path, truth=0, reference_clip=clip, comparison_clip=clip)
-    assert result.observation.confirmed_offset is None
-    assert len(result.observation.check_points) == 5
+    assert result.confirmed_offset is None
+    assert len(result.check_points) == 5
 
 
 def _checkpoint_target(
@@ -1319,11 +1406,11 @@ def test_budget_exhaustion_keeps_planned_point_without_scoring(
     result = _run(tmp_path, truth=0, attempt=_attempt(rounded=0, planned=4))
 
     assert len(scored_frames) == 12
-    assert result.observation.targets[-1].resolution == "unexamined"
-    assert result.observation.targets[-1].positions == ()
+    assert result.targets[-1].resolution == "unexamined"
+    assert result.targets[-1].positions == ()
     assert any(
         point.reference_frame == 31 and point.suggested_comparison_frame == 26
-        for point in result.observation.check_points
+        for point in result.check_points
     )
 
 
@@ -1390,16 +1477,3 @@ def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
     )
 
     assert [point.reference_frame for point in points] == [100, 900]
-
-
-def test_evidence_failures_are_not_constructed_as_observed() -> None:
-    with pytest.raises(ValueError, match="successful"):
-        alignment_video.VideoCheckResult(
-            observation=VideoCheckObservation(
-                observation="not_observed",
-                scored_offsets=(),
-                confirmed_offset=None,
-                index_build_seconds=None,
-                positions=(),
-            )
-        )

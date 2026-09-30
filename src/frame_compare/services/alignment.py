@@ -726,7 +726,7 @@ def _collect_and_decide_audio_pair(
             collection_failure=collection_failure,
         )
         if estimate is not None and attempt.audio.global_lag is not None:
-            video_result = alignment_video.check_video_alignment(
+            video_observation = alignment_video.check_video_alignment(
                 reference=_video_clip_request(reference_request),
                 comparison=_video_clip_request(comparison_request),
                 attempt=attempt,
@@ -738,7 +738,7 @@ def _collect_and_decide_audio_pair(
                 stage=decided,
                 estimate=estimate,
                 plan=plan,
-                video=video_result.observation,
+                video=video_observation,
                 fps_reference=fps_reference,
             )
             attempt = _build_audio_attempt(

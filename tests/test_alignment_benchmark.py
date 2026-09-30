@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+
+from frame_compare.errors import PathEscapesRootError
 
 
 def _load_script() -> ModuleType:
@@ -21,6 +24,21 @@ def _load_script() -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _labelled_pair(script: ModuleType, tmp_path: Path, *, pair_id: str = "pair-1") -> Any:
+    reference = tmp_path / "source-a.mkv"
+    comparison = tmp_path / "source-b.mkv"
+    reference.touch(exist_ok=True)
+    comparison.touch(exist_ok=True)
+    return script.LabelledPair(
+        pair_id=pair_id,
+        category="synthetic",
+        reference=reference,
+        comparison=comparison,
+        expected_frame=0,
+        expected_automatic="applied",
+    )
 
 
 @pytest.mark.parametrize(
@@ -157,8 +175,155 @@ def test_load_labels_keeps_visual_truth_separate_from_automatic_outcome(
 
     (pair,) = script.load_labels(labels)
 
+    assert pair.pair_id == "delay-1"
     assert pair.expected_frame == 0
     assert pair.expected_automatic == "not_applied"
+
+
+@pytest.mark.parametrize(
+    "pair_id",
+    (
+        "../pair-1",
+        "/pair-1",
+        "group/pair-1",
+        r"..\pair-1",
+        r"C:\pair-1",
+        r"group\pair-1",
+    ),
+)
+async def test_path_like_pair_ids_are_rejected_before_output_creation(
+    tmp_path: Path, pair_id: str
+) -> None:
+    script = _load_script()
+    (tmp_path / "source-a.mkv").touch()
+    (tmp_path / "source-b.mkv").touch()
+    labels = tmp_path / "labels.json"
+    labels.write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": pair_id,
+                        "category": "synthetic",
+                        "reference": "source-a.mkv",
+                        "comparison": "source-b.mkv",
+                        "expected_frame": 0,
+                        "expected_automatic": "applied",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    with pytest.raises(ValueError, match="single path-free name"):
+        await script.run_benchmark(labels, output)
+
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("redirect_name", "parts"),
+    (
+        ("pairs", ("pairs",)),
+        ("pair", ("pairs", "pair-1")),
+        ("workspace", ("pairs", "pair-1", "workspace")),
+        ("input", ("pairs", "pair-1", "workspace", "comparison_videos")),
+        ("config", ("pairs", "pair-1", "workspace", "config")),
+        ("generated", ("pairs", "pair-1", "workspace", "generated")),
+    ),
+)
+async def test_redirected_benchmark_directories_cannot_escape_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    redirect_name: str,
+    parts: tuple[str, ...],
+) -> None:
+    script = _load_script()
+    pair = _labelled_pair(script, tmp_path)
+    output = tmp_path / "output"
+    outside = tmp_path / f"outside-{redirect_name}"
+    outside.mkdir()
+    redirected = output.joinpath(*parts)
+    redirected.parent.mkdir(parents=True, exist_ok=True)
+    redirected.symlink_to(outside, target_is_directory=True)
+
+    async def unexpected_preparation(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("production preparation must not run")
+
+    monkeypatch.setattr(script.preparation, "execute_prep", unexpected_preparation)
+
+    with pytest.raises(PathEscapesRootError):
+        await script.align_pair(pair, output, object())
+
+    assert list(outside.iterdir()) == []
+
+
+async def test_config_write_replaces_symlink_without_touching_referent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    pair = _labelled_pair(script, tmp_path)
+    pair_root = tmp_path / "output" / "pairs" / pair.pair_id
+    config_dir = pair_root / "workspace" / "config"
+    config_dir.mkdir(parents=True)
+    outside_config = tmp_path / "outside-config.toml"
+    outside_config.write_text("unchanged", encoding="utf-8")
+    config_file = config_dir / "config.toml"
+    config_file.symlink_to(outside_config)
+    prepared = object()
+
+    async def execute_prep(*_args: object, **_kwargs: object) -> object:
+        return prepared
+
+    monkeypatch.setattr(script.preparation, "execute_prep", execute_prep)
+
+    result = await script._prepare_pair(pair, pair_root, object())
+
+    assert result is prepared
+    assert not config_file.is_symlink()
+    assert config_file.read_text(encoding="utf-8").startswith("[paths]")
+    assert outside_config.read_text(encoding="utf-8") == "unchanged"
+
+
+async def test_results_write_replaces_symlink_without_touching_referent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    pair = _labelled_pair(script, tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    outside_results = tmp_path / "outside-results.json"
+    outside_results.write_text("unchanged", encoding="utf-8")
+    results_file = output / "pair-results.json"
+    results_file.symlink_to(outside_results)
+    record = {
+        "pair_id": pair.pair_id,
+        "category": pair.category,
+        "expected_frame": 0,
+        "expected_automatic": "applied",
+        "x_subframe": 0.0,
+        "r_audio_rounded": 0,
+        "c_video_confirmed": 0,
+        "applied_frame": 0,
+        "state": "trusted_automatic",
+        "primary_reason": "audio_video_confirmed",
+        "outcome": "correct_applied",
+        "elapsed_seconds": 0.0,
+    }
+
+    async def align_pair(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return record
+
+    monkeypatch.setattr(script, "load_labels", lambda _path: [pair])
+    monkeypatch.setattr(script, "DefaultVSLoader", object)
+    monkeypatch.setattr(script, "align_pair", align_pair)
+
+    assert await script.run_benchmark(tmp_path / "labels.json", output) is True
+    assert not results_file.is_symlink()
+    assert json.loads(results_file.read_text(encoding="utf-8"))["summary"]["passed"] is True
+    assert outside_results.read_text(encoding="utf-8") == "unchanged"
 
 
 def test_pair_config_uses_production_fps_at_pure_defaults(tmp_path: Path) -> None:
