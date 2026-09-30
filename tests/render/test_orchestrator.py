@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from concurrent.futures import CancelledError, Future
 from pathlib import Path
 from threading import Barrier, Event, Lock, Thread
 from unittest.mock import MagicMock, patch
@@ -127,6 +128,121 @@ def test_render_batch_fail_fast(mock_render_request):
         invoked_requests = [call.args[0] for call in mock_render.call_args_list]
         assert requests[2] in invoked_requests
         assert len(invoked_requests) < len(requests)
+
+
+def test_render_batch_parallel_prefers_real_failure_to_cancelled_sibling(
+    tmp_path: Path,
+) -> None:
+    class ControlledFuture(Future[list[RenderedFrameResult]]):
+        def cancel(self) -> bool:
+            cancelled = super().cancel()
+            if cancelled:
+                self.set_running_or_notify_cancel()
+            return cancelled
+
+    class ControlledExecutor:
+        def __init__(self, max_workers: int) -> None:
+            assert max_workers == 2
+            self.futures: list[ControlledFuture] = []
+            controlled_executors.append(self)
+
+        def __enter__(self) -> "ControlledExecutor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+            _ = wait, cancel_futures
+
+        def submit(
+            self, _function: object, *args: object, **kwargs: object
+        ) -> Future[list[RenderedFrameResult]]:
+            _ = kwargs
+            future = ControlledFuture()
+            self.futures.append(future)
+            if len(self.futures) == 1:
+                unit = args[0]
+                assert isinstance(unit, tuple)
+                future.set_result([_rendered(request) for request in unit])
+            elif len(self.futures) == 3:
+                future.set_exception(RuntimeError("real failure"))
+            return future
+
+    controlled_executors: list[ControlledExecutor] = []
+    requests = [
+        RenderRequest(
+            clip=tmp_path / f"clip_{index}.mkv",
+            diagnostic_source=tmp_path / f"clip_{index}.mkv",
+            frame_number=index,
+            output_path=tmp_path / f"out_{index}.jpg",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for index in range(3)
+    ]
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.ThreadPoolExecutor",
+            ControlledExecutor,
+        ),
+        pytest.raises(RuntimeError, match="real failure"),
+    ):
+        render_batch_detailed(
+            requests,
+            parallelism=2,
+            work_unit_ranges=[range(0, 1), range(1, 2), range(2, 3)],
+        )
+
+    assert len(controlled_executors) == 1
+    assert controlled_executors[0].futures[1].cancelled()
+
+
+def test_render_batch_parallel_propagates_worker_cancellation(tmp_path: Path) -> None:
+    cancelled = Future[list[RenderedFrameResult]]()
+    cancelled.set_exception(CancelledError("caller cancelled"))
+
+    class ControlledExecutor:
+        def __init__(self, max_workers: int) -> None:
+            _ = max_workers
+
+        def __enter__(self) -> "ControlledExecutor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+            _ = wait, cancel_futures
+
+        def submit(
+            self, _function: object, *args: object, **kwargs: object
+        ) -> Future[list[RenderedFrameResult]]:
+            _ = args, kwargs
+            return cancelled
+
+    request = RenderRequest(
+        clip=tmp_path / "clip.mkv",
+        diagnostic_source=tmp_path / "clip.mkv",
+        frame_number=0,
+        output_path=tmp_path / "out.jpg",
+        overlay=None,
+        encoder_settings=EncoderSettings(),
+    )
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.ThreadPoolExecutor",
+            ControlledExecutor,
+        ),
+        pytest.raises(CancelledError, match="caller cancelled"),
+    ):
+        render_batch_detailed(
+            [request],
+            parallelism=2,
+            work_unit_ranges=[range(0, 1)],
+        )
 
 
 @pytest.fixture

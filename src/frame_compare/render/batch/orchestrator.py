@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING
@@ -219,6 +219,14 @@ def _render_batch_parallel(
                 unit = futures.pop(future)
                 try:
                     completed.append((unit, future.result()))
+                except CancelledError as exc:
+                    if future.cancelled():
+                        # Cancellation is cleanup after a real sibling failure, not
+                        # a competing render error.
+                        continue
+                    failure = (unit[0], exc)
+                    if first_exception is None or failure[0] < first_exception[0]:
+                        first_exception = failure
                 except Exception as exc:
                     failure = (unit[0], exc)
                     if first_exception is None or failure[0] < first_exception[0]:
