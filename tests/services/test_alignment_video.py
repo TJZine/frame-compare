@@ -827,13 +827,11 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert all(position.confirmed_score > 0.0 for position in target.positions)
     assert all(position.alternative_score == 0.0 for position in target.positions)
     assert target.resolution == "alternative_confirmed"
-    winners = {
-        position.reference_frame: alignment_video._position_winner(
-            position.score_by_offset, result.scored_offsets
-        )[0]
-        for position in result.positions
-    }
-    contrast = next(frame for frame, winner in winners.items() if winner == 0)
+    # The remap changes comparison frames through 24; every five-offset
+    # check at reference frame 27 or later lies in the unchanged moving span.
+    contrast = next(
+        position.reference_frame for position in result.positions if position.reference_frame >= 27
+    )
     assert [
         (point.reference_frame, point.suggested_comparison_frame) for point in result.check_points
     ] == [(target_frames[0], target_frames[0] - target.target_offset), (contrast, contrast)]
@@ -896,12 +894,18 @@ def test_real_scoring_run_with_one_winning_position_stays_unresolved(
         position.confirmed_score == position.alternative_score == 0.0 for position in neither
     )
     assert target.resolution == "unresolved"
-    base_winners = [
-        alignment_video._position_winner(position.score_by_offset, result.scored_offsets)
-        for position in result.positions
-    ]
-    assert base_winners.count((0, float("inf"))) == 7
-    assert base_winners.count((None, 0.0)) == 5
+
+    # Both sources use the same fixture: held frames are phase 0, moving
+    # frames cycle through seven crops. Pin the scored luma, not a selector count.
+    def phase(frame: int) -> int:
+        return frame % 7 if frame in range(60, 70) or frame in range(96, 180) else 0
+
+    assert len(result.positions) == 12
+    for position in result.positions:
+        for offset, score in zip(result.scored_offsets, position.score_by_offset, strict=True):
+            assert (score == 0.0) is (
+                phase(position.reference_frame) == phase(position.reference_frame - offset)
+            )
     decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset"
@@ -959,28 +963,14 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
         reference_clip=reference,
         comparison_clip=comparison,
     )
-    winners_and_margins = [
-        alignment_video._position_winner(position.score_by_offset, result.scored_offsets)
-        for position in result.positions
-    ]
-
     assert len(result.positions) == 12
-    assert winners_and_margins == [
-        (1, float("inf")),
-        (1, float("inf")),
-        (1, float("inf")),
-        *((0, float("inf")),) * 9,
-    ]
-    assert all(
-        position.reference_frame in range(5, 28)
-        for position, (winner, _margin) in zip(result.positions, winners_and_margins, strict=True)
-        if winner == 1
-    )
-    assert all(
-        position.reference_frame not in range(5, 28)
-        for position, (winner, _margin) in zip(result.positions, winners_and_margins, strict=True)
-        if winner == 0
-    )
+    for position in result.positions:
+        for offset, score in zip(result.scored_offsets, position.score_by_offset, strict=True):
+            comparison_frame = position.reference_frame - offset
+            source_frame = comparison_frame + 1 if 5 <= comparison_frame <= 27 else comparison_frame
+            # The generated pattern repeats every seven frames; exact matches
+            # follow the remapping used to construct the comparison above.
+            assert (score == 0.0) is (position.reference_frame % 7 == source_frame % 7)
     assert result.confirmed_offset == 0
     decided = _decide_video(_attempt_with_lags((0,) * 10), result)
     assert decided.decision.state == "trusted_automatic"

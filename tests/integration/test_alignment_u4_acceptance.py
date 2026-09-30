@@ -1231,8 +1231,7 @@ def _assert_video(
     result: AlignmentResult,
     *,
     confirmed_offset: int,
-    wins: int = 12,
-    informative: int = 12,
+    held_frames: range | None = None,
     finite_margin: bool = False,
     regions: tuple[range, range, tuple[range, ...]] | None = None,
 ) -> None:
@@ -1242,9 +1241,22 @@ def _assert_video(
     assert video.observation == "observed"
     assert video.confirmed_offset == confirmed_offset
     assert len(video.positions) == 12
-    if regions is None:
-        assert review.video_wins == wins
-        assert review.video_informative == informative
+    if held_frames is not None:
+        # The fixture replaces comparison pictures with black: all offsets
+        # there score equally; unchanged moving pictures have one exact match.
+        expected_wins = 0
+        for position in video.positions:
+            scores = position.score_by_offset
+            if position.reference_frame in held_frames:
+                assert len(set(scores)) == 1
+            else:
+                best_index = video.scored_offsets.index(confirmed_offset)
+                assert scores[best_index] == 0.0
+                assert all(score > 0.0 for index, score in enumerate(scores) if index != best_index)
+                expected_wins += 1
+        assert review.video_wins == review.video_informative == expected_wins
+    elif regions is None:
+        assert review.video_wins == review.video_informative == 12
     else:
         c_frames, other_frames, flat_frames = regions
         for position in video.positions:
@@ -1385,12 +1397,7 @@ def test_low_motion_insert_remains_a_provisional_hint(
         agreeing=19 if seconds == 570 else 18,
     )
     if seconds == 540:
-        _assert_video(
-            result,
-            confirmed_offset=0,
-            wins=11,
-            informative=11,
-        )
+        _assert_video(result, confirmed_offset=0, held_frames=range(538 * _FPS, _DURATION * _FPS))
     else:
         E = _DURATION * _FPS
         if seconds == 60:
@@ -1425,8 +1432,7 @@ def test_same_length_replacements_apply(u4_media: _MediaSet, tmp_path: Path, nam
     _assert_video(
         result,
         confirmed_offset=0,
-        wins=11 if name == "replacement-30" else 12,
-        informative=11 if name == "replacement-30" else 12,
+        held_frames=range(300 * _FPS, (300 + int(name.removeprefix("replacement-"))) * _FPS + 1),
     )
     _assert_targets(result, ())
 
@@ -1484,7 +1490,11 @@ def test_low_motion_credible_disagreement_stays_unresolved(
         credible=20,
         agreeing=19,
     )
-    _assert_video(result, confirmed_offset=0, wins=11, informative=11)
+    _assert_video(
+        result,
+        confirmed_offset=0,
+        held_frames=range(299 * _FPS, 331 * _FPS + 1),
+    )
     _assert_targets(result, (("chunk", 10, 10, (-3, -2, -1), "unresolved", 4),))
 
 
