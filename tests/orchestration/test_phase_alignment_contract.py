@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -13,38 +12,19 @@ from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_alignment
 from frame_compare.orchestration.context import ClipState, RunContext
 from frame_compare.services import alignment as alignment_service
-from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentResult,
     AlignmentReviewSummary,
 )
-from frame_compare.utils.alignment_evidence import (
-    AlignmentStabilitySummary,
-    AudioAlignmentAttempt,
-    AudioAlignmentDecision,
-    AudioAnalysisFacts,
-    AudioChunkColumns,
-    AudioChunkRun,
-    AudioDecisionCandidate,
-    AudioStageOutcome,
-    VideoCheckObservation,
-)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.loader import VSLoader
-from tests.alignment_review_test_support import stream as _stream
+from tests.alignment_review_test_support import (
+    provisional_audio_attempt,
+    unavailable_audio_attempt,
+)
 from tests.orchestration.phase_task_helpers import _clip, _run_align_phase, _workspace
-
-_REFERENCE_DIGEST = "a" * 64
-_COMPARISON_DIGEST = "b" * 64
-_DIAGNOSTIC_POLICY = "retained-audio-evidence-v1"
-_FPS_NUM = 24
-_FPS_DEN = 1
-_CHUNK_SAMPLES = 40000
-_LAG_SAMPLES = 240000
-_MAX_OFFSET_SECONDS = 30.0
-_AGREE_PSR = 30.0
 
 # U3 keeps only the C1 config surface; the shared helper config still lists the
 # removed C2 estimator keys, so this file builds its context from valid TOML.
@@ -94,187 +74,6 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         analysis_selection_domain="test-selection-domain",
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         analysis_clip=reference,
-    )
-
-
-def _frame_lag(frame_offset: int) -> int:
-    """Return the exact 8 kHz lag for the whole-frame offsets used by fixtures."""
-    lag = frame_offset * 8000 // _FPS_NUM
-    assert lag * _FPS_NUM == frame_offset * 8000
-    return lag
-
-
-def _subframe_estimate(lag: int) -> float:
-    return lag / 8000 * (_FPS_NUM / _FPS_DEN)
-
-
-def _agreed_attempt(*, ordinal: int, frame_offset: int, reason: str) -> AudioAlignmentAttempt:
-    lag = _frame_lag(frame_offset)
-    subframe = _subframe_estimate(lag)
-    assert math.floor(subframe + 0.5) == frame_offset
-    chunk_count = 4
-    candidate = AudioDecisionCandidate(
-        frame_offset=frame_offset,
-        time_offset_seconds=lag / 8000,
-        subframe_estimate=subframe,
-        basis="audio_only",
-    )
-    return AudioAlignmentAttempt(
-        reference_identity_digest=_REFERENCE_DIGEST,
-        comparison_identity_digest=_COMPARISON_DIGEST,
-        comparison_ordinal=ordinal,  # type: ignore[arg-type]
-        status="complete",  # type: ignore[arg-type]
-        estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
-        diagnostic_policy=_DIAGNOSTIC_POLICY,
-        media_runtime_fingerprint="alignment-runtime-test",
-        ffmpeg_version="not_observed",
-        ffprobe_version="not_observed",
-        extraction_recipe="ffmpeg -i <input> -map 0:a -f f32le -",
-        fps_num=_FPS_NUM,
-        fps_den=_FPS_DEN,
-        selected_streams=(
-            _stream("reference", _REFERENCE_DIGEST),
-            _stream("comparison", _COMPARISON_DIGEST),
-        ),
-        analysis=AudioAnalysisFacts(
-            analysis_rate=8000,
-            max_offset_seconds=_MAX_OFFSET_SECONDS,
-            chunk_samples=_CHUNK_SAMPLES,
-            lag_samples=_LAG_SAMPLES,
-            planned_chunk_count=chunk_count,
-        ),
-        chunks=AudioChunkColumns(
-            starts=tuple(index * _CHUNK_SAMPLES for index in range(chunk_count)),
-            counts=tuple(_CHUNK_SAMPLES for _ in range(chunk_count)),
-            active=(True, True, True, True),
-            lags=(lag, lag, lag, lag),
-            psrs=(_AGREE_PSR, _AGREE_PSR, _AGREE_PSR, _AGREE_PSR),
-            credible=(True, True, True, True),
-            agrees=(True, True, True, True),
-            total_samples=chunk_count * _CHUNK_SAMPLES,
-        ),
-        runs=(
-            AudioChunkRun(
-                first_index=0, last_index=chunk_count - 1, lag=lag, chunk_count=chunk_count
-            ),
-        ),
-        audio=AudioStageOutcome(
-            status="agreed",
-            global_lag=lag,
-            active_chunks=chunk_count,
-            credible_chunks=chunk_count,
-            agreeing_chunks=chunk_count,
-            compensation_seconds=0.0,
-            subframe_estimate=subframe,
-            rounded_frame=frame_offset,
-        ),
-        collection_observation="not_observed",
-        collection=(),
-        video_check=VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        ),
-        decision=AudioAlignmentDecision(
-            state="provisional",
-            candidate=candidate,
-            primary_reason=reason,
-            failed_gates=(),
-        ),
-        stability=AlignmentStabilitySummary(
-            classification="stable",
-            valid_windows=chunk_count,
-            offset_min_frames=frame_offset,
-            offset_max_frames=frame_offset,
-            first_offset_frames=frame_offset,
-            last_offset_frames=frame_offset,
-            largest_adjacent_jump_frames=0,
-            change_position_seconds=None,
-        ),
-    )
-
-
-def provisional_audio_attempt(*, ordinal: int = 1, frame_offset: int = 0) -> AudioAlignmentAttempt:
-    """Agreed audio stage awaiting video confirmation (the U3 applied-nothing state)."""
-    return _agreed_attempt(ordinal=ordinal, frame_offset=frame_offset, reason="audio_only")
-
-
-def unavailable_audio_attempt(*, ordinal: int = 1) -> AudioAlignmentAttempt:
-    """Agreed chunks that still refuse a single offset: no candidate, never applied."""
-    empty = AudioChunkColumns(
-        starts=(),
-        counts=(),
-        active=(),
-        lags=(),
-        psrs=(),
-        credible=(),
-        agrees=(),
-        total_samples=4 * _CHUNK_SAMPLES,
-        rows_omitted=True,
-    )
-    return AudioAlignmentAttempt(
-        reference_identity_digest=_REFERENCE_DIGEST,
-        comparison_identity_digest=_COMPARISON_DIGEST,
-        comparison_ordinal=ordinal,  # type: ignore[arg-type]
-        status="complete",  # type: ignore[arg-type]
-        estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
-        diagnostic_policy=_DIAGNOSTIC_POLICY,
-        media_runtime_fingerprint="alignment-runtime-test",
-        ffmpeg_version="not_observed",
-        ffprobe_version="not_observed",
-        extraction_recipe="ffmpeg -i <input> -map 0:a -f f32le -",
-        fps_num=_FPS_NUM,
-        fps_den=_FPS_DEN,
-        selected_streams=(
-            _stream("reference", _REFERENCE_DIGEST),
-            _stream("comparison", _COMPARISON_DIGEST),
-        ),
-        analysis=AudioAnalysisFacts(
-            analysis_rate=8000,
-            max_offset_seconds=_MAX_OFFSET_SECONDS,
-            chunk_samples=_CHUNK_SAMPLES,
-            lag_samples=_LAG_SAMPLES,
-            planned_chunk_count=4,
-        ),
-        chunks=empty,
-        runs=(),
-        audio=AudioStageOutcome(
-            status="no_usable_audio",
-            global_lag=None,
-            active_chunks=0,
-            credible_chunks=0,
-            agreeing_chunks=0,
-            compensation_seconds=0.0,
-            subframe_estimate=None,
-            rounded_frame=None,
-        ),
-        collection_observation="not_observed",
-        collection=(),
-        video_check=VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        ),
-        decision=AudioAlignmentDecision(
-            state="unavailable",
-            candidate=None,
-            primary_reason="no_single_offset",
-            failed_gates=("no_single_offset",),
-        ),
-        stability=AlignmentStabilitySummary(
-            classification="insufficient_evidence",
-            valid_windows=0,
-            offset_min_frames=None,
-            offset_max_frames=None,
-            first_offset_frames=None,
-            last_offset_frames=None,
-            largest_adjacent_jump_frames=None,
-            change_position_seconds=None,
-        ),
     )
 
 
