@@ -19,17 +19,6 @@ from frame_compare.services.alignment_diagnostics import original_attempt_digest
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_evidence import (
-    AudioAlignmentAttempt,
-    AudioAlignmentDecision,
-    AudioAnalysisFacts,
-    AudioChunkColumns,
-    AudioChunkRun,
-    AudioDecisionCandidate,
-    AudioStageOutcome,
-    SelectedAudioStreamEvidence,
-    VideoCheckObservation,
-)
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -38,6 +27,7 @@ from frame_compare.vsview.alignment_review_contract import (
     KeepCurrentAlignmentReviewDecision,
     write_alignment_review_result,
 )
+from tests.alignment_review_test_support import trusted_audio_attempt
 from tests.services.alignment_request_test_support import (
     alignment_request,
 )
@@ -55,148 +45,6 @@ def align_clips_from_request(
     return asyncio.run(_align_clips_from_request(request, config, **kwargs))
 
 
-def _trusted_attempt(frame_offset: int) -> AudioAlignmentAttempt:
-    """Hand-built trusted attempt so review tests stay isolated from the estimator.
-
-    The whole-track audio stage never applies on its own in U3; these
-    review-replacement tests stub the estimator with a trusted attempt to
-    simulate confirmed authority flowing into the native session request.
-    """
-    return AudioAlignmentAttempt(
-        reference_identity_digest="d" * 64,
-        comparison_identity_digest="e" * 64,
-        comparison_ordinal=1,
-        status="complete",
-        estimator_policy="whole-track-chunked-phat-video-check-motion-20260929",
-        diagnostic_policy="retained-audio-evidence-v1",
-        media_runtime_fingerprint="alignment-runtime",
-        ffmpeg_version="not_observed",
-        ffprobe_version="not_observed",
-        extraction_recipe="recipe",
-        fps_num=24,
-        fps_den=1,
-        selected_streams=(
-            SelectedAudioStreamEvidence(
-                role="reference",
-                source_identity_digest="d" * 64,
-                audio_stream_index=0,
-                absolute_stream_index=1,
-                selection_method="automatic_metadata",
-                selection_rank=(0, 0, 0, 0),
-                codec_name="aac",
-                sample_rate=48000,
-                channels=2,
-                channel_layout="stereo",
-                language="eng",
-                is_default=True,
-                is_original=False,
-                is_commentary=False,
-                language_match="not_applicable",
-                commentary_match="not_applicable",
-                stream_start_num=0,
-                stream_start_den=1,
-                stream_start_basis="default_zero",
-                input_start_num=0,
-                input_start_den=1,
-                input_start_basis="default_zero",
-                time_base_num=1,
-                time_base_den=48000,
-                duration_num=120,
-                duration_den=1,
-                duration_basis="duration_ts",
-                video_start_num=0,
-                video_start_den=1,
-                video_start_basis="default_zero",
-                timeline_scale_num=1,
-                timeline_scale_den=1,
-            ),
-            SelectedAudioStreamEvidence(
-                role="comparison",
-                source_identity_digest="e" * 64,
-                audio_stream_index=0,
-                absolute_stream_index=1,
-                selection_method="automatic_metadata",
-                selection_rank=(0, 0, 0, 0),
-                codec_name="aac",
-                sample_rate=48000,
-                channels=2,
-                channel_layout="stereo",
-                language="eng",
-                is_default=True,
-                is_original=False,
-                is_commentary=False,
-                language_match="not_applicable",
-                commentary_match="not_applicable",
-                stream_start_num=0,
-                stream_start_den=1,
-                stream_start_basis="default_zero",
-                input_start_num=0,
-                input_start_den=1,
-                input_start_basis="default_zero",
-                time_base_num=1,
-                time_base_den=48000,
-                duration_num=120,
-                duration_den=1,
-                duration_basis="duration_ts",
-                video_start_num=0,
-                video_start_den=1,
-                video_start_basis="default_zero",
-                timeline_scale_num=1,
-                timeline_scale_den=1,
-            ),
-        ),
-        analysis=AudioAnalysisFacts(
-            analysis_rate=8000,
-            max_offset_seconds=30.0,
-            chunk_samples=40000,
-            lag_samples=240000,
-            planned_chunk_count=5,
-        ),
-        chunks=AudioChunkColumns(
-            starts=(0, 40000, 80000, 120000, 160000),
-            counts=(40000,) * 5,
-            active=(True,) * 5,
-            lags=(0,) * 5,
-            psrs=(88.5,) * 5,
-            credible=(True,) * 5,
-            agrees=(True,) * 5,
-            total_samples=200000,
-        ),
-        runs=(AudioChunkRun(first_index=0, last_index=4, lag=0, chunk_count=5),),
-        audio=AudioStageOutcome(
-            status="agreed",
-            global_lag=0,
-            active_chunks=5,
-            credible_chunks=5,
-            agreeing_chunks=5,
-            compensation_seconds=0.0,
-            subframe_estimate=0.0,
-            rounded_frame=0,
-        ),
-        collection_observation="not_observed",
-        collection=(),
-        video_check=VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        ),
-        decision=AudioAlignmentDecision(
-            state="trusted_automatic",
-            candidate=AudioDecisionCandidate(
-                frame_offset=frame_offset,
-                time_offset_seconds=frame_offset / 24,
-                subframe_estimate=float(frame_offset),
-                basis="audio_only",
-            ),
-            primary_reason="audio_video_confirmed",
-            failed_gates=(),
-        ),
-        stability=audio_attempt().stability,
-    )
-
-
 def _trusted_computed_result(
     reference: Path, comparison: Path, frame_offset: int
 ) -> AlignmentResult:
@@ -209,7 +57,7 @@ def _trusted_computed_result(
         algorithm="cross_correlation",
         source="computed",
         stability=audio_attempt().stability,
-        audio_attempt=_trusted_attempt(frame_offset),
+        audio_attempt=trusted_audio_attempt(frame_offset=frame_offset),
     )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.utils.alignment_evidence import (
@@ -9,6 +10,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
     AudioAnalysisFacts,
+    AudioAuthorityRecount,
     AudioChunkColumns,
     AudioChunkRun,
     AudioDecisionCandidate,
@@ -230,7 +232,7 @@ def trusted_audio_attempt(
     lag = frame_lag(frame_offset)
     subframe = subframe_estimate(lag)
     assert math.floor(subframe + 0.5) == frame_offset
-    return attempt_shell(
+    attempt = attempt_shell(
         ordinal=ordinal,
         status="complete",
         analysis_facts=analysis(planned_chunk_count=chunk_count),
@@ -249,6 +251,23 @@ def trusted_audio_attempt(
             failed_gates=(),
         ),
         stability=stable_summary(frame_offset=frame_offset, chunk_count=chunk_count),
+    )
+    return replace(
+        attempt,
+        video_check=VideoCheckObservation(
+            observation="observed",
+            scored_offsets=tuple(frame_offset + delta for delta in range(-2, 3)),
+            confirmed_offset=frame_offset,
+            index_build_seconds=0.0,
+            positions=(),
+        ),
+        authority_recount=AudioAuthorityRecount(
+            raw_status="agreed",
+            raw_agreeing_chunks=chunk_count,
+            authority_status="agreed",
+            authority_agreeing_chunks=chunk_count,
+            passed=True,
+        ),
     )
 
 
