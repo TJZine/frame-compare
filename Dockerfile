@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 0: Pinned Python dependency tooling
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.21@sha256:a7aed3216253ee804de3e2d8afa5073baa1a177335345d43845cd4165e43b711 AS uv
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build supplemental VapourSynth plugins
