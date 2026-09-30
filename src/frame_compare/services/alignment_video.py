@@ -152,12 +152,15 @@ def check_video_alignment(
             return _failed()
         start, end = overlap
         span = end - start
+        # Keep only selected prepared luma, at most 12 frames, until scoring completes.
+        reference_frames: dict[int, FloatFrame] = {}
         positions = _motion_positions(
             reference_node,
             start + span * 0.05,
             start + span * 0.95,
             _BASE_POSITION_COUNT,
             cancellation=cancellation,
+            retained_frames=reference_frames,
         )
         if positions is None:
             return _failed()
@@ -170,9 +173,11 @@ def check_video_alignment(
             positions,
             scored_offsets,
             cancellation=cancellation,
+            retained_frames=reference_frames,
         )
         if scored_positions is None:
             return _failed()
+        reference_frames.clear()
         base_positions, winners, margins = scored_positions
         confirmed = _confirmed_offset(
             rounded_frame,
@@ -234,12 +239,14 @@ def check_video_alignment(
                 else _evenly_spaced(*target_range, target.requested_positions)
             )
             planned_target_frames[(target.kind, target.first_index, target.last_index)] = planned
+            reference_frames.clear()
             if remaining > 0 and target_range is not None:
                 motion = _motion_positions(
                     reference_node,
                     *target_range,
                     target.requested_positions,
                     cancellation=cancellation,
+                    retained_frames=reference_frames,
                 )
                 if motion is None:
                     return _failed()
@@ -259,6 +266,7 @@ def check_video_alignment(
                         frame,
                         confirmed,
                         alternative_offsets,
+                        retained_frames=reference_frames,
                     )
                     if scored is None:
                         return _failed()
@@ -395,11 +403,13 @@ def _motion_positions(
     count: int,
     *,
     cancellation: Event | None,
+    retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[int, ...] | None:
     """One reference frame per equal slot of [start, end]: the candidate with the most motion.
 
     Motion is the mean absolute luma difference between frames ``n`` and
-    ``n + _MOTION_STEP``. Returns ``None`` when cancelled.
+    ``n + _MOTION_STEP``. Retains only selected luma when requested.
+    Returns ``None`` when cancelled.
     """
     if count < 1 or end < start:
         return ()
@@ -411,15 +421,17 @@ def _motion_positions(
         slot_start = start + slot * index
         best_frame = round(slot_start + slot / 2)
         best_motion = -1.0
+        best_image: FloatFrame | None = None
         for candidate_index in range(_MOTION_CANDIDATES):
             frame = round(slot_start + slot * (candidate_index + 0.5) / _MOTION_CANDIDATES)
             if frame < 0 or frame + _MOTION_STEP >= node.num_frames:
                 continue
-            motion = float(
-                np.mean(np.abs(_read_frame(node, frame) - _read_frame(node, frame + _MOTION_STEP)))
-            )
+            image = _read_frame(node, frame)
+            motion = float(np.mean(np.abs(image - _read_frame(node, frame + _MOTION_STEP))))
             if motion > best_motion:
-                best_frame, best_motion = frame, motion
+                best_frame, best_motion, best_image = frame, motion, image
+        if retained_frames is not None and best_image is not None:
+            retained_frames[best_frame] = best_image
         chosen.append(best_frame)
     return tuple(dict.fromkeys(chosen))
 
@@ -431,6 +443,7 @@ def _score_base_positions(
     offsets: Sequence[int],
     *,
     cancellation: Event | None,
+    retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[list[VideoPositionDifference], list[int | None], list[float]] | None:
     evidence: list[VideoPositionDifference] = []
     winners: list[int | None] = []
@@ -439,9 +452,17 @@ def _score_base_positions(
         if _is_cancelled(cancellation):
             return None
         try:
-            reference_ranks = _average_ranks(_read_frame(reference_node, reference_frame))
-            scores = tuple(
-                float(
+            reference_image = (
+                None if retained_frames is None else retained_frames.get(reference_frame)
+            )
+            reference_ranks = _average_ranks(
+                _read_frame(reference_node, reference_frame)
+                if reference_image is None
+                else reference_image
+            )
+            # Larger offsets read earlier comparison frames; decode forward locally.
+            scores_by_offset = {
+                offset: float(
                     np.mean(
                         np.abs(
                             reference_ranks
@@ -449,8 +470,9 @@ def _score_base_positions(
                         )
                     )
                 )
-                for offset in offsets
-            )
+                for offset in sorted(offsets, reverse=True)
+            }
+            scores = tuple(scores_by_offset[offset] for offset in offsets)
         except RuntimeError:
             return None
         winner, margin = _position_winner(scores, offsets)
@@ -667,30 +689,30 @@ def _score_hypotheses(
     reference_frame: int,
     confirmed: int,
     alternative_offsets: Sequence[int],
+    *,
+    retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[float, float, int | None] | None:
     try:
-        reference_ranks = _average_ranks(_read_frame(reference_node, reference_frame))
-        confirmed_score = float(
-            np.mean(
-                np.abs(
-                    reference_ranks
-                    - _average_ranks(_read_frame(comparison_node, reference_frame - confirmed))
+        reference_image = None if retained_frames is None else retained_frames.get(reference_frame)
+        reference_ranks = _average_ranks(
+            _read_frame(reference_node, reference_frame)
+            if reference_image is None
+            else reference_image
+        )
+        scores_by_offset = {
+            offset: float(
+                np.mean(
+                    np.abs(
+                        reference_ranks
+                        - _average_ranks(_read_frame(comparison_node, reference_frame - offset))
+                    )
                 )
             )
-        )
+            for offset in sorted({confirmed, *alternative_offsets}, reverse=True)
+        }
+        confirmed_score = scores_by_offset[confirmed]
         alternative_scores = tuple(
-            (
-                offset,
-                float(
-                    np.mean(
-                        np.abs(
-                            reference_ranks
-                            - _average_ranks(_read_frame(comparison_node, reference_frame - offset))
-                        )
-                    )
-                ),
-            )
-            for offset in alternative_offsets
+            (offset, scores_by_offset[offset]) for offset in alternative_offsets
         )
     except RuntimeError:
         return None

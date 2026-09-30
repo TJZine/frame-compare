@@ -1397,6 +1397,7 @@ def test_budget_exhaustion_keeps_planned_point_without_scoring(
         reference_frame: int,
         _confirmed: int,
         _alternative_offsets: object,
+        **_kwargs: object,
     ) -> tuple[float, float, int]:
         scored_frames.append(reference_frame)
         return 0.1, 1.0, 1
@@ -1477,3 +1478,61 @@ def test_check_points_skip_colliding_base_before_confirmed_contrast() -> None:
     )
 
     assert [point.reference_frame for point in points] == [100, 900]
+
+
+def test_video_check_reuses_only_selected_luma_with_identical_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference = _moving_clip(frames=180)
+    attempt = _attempt_with_lags((333, 0, 0, 0, 0, 0, 0, 0, 0, 0), chunk_samples=8_000)
+    select = alignment_video._motion_positions
+    read = alignment_video._read_frame
+    reuse = False
+    retained_counts: list[int] = []
+    retained_bytes: list[int] = []
+    reads = 0
+
+    def select_frames(
+        node: vs.VideoNode,
+        start: float | int,
+        end: float | int,
+        count: int,
+        *,
+        cancellation: Event | None,
+        retained_frames: dict[int, alignment_video.FloatFrame] | None = None,
+    ) -> tuple[int, ...] | None:
+        if retained_frames is not None:
+            assert not retained_frames
+        selected = select(
+            node,
+            start,
+            end,
+            count,
+            cancellation=cancellation,
+            retained_frames=retained_frames if reuse else None,
+        )
+        if retained_frames is not None:
+            retained_counts.append(len(retained_frames))
+            retained_bytes.append(sum(image.nbytes for image in retained_frames.values()))
+        return selected
+
+    def read_frame(node: vs.VideoNode, frame: int) -> alignment_video.FloatFrame:
+        nonlocal reads
+        reads += 1
+        return read(node, frame)
+
+    monkeypatch.setattr(alignment_video, "_motion_positions", select_frames)
+    monkeypatch.setattr(alignment_video, "_read_frame", read_frame)
+    baseline = _run(tmp_path, truth=0, reference_clip=reference, attempt=attempt)
+    baseline_reads = reads
+    reads = 0
+    reuse = True
+    result = _run(tmp_path, truth=0, reference_clip=reference, attempt=attempt)
+
+    assert result.targets and result.targets[0].positions
+    assert replace(result, index_build_seconds=0.0) == replace(baseline, index_build_seconds=0.0)
+    assert _decide_video(attempt, result).decision == _decide_video(attempt, baseline).decision
+    selected_count = len(result.positions) + sum(len(target.positions) for target in result.targets)
+    assert baseline_reads - reads == selected_count
+    assert max(retained_counts) == 12
+    assert max(retained_bytes) <= 12 * 320 * 180 * np.dtype(np.float32).itemsize
