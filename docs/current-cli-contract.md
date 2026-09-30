@@ -1663,8 +1663,9 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   audio stream ordinal, defaulting to an empty map. Matching entries select the
   comparison clip audio stream for that stem.
 - Without overrides, the reference keeps its default-ranked stream unless that
-  language is missing from the comparison, in which case the reference switches
-  to its best-ranked stream in a language both sides share.
+  stream is non-commentary, has a known language missing from the comparison, and
+  another non-commentary reference stream has a known language shared by both sides;
+  in that case the reference switches to the best-ranked such stream.
 
 Computed alignment decodes the whole selected audio stream at 8 kHz mono rather
 than sampling distributed windows. A source retimed to a different effective
@@ -1691,6 +1692,13 @@ and is never applied. The sub-frame estimate `x = offset_seconds x fps_reference
 is kept as evidence; only the video check may confirm an applied frame. Normal
 optional VSView/manual review and best-effort rendering policy handle rejected
 computed alignments as before.
+
+Video confirmation divides the usable base range and each examined disagreement
+target into equal slots, then chooses the highest-motion reference frame from four
+deterministic candidates in each slot. Motion is the mean absolute luma difference
+over a two-frame step on the prepared active picture; `auto` is the default prepared-
+rectangle policy. Unexamined targets retain evenly spaced planned review frames, which
+are not scored.
 
 Interrupting a run during fresh audio computation cooperatively cancels the active
 collection or bounded numeric work, waits for the owned FFmpeg child, pipe readers,

@@ -110,6 +110,11 @@ def audio_unavailable_phrase(reason: str) -> str:
     return reason
 
 
+def analysis_stream_start(start: Fraction, timeline_scale: Fraction) -> Fraction:
+    """Return a native stream start on the effective analysis timeline."""
+    return start * timeline_scale
+
+
 _NONE_TYPE = type(None)
 
 
@@ -207,49 +212,33 @@ def _walk_value(annotation: object, value: Any, what: str, *, parse: bool) -> An
     raise TypeError(f"unsupported evidence type for {what}: {annotation!r}")
 
 
-def _check_value(annotation: object, value: Any, what: str) -> None:
-    """Strictly check one constructed value against a field annotation."""
-    _walk_value(annotation, value, what, parse=False)
-
-
 def _check_shallow(obj: object) -> None:
     """Run the strict type check over every field of one evidence object."""
     hints: dict[str, Any] = get_type_hints(type(obj))
     for field in fields(cast(Any, obj)):
-        _check_value(hints[field.name], getattr(obj, field.name), field.name)
+        _walk_value(hints[field.name], getattr(obj, field.name), field.name, parse=False)
 
 
-def _check_text(name: str, value: object, *, maximum: int = _MAX_TEXT) -> None:
-    if not isinstance(value, str) or not value or len(value) > maximum:
+def _check_text(name: str, value: str, *, maximum: int = _MAX_TEXT) -> None:
+    if not value or len(value) > maximum:
         raise ValueError(f"{name} must be 1..{maximum} characters")
 
 
-def _check_optional_text(name: str, value: object, *, maximum: int = _MAX_TEXT) -> None:
+def _check_optional_text(name: str, value: str | None) -> None:
     if value is None:
         return
-    if not isinstance(value, str) or len(value) > maximum:
-        raise ValueError(f"{name} must be a string of at most {maximum} characters")
+    if len(value) > _MAX_TEXT:
+        raise ValueError(f"{name} must be a string of at most {_MAX_TEXT} characters")
 
 
-def _check_int(name: str, value: object, *, minimum: int | None = None) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{name} must be an integer")
-    if minimum is not None and value < minimum:
+def _check_minimum(name: str, value: int, *, minimum: int) -> None:
+    if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
 
 
-def _check_digest(name: str, value: object) -> None:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(char not in "0123456789abcdefABCDEF" for char in value)
-    ):
+def _check_digest(name: str, value: str) -> None:
+    if len(value) != 64 or any(char not in "0123456789abcdefABCDEF" for char in value):
         raise ValueError(f"{name} must be a SHA-256 hex digest")
-
-
-def _parse_value(annotation: object, value: Any, what: str) -> Any:
-    """Parse one JSON value against a resolved dataclass field annotation."""
-    return _walk_value(annotation, value, what, parse=True)
 
 
 def evidence_from_payload[T](cls: type[T], data: object) -> T:
@@ -273,7 +262,7 @@ def evidence_from_payload[T](cls: type[T], data: object) -> T:
         raise ValueError(f"{what} is missing keys: {missing}")
     hints: dict[str, Any] = get_type_hints(cls)
     parsed: dict[str, Any] = {
-        name: _parse_value(hints[name], raw[name], f"{what}.{name}") for name in names
+        name: _walk_value(hints[name], raw[name], f"{what}.{name}", parse=True) for name in names
     }
     return cls(**parsed)  # type: ignore[call-arg]
 
@@ -322,36 +311,40 @@ class SelectedAudioStreamEvidence:
     @property
     def analysis_audio_start(self) -> Fraction:
         """Audio stream start on the analysis (effective) timeline."""
-        return Fraction(self.stream_start_num, self.stream_start_den) * self.timeline_scale
+        return analysis_stream_start(
+            Fraction(self.stream_start_num, self.stream_start_den), self.timeline_scale
+        )
 
     @property
     def analysis_video_start(self) -> Fraction:
         """Video stream start on the analysis (effective) timeline."""
-        return Fraction(self.video_start_num, self.video_start_den) * self.timeline_scale
+        return analysis_stream_start(
+            Fraction(self.video_start_num, self.video_start_den), self.timeline_scale
+        )
 
     def __post_init__(self) -> None:
         _check_shallow(self)
         _check_digest("source_identity_digest", self.source_identity_digest)
-        _check_int("audio_stream_index", self.audio_stream_index, minimum=0)
-        _check_int("absolute_stream_index", self.absolute_stream_index, minimum=0)
+        _check_minimum("audio_stream_index", self.audio_stream_index, minimum=0)
+        _check_minimum("absolute_stream_index", self.absolute_stream_index, minimum=0)
         _check_optional_text("codec_name", self.codec_name)
         if self.sample_rate is not None:
-            _check_int("sample_rate", self.sample_rate, minimum=0)
+            _check_minimum("sample_rate", self.sample_rate, minimum=0)
         if self.channels is not None:
-            _check_int("channels", self.channels, minimum=0)
+            _check_minimum("channels", self.channels, minimum=0)
         _check_optional_text("channel_layout", self.channel_layout)
         _check_optional_text("language", self.language)
-        _check_int("stream_start_den", self.stream_start_den, minimum=1)
-        _check_int("input_start_den", self.input_start_den, minimum=1)
+        _check_minimum("stream_start_den", self.stream_start_den, minimum=1)
+        _check_minimum("input_start_den", self.input_start_den, minimum=1)
         if self.time_base_num is not None:
-            _check_int("time_base_num", self.time_base_num, minimum=0)
+            _check_minimum("time_base_num", self.time_base_num, minimum=0)
         if self.time_base_den is not None:
-            _check_int("time_base_den", self.time_base_den, minimum=1)
+            _check_minimum("time_base_den", self.time_base_den, minimum=1)
         if self.duration_num is not None:
-            _check_int("duration_num", self.duration_num, minimum=0)
+            _check_minimum("duration_num", self.duration_num, minimum=0)
         if self.duration_den is not None:
-            _check_int("duration_den", self.duration_den, minimum=1)
-        _check_int("video_start_den", self.video_start_den, minimum=1)
+            _check_minimum("duration_den", self.duration_den, minimum=1)
+        _check_minimum("video_start_den", self.video_start_den, minimum=1)
         if (
             self.timeline_scale_num < 1
             or self.timeline_scale_den < 1
@@ -376,9 +369,9 @@ class AudioAnalysisFacts:
             raise ValueError("analysis rate must be 8000")
         if self.max_offset_seconds < 1:
             raise ValueError("max_offset_seconds must be finite and >= 1")
-        _check_int("chunk_samples", self.chunk_samples, minimum=0)
-        _check_int("lag_samples", self.lag_samples, minimum=0)
-        _check_int("planned_chunk_count", self.planned_chunk_count, minimum=0)
+        _check_minimum("chunk_samples", self.chunk_samples, minimum=0)
+        _check_minimum("lag_samples", self.lag_samples, minimum=0)
+        _check_minimum("planned_chunk_count", self.planned_chunk_count, minimum=0)
         if self.planned_chunk_count > MAX_AUDIO_CHUNKS:
             raise ValueError("planned chunk count is out of bounds")
 
@@ -420,11 +413,11 @@ class AudioChunkColumns:
             raise ValueError("chunk columns must share one length")
         if self.rows_omitted and self.starts:
             raise ValueError("omitted chunk rows must be empty")
-        _check_int("total_samples", self.total_samples, minimum=0)
+        _check_minimum("total_samples", self.total_samples, minimum=0)
         for item in self.starts:
-            _check_int("starts", item, minimum=0)
+            _check_minimum("starts", item, minimum=0)
         for item in self.counts:
-            _check_int("counts", item, minimum=1)
+            _check_minimum("counts", item, minimum=1)
         previous_start: int | None = None
         for index in range(len(self.starts)):
             start = self.starts[index]
@@ -440,8 +433,6 @@ class AudioChunkColumns:
                 raise ValueError("inactive chunks cannot carry lag evidence")
             if self.active[index] and (self.lags[index] is None or self.psrs[index] is None):
                 raise ValueError("active chunks require a lag and PSR")
-            if self.credible[index] and not self.active[index]:
-                raise ValueError("credible chunks must be active")
             if self.agrees[index] and not self.credible[index]:
                 raise ValueError("agreeing chunks must be credible")
 
@@ -461,9 +452,9 @@ class AudioChunkRun:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("first_index", self.first_index, minimum=0)
-        _check_int("last_index", self.last_index, minimum=0)
-        _check_int("chunk_count", self.chunk_count, minimum=1)
+        _check_minimum("first_index", self.first_index, minimum=0)
+        _check_minimum("last_index", self.last_index, minimum=0)
+        _check_minimum("chunk_count", self.chunk_count, minimum=1)
         if self.last_index < self.first_index:
             raise ValueError("chunk run ends before it starts")
         if self.chunk_count > self.last_index - self.first_index + 1:
@@ -485,9 +476,9 @@ class AudioStageOutcome:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("active_chunks", self.active_chunks, minimum=0)
-        _check_int("credible_chunks", self.credible_chunks, minimum=0)
-        _check_int("agreeing_chunks", self.agreeing_chunks, minimum=0)
+        _check_minimum("active_chunks", self.active_chunks, minimum=0)
+        _check_minimum("credible_chunks", self.credible_chunks, minimum=0)
+        _check_minimum("agreeing_chunks", self.agreeing_chunks, minimum=0)
         if not self.agreeing_chunks <= self.credible_chunks <= self.active_chunks:
             raise ValueError("chunk counts must nest: agreeing <= credible <= active")
         if (self.status == "no_usable_audio") == (self.global_lag is not None):
@@ -514,12 +505,12 @@ class AudioCollectionFacts:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("emitted_samples", self.emitted_samples, minimum=0)
+        _check_minimum("emitted_samples", self.emitted_samples, minimum=0)
         if self.eof_sample is not None:
-            _check_int("eof_sample", self.eof_sample, minimum=0)
+            _check_minimum("eof_sample", self.eof_sample, minimum=0)
         if self.elapsed_seconds < 0:
             raise ValueError("collection elapsed time must be non-negative")
-        _check_int("stderr_bytes", self.stderr_bytes, minimum=0)
+        _check_minimum("stderr_bytes", self.stderr_bytes, minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,8 +534,8 @@ class VideoPositionDifference:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("position_index", self.position_index, minimum=0)
-        _check_int("reference_frame", self.reference_frame, minimum=0)
+        _check_minimum("position_index", self.position_index, minimum=0)
+        _check_minimum("reference_frame", self.reference_frame, minimum=0)
         if any(score < 0 for score in self.score_by_offset):
             raise ValueError("video position scores must be non-negative")
 
@@ -562,8 +553,8 @@ class VideoTargetPosition:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("position_index", self.position_index, minimum=0)
-        _check_int("reference_frame", self.reference_frame, minimum=0)
+        _check_minimum("position_index", self.position_index, minimum=0)
+        _check_minimum("reference_frame", self.reference_frame, minimum=0)
         if self.confirmed_score < 0 or self.alternative_score < 0:
             raise ValueError("target hypothesis scores must be non-negative")
         if self.winner == "alternative" and self.alternative_offset is None:
@@ -587,11 +578,10 @@ class VideoTargetEvidence:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("first_chunk_index", self.first_chunk_index, minimum=0)
-        _check_int("last_chunk_index", self.last_chunk_index, minimum=0)
-        _check_int("start_sample", self.start_sample, minimum=0)
-        _check_int("end_sample", self.end_sample, minimum=0)
-        _check_int("target_offset", self.target_offset)
+        _check_minimum("first_chunk_index", self.first_chunk_index, minimum=0)
+        _check_minimum("last_chunk_index", self.last_chunk_index, minimum=0)
+        _check_minimum("start_sample", self.start_sample, minimum=0)
+        _check_minimum("end_sample", self.end_sample, minimum=0)
         if self.last_chunk_index < self.first_chunk_index:
             raise ValueError("video target ends before it starts")
         if self.end_sample <= self.start_sample:
@@ -625,11 +615,10 @@ class VideoTargetEvidence:
             required = 2 if self.kind == "run" else 1
             if winners.count("confirmed") < required:
                 raise ValueError("resolved targets need enough confirmed positions")
-        elif self.resolution == "local_video_inconclusive":
-            if self.credible or "neither" not in winners:
-                raise ValueError("local video inconclusive is non-credible neither-win context")
-        elif "confirmed" not in winners and "neither" not in winners:
-            raise ValueError("unresolved targets need an observed position")
+        elif self.resolution == "local_video_inconclusive" and (
+            self.credible or "neither" not in winners
+        ):
+            raise ValueError("local video inconclusive is non-credible neither-win context")
 
     def representative_offset(self) -> int:
         """Return the offset supported by the first authoritative target position."""
@@ -653,7 +642,7 @@ class AudioSameFrameContext:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("chunk_index", self.chunk_index, minimum=0)
+        _check_minimum("chunk_index", self.chunk_index, minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -668,8 +657,8 @@ class AudioAuthorityRecount:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("raw_agreeing_chunks", self.raw_agreeing_chunks, minimum=0)
-        _check_int("authority_agreeing_chunks", self.authority_agreeing_chunks, minimum=0)
+        _check_minimum("raw_agreeing_chunks", self.raw_agreeing_chunks, minimum=0)
+        _check_minimum("authority_agreeing_chunks", self.authority_agreeing_chunks, minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -684,8 +673,8 @@ class VideoCheckPoint:
         _check_shallow(self)
         if self.timestamp_seconds < 0:
             raise ValueError("video check-point timestamp must be non-negative")
-        _check_int("reference_frame", self.reference_frame, minimum=0)
-        _check_int("suggested_comparison_frame", self.suggested_comparison_frame, minimum=0)
+        _check_minimum("reference_frame", self.reference_frame, minimum=0)
+        _check_minimum("suggested_comparison_frame", self.suggested_comparison_frame, minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -810,9 +799,11 @@ class AlignmentStabilitySummary:
 
     def __post_init__(self) -> None:
         _check_shallow(self)
-        _check_int("valid_windows", self.valid_windows, minimum=0)
+        _check_minimum("valid_windows", self.valid_windows, minimum=0)
         if self.largest_adjacent_jump_frames is not None:
-            _check_int("largest_adjacent_jump_frames", self.largest_adjacent_jump_frames, minimum=0)
+            _check_minimum(
+                "largest_adjacent_jump_frames", self.largest_adjacent_jump_frames, minimum=0
+            )
         if self.change_position_seconds is not None and self.change_position_seconds < 0:
             raise ValueError("stability change position must be non-negative")
 
@@ -850,7 +841,7 @@ class AudioAlignmentAttempt:
         _check_shallow(self)
         _check_digest("reference_identity_digest", self.reference_identity_digest)
         _check_digest("comparison_identity_digest", self.comparison_identity_digest)
-        _check_int("comparison_ordinal", self.comparison_ordinal, minimum=1)
+        _check_minimum("comparison_ordinal", self.comparison_ordinal, minimum=1)
         _check_text("estimator_policy", self.estimator_policy)
         _check_text("diagnostic_policy", self.diagnostic_policy)
         _check_text(
@@ -859,8 +850,8 @@ class AudioAlignmentAttempt:
         _check_text("ffmpeg_version", self.ffmpeg_version, maximum=_MAX_VERSION_TEXT)
         _check_text("ffprobe_version", self.ffprobe_version, maximum=_MAX_VERSION_TEXT)
         _check_text("extraction_recipe", self.extraction_recipe)
-        _check_int("fps_num", self.fps_num, minimum=1)
-        _check_int("fps_den", self.fps_den, minimum=1)
+        _check_minimum("fps_num", self.fps_num, minimum=1)
+        _check_minimum("fps_den", self.fps_den, minimum=1)
         if tuple(stream.role for stream in self.selected_streams) != ("reference", "comparison"):
             raise ValueError("audio attempt requires reference and comparison stream evidence")
         if self.status != "complete" and self.decision.state != "unavailable":
@@ -907,8 +898,6 @@ class AudioAlignmentAttempt:
                     )
                     if count != expected_count:
                         raise ValueError("chunk counts must match the total sample span")
-                if sum(self.chunks.counts) != total_samples:
-                    raise ValueError("chunk counts must sum to total samples")
         for lag in self.chunks.lags:
             if lag is not None and abs(lag) > lag_radius:
                 raise ValueError("chunk lag exceeds the search radius")
@@ -1009,6 +998,7 @@ __all__ = [
     "VideoTargetPosition",
     "VideoTargetResolution",
     "VideoTargetWinner",
+    "analysis_stream_start",
     "audio_unavailable_phrase",
     "audio_attempt_payload",
     "evidence_from_payload",

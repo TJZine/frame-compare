@@ -82,21 +82,33 @@ def test_edge_consensus_offset(
 
 
 def test_retimed_start_uses_the_analysis_timeline() -> None:
-    evidence = replace(
+    reference = replace(
         stream("reference"),
         stream_start_num=1,
         stream_start_den=10,
-        video_start_num=0,
-        video_start_den=1,
+        video_start_num=1,
+        video_start_den=20,
         timeline_scale_num=1001,
         timeline_scale_den=1000,
     )
+    comparison = replace(
+        stream("comparison"),
+        stream_start_num=3,
+        stream_start_den=20,
+        video_start_num=1,
+        video_start_den=25,
+        timeline_scale_num=25,
+        timeline_scale_den=24,
+    )
 
-    assert evidence.analysis_audio_start == Fraction(1001, 10000)
+    assert reference.analysis_audio_start == Fraction(1001, 10000)
+    assert reference.analysis_video_start == Fraction(1001, 20000)
+    assert comparison.analysis_audio_start == Fraction(5, 32)
+    assert comparison.analysis_video_start == Fraction(1, 24)
     assert compensated_offset_seconds(
         global_lag=0,
-        reference_audio_start=evidence.analysis_audio_start,
-        reference_video_start=Fraction(0),
-        comparison_audio_start=Fraction(0),
-        comparison_video_start=Fraction(0),
-    ) == pytest.approx(0.1001)
+        reference_audio_start=reference.analysis_audio_start,
+        reference_video_start=reference.analysis_video_start,
+        comparison_audio_start=comparison.analysis_audio_start,
+        comparison_video_start=comparison.analysis_video_start,
+    ) == pytest.approx(-0.0645333)

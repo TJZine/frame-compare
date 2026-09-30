@@ -78,11 +78,6 @@ V6_PRIMARY_REASON_ORDER = (
 )
 
 
-def subframe_estimate(*, offset_seconds: float, fps_reference: Fraction) -> float:
-    """Keep the A6 sub-frame estimate ``x = offset_seconds * fps`` as evidence."""
-    return offset_seconds * float(fps_reference)
-
-
 def correlation_score(estimate: ChunkedAudioEstimate) -> float:
     """Agreement fraction: agreeing over credible chunks, else zero."""
     if estimate.credible_count <= 0:
@@ -169,23 +164,6 @@ def competing_run_center(
     return float(median(lags))
 
 
-def classify_audio_disagreements(
-    *,
-    estimate: ChunkedAudioEstimate,
-    confirmed_offset: int,
-    fps_reference: Fraction,
-    compensation_seconds: float,
-) -> AudioFrameDisagreements:
-    """Classify A4b frame-distinct evidence after V5 confirms ``c``."""
-    return classify_audio_observations(
-        observations=estimate.observations,
-        global_lag=estimate.global_lag,
-        confirmed_offset=confirmed_offset,
-        fps_reference=fps_reference,
-        compensation_seconds=compensation_seconds,
-    )
-
-
 def classify_audio_observations(
     *,
     observations: Sequence[ChunkObservation],
@@ -219,10 +197,7 @@ def classify_audio_observations(
                     AudioSameFrameContext(
                         chunk_index=observation.index,
                         lag_samples=observation.lag,
-                        subframe_estimate=subframe_estimate(
-                            offset_seconds=offset_seconds,
-                            fps_reference=fps_reference,
-                        ),
+                        subframe_estimate=offset_seconds * float(fps_reference),
                         rounded_frame=frame,
                     )
                 )
@@ -605,8 +580,9 @@ def decide_after_video(
     compensation_seconds = stage.audio.compensation_seconds
     if compensation_seconds is None:
         raise ValueError("a completed audio stage needs compensation for video authority")
-    classification = classify_audio_disagreements(
-        estimate=estimate,
+    classification = classify_audio_observations(
+        observations=estimate.observations,
+        global_lag=estimate.global_lag,
         confirmed_offset=confirmed_offset,
         fps_reference=fps_reference,
         compensation_seconds=compensation_seconds,
@@ -703,7 +679,7 @@ def decide_completed_stage(
     rounded: int | None = None
     if estimate.global_lag is not None:
         offset_seconds = estimate.global_lag / AUDIO_ANALYSIS_SAMPLE_RATE + compensation_seconds
-        subframe = subframe_estimate(offset_seconds=offset_seconds, fps_reference=fps_reference)
+        subframe = offset_seconds * float(fps_reference)
         rounded = _rounded_frame(offset_seconds, fps_reference)
     audio = AudioStageOutcome(
         status=outcome if estimate.global_lag is not None else "no_usable_audio",
@@ -845,7 +821,7 @@ __all__ = [
     "AudioFrameDisagreements",
     "V6_PRIMARY_REASON_ORDER",
     "DecidedAudioStage",
-    "classify_audio_disagreements",
+    "classify_audio_observations",
     "correlation_score",
     "decide_aborted_stage",
     "decide_completed_stage",
@@ -854,6 +830,5 @@ __all__ = [
     "derive_stability",
     "is_trusted_automatic",
     "recount_audio_authority",
-    "subframe_estimate",
     "v6_failure_reasons",
 ]

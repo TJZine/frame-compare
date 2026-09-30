@@ -464,9 +464,10 @@ stale-policy shared entries miss and recompute.
 Computed alignment work runs whole-track chunked correlation over each selected audio
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
-whole-track 8 kHz mono FFmpeg recipe. Without overrides, the reference switches
-from its default-ranked stream to its best-ranked stream in a shared language when
-its default language is missing from the comparison. Each source's audio is analysed on its
+whole-track 8 kHz mono FFmpeg recipe. Without overrides, a non-commentary reference
+default with a known language switches to the best-ranked non-commentary reference
+stream in a known language shared by both sides when its language is missing from the
+comparison. Each source's audio is analysed on its
 effective timeline, so a retimed source's exact resample/relabel filters stretch
 its audio by `source_fps / effective_fps` before chunking. Reference chunks of length
 `C = clamp(floor(D/3), 5 s, 30 s)` (one chunk of length `D` when the shorter
@@ -551,9 +552,10 @@ prompt/table helper, including TTY fallback behavior and no-color rendering.
 write-source provenance such as `computed_this_run`,
 `interactive_confirmed_this_run`, `shared_computed_offsets`,
 `shared_previous_offsets`, and
-`preexisting_manual_override`; shared-cache writes consume only current-run
-computed or interactively confirmed provenance rather than inferring eligibility from
-the final flattened `AlignmentResult.source`. Shared cache schema v2 remains
+`preexisting_manual_override`; shared-cache writes require at least one current-run
+computed or interactively confirmed result and otherwise admit only trusted current-run
+or shared-computed provenance rather than inferring eligibility from the final flattened
+`AlignmentResult.source`. Shared cache schema v2 remains
 accepted-authority-only and does not serialize the richer attempt. Warm cache entries
 therefore report historical stream/chunk details as unavailable rather than
 inventing them.
@@ -992,7 +994,7 @@ Active-picture resolution is owned by `frame_compare.orchestration.active_rect`
 and optional `frame_compare.orchestration.active_rect_content` during
 preparation. Static resolution produces explicit, metadata, dimension-derived,
 aspect-ratio-derived, or full-frame rectangles from probe/config evidence.
-Opt-in `auto` content refinement runs only after the shared `SelectionWindow`
+Default `auto` content refinement runs only after the shared `SelectionWindow`
 exists, samples a bounded deterministic set of luma frames for unresolved
 full-frame clips, and can produce `content-derived` provenance. Analysis consumes
 the final prepared rectangle through analysis-owned `MetricActiveRect`; render

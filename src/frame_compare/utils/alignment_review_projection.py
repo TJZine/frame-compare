@@ -580,13 +580,6 @@ def _review_sample_time(attempt: AudioAlignmentAttempt, sample: int) -> float:
 def _review_chunk_bounds(
     attempt: AudioAlignmentAttempt, first: int, last: int
 ) -> tuple[float, float]:
-    starts = attempt.chunks.starts
-    counts = attempt.chunks.counts
-    if starts and 0 <= first < len(starts) and 0 <= last < len(starts):
-        return (
-            _review_sample_time(attempt, starts[first]),
-            _review_sample_time(attempt, starts[last] + counts[last]),
-        )
     chunk_samples = attempt.analysis.chunk_samples
     return (
         _review_sample_time(attempt, first * chunk_samples),

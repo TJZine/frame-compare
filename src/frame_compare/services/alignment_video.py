@@ -455,11 +455,15 @@ def _score_base_positions(
         if _is_cancelled(cancellation):
             return None
         try:
-            reference_image = _read_frame(reference_node, reference_frame)
+            reference_ranks = _average_ranks(_read_frame(reference_node, reference_frame))
             scores = tuple(
-                _frame_difference(
-                    reference_image,
-                    _read_frame(comparison_node, reference_frame - offset),
+                float(
+                    np.mean(
+                        np.abs(
+                            reference_ranks
+                            - _average_ranks(_read_frame(comparison_node, reference_frame - offset))
+                        )
+                    )
                 )
                 for offset in offsets
             )
@@ -493,20 +497,10 @@ def _read_frame(node: vs.VideoNode, frame: int) -> FloatFrame:
 
 def _average_ranks(values: FloatFrame) -> FloatFrame:
     flat = values.reshape(-1)
-    order = np.argsort(flat, kind="stable")
-    ranks = np.empty(flat.size, dtype=np.float32)
-    start = 0
-    while start < order.size:
-        end = start + 1
-        while end < order.size and flat[order[end]] == flat[order[start]]:
-            end += 1
-        ranks[order[start:end]] = (start + 1 + end) / 2.0
-        start = end
-    return np.asarray((ranks / flat.size).reshape(values.shape), dtype=np.float32)
-
-
-def _frame_difference(reference: FloatFrame, comparison: FloatFrame) -> float:
-    return float(np.mean(np.abs(_average_ranks(reference) - _average_ranks(comparison))))
+    _unique, inverse, counts = np.unique(flat, return_inverse=True, return_counts=True)
+    ends = np.cumsum(counts)
+    ranks = np.asarray((ends - counts + 1 + ends) / 2.0, dtype=np.float32)
+    return np.asarray((ranks[inverse] / flat.size).reshape(values.shape), dtype=np.float32)
 
 
 def _stream_start(
@@ -684,17 +678,25 @@ def _score_hypotheses(
     alternative_offsets: Sequence[int],
 ) -> tuple[float, float, int | None] | None:
     try:
-        reference_image = _read_frame(reference_node, reference_frame)
-        confirmed_score = _frame_difference(
-            reference_image,
-            _read_frame(comparison_node, reference_frame - confirmed),
+        reference_ranks = _average_ranks(_read_frame(reference_node, reference_frame))
+        confirmed_score = float(
+            np.mean(
+                np.abs(
+                    reference_ranks
+                    - _average_ranks(_read_frame(comparison_node, reference_frame - confirmed))
+                )
+            )
         )
         alternative_scores = tuple(
             (
                 offset,
-                _frame_difference(
-                    reference_image,
-                    _read_frame(comparison_node, reference_frame - offset),
+                float(
+                    np.mean(
+                        np.abs(
+                            reference_ranks
+                            - _average_ranks(_read_frame(comparison_node, reference_frame - offset))
+                        )
+                    )
                 ),
             )
             for offset in alternative_offsets

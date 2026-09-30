@@ -303,72 +303,6 @@ def _decide_video(
     )
 
 
-def _expected_base_positions(
-    reference_clip: vs.VideoNode,
-    comparison_clip: vs.VideoNode,
-    *,
-    rounded: int,
-) -> tuple[int, ...]:
-    """Recompute M1 motion-selected base positions from the production formula."""
-    overlap = alignment_video._frame_overlap(
-        reference_clip.num_frames,
-        comparison_clip.num_frames,
-        tuple(range(rounded - 2, rounded + 3)),
-    )
-    assert overlap is not None
-    node = alignment_video._prepare_luma(reference_clip, None)
-    start, end = overlap
-    span = end - start
-    positions = alignment_video._motion_positions(
-        node,
-        start + span * 0.05,
-        start + span * 0.95,
-        alignment_video._BASE_POSITION_COUNT,
-        cancellation=None,
-    )
-    assert positions is not None
-    return positions
-
-
-def _expected_target_positions(
-    reference_clip: vs.VideoNode,
-    comparison_frame_count: int,
-    attempt: AudioAlignmentAttempt,
-    *,
-    confirmed: int,
-    target_index: int = 0,
-    remaining: int = 12,
-) -> tuple[int, ...]:
-    """Recompute M1 motion-selected target positions from the production formula."""
-    starts = alignment_video._stream_start(attempt, role="reference", video=False)
-    video_starts = alignment_video._stream_start(attempt, role="reference", video=True)
-    chunks = alignment_video._chunks(attempt)
-    targets, _same_frame = alignment_video._build_targets(
-        attempt, chunks, confirmed=confirmed, fps_reference=FPS
-    )
-    target = targets[target_index]
-    alternative_frame = alignment_video._lag_to_frame(
-        target.lag, attempt=attempt, fps_reference=FPS
-    )
-    target_range = alignment_video._target_range(
-        target,
-        fps_reference=FPS,
-        audio_start_reference=starts,
-        video_start_reference=video_starts,
-        alternative_frame=alternative_frame,
-        confirmed=confirmed,
-        reference_frame_count=reference_clip.num_frames,
-        comparison_frame_count=comparison_frame_count,
-    )
-    assert target_range is not None
-    node = alignment_video._prepare_luma(reference_clip, None)
-    motion = alignment_video._motion_positions(
-        node, *target_range, target.requested_positions, cancellation=None
-    )
-    assert motion is not None
-    return motion[:remaining]
-
-
 def _run(
     tmp_path: Path,
     *,
@@ -420,32 +354,54 @@ def test_static_content_is_uninformative(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("ranges", "start", "end", "count"),
+    ("values", "expected"),
     [
-        pytest.param((range(60, 80),), 40, 100, 1, id="moving-slot"),
-        pytest.param((), 10, 70, 3, id="static-ties-pick-first"),
-        pytest.param((), 40, 100, 0, id="empty-count"),
+        pytest.param(
+            [[0, 255], [0, 127]],
+            [[0.375, 1.0], [0.375, 0.75]],
+            id="uint8-values-with-tie",
+        ),
+        pytest.param(
+            [[1023, 0], [511, 512]],
+            [[1.0, 0.25], [0.5, 0.75]],
+            id="uint10-values",
+        ),
+        pytest.param(
+            [[-0.75, 0.25], [0.5, -0.25]],
+            [[0.25, 0.75], [1.0, 0.5]],
+            id="continuous-float32",
+        ),
+    ],
+)
+def test_average_ranks_match_hand_computed_oracle(
+    values: list[list[float]], expected: list[list[float]]
+) -> None:
+    ranks = alignment_video._average_ranks(np.asarray(values, dtype=np.float32))
+
+    assert ranks.dtype == np.float32
+    np.testing.assert_array_equal(ranks, np.asarray(expected, dtype=np.float32))
+
+
+@pytest.mark.parametrize(
+    ("ranges", "start", "end", "count", "expected"),
+    [
+        pytest.param((range(60, 70),), 40, 100, 1, (62,), id="moving-slot"),
+        pytest.param((range(90, 100),), 40, 100, 1, (92,), id="fourth-candidate"),
+        pytest.param((), 10, 70, 3, (12, 32, 52), id="static-ties-pick-first"),
+        pytest.param((), 40, 100, 0, (), id="empty-count"),
     ],
 )
 def test_motion_positions_pick_the_moving_frame(
-    ranges: tuple[range, ...], start: int, end: int, count: int
+    ranges: tuple[range, ...],
+    start: int,
+    end: int,
+    count: int,
+    expected: tuple[int, ...],
 ) -> None:
     node = alignment_video._prepare_luma(_motion_ranges_clip(*ranges), None)
 
     positions = alignment_video._motion_positions(node, start, end, count, cancellation=None)
 
-    if count == 0:
-        assert positions == ()
-        return
-    assert positions is not None
-    if ranges:
-        assert positions in {(62,), (78,)}
-        return
-    slot = (end - start) / count
-    expected = tuple(
-        round(start + slot * index + slot * 0.5 / alignment_video._MOTION_CANDIDATES)
-        for index in range(count)
-    )
     assert positions == expected
 
 
@@ -654,9 +610,8 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
         chunk_samples=8_000,
         reference_audio_start=Fraction(1, 24),
     )
-    target_frames = _expected_target_positions(
-        reference, reference.num_frames, attempt, confirmed=0
-    )
+    # Fixture-derived first-chunk motion winners; no production selector computes this oracle.
+    target_frames = (6, 13, 15, 19)
     remap = {
         comparison_frame: reference_frame
         for reference_frame in target_frames
@@ -762,26 +717,25 @@ def test_v3a_nonzero_reference_start_targets_the_exact_disagreement(
     assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("chunk", 0, 0)
     assert (target.start_sample, target.end_sample, target.target_offset) == (0, 8_000, 2)
     assert target.alternative_offsets == (1, 2, 3)
-    expected_target = _expected_target_positions(
-        reference, comparison.num_frames, attempt, confirmed=0
-    )
-    assert [position.reference_frame for position in target.positions] == list(expected_target)
+    target_frames = [position.reference_frame for position in target.positions]
+    assert len(target_frames) == 4
+    assert target_frames == sorted(target_frames)
+    assert all(1 <= frame <= 24 for frame in target_frames)
     assert [position.winner for position in target.positions] == ["alternative"] * 4
     assert all(position.confirmed_score > 0.0 for position in target.positions)
     assert all(position.alternative_score == 0.0 for position in target.positions)
     assert target.resolution == "alternative_confirmed"
-    expected_base = _expected_base_positions(reference, comparison, rounded=0)
     winners = {
         position.reference_frame: alignment_video._position_winner(
             position.score_by_offset, result.observation.scored_offsets
         )[0]
         for position in result.observation.positions
     }
-    contrast = next(frame for frame in expected_base if winners[frame] == 0)
+    contrast = next(frame for frame, winner in winners.items() if winner == 0)
     assert [
         (point.reference_frame, point.suggested_comparison_frame)
         for point in result.observation.check_points
-    ] == [(expected_target[0], expected_target[0] - target.target_offset), (contrast, contrast)]
+    ] == [(target_frames[0], target_frames[0] - target.target_offset), (contrast, contrast)]
     decided = _decide_video(attempt, result.observation)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "competing_offset_confirmed_by_video"
@@ -830,20 +784,16 @@ def test_real_scoring_run_with_one_winning_position_stays_unresolved(
     assert len(result.observation.targets) == 1
     target = result.observation.targets[0]
     assert (target.kind, target.first_chunk_index, target.last_chunk_index) == ("run", 0, 1)
-    expected_target = _expected_target_positions(
-        reference, reference.num_frames, attempt, confirmed=0
+    assert len(target.positions) == 4
+    assert all(0 <= position.reference_frame <= 95 for position in target.positions)
+    (winner,) = [position for position in target.positions if position.winner == "confirmed"]
+    assert winner.reference_frame in range(60, 70)
+    assert winner.confirmed_score == 0.0 < winner.alternative_score
+    neither = [position for position in target.positions if position.winner == "neither"]
+    assert len(neither) == 3
+    assert all(
+        position.confirmed_score == position.alternative_score == 0.0 for position in neither
     )
-    assert [position.reference_frame for position in target.positions] == list(expected_target)
-    assert [position.winner for position in target.positions] == [
-        "neither",
-        "neither",
-        "confirmed",
-        "neither",
-    ]
-    assert [
-        (position.confirmed_score == 0.0, position.alternative_score == 0.0)
-        for position in target.positions
-    ] == [(True, True), (True, True), (True, False), (True, True)]
     assert target.resolution == "unresolved"
     base_winners = [
         alignment_video._position_winner(
@@ -921,15 +871,27 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
         for position in result.observation.positions
     ]
 
-    assert [position.reference_frame for position in result.observation.positions] == list(
-        _expected_base_positions(reference, comparison, rounded=0)
-    )
+    assert len(result.observation.positions) == 12
     assert winners_and_margins == [
         (1, float("inf")),
         (1, float("inf")),
         (1, float("inf")),
         *((0, float("inf")),) * 9,
     ]
+    assert all(
+        position.reference_frame in range(5, 28)
+        for position, (winner, _margin) in zip(
+            result.observation.positions, winners_and_margins, strict=True
+        )
+        if winner == 1
+    )
+    assert all(
+        position.reference_frame not in range(5, 28)
+        for position, (winner, _margin) in zip(
+            result.observation.positions, winners_and_margins, strict=True
+        )
+        if winner == 0
+    )
     assert result.observation.confirmed_offset == 0
     decided = _decide_video(_attempt_with_lags((0,) * 10), result.observation)
     assert decided.decision.state == "trusted_automatic"

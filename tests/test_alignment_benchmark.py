@@ -182,7 +182,35 @@ def test_pair_config_uses_production_fps_at_pure_defaults(tmp_path: Path) -> Non
     assert "active_rect_detection" not in config
     assert "reference_stream" not in config
     assert "comparison_streams" not in config
-    assert "video_check_positions" not in config
+    assert "max_offset_seconds = 30.0" in config
+
+
+def test_summary_row_excludes_media_fields(capsys: pytest.CaptureFixture[str]) -> None:
+    script = _load_script()
+    record = {
+        "pair_id": "pair-7",
+        "category": "synthetic",
+        "reference": "REFERENCE_PRIVATE_SENTINEL",
+        "comparison": "COMPARISON_PRIVATE_SENTINEL",
+        "expected_frame": 12,
+        "x_subframe": 12.25,
+        "r_audio_rounded": 12,
+        "c_video_confirmed": 12,
+        "applied_frame": 12,
+        "state": "trusted_automatic",
+        "primary_reason": "audio_video_confirmed",
+        "outcome": "correct_applied",
+        "elapsed_seconds": 1.25,
+    }
+
+    script._print_table_row(record)
+
+    summary = capsys.readouterr().out
+    assert "pair-7" in summary
+    assert "synthetic" in summary
+    assert "correct_applied" in summary
+    assert "REFERENCE_PRIVATE_SENTINEL" not in summary
+    assert "COMPARISON_PRIVATE_SENTINEL" not in summary
 
 
 def test_media_link_rerun_accepts_same_target_and_rejects_stale_target(tmp_path: Path) -> None:

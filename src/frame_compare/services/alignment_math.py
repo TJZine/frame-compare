@@ -2,19 +2,7 @@
 
 from __future__ import annotations
 
-from fractions import Fraction
-
 from frame_compare.services.errors import AudioAlignmentError
-
-
-def samples_to_frames(
-    sample_offset: int,
-    sample_rate: int,
-    fps: Fraction,
-) -> int:
-    """Convert sample offset to frame offset."""
-    time_offset = sample_offset / sample_rate
-    return int(round(time_offset * float(fps)))
 
 
 def calculate_alignment_trims(

@@ -3,14 +3,10 @@
 # pyright: reportPrivateUsage=false
 
 from dataclasses import FrozenInstanceError
-from fractions import Fraction
 
 import pytest
 
-from frame_compare.services.alignment_math import (
-    calculate_alignment_trims,
-    samples_to_frames,
-)
+from frame_compare.services.alignment_math import calculate_alignment_trims
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 
 
@@ -34,17 +30,6 @@ def test_alignment_config_defaults() -> None:
     assert cfg.reference_stream is None
     assert cfg.comparison_streams == {}
     assert cfg.no_color is False
-
-
-def test_samples_to_frames_integer_fps() -> None:
-    """Sample to frame conversion with integer FPS."""
-    assert samples_to_frames(8000, 8000, Fraction(24, 1)) == 24
-
-
-def test_samples_to_frames_fractional_fps() -> None:
-    """Sample to frame conversion with fractional FPS."""
-    # 24000/1001 * (8008/8000) = 23.976... * 1.001 = 24.0
-    assert samples_to_frames(8008, 8000, Fraction(24000, 1001)) == 24
 
 
 def test_calculate_alignment_trims_rejects_mismatched_lengths_when_offsets_are_unknown() -> None:

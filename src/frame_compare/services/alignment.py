@@ -75,6 +75,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioCollectionObservation,
     AudioPairSide,
     VideoCheckObservation,
+    analysis_stream_start,
     audio_attempt_payload,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -379,8 +380,8 @@ def _selection_start_facts(
 ) -> tuple[Fraction, Fraction]:
     """Return the (audio start, video start) A5 facts for one selection."""
     return (
-        selection.stream.timeline.start_time * timeline_scale,
-        selection.video_start.start_time * timeline_scale,
+        analysis_stream_start(selection.stream.timeline.start_time, timeline_scale),
+        analysis_stream_start(selection.video_start.start_time, timeline_scale),
     )
 
 

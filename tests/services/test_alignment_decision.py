@@ -17,7 +17,7 @@ from frame_compare.services.alignment_correlation import (
     plan_audio_chunks,
 )
 from frame_compare.services.alignment_decision import (
-    classify_audio_disagreements,
+    classify_audio_observations,
     correlation_score,
     decide_aborted_stage,
     decide_after_video,
@@ -26,7 +26,6 @@ from frame_compare.services.alignment_decision import (
     derive_stability,
     is_trusted_automatic,
     recount_audio_authority,
-    subframe_estimate,
     v6_failure_reasons,
 )
 from frame_compare.utils.alignment_evidence import (
@@ -108,10 +107,7 @@ def test_compensation_adds_reference_delay() -> None:
     assert offset == pytest.approx(0.2)
 
 
-def test_subframe_estimate_and_rounding() -> None:
-    assert subframe_estimate(offset_seconds=6.1, fps_reference=Fraction(24, 1)) == pytest.approx(
-        146.4
-    )
+def test_literal_rounding_boundaries() -> None:
     assert rounded_frame(146.4, Fraction(1)) == 146
     assert rounded_frame(146.5, Fraction(1)) == 147
     assert rounded_frame(-2.0, Fraction(1)) == -2
@@ -407,8 +403,9 @@ def test_a4b_recount_accepts_14_of_20_when_six_lags_share_the_frame() -> None:
         fps_reference=Fraction(24),
         compensation_seconds=0.0,
     )
-    classification = classify_audio_disagreements(
-        estimate=estimate,
+    classification = classify_audio_observations(
+        observations=estimate.observations,
+        global_lag=estimate.global_lag,
         confirmed_offset=0,
         fps_reference=Fraction(24),
         compensation_seconds=0.0,
@@ -486,8 +483,9 @@ def test_a4a_requires_index_adjacency_for_competing_runs() -> None:
         runs=(ChunkRun(first_index=2, last_index=15, lag=1600, chunk_count=2),),
     )
 
-    classification = classify_audio_disagreements(
-        estimate=estimate,
+    classification = classify_audio_observations(
+        observations=estimate.observations,
+        global_lag=estimate.global_lag,
         confirmed_offset=0,
         fps_reference=Fraction(24),
         compensation_seconds=0.0,
@@ -505,8 +503,9 @@ def test_a4b_boundary_run_drives_trusted_or_provisional_video_outcome() -> None:
         _observation(3, lag=168, credible=True, agrees=False),
     )
     estimate = _estimate(observations, outcome="no_single_offset", agreeing_count=1)
-    classification = classify_audio_disagreements(
-        estimate=estimate,
+    classification = classify_audio_observations(
+        observations=estimate.observations,
+        global_lag=estimate.global_lag,
         confirmed_offset=0,
         fps_reference=Fraction(24),
         compensation_seconds=0.0,

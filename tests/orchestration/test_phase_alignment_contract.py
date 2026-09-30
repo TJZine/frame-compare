@@ -28,12 +28,12 @@ from frame_compare.utils.alignment_evidence import (
     AudioChunkRun,
     AudioDecisionCandidate,
     AudioStageOutcome,
-    SelectedAudioStreamEvidence,
     VideoCheckObservation,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.loader import VSLoader
+from tests.alignment_review_test_support import stream as _stream
 from tests.orchestration.phase_task_helpers import _clip, _run_align_phase, _workspace
 
 _REFERENCE_DIGEST = "a" * 64
@@ -106,43 +106,6 @@ def _frame_lag(frame_offset: int) -> int:
 
 def _subframe_estimate(lag: int) -> float:
     return lag / 8000 * (_FPS_NUM / _FPS_DEN)
-
-
-def _stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
-    return SelectedAudioStreamEvidence(
-        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
-        source_identity_digest=digest,
-        audio_stream_index=0,
-        absolute_stream_index=1,
-        selection_method="automatic_metadata",
-        selection_rank=(0, 0, 0, 0),
-        codec_name="aac",
-        sample_rate=48000,
-        channels=2,
-        channel_layout="stereo",
-        language="eng",
-        is_default=True,
-        is_original=False,
-        is_commentary=False,
-        language_match="not_applicable" if role == "reference" else "match",
-        commentary_match="not_applicable" if role == "reference" else "match",
-        stream_start_num=0,
-        stream_start_den=1,
-        stream_start_basis="metadata",
-        input_start_num=0,
-        input_start_den=1,
-        input_start_basis="metadata",
-        time_base_num=1,
-        time_base_den=48000,
-        duration_num=120,
-        duration_den=1,
-        duration_basis="duration_ts",
-        video_start_num=0,
-        video_start_den=1,
-        video_start_basis="metadata",
-        timeline_scale_num=1,
-        timeline_scale_den=1,
-    )
 
 
 def _agreed_attempt(*, ordinal: int, frame_offset: int, reason: str) -> AudioAlignmentAttempt:

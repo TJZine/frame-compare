@@ -437,11 +437,13 @@ def _is_evidence_availability(value: object) -> TypeGuard[_EvidenceAvailabilityL
 def _parse_audio_review(
     raw: object, *, suggested_offset: int | None, comparison_ordinal: int
 ) -> AlignmentReviewAudioReview:
-    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
+    if not isinstance(raw, str):
         raise AlignmentReviewContractError("alignment review audio evidence is invalid")
     try:
+        if len(raw.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
+            raise AlignmentReviewContractError("alignment review audio evidence is invalid")
         decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
-    except (UnicodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, RecursionError, json.JSONDecodeError) as exc:
         raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
     root = _strict_dict(
         decoded,
