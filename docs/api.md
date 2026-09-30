@@ -114,7 +114,7 @@ Color space properties extracted from frame.
 
 `DefaultVSLoader`
 
-Default VapourSynth loader implementation using LWLibavSource.
+LWLibavSource loader with an optional frame-cache cap in MiB.
 
 ### detect_hdr
 

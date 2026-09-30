@@ -363,6 +363,7 @@ def maybe_launch_alignment_vsview(
                 suggested_offsets_by_key=offsets_by_key,
                 audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
+                memory_limit_mb=config.memory_limit_mb,
                 frame_props_by_stem=frame_props_by_stem,
                 presentation_names_by_stem={
                     reference_path.stem: reference.presentation_name or reference_path.stem,

@@ -226,3 +226,19 @@ After every recipe:
 
 For exact field types, precedence, persistence, and error behavior, use the
 [CLI Behavioral Contract](../current-cli-contract.md).
+
+## Limited memory
+
+Set an optional VapourSynth frame-cache cap in MiB:
+
+```toml
+[runtime]
+memory_limit_mb = 4096
+```
+
+The value must be an integer of at least 512. Omit it to retain the
+VapourSynth default. This caps the frame cache used during analysis, rendering,
+and alignment video checking; it is not a hard limit on total process memory.
+The separate VSView process receives the same cap. Audio alignment already has
+bounded buffers and does not use this setting. A smaller cache can increase
+decoding work.

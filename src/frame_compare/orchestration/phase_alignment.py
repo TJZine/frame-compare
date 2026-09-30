@@ -82,6 +82,7 @@ async def run_align_phase(
         )
     alignment_config = AlignmentConfig(
         enable=ctx.config.audio_alignment.enable,
+        memory_limit_mb=ctx.config.runtime.memory_limit_mb,
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
         use_vsview=ctx.config.audio_alignment.use_vsview,
         force_interactive=ctx.config.audio_alignment.force_interactive,

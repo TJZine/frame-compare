@@ -28,6 +28,15 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 The CLI keeps VS-heavy imports lazy through proxy functions so help text and simple commands do not import the full runtime stack at module import time.
 
+Preparation creates the run's default `DefaultVSLoader` immediately after
+resolving effective config, before loading sources. Injected loaders remain
+caller-owned. `runtime.memory_limit_mb` is an optional frame-cache cap in MiB;
+`DefaultVSLoader.ensure_core` is the single in-process setter. Rendering and
+metric direct-call fallbacks pass the setting to that loader. VSView runs in a
+separate process, so its generated session sets the same core property after
+acquiring the core. Unset leaves the native default untouched. This controls
+frame caching, not total process memory or audio-alignment buffers.
+
 ## Runtime Flow
 
 The main run path is:

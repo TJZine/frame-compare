@@ -26,6 +26,7 @@ from frame_compare.config.schema_models import (
     LoggingConfig,
     PathsConfig,
     ReportConfig,
+    RuntimeConfig,
     ScreenshotsConfig,
     SlowpicsConfig,
     SourceActiveRectConfig,
@@ -72,6 +73,7 @@ class ConfigSchema(BaseSettings):
         )
 
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     audio_alignment: AudioAlignmentConfig = Field(default_factory=AudioAlignmentConfig)
@@ -95,6 +97,7 @@ __all__ = [
     "OverlayMode",
     "PathsConfig",
     "ReportConfig",
+    "RuntimeConfig",
     "ScreenshotsConfig",
     "SlowpicsConfig",
     "SourceActiveRectConfig",

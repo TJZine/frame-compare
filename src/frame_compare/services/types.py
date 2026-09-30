@@ -124,6 +124,7 @@ class AlignmentConfig:
     channel_strategy: AlignmentChannelStrategy = "mono_downmix"
     reference_stream: int | None = None
     comparison_streams: dict[str, int] = field(default_factory=dict[str, int])
+    memory_limit_mb: int | None = None
     no_color: bool = False
 
 

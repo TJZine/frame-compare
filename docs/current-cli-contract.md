@@ -1168,6 +1168,17 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 `--no-upload` is the only slow.pics-specific `run` flag. No runtime-only
 slow.pics `run` flags exist.
 
+## Config-Only Runtime Surface
+
+`[runtime].memory_limit_mb` is optional and defaults to unset (`None`). It accepts
+only integers greater than or equal to 512; floats, strings, booleans, and unknown
+runtime keys fail validation. There is no dedicated CLI flag or wizard prompt.
+The value sets VapourSynth's frame-cache cap in MiB during source loading,
+analysis, rendering, and alignment video checking. It is not a hard limit on
+total process memory and does not affect bounded audio-alignment buffers.
+The separate VSView session applies the same cap immediately after acquiring
+its core. When unset, neither process changes the VapourSynth default.
+
 ## Config-Only Analysis Surface
 
 The default `[analysis]` frame-selection and metric surface is:

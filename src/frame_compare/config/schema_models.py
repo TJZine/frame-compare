@@ -47,6 +47,14 @@ class PathsConfig(BaseModel):
     config_dir: str = "config"
 
 
+class RuntimeConfig(BaseModel):
+    """VapourSynth frame-cache settings, not total process memory limits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_limit_mb: int | None = Field(default=None, ge=512, strict=True)
+
+
 class AnalysisConfig(BaseModel):
     """Frame selection and analysis settings."""
 

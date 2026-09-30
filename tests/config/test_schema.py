@@ -15,6 +15,7 @@ from frame_compare.config.schema import (
     ColorConfig,
     ConfigSchema,
     ReportConfig,
+    RuntimeConfig,
 )
 from frame_compare.config.schema_enums import (
     AnalysisPerformanceMode,
@@ -680,3 +681,20 @@ def test_toml_settings_source_accepts_utf8_bom_directly(tmp_path: Path) -> None:
         "analysis": {"random_frame_count": 24},
         "logging": {"level": "DEBUG"},
     }
+
+
+def test_runtime_memory_limit_defaults_and_integer_boundaries() -> None:
+    assert get_default_config().runtime.memory_limit_mb is None
+    for value in (None, 512, 1024, 4096):
+        assert RuntimeConfig(memory_limit_mb=value).memory_limit_mb == value
+
+
+@pytest.mark.parametrize("value", [511, 0, -1, 512.0, 512.5, "512", True, False])
+def test_runtime_memory_limit_rejects_invalid_values(value: object) -> None:
+    with pytest.raises(ValidationError):
+        RuntimeConfig.model_validate({"memory_limit_mb": value})
+
+
+def test_runtime_rejects_unknown_keys() -> None:
+    with pytest.raises(ValidationError):
+        ConfigSchema(runtime={"unknown": 1024})

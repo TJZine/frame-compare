@@ -183,6 +183,7 @@ class VSViewSessionRequest:
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None
     presentation_names_by_stem: dict[str, str] | None = None
     short_names_by_stem: dict[str, str] | None = None
+    memory_limit_mb: int | None = None
 
 
 def launch_alignment_verification_session(
@@ -379,6 +380,7 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
         frame_props_by_stem=request.frame_props_by_stem,
         presentation_names_by_stem=request.presentation_names_by_stem,
         short_names_by_stem=request.short_names_by_stem,
+        memory_limit_mb=request.memory_limit_mb,
     )
 
 

@@ -317,3 +317,19 @@ def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:
     assert "SHORT_NAMES = {}" in defaulted
     assert '"ShortA"' in named
     assert named != defaulted
+
+
+@pytest.mark.parametrize("memory_limit_mb", [None, 1024])
+def test_session_script_optional_frame_cache_limit(memory_limit_mb: int | None) -> None:
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[],
+        suggested_offsets_by_key={},
+        audio_review_by_key={},
+        memory_limit_mb=memory_limit_mb,
+    )
+    compile(script, "session.py", "exec")
+    if memory_limit_mb is None:
+        assert "max_cache_size" not in script
+    else:
+        assert "    core = vs.core\n    core.max_cache_size = 1024\n" in script

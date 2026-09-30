@@ -7,6 +7,13 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+### Added
+
+- Optional `[runtime].memory_limit_mb` (integer, minimum 512) caps the
+  VapourSynth frame cache for analysis, rendering, alignment video checks, and
+  the separate VSView session. Unset retains the native default; this is not
+  a hard limit on total process memory and does not affect audio buffers.
+
 ### Changed
 
 - Select video-check positions by reference motion instead of even spacing: each

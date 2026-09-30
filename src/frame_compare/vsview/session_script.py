@@ -37,6 +37,7 @@ def write_vsview_session_script(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
     short_names_by_stem: dict[str, str] | None = None,
+    memory_limit_mb: int | None = None,
 ) -> Path:
     """Generate and write a self-contained VSView script.
 
@@ -60,6 +61,7 @@ def write_vsview_session_script(
         frame_props_by_stem=frame_props_by_stem,
         presentation_names_by_stem=presentation_names_by_stem,
         short_names_by_stem=short_names_by_stem,
+        memory_limit_mb=memory_limit_mb,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -694,6 +696,7 @@ def _build_script_content(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
     short_names_by_stem: dict[str, str] | None = None,
+    memory_limit_mb: int | None = None,
 ) -> str:
     """Build the script content for VSView.
 
@@ -711,5 +714,10 @@ def _build_script_content(
         short_names_by_stem,
     )
     main_execution = _build_main_execution_section()
+    if memory_limit_mb is not None:
+        main_execution = main_execution.replace(
+            "    core = vs.core\n",
+            f"    core = vs.core\n    core.max_cache_size = {memory_limit_mb}\n",
+        )
 
     return f"{header}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"
