@@ -346,8 +346,10 @@ def present_alignment_evidence(
         verbose_lines: list[str] = []
         verbose_rows: tuple[EvidenceRow, ...] = ()
         if verbose and not quiet and result.audio_attempt is not None:
-            verbose_lines = _verbose_evidence_lines(result.audio_attempt)
-            verbose_rows = _verbose_evidence_rows(result.audio_attempt)
+            if isinstance(progress, RichProgressReporter):
+                verbose_rows = _verbose_evidence_rows(result.audio_attempt)
+            else:
+                verbose_lines = _verbose_evidence_lines(result.audio_attempt)
         review_lines: list[str] = []
         review_rows: list[_StyledRow] = []
         if human_actionable and (config.use_vsview or config.force_interactive):

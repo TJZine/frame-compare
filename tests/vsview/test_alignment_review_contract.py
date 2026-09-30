@@ -692,8 +692,8 @@ def test_workspace_metadata_rejects_duplicate_or_oversized_audio_review(
 
 @pytest.mark.parametrize(
     "audio_review",
-    ["\ud800", "[" * 10_000 + "0" + "]" * 10_000],
-    ids=("lone-surrogate", "deeply-nested-arrays"),
+    ["\ud800", "[" * 10_000 + "0" + "]" * 10_000, "1" * 5_000],
+    ids=("lone-surrogate", "deeply-nested-arrays", "integer-digit-limit"),
 )
 def test_workspace_metadata_maps_malformed_audio_review_to_contract_error(
     audio_review: str,

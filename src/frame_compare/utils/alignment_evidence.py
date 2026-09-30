@@ -163,9 +163,13 @@ def _walk_value(annotation: object, value: Any, what: str, *, parse: bool) -> An
     if annotation is float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{what} must be a finite number")
-        if not math.isfinite(float(value)):
+        try:
+            parsed = float(value)
+        except OverflowError as exc:
+            raise ValueError(f"{what} must be a finite number") from exc
+        if not math.isfinite(parsed):
             raise ValueError(f"{what} must be a finite number")
-        return float(value) if parse else value
+        return parsed if parse else value
     if annotation is str:
         if not isinstance(value, str):
             raise ValueError(f"{what} must be a string")

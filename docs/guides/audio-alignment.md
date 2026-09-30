@@ -374,9 +374,10 @@ Label schema (media paths are relative to the label file's directory):
 {
   "pairs": [
     {"id": "pair-1", "category": "development", "reference": "A.mkv",
-     "comparison": "B.mkv", "expected_frame": 0},
+     "comparison": "B.mkv", "expected_frame": 0, "expected_automatic": "applied"},
     {"id": "control-1", "category": "negative_control", "reference": "C.mkv",
-     "comparison": "D.mkv", "expected": "not_applied"}
+     "comparison": "D.mkv", "expected_frame": null,
+     "expected_automatic": "not_applied"}
   ]
 }
 ```

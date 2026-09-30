@@ -388,6 +388,8 @@ def test_average_ranks_match_hand_computed_oracle(
         pytest.param((range(60, 70),), 40, 100, 1, (62,), id="moving-slot"),
         pytest.param((range(90, 100),), 40, 100, 1, (92,), id="fourth-candidate"),
         pytest.param((), 10, 70, 3, (12, 32, 52), id="static-ties-pick-first"),
+        pytest.param((), 176, 180, 1, (176,), id="skip-candidates-past-end"),
+        pytest.param((), 179, 179, 1, (179,), id="midpoint-fallback"),
         pytest.param((), 40, 100, 0, (), id="empty-count"),
     ],
 )

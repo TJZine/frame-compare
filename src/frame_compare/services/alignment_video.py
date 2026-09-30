@@ -20,6 +20,7 @@ from frame_compare.services.alignment_decision import (
     competing_run_center,
 )
 from frame_compare.utils.alignment_evidence import (
+    MAX_VIDEO_TARGET_POSITIONS,
     AudioAlignmentAttempt,
     AudioSameFrameContext,
     VideoCheckObservation,
@@ -58,7 +59,6 @@ FloatFrame = npt.NDArray[np.float32]
 
 _FRAME_WIDTH = 320
 _FRAME_HEIGHT = 180
-_TARGET_POSITION_LIMIT = 12
 _MOTION_CANDIDATES = 4
 _MOTION_STEP = 2
 _BASE_POSITION_COUNT = 12
@@ -145,8 +145,6 @@ def check_video_alignment(
         comparison_source = loader.load(comparison.path)
         if _is_cancelled(cancellation):
             return _failed("cancelled")
-        if not _identities_match(comparison):
-            return _failed("source_identity_changed")
         if not _identities_match(reference) or not _identities_match(comparison):
             return _failed("source_identity_changed")
         index_build_seconds = time.monotonic() - load_started
@@ -222,7 +220,7 @@ def check_video_alignment(
         )
         target_evidence: list[VideoTargetEvidence] = []
         planned_target_frames: dict[_TargetKey, tuple[int, ...]] = {}
-        remaining = _TARGET_POSITION_LIMIT
+        remaining = MAX_VIDEO_TARGET_POSITIONS
         next_position_index = len(base_positions)
         for target in targets:
             alternative_frame = _lag_to_frame(

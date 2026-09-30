@@ -443,7 +443,9 @@ def _parse_audio_review(
         if len(raw.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
             raise AlignmentReviewContractError("alignment review audio evidence is invalid")
         decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
-    except (UnicodeError, RecursionError, json.JSONDecodeError) as exc:
+    except AlignmentReviewContractError:
+        raise
+    except (RecursionError, ValueError) as exc:
         raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
     root = _strict_dict(
         decoded,

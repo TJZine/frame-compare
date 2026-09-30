@@ -763,6 +763,11 @@ def test_parser_rejects_bool_as_int_and_non_finite() -> None:
         evidence_from_payload(AudioAlignmentAttempt, payload)
 
     payload = asdict(attempt_with_chunks(2))
+    payload["audio"]["compensation_seconds"] = 10**1000
+    with pytest.raises(ValueError, match="finite number"):
+        evidence_from_payload(AudioAlignmentAttempt, payload)
+
+    payload = asdict(attempt_with_chunks(2))
     payload["chunks"]["psrs"] = [float("nan"), 88.5]
     with pytest.raises(ValueError):
         evidence_from_payload(AudioAlignmentAttempt, payload)

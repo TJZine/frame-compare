@@ -109,42 +109,39 @@ def _adjacent_competing_runs(
 ) -> tuple[ChunkRun, ...]:
     """Build A4a runs without inheriting U1's non-credible-gap behavior."""
     runs: list[ChunkRun] = []
-    members: list[ChunkObservation] = []
+    members: list[tuple[int, int]] = []
 
     def close_run() -> None:
         if len(members) < 2:
             return
-        lags = [item.lag for item in members]
-        if any(lag is None for lag in lags):
-            return
+        lags = [lag for _index, lag in members]
         runs.append(
             ChunkRun(
-                first_index=members[0].index,
-                last_index=members[-1].index,
-                lag=int(sorted(lag for lag in lags if lag is not None)[(len(lags) - 1) // 2]),
+                first_index=members[0][0],
+                last_index=members[-1][0],
+                lag=sorted(lags)[(len(lags) - 1) // 2],
                 chunk_count=len(members),
             )
         )
 
     for observation in observations:
-        if observation.lag is None:
+        lag = observation.lag
+        if lag is None:
             continue
         if not members:
-            members = [observation]
+            members = [(observation.index, lag)]
             continue
-        previous = members[-1]
+        previous_index = members[-1][0]
+        member_lags = [member_lag for _index, member_lag in members]
         if (
-            observation.index == previous.index + 1
-            and previous.lag is not None
-            and all(item.lag is not None for item in members)
-            and max(observation.lag, *(item.lag for item in members if item.lag is not None))
-            - min(observation.lag, *(item.lag for item in members if item.lag is not None))
+            observation.index == previous_index + 1
+            and max(lag, *member_lags) - min(lag, *member_lags)
             <= AUDIO_ANALYSIS_SAMPLE_RATE * 2 // 1000
         ):
-            members.append(observation)
+            members.append((observation.index, lag))
             continue
         close_run()
-        members = [observation]
+        members = [(observation.index, lag)]
     close_run()
     return tuple(runs)
 
