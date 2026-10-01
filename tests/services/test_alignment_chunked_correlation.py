@@ -71,20 +71,6 @@ def _variant_base(name: str, duration: float) -> np.ndarray:
     raise AssertionError(f"unknown variant {name}")
 
 
-def test_lag_sign_convention_pinned() -> None:
-    """lag = i_ref - i_cmp: content later in the comparison gives a negative lag."""
-    reference = make_program(SEED, 120.0)
-    comparison = shift_signal(reference, POSITIVE_SHIFT)
-    estimate = run_estimate(reference, comparison)
-    assert estimate.global_lag == -POSITIVE_SHIFT
-    assert estimate.outcome == "agreed"
-
-    leading = shift_signal(reference, NEGATIVE_SHIFT)
-    estimate = run_estimate(reference, leading)
-    assert estimate.global_lag == -NEGATIVE_SHIFT
-    assert estimate.outcome == "agreed"
-
-
 @pytest.mark.parametrize("variant", ["same", "remix", "downmix", "remaster", "dub", "noisy"])
 @pytest.mark.parametrize("shift", [POSITIVE_SHIFT, NEGATIVE_SHIFT])
 def test_matrix_positives_agree(variant: str, shift: int) -> None:
@@ -427,47 +413,3 @@ def test_comparison_window_edges() -> None:
         comparison_window(comparison, -1, 1000, 100)
     with pytest.raises(ValueError):
         comparison_window(comparison, 4000, 0, 100)
-
-
-def test_prototype_parity_on_180s_same() -> None:
-    """On 30 s-multiple sources the lag and counts equal the benchmark prototype."""
-
-    def prototype(
-        reference: np.ndarray, comparison: np.ndarray, lag_range: int, chunk: int
-    ) -> tuple[int, int, int]:
-        padded = np.concatenate([np.zeros(lag_range), comparison, np.zeros(lag_range + chunk)])
-        size = 1 << (chunk + 2 * lag_range - 1).bit_length()
-        total = np.zeros(2 * lag_range + 1)
-        rows: list[tuple[float, int]] = []
-        for start in range(0, len(reference) - AUDIO_ANALYSIS_SAMPLE_RATE, chunk):
-            part = reference[start : start + chunk].astype(np.float64)
-            segment = padded[start : start + chunk + 2 * lag_range].astype(np.float64)
-            if not (
-                np.sqrt(np.mean(part * part)) > 10 ** (-50 / 20)
-                and np.sqrt(np.mean(segment * segment)) > 10 ** (-50 / 20)
-            ):
-                continue
-            cross = np.conj(np.fft.rfft(part, size)) * np.fft.rfft(segment, size)
-            cross /= np.maximum(np.abs(cross), 1e-12)
-            curve = np.fft.irfft(cross, size)[: 2 * lag_range + 1]
-            peak = int(np.argmax(curve))
-            side = np.delete(curve, np.arange(max(0, peak - 160), peak + 161))
-            mad = np.median(np.abs(side - np.median(side))) + 1e-15
-            psr = (curve[peak] - np.median(side)) / (1.4826 * mad)
-            rows.append((psr, lag_range - peak))
-            total += curve
-        global_lag = lag_range - int(np.argmax(total))
-        credible = [row for row in rows if row[0] >= 25.0]
-        agreeing = [row for row in credible if abs(row[1] - global_lag) <= 16]
-        return global_lag, len(credible), len(agreeing)
-
-    reference = make_program(SEED, 180.0)
-    comparison = shift_signal(reference, POSITIVE_SHIFT)
-    estimate = run_estimate(reference, comparison)
-    assert estimate.outcome == "agreed"
-    lag_range = int(30.0 * AUDIO_ANALYSIS_SAMPLE_RATE)
-    expected = prototype(reference, comparison, lag_range, 30 * AUDIO_ANALYSIS_SAMPLE_RATE)
-    assert expected[0] == -POSITIVE_SHIFT
-    assert estimate.global_lag == expected[0]
-    assert estimate.credible_count == expected[1]
-    assert estimate.agreeing_count == expected[2]

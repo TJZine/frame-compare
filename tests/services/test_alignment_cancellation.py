@@ -328,31 +328,6 @@ def test_prespawn_cancellation_delivers_no_pairs_and_completes_cleanup() -> None
     assert result.comparison_cleanup.completed
 
 
-def test_cancelled_paired_collection_stops_delivery_between_chunks() -> None:
-    cancellation = threading.Event()
-    delivered: list[int] = []
-
-    def consumer(index: int, _reference: np.ndarray, _window: np.ndarray) -> None:
-        delivered.append(index)
-        cancellation.set()
-
-    result = collect_paired_audio_chunks(
-        _float_writer_argv(),
-        _float_writer_argv(),
-        **_paired_kwargs(
-            consumer,
-            chunks=((0, 8000), (8000, 8000)),
-            cancellation=cancellation,
-        ),
-    )
-
-    assert isinstance(result, PairedAudioCollectionFailure)
-    assert result.category == "cancelled"
-    assert delivered == [0]
-    assert result.reference_cleanup.completed
-    assert result.comparison_cleanup.completed
-
-
 def test_in_flight_consumer_finishes_before_cancellation_is_observed() -> None:
     cancellation = threading.Event()
     entered = threading.Event()

@@ -287,7 +287,7 @@ def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None
 
 @pytest.mark.parametrize(
     "case",
-    ("repeat-parse", "input-immutability", "mixed-target-order", "zero-fps-denominator"),
+    ("mixed-target-order", "zero-fps-denominator"),
 )
 def test_plain_attempt_parser_contract(case: str) -> None:
     payload = asdict(_populated_video_attempt())

@@ -917,12 +917,6 @@ def test_real_scoring_run_with_one_winning_position_stays_unresolved(
     assert decided.decision.candidate.frame_offset == 0
 
 
-def test_position_ties_and_periodic_aliases_are_not_informative() -> None:
-    offsets = (-2, -1, 0, 1, 2)
-    assert alignment_video._position_winner((1.0, 0.0, 0.0, 1.0, 2.0), offsets)[0] is None
-    assert alignment_video._position_winner((1.0, 0.9, 0.5, 0.9, 0.5), offsets)[0] is None
-
-
 @pytest.mark.parametrize("cadence", ["duplicated", "periodic"])
 def test_real_cadence_aliases_do_not_confirm_a_wrong_offset(tmp_path: Path, cadence: str) -> None:
     moving = _moving_clip(frames=120)

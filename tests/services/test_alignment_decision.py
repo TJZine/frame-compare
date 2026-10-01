@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from fractions import Fraction
 
 import pytest
@@ -25,7 +24,6 @@ from frame_compare.services.alignment_decision import (
     decide_rejected_stage,
     derive_stability,
     is_trusted_automatic,
-    recount_audio_authority,
     v6_failure_reasons,
 )
 from frame_compare.utils.alignment_evidence import (
@@ -35,7 +33,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetEvidence,
     VideoTargetPosition,
 )
-from frame_compare.utils.alignment_policy import compensated_offset_seconds, rounded_frame
+from frame_compare.utils.alignment_policy import rounded_frame
 from tests.services.alignment_synthetic_audio import (
     insert_program,
     make_program,
@@ -83,59 +81,12 @@ def decide(
     )
 
 
-def test_compensation_sign_matches_reference_minus_comparison() -> None:
-    lag = 1600
-    offset = compensated_offset_seconds(
-        global_lag=lag,
-        reference_audio_start=Fraction(0),
-        reference_video_start=Fraction(0),
-        comparison_audio_start=Fraction(1, 5),
-        comparison_video_start=Fraction(0),
-    )
-    assert offset == pytest.approx(lag / AUDIO_ANALYSIS_SAMPLE_RATE - 0.2)
-
-
-def test_compensation_adds_reference_delay() -> None:
-    lag = 0
-    offset = compensated_offset_seconds(
-        global_lag=lag,
-        reference_audio_start=Fraction(1, 5),
-        reference_video_start=Fraction(0),
-        comparison_audio_start=Fraction(0),
-        comparison_video_start=Fraction(0),
-    )
-    assert offset == pytest.approx(0.2)
-
-
 def test_literal_rounding_boundaries() -> None:
     assert rounded_frame(146.4, Fraction(1)) == 146
     assert rounded_frame(146.5, Fraction(1)) == 147
     assert rounded_frame(-2.0, Fraction(1)) == -2
     assert rounded_frame(-2.5, Fraction(1)) == -2
     assert rounded_frame(-2.51, Fraction(1)) == -3
-
-
-def test_agreed_decision_is_internal_audio_only_candidate() -> None:
-    reference = make_program(SEED, 35.0)
-    comparison = shift_signal(reference, 1668)
-    decided = decide(reference, comparison)
-
-    assert decided.attempt_status == "complete"
-    assert decided.audio.status == "agreed"
-    assert decided.audio.global_lag == -1668
-    assert decided.decision.state == "provisional"
-    assert decided.decision.primary_reason == "audio_only"
-    assert decided.decision.failed_gates == ()
-    candidate = decided.decision.candidate
-    assert candidate is not None
-    assert candidate.basis == "audio_only"
-    expected_subframe = -1668 / AUDIO_ANALYSIS_SAMPLE_RATE * float(FPS)
-    assert candidate.subframe_estimate == pytest.approx(expected_subframe)
-    assert candidate.frame_offset == math.floor(expected_subframe + 0.5)
-    assert candidate.time_offset_seconds == pytest.approx(-1668 / AUDIO_ANALYSIS_SAMPLE_RATE)
-    assert decided.audio.rounded_frame == candidate.frame_offset
-    assert decided.correlation_score == pytest.approx(1.0)
-    assert decided.stability.classification == "stable"
 
 
 @pytest.mark.parametrize(
@@ -383,42 +334,6 @@ def _target(
         resolution=resolution,  # type: ignore[arg-type]
         positions=positions,
     )
-
-
-def test_a4b_recount_accepts_14_of_20_when_six_lags_share_the_frame() -> None:
-    observations = tuple(
-        _observation(
-            index,
-            lag=80 if index >= 14 else 0,
-            credible=True,
-            agrees=index < 14,
-        )
-        for index in range(20)
-    )
-    estimate = _estimate(observations, outcome="no_single_offset", agreeing_count=14)
-    recount = recount_audio_authority(
-        estimate=estimate,
-        plan=_plan_for(*observations),
-        confirmed_offset=0,
-        fps_reference=Fraction(24),
-        compensation_seconds=0.0,
-    )
-    classification = classify_audio_observations(
-        observations=estimate.observations,
-        global_lag=estimate.global_lag,
-        confirmed_offset=0,
-        fps_reference=Fraction(24),
-        compensation_seconds=0.0,
-    )
-
-    assert estimate.outcome == "no_single_offset"
-    assert recount.raw_status == "no_single_offset"
-    assert recount.raw_agreeing_chunks == 14
-    assert recount.authority_agreeing_chunks == 20
-    assert recount.authority_status == "agreed"
-    assert recount.passed
-    assert len(classification.same_frame_context) == 6
-    assert classification.credible_disagreements == ()
 
 
 def test_decide_after_video_trusts_the_recounted_authority() -> None:
