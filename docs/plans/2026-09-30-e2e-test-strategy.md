@@ -348,7 +348,8 @@ classification:
 
   These are the proofs other tests are deleted against. They may lose only
   `junk:duplicate` tests within themselves.
-- **`vsview`, `windows_portable` and `workflows`** may lose tests only as `junk:*`.
+- **`vsview`, `windows_portable` and `workflows`** may lose tests only as `junk:*`
+  (S10 adds `delete:internal`, never `delete:covered`).
   Their real E2E is a GUI session or a hosted Windows or release run, which unit C
   cannot execute.
 - A cluster whose classification is uncertain is kept. The goal is confidence, not
@@ -474,11 +475,28 @@ user-visible bug ship that no remaining test catches?
   consolidated test. POSIX and Windows variants of one behavior are distinct
   cases.
 - **Classifications:**
-  - `delete:junk:<pattern>`: an S6 junk pattern other than `duplicate`. That
-    covers assertions that can't fail, copied sources, test-only hooks and mocks
-    that implement the asserted behavior. Also a smoke test with no assertion, when
-    a retained test runs the same path. Under S10, duplicates are always
-    `delete:covered`, so they get a mutation proof.
+  - `delete:junk:<pattern>`: any S6 junk pattern except `duplicate`. The full list:
+    - no assertion, or an assertion that can't fail;
+    - self-comparison, or an expected value computed by the code under test;
+    - a copied inventory, manifest, export list or constant;
+    - a source, import or string grep that doesn't guard a user-facing key, byte
+      or path;
+    - a private call-shape or call-order test, where the order isn't observable;
+    - a mock that implements the asserted behavior;
+    - a test that only keeps a test-only export, wrapper or hook alive.
+
+    A smoke test with no assertion is also junk when a retained test runs the same
+    path. Under S10, duplicates are always `delete:covered`, so they get a mutation
+    proof.
+  - `delete:internal`: every assertion in the test is internal (as defined above),
+    so no user-visible behavior depends on what it checks. Examples: immutability
+    of a frozen dataclass that no document lists, intermediate carrier fields, and
+    progress-event order.
+    - The record names the production code the test exercises.
+    - It names either the retained owner that checks that code's user-visible
+      outcome, or "no user-visible outcome".
+    - No C2 mutation is needed. C5's coverage diff is the safety net, and Checkpoint
+      B reviews every `delete:internal` record in lanes 1a–5.
   - `delete:covered(<target>)`: the named retained test fails when the cluster's
     user-visible behavior breaks. The target may be any `keep` test in the same
     lane, or an S6 always-keep or E2E test. A target in another lane is
@@ -500,6 +518,9 @@ user-visible bug ship that no remaining test catches?
       and names the specific field, byte or key asserted. Each contract element has
       one owner; other tests of the same element are `delete:covered`;
     - `network`, `security`, `platform` and `always`: unchanged from S6.
+- **`keep:unresolved(<question>)`:** a test that S10 can't place. The worker writes
+  the specific question in one line and continues; it never blocks the lane.
+  Checkpoint B decides each one.
 - **Annotations on `keep` records**, used by unit D:
   - `trim`: the internal assertions to remove from a kept test, by line;
   - `consolidate:<group>`: kept tests in **one file** that share setup or shape and
@@ -828,3 +849,12 @@ independent per area. Reverting one restores its tests and any seams it deleted.
     widening.
   - The unit B ledgers stay as B2's assertion inventory. Checkpoint B moves to the
     B2 output.
+- 2026-10-01: the first T3 dispatch blocked in all six started lanes on two S10
+  gaps. Fixed in the plan and T3:
+  - S10's junk list read as examples, so it omitted private call-shape and
+    source-grep patterns. It now lists every S6 pattern.
+  - There was no label for tests whose assertions are all internal (for example
+    frozen-dataclass immutability). Added `delete:internal`, with C5 as the safety
+    net.
+  - Unplaceable tests now become `keep:unresolved(<question>)` instead of blocking
+    a lane.
