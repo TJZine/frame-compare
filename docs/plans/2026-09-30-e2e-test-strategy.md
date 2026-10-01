@@ -550,6 +550,53 @@ user-visible bug ship that no remaining test catches?
   or scenario is added only when B2 finds a user-visible behavior whose only guard
   is a heavily faked unit test. Each such case goes to the maintainer individually.
 
+**S11. Two retention rules** (maintainer, 2026-10-01, after lane 1a). These apply to
+unit C from the resume onward, through a catch-up pass for lanes already done, and
+to unit D.
+
+- **R1. Test-only production code is S7 scope.** A production symbol is test-only
+  when nothing outside tests uses it:
+  - the symbol is a function, class, method, module, parameter or branch;
+  - `git grep` over tracked files finds no caller in `src/` (outside its own
+    definition), `tools/`, `.github/` or the `pyproject.toml` entry points;
+  - it isn't documented in `docs/api.md` or `docs/current-cli-contract.md`.
+
+  Such a symbol is S7 scope even if no deletion orphaned it.
+  - Tests whose only subject is a test-only symbol are
+    `delete:junk:test-only-hook`.
+  - Unit C deletes the symbol (C3) when no retained test uses it.
+  - When retained tests use it as an oracle or expected-value producer, unit C
+    records it in the lane's `c.md` as `rewrite: inline the expected values, then
+    delete <symbol>`. Unit D does that work.
+  - Lines and branches inside a test-only symbol never count as C5 coverage loss.
+  - Lane 1a example: `services/alignment_correlation.py::comparison_window` has no
+    production caller. Its restored tests B1a-030 and B1a-126 may be deleted, and
+    unit D rewrites the streaming oracle tests that use it.
+- **R2. One test per failure outcome, for data the program writes itself.**
+  - **Scope:** validators, parsers and constructor guards (`__post_init__` checks)
+    for data Frame Compare writes and reads back:
+    - alignment evidence and diagnostic payloads;
+    - analysis, probe and alignment caches;
+    - `run_info.toml` and `run_result.toml`;
+    - the report payload;
+    - VSView session data;
+    - internal carriers.
+  - **Rule:** for each entry point, keep one test per distinct failure outcome:
+    refused with a warning, a specific documented error raised, treated as a cache
+    miss, or falling back to "unavailable". Other tests that reach the same
+    outcome through a different malformed-data branch are
+    `delete:redundant-failure(<outcome owner>)`.
+  - These need no C2 mutation, because the owner deliberately doesn't cover their
+    branch. Their C5 coverage loss is accepted and listed, not restored.
+  - **Out of scope** (per-branch edge cases stay):
+    - input users author: config files, CLI flags, environment variables,
+      filenames and release names, presets, user-edited files;
+    - data from outside the program: FFmpeg and ffprobe output, HTTP responses,
+      plugin output;
+    - security checks: path escape, redaction, signatures;
+    - cache identity and reuse decisions. A stale cache reused after a change is a
+      user-visible bug, not malformed data.
+
 ## Units
 
 Codex runs each unit through a handoff. The Claude controller verifies each
@@ -863,6 +910,10 @@ named under Samples), and S10 as amended (the flow rule and the narrowed
   - Before committing, `git status --short` lists only this lane's planned
     deletions and edits.
   - Report the `git diff --numstat`, split into production and test lines.
+- **S11** (from the T5R resume): C0 applies R1 and R2; C3 deletes test-only symbols
+  that no retained test uses; C5 ignores lines inside test-only symbols and
+  accepts R2 losses. Lanes finished before S11 get a catch-up pass
+  (`.handoff/T5R-codex-deletions-resume.md`).
 - **Not in unit C:** trims, consolidation, `rewrite` annotations and renames. Those
   belong to unit D.
 
@@ -883,7 +934,8 @@ Checkpoint C (controller):
 - **Proof:** one mutation per consolidated group fails the new test on an
   assertion.
 - **Rewrites:** each `rewrite:<what>` annotation is applied, and one mutation shows
-  the repaired assertion can fail.
+  the repaired assertion can fail. That includes unit C's R1 records: inline the
+  expected values, then delete the test-only symbol.
 - **Trim safety:** a trim may not remove an assertion that C2 recorded as failing.
   When a trimmed file owns a `delete:covered` target, rerun that target's C2
   mutations after the trim.
@@ -1084,3 +1136,13 @@ Reverting one restores its tests and any seams it deleted.
 
   Unit C runs serially, lane by lane (lanes 7 and 8 together), from
   `.handoff/T5-codex-deletions.md`.
+- 2026-10-01: lane 1a `c2f3be2d`.
+  - Deleted 11 cases, 183 lines net, against a proposal of 38 cases and 718 lines.
+    C0 moved 21 records to keep. Two owners didn't fail C2, so their candidates
+    were kept. C5 restored B1a-030 and B1a-126.
+  - All gates passed, and the full suite was 3,641 passed, 87 skipped. Checked by
+    the controller, including the B1a-191 owner log, which showed an
+    `AssertionError` in both cases.
+  - **Maintainer decision:** adopt S11 (R1 and R2) to cut over-retention. Unit C
+    paused after lane 1a and resumes from `.handoff/T5R-codex-deletions-resume.md`,
+    starting with a catch-up pass for lane 1a.
