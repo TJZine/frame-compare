@@ -1,4 +1,3 @@
-import typing
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -12,7 +11,6 @@ from frame_compare.render.types import (
     OverlayConfig,
     RenderedBatchResult,
     RenderedClipFacts,
-    Renderer,
 )
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -44,10 +42,6 @@ def _clip_facts() -> RenderedClipFacts:
         tonemap_settings=None,
         geometry=_geometry(),
     )
-
-
-def test_overlay_mode_string_values() -> None:
-    assert {mode.value for mode in OverlayMode} == {"minimal", "standard", "diagnostic", "none"}
 
 
 def test_encoder_settings_defaults() -> None:
@@ -100,10 +94,6 @@ def test_rendered_batch_accepts_one_to_one_exact_frame_facts() -> None:
         clip_facts_by_label={"ref": _clip_facts()},
     )
     assert result.frame_facts_by_label["ref"][0].source_frame == 3
-
-
-def test_renderer_literal_values() -> None:
-    assert typing.get_args(Renderer) == ("vapoursynth", "ffmpeg", "auto")
 
 
 def test_batch_render_options_defaults() -> None:

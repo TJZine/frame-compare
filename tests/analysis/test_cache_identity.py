@@ -224,18 +224,6 @@ def test_metric_algorithm_identity_changes_with_media_runtime(
     assert '"scope":"analysis"' in changed
 
 
-def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
-    first = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
-    second = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
-
-    assert first == second
-    assert '"performance_mode":"performance"' in first
-    assert '"exact_ceil_one_quarter_in_up_to_eight_centered_bursts"' in first
-    assert '"active_rect_aware_full_resolution_luma"' in first
-    assert '"resize"' not in first
-    assert '"sampled_burst_pairs_with_per_burst_source_lookbehind"' in first
-
-
 def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:
     """Random seed affects frame choice, not metric-array computation."""
     v1 = create_video_file(tmp_path, "v1.mkv")

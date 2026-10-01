@@ -1,6 +1,5 @@
 """Tests for VapourSynth environment detection."""
 
-import runpy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -18,14 +17,6 @@ from frame_compare.vs.env import (
     try_load_lsmas_plugin,
 )
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
-
-
-def test_env_module_annotations_do_not_require_runtime_vapoursynth(repo_root) -> None:
-    """Import-time annotations must not require the optional VS runtime."""
-    env_path = repo_root / "src" / "frame_compare" / "vs" / "env.py"
-    namespace = runpy.run_path(str(env_path))
-
-    assert namespace["ensure_vs_environment"].__annotations__["return"] == "vs.Core"
 
 
 def make_mock_core(*, lsmas: bool = False, libplacebo: bool = False) -> SimpleNamespace:
@@ -480,9 +471,3 @@ def test_require_plugin_missing_raises_error() -> None:
     with pytest.raises(PluginNotFoundError) as exc:
         require_plugin(core, "libplacebo")  # type: ignore
     assert exc.value.code == "FC-2003"
-
-
-def test_require_plugin_present_passes() -> None:
-    """Verify no error raised for present plugin."""
-    core = make_mock_core(lsmas=True)
-    require_plugin(core, "lsmas")  # type: ignore

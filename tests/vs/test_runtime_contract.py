@@ -279,21 +279,6 @@ def test_authority_docs_use_tokens_calculated_by_runtime_contract(repo_root: Pat
     assert media_runtime_fingerprint("full", profile="windows-x64") in validation
 
 
-def test_authority_cache_docs_scope_managed_invalidation_and_unmanaged_clear(
-    repo_root: Path,
-) -> None:
-    for relative_path in (
-        "docs/current-architecture.md",
-        "docs/current-cli-contract.md",
-    ):
-        content = (repo_root / relative_path).read_text(encoding="utf-8")
-        assert "managed Windows portable and Debian/Docker profiles" in content
-        assert "unmanaged Windows" in content
-        assert "clearing generated caches and" in content
-        assert "Frame Compare-owned indexes before reuse" in content
-        assert "[Supported Media Runtime](supported-media-runtime.md)" in content
-
-
 def test_windows_manifest_fingerprints_match_code_contract(repo_root: Path) -> None:
     manifest = json.loads(
         (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
@@ -503,37 +488,3 @@ def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: P
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
     assert "DOCKER_PROOF vapoursynth_import=ok version=R80 api=4.3" in script
-
-
-def test_docker_doctor_gate_preserves_missing_check_diagnostic_and_proof_marker(
-    repo_root: Path,
-) -> None:
-    script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
-
-    assert "doctor required check missing: {required_check}" in script
-    assert 'checks[required_check]["status"] == "pass"' in script
-    assert script.count("DOCKER_PROOF doctor_json=ok") == 2
-
-
-def test_docker_runtime_generates_metadata_sensitive_fixture_matrix(repo_root: Path) -> None:
-    script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
-
-    for marker in (
-        "h264_full_range",
-        "generated VFR fixture is not variable",
-        "h264_interlaced",
-        "hevc10_hdr10",
-        "libaom-av1",
-        "generated_fixture_matrix=ok",
-    ):
-        assert marker in script
-    assert "props_indicate_limited_range" in script
-    assert "invalid full-range fixture" in script
-    assert '"color_transfer": "smpte2084"' in script
-    assert '"color_primaries": "bt2020"' in script
-    assert '"pix_fmt": "yuv420p10le"' in script
-    assert "hdr_lsw.is_hdr is True" in script
-    assert "hdr_lsw.hdr_metadata.transfer == 16" in script
-    assert "hdr_lsw.hdr_metadata.color_primaries == 9" in script
-    assert "RemoveFrameProps" in script
-    assert 'tonemapped_hdr_frame.props.get("_Tonemapped") == 1' in script

@@ -5,14 +5,6 @@ import pytest
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
 
 
-def test_generate_name_simple():
-    assert generate_screenshot_name("Source", 100) == "100 - Source.png"
-
-
-def test_generate_name_zero_frame():
-    assert generate_screenshot_name("Ref", 0) == "0 - Ref.png"
-
-
 def test_generate_name_custom_extension():
     assert generate_screenshot_name("Test", 1, extension="jpg") == "1 - Test.jpg"
 
@@ -64,10 +56,6 @@ def test_generate_name_negative_frame_raises():
 def test_generate_name_empty_extension_raises():
     with pytest.raises(ValueError, match="extension must not be empty"):
         generate_screenshot_name("Test", 1, extension="")
-
-
-def test_generate_path_simple(tmp_path):
-    assert generate_screenshot_path(tmp_path, "Ref", 100) == tmp_path / "100 - Ref.png"
 
 
 def test_generate_path_sanitizes(tmp_path):

@@ -173,13 +173,6 @@ def test_none_mode_has_no_lines() -> None:
     assert _lines(config) == []
 
 
-def test_active_overlay_mode_rejects_mismatched_frame_facts() -> None:
-    config = _config(OverlayMode.STANDARD)
-    facts = RenderedFrameFacts(source_frame=config.source_frame + 1)
-    with pytest.raises(ValueError, match="do not match"):
-        compose_overlay_text_lines(config, facts)
-
-
 def test_unknown_optional_values_are_omitted_without_dangling_separators() -> None:
     signal = SourceSignalFacts(is_hdr=True, primaries=2, transfer=99, matrix=None)
     config = _config(

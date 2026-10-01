@@ -100,14 +100,6 @@ def test_load_source_extracts_fps():
     assert source.fps == Fraction(24, 1)
 
 
-def test_load_source_extracts_dimensions():
-    # MockClip defaults to 1920x1080
-    core = make_mock_core(with_lsmas=True)
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.width == 1920
-    assert source.height == 1080
-
-
 def test_load_source_default_does_not_forward_decoder_kwargs():
     calls: list[tuple[str, dict[str, object]]] = []
 

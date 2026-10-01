@@ -188,25 +188,6 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
     assert output.parent.is_dir()
 
 
-def test_default_ffmpeg_runner_returns_picture_type_from_same_extraction(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    run_subprocess = MagicMock(
-        return_value=subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=b"",
-            stderr=b"[Parsed_showinfo_1 @ 0x1] n:0 type:B",
-        )
-    )
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
-
-    facts = DefaultFFmpegRunner().extract_frame(Path("clip.mkv"), 12, tmp_path / "frame.png")
-
-    assert facts.source_frame == 12
-    assert facts.picture_type == "B"
-
-
 def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

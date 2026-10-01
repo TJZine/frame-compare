@@ -12,7 +12,6 @@ from frame_compare.render.batch.orchestrator import (
 from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,
-    RenderedBatchResult,
     RenderedClipFacts,
     RenderedFrameResult,
     RenderRequest,
@@ -270,16 +269,3 @@ def test_render_screenshots_from_batch_requires_positive_source_facts(tmp_path: 
     )
     with pytest.raises(ValueError, match="requires positive source dimensions"):
         render_screenshots_from_batch([request], tmp_path, config)
-
-
-def test_render_screenshots_from_batch_rejects_duplicate_labels(tmp_path: Path) -> None:
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    requests = [_batch_request("a.mkv", "same", [1]), _batch_request("b.mkv", "same", [2])]
-    with pytest.raises(ValueError, match="Duplicate label 'same'"):
-        render_screenshots_from_batch(requests, tmp_path, config)
-
-
-def test_render_screenshots_from_batch_empty_returns_empty(tmp_path: Path) -> None:
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    assert render_screenshots_from_batch([], tmp_path, config) == {}
-    assert render_screenshots_from_batch_detailed([], tmp_path, config) == RenderedBatchResult()

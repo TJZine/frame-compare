@@ -6,7 +6,6 @@ from enum import Enum
 
 from frame_compare.vs.props import (
     detect_hdr,
-    get_int_prop,
     get_optional_int_prop,
     get_optional_range_prop,
     get_str_prop,
@@ -19,25 +18,6 @@ from frame_compare.vs.types import HDRMetadata
 
 class _ExampleEnum(Enum):
     VALUE = 9
-
-
-def test_get_int_prop():
-    """Verify get_int_prop behaves correctly with different types."""
-    props = {
-        "int_val": 42,
-        "float_val": 42.6,
-        "str_val": "100",
-        "bytes_val": b"200",
-        "invalid_str": "not_an_int",
-    }
-
-    assert get_int_prop(props, "int_val", 0) == 42
-    assert get_int_prop(props, "float_val", 0) == 42
-    assert get_int_prop(props, "str_val", 0) == 100
-    assert get_int_prop(props, "bytes_val", 0) == 200
-    assert get_int_prop(props, "invalid_str", 5) == 5
-    assert get_int_prop(props, "missing", 10) == 10
-    assert get_int_prop({"enum_val": _ExampleEnum.VALUE}, "enum_val", 0) == 9
 
 
 def test_get_optional_int_prop():

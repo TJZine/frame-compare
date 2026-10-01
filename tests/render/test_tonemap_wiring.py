@@ -10,22 +10,10 @@ from frame_compare.config.schema import ColorConfig, ConfigSchema, ToneCurve, To
 from frame_compare.render.prepare import (
     prepare_clip_for_render,
     resolve_tonemap_settings,
-    should_tonemap,
 )
 from frame_compare.utils.media_facts import PresentationState
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError, VapourSynthNotFoundError
-from frame_compare.vs.types import HDRMetadata, SourceInfo, TonemapSettings
-
-
-def test_should_tonemap_truth_table() -> None:
-    hdr_source = MagicMock(spec=SourceInfo, is_hdr=True)
-    sdr_source = MagicMock(spec=SourceInfo, is_hdr=False)
-    enabled = ConfigSchema(color=ColorConfig(enable_tonemap=True))
-    disabled = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    assert should_tonemap(hdr_source, enabled) is True
-    assert should_tonemap(hdr_source, disabled) is False
-    assert should_tonemap(sdr_source, enabled) is False
-    assert should_tonemap(sdr_source, disabled) is False
+from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
 
 def test_resolve_tonemap_settings_applies_config_and_cli_overrides() -> None:

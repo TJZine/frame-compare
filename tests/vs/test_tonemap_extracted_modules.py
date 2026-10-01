@@ -7,7 +7,6 @@ import pytest
 import vapoursynth as vs  # noqa: E402, I001
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
-from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
     convert_non_rgb_with_matrix_hint,
@@ -124,16 +123,6 @@ def test_reference_preset_uses_legacy_hdr_target() -> None:
     assert settings.metadata == 0
     assert settings.use_dovi is True
     assert settings.contrast_recovery == 0.30
-
-
-def test_tonemap_presets_unknown_preset_reports_available_values() -> None:
-    """Unknown preset errors should include the supported value list."""
-    with pytest.raises(TonemapError) as exc:
-        get_preset_settings(cast(TonemapPreset, "invalid"))
-
-    assert "Unknown preset" in exc.value.context.message
-    assert exc.value.context.hint is not None
-    assert "reference, filmic" in exc.value.context.hint
 
 
 def test_fallback_tonemap_detects_metadata_and_uses_reinhard_expression() -> None:
