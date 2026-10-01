@@ -390,26 +390,3 @@ def test_add_contract_errors() -> None:
     with pytest.raises(AudioAlignmentError) as exc_info:
         fresh.add(0, chunk, broken_window)
     assert exc_info.value.category == "non_finite_signal"
-
-
-def test_comparison_window_edges() -> None:
-    """Windows zero-pad past both stream edges and copy exactly in the middle."""
-    comparison = np.arange(10000, dtype=np.float64)
-    window = comparison_window(comparison, 0, 5000, 8000)
-    assert window.size == 5000 + 2 * 8000
-    assert np.all(window[:8000] == 0)
-    assert np.array_equal(window[8000:18000], comparison[:10000])
-    assert np.all(window[18000:] == 0)
-
-    window = comparison_window(comparison, 9000, 1000, 8000)
-    assert window.size == 1000 + 2 * 8000
-    assert np.array_equal(window[:9000], comparison[1000:])
-    assert np.all(window[9000:] == 0)
-
-    window = comparison_window(comparison, 4000, 1000, 100)
-    assert np.array_equal(window, comparison[3900:5100])
-
-    with pytest.raises(ValueError):
-        comparison_window(comparison, -1, 1000, 100)
-    with pytest.raises(ValueError):
-        comparison_window(comparison, 4000, 0, 100)

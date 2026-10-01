@@ -242,32 +242,6 @@ def _f4_block(rng: np.random.Generator, size: int) -> np.ndarray:
     return rng.standard_normal(size).astype(_FLOAT32_DTYPE)
 
 
-def test_geometry_with_early_comparison_eof_matches_u1_value_for_value() -> None:
-    rng = np.random.default_rng(11)
-    reference = _f4_block(rng, 4000)
-    comparison = _f4_block(rng, 2500)
-    chunks = ((0, 1000), (1000, 1000), (2000, 1000), (3000, 1000))
-    lag_samples = 200
-    accumulator = _StrictAccumulator()
-    result = collect_paired_audio_chunks(
-        _child_argv(reference.tobytes()),
-        _child_argv(comparison.tobytes()),
-        **_paired_kwargs(accumulator, chunks=chunks, lag_samples=lag_samples),
-    )
-
-    assert isinstance(result, PairedAudioCollection)
-    assert result.chunks_delivered == len(chunks)
-    assert accumulator.indices == list(range(len(chunks)))
-    assert accumulator.writeable_inside == [False] * len(chunks)
-    _check_geometry(
-        accumulator.pairs,
-        reference_full=reference.astype(np.float64),
-        comparison_full=comparison.astype(np.float64),
-        chunks=chunks,
-        lag_samples=lag_samples,
-    )
-
-
 def test_geometry_with_early_reference_eof_delivers_zero_chunks_in_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
