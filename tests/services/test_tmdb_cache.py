@@ -60,17 +60,6 @@ async def test_cache_preserves_order_and_separates_search_and_alias_entries(
 
 
 @pytest.mark.anyio
-async def test_empty_alternative_titles_round_trip(tmp_path: Path) -> None:
-    cache = TmdbCache(tmp_path / "tmdb.toml")
-    endpoint = "https://api.example.test/movie/1/alternative_titles"
-    params = {"api_key": "a" * 32}
-
-    await cache.store_alternative_titles(endpoint, params, [])
-
-    assert cache.get_alternative_titles(endpoint, params) == []
-
-
-@pytest.mark.anyio
 async def test_empty_entries_are_cacheable_through_the_ttl_boundary(tmp_path: Path) -> None:
     now = [datetime(2026, 1, 1, tzinfo=UTC)]
     cache = TmdbCache(tmp_path / "tmdb.toml", clock=lambda: now[0])

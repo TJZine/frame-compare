@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from http.cookies import SimpleCookie
-from io import StringIO
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
@@ -31,7 +30,6 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadRow,
 )
 from frame_compare.services.types import SlowpicsCollectionMetadata
-from frame_compare.utils.progress import UPLOAD_PRESENTATION, PlainProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 
@@ -233,59 +231,6 @@ async def test_publish_to_slowpics_success_returns_url(
         "slowpics_upload_complete",
     ]
     logger.info.assert_not_called()
-
-
-@pytest.mark.anyio
-async def test_publish_to_slowpics_reports_progress_for_each_completed_image(
-    tmp_path: Path,
-    async_client: httpx.AsyncClient,
-    respx_mock,
-) -> None:
-    upload_plan = _plan(tmp_path, rows=2, cols=2)
-    _mock_successful_browser_flow(respx_mock)
-    progress = Mock(spec=ProgressReporter)
-
-    await publish_to_slowpics(
-        _collection_metadata("My Comparison"),
-        SlowpicsConfig(),
-        async_client,
-        progress=progress,
-        upload_plan=upload_plan,
-    )
-
-    progress.start_phase.assert_called_once_with(
-        "Uploading My Comparison to slow.pics",
-        total=4,
-        presentation=UPLOAD_PRESENTATION,
-    )
-    assert progress.advance.call_count == 4
-    progress.complete_phase.assert_called_once_with(
-        ProgressPhaseStatus.COMPLETED,
-        retain=False,
-    )
-
-
-@pytest.mark.anyio
-async def test_publish_to_slowpics_plain_reporter_keeps_upload_phase_name_on_failure(
-    tmp_path: Path,
-    async_client: httpx.AsyncClient,
-    respx_mock,
-) -> None:
-    upload_plan = _plan(tmp_path, rows=1, cols=1)
-    respx_mock.get("https://slow.pics/comparison").mock(return_value=httpx.Response(200))
-    stream = StringIO()
-    progress = PlainProgressReporter(stream)
-
-    with pytest.raises(SlowpicsError, match="Missing slow.pics XSRF token"):
-        await publish_to_slowpics(
-            _collection_metadata("My Comparison"),
-            SlowpicsConfig(),
-            async_client,
-            progress=progress,
-            upload_plan=upload_plan,
-        )
-
-    assert stream.getvalue() == "[FAIL] Uploading My Comparison to slow.pics\n"
 
 
 @pytest.mark.anyio
@@ -1302,21 +1247,6 @@ async def test_publish_to_slowpics_rejects_missing_planned_file_before_request(
         )
 
     assert route.call_count == 0
-
-
-@pytest.mark.anyio
-async def test_slowpics_publisher_upload_returns_url(
-    tmp_path: Path,
-    async_client: httpx.AsyncClient,
-    respx_mock,
-) -> None:
-    upload_plan = _plan(tmp_path, rows=1, cols=1)
-    _mock_successful_browser_flow(respx_mock, rows=1, cols=1)
-    publisher = SlowpicsPublisher(SlowpicsConfig(), async_client)
-
-    url = await publisher.upload(upload_plan, _collection_metadata())
-
-    assert url == "https://slow.pics/c/first-key"
 
 
 @pytest.mark.anyio

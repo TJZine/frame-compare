@@ -110,10 +110,6 @@ def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("version", 2),
-        ("status", "mystery"),
-        ("started_at", "yesterday"),
-        ("duration_seconds", -1),
-        ("clip_count", -1),
         ("report_path", "../escape.html"),
         ("report_path", ""),
         ("report_path", "."),

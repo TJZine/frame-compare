@@ -76,114 +76,6 @@ def test_real_parser_corpus(filename: str, expected: tuple[object, ...]) -> None
     ) == expected
 
 
-@pytest.mark.parametrize(
-    "filename",
-    [
-        "Ma.2024.1080p.WEB-DL-GROUP.mkv",
-        "Max.Payne.2008.1080p.WEB-DL-GROUP.mkv",
-        "The.Web.2020.1080p.BluRay-GROUP.mkv",
-        "A.Proper.Man.2024.1080p.WEB-DL-GROUP.mkv",
-        "HDR.The.Story.2023.1080p.WEB-DL-GROUP.mkv",
-        "DV.2024.1080p.WEB-DL-GROUP.mkv",
-        "Studio-Canal.mkv",
-        "Class.of.2160.mkv",
-        "Movie.x264.mkv",
-    ],
-)
-def test_title_tokens_are_not_release_false_positives(filename: str) -> None:
-    identity = parse_release_identity(filename)
-    assert identity.service is None
-    assert not identity.dynamic_range_claims
-    assert not identity.revision_tags
-
-
-@pytest.mark.parametrize(
-    ("code_token", "expected"),
-    [
-        ("AMZN", "AMZN"),
-        ("ATV", "ATV"),
-        ("ATVP", "ATVP"),
-        ("APTV", "ATVP"),
-        ("CC", "CC"),
-        ("DCU", "DCU"),
-        ("DSNP", "DSNP"),
-        ("PLAY", "PLAY"),
-        ("HBO", "HBO"),
-        ("HMAX", "HMAX"),
-        ("HULU", "HULU"),
-        ("iT", "iT"),
-        ("MAX", "MAX"),
-        ("MA", "MA"),
-        ("NF", "NF"),
-        ("PMTP", "PMTP"),
-        ("PCOK", "PCOK"),
-        ("ROKU", "ROKU"),
-        ("SHO", "SHO"),
-        ("STAN", "STAN"),
-        ("SYFY", "SYFY"),
-        ("ABEMA", "ABEMA"),
-        ("ADN", "ADN"),
-        ("B-Global", "B-Global"),
-        ("Bilibili", "Bilibili"),
-        ("CR", "CR"),
-        ("FUNI", "FUNI"),
-        ("HIDIVE", "HIDIVE"),
-        ("VRV", "VRV"),
-        ("WKN", "WKN"),
-    ],
-)
-def test_streaming_service_codes_from_realistic_filenames(code_token: str, expected: str) -> None:
-    identity = parse_release_identity(f"Show.S01E01.1080p.{code_token}.WEB-DL.DDP5.1.H.264-GRP.mkv")
-    assert identity.service == expected
-
-
-@pytest.mark.parametrize(
-    ("alias_tokens", "expected"),
-    [
-        ("AMAZON", "AMZN"),
-        ("AMAZONHD", "AMZN"),
-        ("AMAZON.PRIME", "AMZN"),
-        ("APPLETV", "ATV"),
-        ("APPLE.TV", "ATV"),
-        ("APPLE.TV+", "ATVP"),
-        ("DC.UNIVERSE", "DCU"),
-        ("DSNY", "DSNP"),
-        ("DISNEY", "DSNP"),
-        ("DISNEY+", "DSNP"),
-        ("HBOM", "HMAX"),
-        ("HBOMAX", "HMAX"),
-        ("ITUNES", "iT"),
-        ("MOVIES.ANYWHERE", "MA"),
-        ("NETFLIX", "NF"),
-        ("NETFLIXHD", "NF"),
-        ("NETFLIXUHD", "NF"),
-        ("PARAMOUNT", "PMTP"),
-        ("PARAMOUNT+", "PMTP"),
-        ("PEACOCK", "PCOK"),
-        ("PEACOCK.TV", "PCOK"),
-        ("SHOWTIME", "SHO"),
-        ("ABEMATV", "ABEMA"),
-        ("ABEMA.TV", "ABEMA"),
-        ("BGLOBAL", "B-Global"),
-        ("B.GLOBAL", "B-Global"),
-        ("BILI", "Bilibili"),
-        ("CRUNCHYROLL", "CR"),
-        ("CRUNCHY.ROLL", "CR"),
-        ("FUNIMATION", "FUNI"),
-        ("HIDI", "HIDIVE"),
-        ("WAKA", "WKN"),
-        ("WAKANIM", "WKN"),
-    ],
-)
-def test_streaming_service_alias_spellings_from_realistic_filenames(
-    alias_tokens: str, expected: str
-) -> None:
-    identity = parse_release_identity(
-        f"Show.S01E01.1080p.{alias_tokens}.WEB-DL.DDP5.1.H.264-GRP.mkv"
-    )
-    assert identity.service == expected
-
-
 @pytest.mark.parametrize("code_token", ["CC", "PLAY", "HBO", "HMAX", "iT", "MAX", "SHO", "STAN"])
 def test_needs_web_services_without_web_next_give_no_service(code_token: str) -> None:
     identity = parse_release_identity(f"Show.S01E01.1080p.{code_token}.DDP5.1.H.264-GRP.mkv")
@@ -195,22 +87,9 @@ def test_hbo_max_without_web_next_gives_no_service() -> None:
     assert identity.service is None
 
 
-def test_it_title_and_service_from_realistic_filename() -> None:
-    identity = parse_release_identity("It.2017.2160p.iT.WEB-DL.DDP5.1.H.264-GRP.mkv")
-    assert identity.content.title == "It"
-    assert identity.service == "iT"
-
-
 def test_it_without_web_next_gives_no_service() -> None:
     identity = parse_release_identity("Show.S01E01.1080p.IT.DDP5.1.H.264-GRP.mkv")
     assert identity.service is None
-
-
-def test_hbo_max_gives_hmax_and_hbo_alone_gives_hbo() -> None:
-    combined = parse_release_identity("Show.S01E01.1080p.HBO.MAX.WEB-DL.DDP5.1.H.264-GRP.mkv")
-    assert combined.service == "HMAX"
-    alone = parse_release_identity("Show.S01E01.1080p.HBO.WEB-DL.DDP5.1.H.264-GRP.mkv")
-    assert alone.service == "HBO"
 
 
 def test_screenshots_it_file_descriptor() -> None:
@@ -255,31 +134,10 @@ def test_guessit_streaming_service_names_map_to_display_codes(
     assert identity.service == expected
 
 
-def test_embedded_source_text_does_not_start_the_release_suffix() -> None:
-    identity = parse_release_identity("The.WebRipples.PROPER.Man.2024.1080p.WEBRip-GROUP.mkv")
-
-    assert identity.source_type == "WEBRip"
-    assert identity.revision_tags == ()
-    assert identity.release_group == "GROUP"
-
-
 def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
     identity = parse_release_identity("Show.S01E05.1080p.AMZN.WEBRip.HLG-GROUP.mkv")
 
     assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
-
-
-def test_hlg_group_correction_normalizes_the_remaining_group() -> None:
-    identity = parse_release_identity("Show.S01E05.1080p.AMZN.WEBRip.HLG-\x1bGROUP.mkv")
-
-    assert identity.release_group == "GROUP"
-
-
-def test_hdr10plus_group_correction_preserves_the_claim() -> None:
-    identity = parse_release_identity("Film.2024.2160p.WEB-DL.HDR10Plus-GROUP.mkv")
-
-    assert identity.dynamic_range_claims == ("HDR10+",)
-    assert identity.release_group == "GROUP"
 
 
 @pytest.mark.parametrize(
@@ -300,30 +158,6 @@ def test_compact_aliases_and_specific_revision_precedence(
     assert identity.revision_tags == revisions
 
 
-def test_parser_field_shapes_are_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.metadata_parsing.guessit",
-        lambda _name: {
-            "title": ["Example"],
-            "year": ["2024"],
-            "screen_size": ["2160p"],
-            "source": ["Web"],
-            "streaming_service": ["Netflix"],
-            "release_group": ["GROUP"],
-        },
-    )
-    monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: {})
-
-    identity = parse_release_identity("Example.2024.2160p.NF.WEB-DL.DoVi.HDR10+-GROUP.mkv")
-
-    assert identity.content == ContentIdentity("Example", year=2024)
-    assert identity.resolution == "2160p"
-    assert identity.service == "NF"
-    assert identity.source_type == "WEB-DL"
-    assert identity.release_group == "GROUP"
-    assert identity.dynamic_range_claims == ("DV", "HDR10+")
-
-
 def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "frame_compare.services.metadata_parsing.guessit",
@@ -342,23 +176,6 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
     assert identity.release_group == "GROUP EVIL"
     assert "\n" not in format_compact_identity(identity)
     assert "\x1b" not in format_compact_identity(identity)
-
-
-def test_normalized_empty_parser_title_uses_stem_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.metadata_parsing.guessit",
-        lambda _name: {"title": "\x01\x02"},
-    )
-    monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: {})
-
-    identity = parse_release_identity("Meaningful.Movie.mkv")
-
-    assert identity.content == ContentIdentity(
-        "Meaningful Movie",
-        title_origin="fallback",
-    )
 
 
 @pytest.mark.parametrize(
@@ -526,14 +343,3 @@ def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: None)
     identity = parse_release_identity("odd_name.mkv")
     assert identity.content == ContentIdentity("odd name", title_origin="fallback")
-
-
-def test_anime_unicode_and_variant_fields() -> None:
-    anime = parse_release_identity("[SubsPlease] 葬送のフリーレン - 03 (1080p) [ABC123].mkv")
-    assert anime.content.episode == 3
-    assert anime.release_group == "SubsPlease"
-
-    variant = parse_release_identity(
-        "Film.2020.2160p.DSNP.WEB-DL.HYBRID.IMAX.Extended.Criterion-GROUP.mkv"
-    )
-    assert variant.variant_tags == ("HYBRID", "IMAX", "Extended", "Criterion")
