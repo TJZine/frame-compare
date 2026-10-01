@@ -48,9 +48,9 @@ ERROR_CASES = (
                 "--no-upload",
             ],
         },
-        5,
-        "FC-4002",
-        "METRICS_CALCULATION_ERROR",
+        2,
+        "FC-1003",
+        "CONFIG_VALIDATION_ERROR",
         id="mutually-exclusive-cache-flags",
     ),
     pytest.param(

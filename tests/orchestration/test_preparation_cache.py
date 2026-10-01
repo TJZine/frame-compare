@@ -84,7 +84,7 @@ def _prepared_metric_cache_fingerprint(source_paths: list[Path], *, prep: PrepSt
 def test_execute_prep_rejects_mutually_exclusive_cache_flags(tmp_path: Path) -> None:
     request = RunRequest(root=tmp_path, no_cache=True, from_cache_only=True)
 
-    with pytest.raises(MetricsCalculationError, match="mutually exclusive"):
+    with pytest.raises(ConfigValidationError, match="mutually exclusive"):
         asyncio.run(preparation.execute_prep(request, RunDependencies()))
 
 

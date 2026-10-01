@@ -30,6 +30,7 @@ from frame_compare.orchestration.active_rect_content import (
 )
 from frame_compare.orchestration.analysis_policy import (
     needs_analysis,
+    validate_cache_mode_flags,
     validate_skip_analysis_frame_selection_contract,
 )
 from frame_compare.orchestration.analysis_source import resolve_analysis_source
@@ -524,10 +525,10 @@ async def execute_prep(
     deps: RunDependencies,
 ) -> PrepState:
     preflight_start = deps.monotonic_timer()
-    if request.no_cache and request.from_cache_only:
-        raise MetricsCalculationError(
-            "Flags --no-cache and --from-cache-only are mutually exclusive."
-        )
+    validate_cache_mode_flags(
+        no_cache=request.no_cache,
+        from_cache_only=request.from_cache_only,
+    )
 
     preflight = prepare_preflight(
         root=request.root,

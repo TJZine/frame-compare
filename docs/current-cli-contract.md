@@ -909,7 +909,9 @@ recovery requirement.
   previous alignment offsets do not fail `--from-cache-only` by themselves.
   Alignment can compute current-run offsets or use accepted shared previous
   offsets after analysis cache validation succeeds.
-- `--no-cache` and `--from-cache-only` are mutually exclusive.
+- `--no-cache` and `--from-cache-only` are mutually exclusive. Pipeline runs and
+  `--dry-run` reject the pair before runtime work with `CONFIG_VALIDATION_ERROR`
+  (FC-1003) and exit 2. `--write-config` and `--diagnose-paths` ignore cache flags.
 
 ### Report Auto-Open Ownership
 
