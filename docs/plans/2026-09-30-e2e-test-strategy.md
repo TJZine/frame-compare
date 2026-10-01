@@ -433,7 +433,9 @@ classification:
 
 **S10. Revised deletion bar** (maintainer, 2026-10-01). This replaces S6's
 classification rules for units B2, C and D. S6's junk patterns, always-keep list and
-junk-only areas (`vsview`, `windows_portable`, `workflows`) still apply.
+junk-only areas (`vsview`, `windows_portable`, `workflows`) still apply. The one
+exception is ruling U7 in "Checkpoint B rulings", which allows some duplicates in
+those areas to be deleted as covered.
 
 Unit B under S6 kept 96% of tests (3,533 of 3,679) and proposed only 1,543 lines
 for deletion. The reason: S6 counted a test as covered only if E2E observed every
@@ -465,6 +467,18 @@ user-visible bug ship that no remaining test catches?
     corrupts stdout.
 
   An internal assertion is never a reason to keep a test.
+- **The flow rule** (Checkpoint B, 2026-10-01): a value is internal only if it never
+  reaches a user-visible output from the list above.
+  - Follow production callers only. The value must change the output's content,
+    not merely appear in a debug log.
+  - **Reaching an output makes the test a case of that output, not a keep.** It is
+    `keep:edge` only if it reaches a production branch or boundary (cite
+    `file:line`) that no retained test of that output reaches.
+  - Otherwise it is `delete:covered(<owner>)`, with the mutation placed in that
+    branch.
+  - Example: a corpus of real release filenames whose shapes reach distinct parser
+    branches (cited per shape) is `keep:edge`, consolidated into rows. Shapes that
+    reach no unique branch are `delete:covered` by the corpus owner.
 - **Clusters group tests by behavior, not by function.** A cluster may span
   functions and files within one lane. Each user-visible behavior has one owner:
   the strongest test for it. The other tests in its cluster are deleted as covered
@@ -488,15 +502,14 @@ user-visible bug ship that no remaining test catches?
     A smoke test with no assertion is also junk when a retained test runs the same
     path. Under S10, duplicates are always `delete:covered`, so they get a mutation
     proof.
-  - `delete:internal`: every assertion in the test is internal (as defined above),
-    so no user-visible behavior depends on what it checks. Examples: immutability
-    of a frozen dataclass that no document lists, intermediate carrier fields, and
-    progress-event order.
+  - `delete:internal`: every assertion in the test is internal (as defined above,
+    including the flow rule), and **the code it checks has no user-visible outcome
+    at all**. Examples: immutability of a frozen dataclass that no document lists,
+    timing spans, and progress-event order.
     - The record names the production code the test exercises.
-    - It names either the retained owner that checks that code's user-visible
-      outcome, or "no user-visible outcome".
-    - No C2 mutation is needed. C5's coverage diff is the safety net, and Checkpoint
-      B reviews every `delete:internal` record in lanes 1a–5.
+    - If a retained owner checks that code's user-visible outcome, the record is
+      `delete:covered(<owner>)` instead, and needs a C2 mutation.
+    - C5's coverage diff is the safety net.
   - `delete:covered(<target>)`: the named retained test fails when the cluster's
     user-visible behavior breaks. The target may be any `keep` test in the same
     lane, or an S6 always-keep or E2E test. A target in another lane is
@@ -522,6 +535,8 @@ user-visible bug ship that no remaining test catches?
   the specific question in one line and continues; it never blocks the lane.
   Checkpoint B decides each one.
 - **Annotations on `keep` records**, used by unit D:
+  - `rewrite:<what>`: the kept test has an assertion that can't fail. Unit D
+    changes it so the assertion can fail, and proves it with one mutation;
   - `trim`: the internal assertions to remove from a kept test, by line;
   - `consolidate:<group>`: kept tests in **one file** that share setup or shape and
     can become one parametrized test. The record maps each member test to a
@@ -612,6 +627,121 @@ Checkpoint B (controller):
   at least one in five elsewhere, plus a sample of `keep` records against the
   narrowed categories.
 
+### Checkpoint B rulings (controller, 2026-10-01)
+
+**B2 result.** All ten lanes done; 3,679 nodes mapped exactly once.
+- Proposed for deletion: 216 junk, 142 covered and 434 internal tests, 11,643
+  lines in total.
+- Kept: 2,763 tests. Unresolved: 124 tests in 105 questions.
+- Projected remainder after units C and D: about 76.7k of 92.0k `wc -l` lines.
+
+**Samples.**
+- **Junk** records are sound. One exception, B8-087, a source grep for the
+  PowerShell `param` block, is `keep:contract`, because PowerShell requires that
+  block first.
+- **Internal** records show a systematic error, which the flow rule and the
+  narrowed `delete:internal` above now fix:
+  - parser corpora (B2-2-003, B2-2-059) were called internal although their values
+    reach TMDB queries and labels;
+  - tests with a named owner (B6-013) skipped the mutation proof.
+
+  Every `delete:internal` and `delete:junk` record is re-verified in unit B3
+  before unit C.
+
+**Rulings on the `keep:unresolved` questions.** Each applies to every record it
+names.
+
+- **U1. Arguments handed to an external runtime are owned behavior.** A test that
+  asserts the arguments, expressions, properties or calls handed to VapourSynth,
+  libplacebo, Pillow or FFmpeg is `keep:owner` of "the correct parameters reach the
+  runtime".
+  - The exception: a real-runtime test (M*, `tests/vs/test_integration.py`,
+    `tests/integration/**`) **observes** the case. "Observes" means a field in that
+    test's `expected` literal, or an assertion, changes when the parameter is
+    wrong. Running the code path is not enough.
+  - If it observes the case, the record is `delete:covered(<test>)`, route docker.
+  - Distinct parameter cases of kept owners become consolidation rows.
+  - Applies to: B5-055, 056, 064, 149, 165–169, 328–332, 368, 459, 462, 463–473,
+    477–479, 481–486; B3b-119, 139, 140, 141.
+  - B5-277 (graph serialization) and B5-487–492 (probe and backend selection) are
+    `keep:failure`, because the user-visible consequence is a crash, hang or
+    wrong backend.
+  - B5-338 and B5-340–348 (DLL and plugin loading) are `keep:platform`.
+- **U2. No public proof means the test is the owner.** When the question is "which
+  public result observes X" and none does, the existing test is `keep:owner`.
+  - Assertions on the carrier field that carries the value to the output are the
+    owner's check, and never `trim`.
+  - Only fake-call and shape assertions are `trim`.
+  - Applies to: B3a-043, 076, 078, 079, 080, 083, 085, 108, 109, 117, 126, 149,
+    151, 176, 177; lane 2's two metadata-stub questions; B4-190.
+  - B3a-030's forbidden-publisher assertion is swallowed by warn-only handling. It
+    stays `keep:owner` with the annotation `rewrite: make the forbidden-publisher
+    assertion able to fail`, for unit D.
+- **U3. Shared-mutation questions are decided by C2.** These records become
+  `delete:covered(<owner>)`, deleted only if C2's mutation fails both the owner
+  and each deleted test individually, on an assertion: B1a-045, B3a-003,
+  B3a-025, B5-290, B5-305, B5-334, B5-461. Otherwise each becomes `keep:edge`, in
+  its own cluster.
+- **U4. Documented behavior is a contract.**
+  - `keep:contract` with a citation: B3b-149, if "Shared Path Resolution Rules"
+    lists the asserted locations, otherwise `keep:owner`; B4-196, logging
+    precedence.
+  - B6-247 (numeric exit values) and B4-062 (exit categories): exit codes are
+    user-visible.
+    - B6-247 is `keep:contract` if the contract documents the values, otherwise
+      `keep:owner`.
+    - B4-062 is one non-parametrized test, so it stays `keep:owner` with
+      `consolidate` into one row per category. A row that a retained command-level
+      owner already fails on is `trim`; the record names that owner and its C2
+      mutation.
+- **U5. Undocumented internals.**
+  - B3b-207 (returned shared-cache paths): `delete:internal`, unless a
+    user-visible consumer reads them.
+  - B4-078 (terminal width at import): `keep:failure` only if its history shows a
+    regression fix, otherwise `delete:internal`.
+  - B6-055 (preset bytes): `keep:owner`. It compares two saves in one process, so
+    it guards against per-save content such as a name or timestamp leaking into
+    the file. It can't catch hash-order nondeterminism.
+  - B6-116 (umask): `keep:failure`. A process-wide permission race changes the
+    permissions of written files.
+  - B6-156: `delete:junk:no-assertion`.
+  - B6-226: `delete:junk:no-assertion` only if a retained test passes the same cold
+    and reuse states; otherwise `keep:edge`, because it fails if the policy
+    rejects valid states.
+  - B6-218 (API-doc drift): `keep:owner` for one matching case and one stale case;
+    the others are `delete:covered`.
+- **U6. Lane 2 specifics.**
+  - The metadata stubs, B2-2-012 and B2-2-015: as in U2.
+  - Category display labels, B2-2-088: `keep:edge`, because they are visible text.
+  - The reduced-motion and 44px CSS checks, B2-2-142: `keep:owner`. Accessibility
+    basics are never simplified away.
+  - The webhook on port 8443, B2-2-246: `keep:security`.
+- **U7. Duplicates in junk-only areas.** Within `vsview`, `windows_portable` or
+  `workflows`, a duplicate may be `delete:covered` when its owner is in the same
+  area **and** C2 can run that owner natively. If the owner skips natively (no
+  `pwsh`, or Windows-only), the duplicate is kept.
+  - Applies to: B7-039, B7-048, B8-040, B8-216.
+  - B8-135, B8-141: their executed owners skip natively, so they are kept.
+- **B4-126:** `keep:platform`.
+
+**Not a product bug.** SB8-1 (`tools/open_docker_host_target.py:60`):
+`PurePosixPath` normalizes `.` away, so the `"."` half of the check never fires,
+but `.` can't escape. `..` is still rejected, and the `resolve()` plus
+`is_relative_to` guard is the real protection. At most it's one dead condition.
+
+**Widening candidates.** B2 lists 76. They await individual maintainer decisions.
+None blocks unit C, because every behavior they describe has a kept test.
+
+### Unit B3: verification of internal and junk records (`.handoff/T4-codex-verify-deletions.md`)
+
+- Read-only, in the same ten lanes.
+- Each lane re-checks every `delete:internal` and `delete:junk` record against the
+  flow rule and the narrowed `delete:internal`, and applies the rulings above.
+- Each lane writes `.handoff/test-audit/<lane>.verdicts.md`. It lists every
+  changed record (old → new classification, with a reason) and the corrected
+  totals.
+- The B2 ledger plus its verdicts file is unit C's input.
+
 ### Unit C: deletions (handoff written after checkpoint B)
 
 - **C1:** one area per commit, **serially**, in the lane order above.
@@ -676,6 +806,8 @@ execution record.
   report.
 - **Proof:** one mutation per consolidated group fails the new test on an
   assertion.
+- **Rewrites:** each `rewrite:<what>` annotation is applied, and one mutation shows
+  the repaired assertion can fail.
 - **Trim safety:** a trim may not remove an assertion that C2 recorded as failing.
   When a trimmed file owns a `delete:covered` target, rerun that target's C2
   mutations after the trim.
