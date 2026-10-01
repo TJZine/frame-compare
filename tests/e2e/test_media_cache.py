@@ -38,6 +38,7 @@ def test_media_cache_lifecycle(
         shutil.copy2(media_files["sdr"], root.input_dir / name)
     base_arguments = ["run", "--json", "--skip-metadata", "--no-upload", "--root", str(root.root)]
     steps: list[ArtifactStep] = []
+    # Cache Mode Semantics and History Command Contract.
     expected = {
         "runs": [
             {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
@@ -76,7 +77,16 @@ def test_media_cache_lifecycle(
                 "M3-cache",
                 root,
                 steps,
-                {"runs": runs},
+                {
+                    "runs": runs,
+                    "corrupted": {
+                        "exit_code": None,
+                        "error_code": None,
+                        "error_name": None,
+                        "no_new_run_folder": None,
+                    },
+                    "history": [],
+                },
                 expected,
                 run_dir,
             )
@@ -122,5 +132,4 @@ def test_media_cache_lifecycle(
             for entry in json.loads(history.stdout)["runs"]
         ),
     }
-    # Cache Mode Semantics and History Command Contract.
     record("M3-cache", root, steps, summary, expected, run_dir)
