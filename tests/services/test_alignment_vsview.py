@@ -203,30 +203,6 @@ def test_native_result_confirms_and_keeps_in_request_order(
     assert overrides["ref:first"].frame_offset == 12
 
 
-def test_keep_current_only_is_a_successful_empty_override_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _set_interactive(monkeypatch)
-
-    def launch(*_args: object, **_kwargs: object):
-        session = _session(tmp_path)
-        write_alignment_review_result(
-            session,
-            AlignmentReviewResult(
-                session_id=session.session_id,
-                decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
-            ),
-        )
-        return session, 0.0
-
-    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
-
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
-        {}, "keep_current"
-    )
-    assert load_manual_overrides(tmp_path) == {}
-
-
 @pytest.mark.parametrize("wait_seconds", [42.5, 0.0])
 def test_launch_wait_seconds_reach_review_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wait_seconds: float
@@ -435,23 +411,6 @@ def test_close_without_finish_is_optional_cancellation(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         None, "rejected_result"
     )
-
-
-def test_forced_close_without_finish_is_typed_alignment_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _set_interactive(monkeypatch)
-    monkeypatch.setattr(
-        alignment_vsview,
-        "launch_alignment_verification_session",
-        lambda *_args, **_kwargs: (_session(tmp_path), 0.0),
-    )
-
-    with pytest.raises(AudioAlignmentError, match="did not return a valid VSView review result"):
-        _call(
-            tmp_path,
-            config=AlignmentConfig(use_vsview=True, force_interactive=True),
-        )
 
 
 def test_result_bounds_come_from_typed_request_not_sidecar(

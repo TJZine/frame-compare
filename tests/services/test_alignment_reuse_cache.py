@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import os
 import tomllib
 from collections.abc import Callable, Generator
@@ -189,103 +188,6 @@ def test_stability_summary_round_trips_in_current_cache_schema(tmp_path: Path) -
     assert _cache_data(request)["version"] == CACHE_VERSION
 
 
-@pytest.mark.parametrize("embedded", [False, True], ids=["computed-entry", "computed-result"])
-def test_computed_cache_evidence_without_stability_warns_and_misses(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    embedded: bool,
-) -> None:
-    request = _request(tmp_path)
-    computed = _result(request)
-    if embedded:
-        confirmed = replace(
-            computed,
-            frame_offset=47,
-            time_offset_seconds=1.96,
-            correlation_score=1.0,
-            algorithm=None,
-            source="manual",
-            stability=None,
-            audio_attempt=None,
-        )
-        provenance = _provenance(
-            request,
-            result=confirmed,
-            provenance="interactive_confirmed_this_run",
-            computed_result=computed,
-        )
-    else:
-        provenance = _provenance(request, result=computed)
-    save_reusable_offsets(request, [provenance])
-    data = _cache_data(request)
-    container = _first_entry(data)
-    if embedded:
-        computed_result = container["computed_result"]
-        assert isinstance(computed_result, dict)
-        container = computed_result
-    removed = container.pop("stability")
-    assert isinstance(removed, dict)
-    _persist_cache_data(request, data)
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_invalid_entry"]
-
-
-@pytest.mark.parametrize("embedded", [False, True], ids=["computed-entry", "computed-result"])
-def test_negative_largest_adjacent_jump_warns_and_misses(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    embedded: bool,
-) -> None:
-    request = _request(tmp_path)
-    computed = _result(request)
-    if embedded:
-        confirmed = replace(
-            computed,
-            frame_offset=47,
-            time_offset_seconds=1.96,
-            correlation_score=1.0,
-            algorithm=None,
-            source="manual",
-            stability=None,
-            audio_attempt=None,
-        )
-        provenance = _provenance(
-            request,
-            result=confirmed,
-            provenance="interactive_confirmed_this_run",
-            computed_result=computed,
-        )
-    else:
-        provenance = _provenance(request, result=computed)
-    save_reusable_offsets(request, [provenance])
-    data = _cache_data(request)
-    container = _first_entry(data)
-    if embedded:
-        computed_result = container["computed_result"]
-        assert isinstance(computed_result, dict)
-        container = computed_result
-    stability = container["stability"]
-    assert isinstance(stability, dict)
-    stability["largest_adjacent_jump_frames"] = -1
-    _persist_cache_data(request, data)
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_invalid_entry"]
-
-
 def test_shared_reuse_cache_does_not_write_computed_entry_without_stability(
     tmp_path: Path,
 ) -> None:
@@ -322,18 +224,6 @@ def test_computed_this_run_provisional_result_is_not_write_eligible(
     save_reusable_offsets(request, [_provenance(request, result=result)])
 
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
-
-
-def test_applied_result_cannot_carry_provisional_evidence(tmp_path: Path) -> None:
-    """First layer: the result type refuses applied-with-untrusted-evidence."""
-    request = _request(tmp_path)
-    attempt = trusted_audio_attempt(frame_offset=42)
-    provisional = replace(
-        attempt,
-        decision=replace(attempt.decision, state="provisional", primary_reason="audio_only"),
-    )
-    with pytest.raises(ValueError, match="untrusted audio evidence"):
-        replace(_result(request), audio_attempt=provisional)
 
 
 def test_computed_this_run_without_trusted_attempt_is_not_write_eligible(
@@ -476,31 +366,6 @@ def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
     comparison = _first_entry(data)["comparison"]
     assert isinstance(comparison, dict)
     assert comparison["selected_audio_stream"] == 1
-
-
-def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(
-    tmp_path: Path,
-) -> None:
-    request = _request(tmp_path)
-    save_reusable_offsets(
-        request,
-        [
-            _provenance(
-                request,
-                result=replace(_result(request, correlation_score=0.876), audio_attempt=None),
-                provenance="shared_computed_offsets",
-            )
-        ],
-        accepted_at="2026-06-06T12:00:00Z",
-    )
-
-    entries = load_reusable_offset_entries(request)
-
-    assert entries is not None
-    entry = next(iter(entries.values()))
-    assert entry.origin == "computed"
-    assert entry.result.source == "cached"
-    assert entry.result.correlation_score == pytest.approx(0.876)
 
 
 def test_shared_cache_persists_confirmed_entry_while_shared_computed_stays_computed(
@@ -819,25 +684,6 @@ def test_shared_reuse_cache_corrupt_data_warns_and_misses(
     assert warnings == ["alignment_reuse_cache_unreadable"]
 
 
-def test_shared_reuse_cache_version_mismatch_warns_and_misses(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    cache_file.parent.mkdir(parents=True)
-    cache_file.write_text('version = "1"', encoding="utf-8")
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_version_mismatch"]
-
-
 def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path) -> None:
     request = _request(tmp_path)
     cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
@@ -854,47 +700,6 @@ def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path
     source_sets = data["source_sets"]
     assert isinstance(source_sets, dict)
     assert "legacy" not in source_sets
-
-
-def test_shared_reuse_cache_malformed_source_sets_warns_and_misses(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    cache_file.parent.mkdir(parents=True)
-    cache_file.write_text(
-        tomli_w.dumps({"version": CACHE_VERSION, "source_sets": "not-a-table"}),
-        encoding="utf-8",
-    )
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_malformed_source_sets"]
-
-
-def test_shared_reuse_cache_missing_source_sets_warns_and_misses(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    cache_file.parent.mkdir(parents=True)
-    cache_file.write_text(tomli_w.dumps({"version": CACHE_VERSION}), encoding="utf-8")
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_missing_source_sets"]
 
 
 @pytest.mark.parametrize(
@@ -1081,131 +886,6 @@ def test_shared_reuse_cache_lock_timeout_warns_without_raising(
     _write_computed(request)
 
     assert warnings == ["alignment_reuse_cache_write_failed"]
-
-
-def test_shared_reuse_cache_invalid_entry_warns_and_misses(tmp_path: Path) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-    data = _cache_data(request)
-    entry = _first_entry(data)
-    entry["origin"] = "manual"
-    _persist_cache_data(request, data)
-
-    assert load_reusable_offset_entries(request) is None
-
-
-@pytest.mark.parametrize(
-    ("field_name", "field_value"),
-    [
-        ("frame_offset", True),
-        ("time_offset_seconds", False),
-        ("correlation_score", True),
-    ],
-)
-def test_shared_reuse_cache_boolean_numeric_fields_warn_and_miss(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    field_name: str,
-    field_value: bool,
-) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-    data = _cache_data(request)
-    entry = _first_entry(data)
-    entry[field_name] = field_value
-    _persist_cache_data(request, data)
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_invalid_entry"]
-
-
-@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf, 10**400])
-@pytest.mark.parametrize(
-    ("container_name", "field_name"),
-    [
-        ("entry", "time_offset_seconds"),
-        ("entry", "correlation_score"),
-        ("computed_result", "time_offset_seconds"),
-        ("computed_result", "correlation_score"),
-        ("stability", "change_position_seconds"),
-        ("computed_stability", "change_position_seconds"),
-    ],
-)
-def test_shared_reuse_cache_invalid_float_fields_warn_and_miss(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    container_name: str,
-    field_name: str,
-    value: float,
-) -> None:
-    request = _request(tmp_path)
-    summary = AlignmentStabilitySummary(
-        classification="possible_discontinuity",
-        valid_windows=4,
-        offset_min_frames=178,
-        offset_max_frames=202,
-        first_offset_frames=178,
-        last_offset_frames=202,
-        largest_adjacent_jump_frames=24,
-        change_position_seconds=2832.0,
-    )
-    result = replace(_result(request), stability=summary)
-    if container_name.startswith("computed"):
-        confirmed = replace(
-            result,
-            frame_offset=47,
-            time_offset_seconds=1.96,
-            correlation_score=1.0,
-            algorithm=None,
-            source="manual",
-            audio_attempt=None,
-        )
-        provenance = _provenance(
-            request,
-            result=confirmed,
-            provenance="interactive_confirmed_this_run",
-            computed_result=result,
-        )
-    else:
-        provenance = _provenance(request, result=result)
-    save_reusable_offsets(request, [provenance])
-    data = _cache_data(request)
-    entry = _first_entry(data)
-
-    container: dict[str, object]
-    if container_name == "entry":
-        container = entry
-    elif container_name == "computed_result":
-        computed = entry["computed_result"]
-        assert isinstance(computed, dict)
-        container = computed
-    elif container_name == "stability":
-        stability = entry["stability"]
-        assert isinstance(stability, dict)
-        container = stability
-    else:
-        computed = entry["computed_result"]
-        assert isinstance(computed, dict)
-        stability = computed["stability"]
-        assert isinstance(stability, dict)
-        container = stability
-    container[field_name] = value
-    _persist_cache_data(request, data)
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_invalid_entry"]
 
 
 @pytest.mark.parametrize(

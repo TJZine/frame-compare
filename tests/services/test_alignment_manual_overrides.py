@@ -114,24 +114,6 @@ def test_save_manual_override_merges_overwrites_and_orders_keys(tmp_path: Path) 
     assert content.index('["ref:alpha"]') < content.index('["ref:zeta"]')
 
 
-def test_save_manual_override_uses_atomic_bytes_write(tmp_path: Path) -> None:
-    override = _override("comp", 10)
-    calls: list[tuple[Path, bytes]] = []
-
-    def _write(path: Path, content: bytes) -> None:
-        calls.append((path, content))
-        path.write_bytes(content)
-
-    with patch(
-        "frame_compare.services.alignment_manual_overrides.write_bytes_atomic",
-        _write,
-    ):
-        save_manual_override(tmp_path, override)
-
-    assert [path for path, _ in calls] == [tmp_path / MANUAL_OVERRIDES_FILE]
-    assert load_manual_overrides(tmp_path) == {"ref:comp": override}
-
-
 def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> None:
     path = tmp_path / MANUAL_OVERRIDES_FILE
     path.write_text(

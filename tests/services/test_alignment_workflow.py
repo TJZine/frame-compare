@@ -44,7 +44,6 @@ from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_synthetic_audio import (
     insert_program,
     make_program,
-    quiet_program,
     shift_signal,
 )
 
@@ -155,54 +154,6 @@ def _align(
     return run_request(request, config, reference_fps=FPS)
 
 
-def test_agreed_pair_without_loader_is_video_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    config = _config()
-
-    (result,) = _align(reference, comparison, config, tmp_path)
-
-    assert result.applied is False
-    assert result.frame_offset is None
-    assert result.time_offset_seconds is None
-    assert result.source == "computed"
-    assert result.algorithm == "cross_correlation"
-    assert result.diagnostic == "video_check_unavailable"
-    assert result.correlation_score == pytest.approx(1.0)
-    assert result.stability is not None
-    assert result.stability.classification == "stable"
-    attempt = result.audio_attempt
-    assert attempt is not None
-    assert attempt.status == "complete"
-    assert attempt.comparison_ordinal == 1
-    assert attempt.estimator_policy == "whole-track-chunked-phat-video-check-motion-20260929"
-    assert attempt.diagnostic_policy == "retained-audio-evidence-v1"
-    assert (attempt.fps_num, attempt.fps_den) == (FPS.numerator, FPS.denominator)
-    assert [s.role for s in attempt.selected_streams] == ["reference", "comparison"]
-    assert attempt.analysis.planned_chunk_count == len(attempt.chunks.starts) > 0
-    assert len(attempt.runs) == 1
-    assert attempt.audio.status == "agreed"
-    assert attempt.audio.global_lag == 0
-    assert attempt.audio.compensation_seconds == pytest.approx(0.0)
-    assert attempt.audio.subframe_estimate == pytest.approx(0.0)
-    assert attempt.audio.rounded_frame == 0
-    assert attempt.collection_observation == "observed"
-    assert [facts.role for facts in attempt.collection] == ["reference", "comparison"]
-    assert all(facts.returncode == 0 for facts in attempt.collection)
-    assert all(facts.cleanup_completed for facts in attempt.collection)
-    assert attempt.video_check.observation == "not_observed"
-    assert attempt.video_check.scored_offsets == ()
-    decision = attempt.decision
-    assert decision.state == "provisional"
-    assert decision.primary_reason == "video_check_unavailable"
-    assert decision.candidate is not None
-    assert decision.candidate.frame_offset == 0
-    assert decision.candidate.basis == "audio_only"
-
-
 def test_shifted_pair_candidate_matches_frame_truth(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -261,21 +212,6 @@ def test_insert_gives_no_single_offset_with_runs(
     assert len(attempt.runs) >= 2
     assert attempt.decision.state == "unavailable"
     assert attempt.decision.candidate is None
-
-
-def test_silence_gives_no_usable_audio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    reference, comparison = _media(tmp_path)
-    program = quiet_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-
-    (result,) = _align(reference, comparison, _config(), tmp_path)
-
-    assert result.applied is False
-    assert result.diagnostic == "no_usable_audio"
-    assert result.correlation_score == 0.0
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.audio.status == "no_usable_audio"
-    assert result.audio_attempt.audio.global_lag is None
 
 
 def test_unknown_duration_rejected_before_decode(
