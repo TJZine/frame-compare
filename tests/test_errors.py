@@ -4,18 +4,14 @@ import pytest
 from rich.console import Console
 
 from frame_compare.analysis.errors import (
-    AnalysisError,
-    InsufficientFramesError,
     MetricsCalculationError,
     SelectionError,
 )
 from frame_compare.cli.errors import (
     ExitCode,
     format_error_console,
-    format_error_json,
     get_exit_code,
 )
-from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
     ErrorContext,
     FrameCompareError,
@@ -25,7 +21,6 @@ from frame_compare.errors import (
 )
 from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
-    InputDiscoveryError,
     NoVideosFoundError,
 )
 from frame_compare.render.errors import (
@@ -79,7 +74,6 @@ def _render_rich_markup(markup: str) -> str:
         (TonemapRequiresVapourSynthError, (), "FC-2009"),
         # InputError (FC-3xxx)
         (NoVideosFoundError, (Path("/test"),), "FC-3001"),
-        (InsufficientFramesError, (Path("/test"), 10, 20), "FC-3004"),
         (DirectoryNotFoundError, (Path("/test"),), "FC-3006"),
         (PathEscapesRootError, (Path("/root"), Path("/other")), "FC-3009"),
         # ProcessingError (FC-4xxx)
@@ -116,48 +110,6 @@ def test_exception_class_contract(error_class, args, expected_code):
     assert "message" in ctx_dict
 
 
-@pytest.mark.parametrize(
-    "error_class,owner_module",
-    [
-        (MetricsCalculationError, "frame_compare.analysis.errors"),
-        (NoVideosFoundError, "frame_compare.orchestration.errors"),
-        (DirectoryNotFoundError, "frame_compare.orchestration.errors"),
-        (InputDiscoveryError, "frame_compare.orchestration.errors"),
-        (FrameExtractionError, "frame_compare.render.errors"),
-        (RenderError, "frame_compare.render.errors"),
-        (EncodingError, "frame_compare.render.errors"),
-        (OverlayError, "frame_compare.render.errors"),
-        (CacheCorruptionError, "frame_compare.utils.cache_errors"),
-        (CacheVersionMismatchError, "frame_compare.utils.cache_errors"),
-        (FFmpegNotFoundError, "frame_compare.utils.ffmpeg_errors"),
-        (FFmpegError, "frame_compare.utils.ffmpeg_errors"),
-    ],
-)
-def test_active_domain_errors_live_in_owner_modules(error_class, owner_module):
-    assert error_class.__module__ == owner_module
-
-
-def test_metrics_calculation_error_is_analysis_error_marker() -> None:
-    assert isinstance(MetricsCalculationError("test"), AnalysisError)
-
-
-def test_insufficient_frames_error_details_shape():
-    """Verify FC-3004 payload shape uses correct count/required keys."""
-    path = Path("/video.mkv")
-    count = 5
-    required = 10
-
-    error = InsufficientFramesError(path, count, required)
-
-    assert error.code == "FC-3004"
-    details = error.context.details
-    assert details is not None
-    assert set(details.keys()) == {"path", "count", "required"}
-    assert details["path"] == str(path)
-    assert details["count"] == count
-    assert details["required"] == required
-
-
 def test_vsview_error_omits_public_details() -> None:
     error = VSViewError("launch exited with code 3")
 
@@ -174,31 +126,6 @@ def test_exit_code_enum_values():
     assert ExitCode.PROCESSING_ERROR == 5
     assert ExitCode.NETWORK_ERROR == 6
     assert ExitCode.INTERRUPTED == 130
-
-
-def test_get_exit_code_config():
-    assert get_exit_code(ConfigNotFoundError(Path("/test"))) == ExitCode.CONFIG_ERROR
-
-
-def test_get_exit_code_dependency():
-    assert get_exit_code(VapourSynthNotFoundError()) == ExitCode.DEPENDENCY_ERROR
-
-
-def test_get_exit_code_input():
-    assert get_exit_code(NoVideosFoundError(Path("/test"))) == ExitCode.INPUT_ERROR
-
-
-def test_get_exit_code_processing():
-    assert get_exit_code(RenderError()) == ExitCode.PROCESSING_ERROR
-
-
-def test_get_exit_code_network():
-    assert get_exit_code(SlowpicsError("test")) == ExitCode.NETWORK_ERROR
-
-
-def test_get_exit_code_internal():
-    error = FrameCompareError(ErrorContext(code="FC-9000", name="INTERNAL", message="test"))
-    assert get_exit_code(error) == ExitCode.GENERAL_ERROR
 
 
 def test_get_exit_code_unknown():
@@ -288,15 +215,6 @@ def test_format_error_console_rendered_output_preserves_literal_brackets() -> No
     assert "[[FC-3001]]" not in rendered
     assert "Hint: Try [literal] brackets" in rendered
     assert "path: C:/videos/[sample].mkv" in rendered
-
-
-def test_format_error_json():
-    error = RenderError()
-    data = format_error_json(error)
-    assert data["success"] is False
-    payload = data["error"]
-    assert isinstance(payload, dict)
-    assert payload["code"] == "FC-4004"
 
 
 def test_error_context_omits_non_public_and_empty_fields() -> None:

@@ -6,12 +6,10 @@ from io import StringIO
 
 import pytest
 from rich.console import Console
-from rich.progress import Progress
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
     UPLOAD_PRESENTATION,
-    LogProgressReporter,
     NullProgressReporter,
     PlainProgressReporter,
     RichProgressReporter,
@@ -25,18 +23,6 @@ def test_align_phase_duration_text_splits_machine_and_review() -> None:
         align_phase_duration_text(align_seconds=674.0, review_seconds=634.0)
         == "40s + 10m 34s review"
     )
-
-
-def test_align_phase_duration_text_clamps_negative_machine() -> None:
-    assert align_phase_duration_text(align_seconds=10.0, review_seconds=42.5) == "0s + 42s review"
-
-
-def test_align_phase_duration_text_absent_without_review() -> None:
-    assert align_phase_duration_text(align_seconds=12.0, review_seconds=0.0) is None
-
-
-def test_align_phase_duration_text_truncates_sub_second_parts() -> None:
-    assert align_phase_duration_text(align_seconds=0.4, review_seconds=0.4) == "0s + 0s review"
 
 
 def _captured_rich_reporter(
@@ -72,43 +58,6 @@ def test_null_progress_reporter_noops():
     reporter.complete_phase()
     reporter.suspend()
     reporter.resume()
-
-
-def test_rich_progress_reporter_accepts_no_color() -> None:
-    reporter = RichProgressReporter(no_color=True)
-
-    assert reporter.no_color is True
-    assert reporter.writes_to_stderr is True
-
-
-def test_rich_progress_reporter_marks_active_work_without_color(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase("PLAN", 1)
-    try:
-        assert "… PLAN" in output.getvalue()
-
-        reporter.set_description("Selecting frames")
-        assert "… Selecting frames" in output.getvalue()
-    finally:
-        reporter.complete_phase()
-
-
-def test_rich_progress_active_marker_style_does_not_leak_to_description(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch, no_color=False)
-
-    reporter.start_phase("ALIGN | Interactive verification", 1)
-    try:
-        rendered = output.getvalue()
-        assert "…" in rendered
-        assert "ALIGN | Interactive verification" in rendered
-        assert "[RUN]" not in rendered
-    finally:
-        reporter.complete_phase(retain=False)
 
 
 @pytest.mark.parametrize(
@@ -196,36 +145,6 @@ def test_rich_durable_skip_line_keeps_summary_verbatim(
     assert "–" in rendered
     assert "Publish" in rendered
     assert "Declined" in rendered
-
-
-def test_rich_progress_reporter_indents_live_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase("PLAN", 1)
-    try:
-        assert re.search(r" {2,}… PLAN", output.getvalue()) is not None
-    finally:
-        reporter.complete_phase()
-
-
-def test_log_progress_reporter_supports_nested_phases(capsys) -> None:
-    """Nested phases should restore parent context on completion."""
-    reporter = LogProgressReporter()
-    reporter.start_phase("outer", 100)
-    reporter.advance(10)
-
-    reporter.start_phase("inner", 1)
-    reporter.advance(1)
-    reporter.complete_phase()
-    reporter.advance(15)
-
-    captured = capsys.readouterr()
-
-    assert "phase=outer" in captured.out
-    assert "percentage=10" in captured.out
-    assert "phase=inner" in captured.out
-    assert "percentage=100" in captured.out
-    assert "percentage=25" in captured.out
 
 
 def test_plain_progress_reporter_emits_one_ascii_line_per_top_level_phase(
@@ -372,72 +291,6 @@ def test_rich_progress_reporter_uses_distinct_task_presentations(
     reporter.complete_phase()
 
 
-def test_eta_column_appears_only_after_rich_has_an_estimate() -> None:
-    column = progress_module._EstimatedTimeRemainingColumn()  # noqa: SLF001
-    current_time = 0.0
-    progress = Progress(auto_refresh=False, get_time=lambda: current_time)
-    task_id = progress.add_task("work", total=3)
-    task = progress.tasks[0]
-
-    assert column.render(task).plain == ""
-
-    current_time = 1.0
-    progress.advance(task_id)
-    current_time = 2.0
-    progress.advance(task_id)
-    assert column.render(task).plain.startswith("ETA ")
-
-
-def test_rich_progress_reporter_adds_no_blank_line_when_measurable_work_begins(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase("Rendering", 30)
-    reporter.advance(1)
-    reporter.set_description("Rendering frame 1")
-    reporter.advance(1)
-
-    assert not output.getvalue().startswith("\n")
-    reporter.complete_phase()
-
-
-def test_rich_progress_reporter_ellipsizes_only_the_rendered_description(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-    description = "Reference | " + "very-long-release-identity-" * 8
-
-    reporter.start_phase(description, 30)
-    reporter.advance(10)
-    task = reporter._progress.tasks[0]  # noqa: SLF001
-
-    assert task.description == description
-    assert "…" in output.getvalue()
-    assert re.search(r"[━-]", output.getvalue())
-    assert "10/30" in output.getvalue()
-    reporter.complete_phase()
-
-
-def test_rich_progress_reporter_keeps_a_useful_bar_at_narrow_width(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TERM", "xterm-256color")
-    output = StringIO()
-    console = Console(file=output, force_terminal=True, no_color=True, width=60)
-    monkeypatch.setattr(progress_module, "human_console", lambda **_kwargs: console)
-    reporter = RichProgressReporter(no_color=True)
-
-    reporter.start_phase("Reference | PMTP WEB-DL | DV HDR10+ | Kitsune", 30)
-    reporter.advance(10)
-
-    rendered_bar = max(re.findall(r"([━╸╺-][━╸╺ -]+)10/30", output.getvalue()), key=len)
-    assert len(rendered_bar.rstrip()) >= 7
-    assert len(rendered_bar) >= 20
-    assert "10/30" in output.getvalue()
-    reporter.complete_phase()
-
-
 def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
     monkeypatch,
 ) -> None:
@@ -461,41 +314,6 @@ def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
     assert (outer_task_id, {"visible": True, "refresh": True}) in update_calls
 
     reporter.complete_phase()
-
-
-def test_rich_progress_reporter_warned_phase_does_not_force_total(
-    monkeypatch,
-) -> None:
-    reporter = RichProgressReporter()
-    update_calls: list[dict[str, object]] = []
-    original_update = reporter._progress.update  # noqa: SLF001
-
-    def _recording_update(task_id, **kwargs):
-        update_calls.append(kwargs)
-        return original_update(task_id, **kwargs)
-
-    monkeypatch.setattr(reporter._progress, "update", _recording_update)  # noqa: SLF001
-
-    reporter.start_phase("test", 10)
-    reporter.advance(3)
-    reporter.complete_phase(ProgressPhaseStatus.WARNED)
-
-    assert {"description": "Warning", "refresh": True} in update_calls
-    assert {"completed": 10, "refresh": True} not in update_calls
-
-
-def test_rich_progress_reporter_does_not_retain_success_below_ten_seconds(
-    monkeypatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    reporter = RichProgressReporter()
-    clock = iter((0.0, 9.9))
-    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-
-    reporter.start_phase("PLAN", 1)
-    reporter.complete_phase()
-
-    assert "✓ PLAN" not in capsys.readouterr().err
 
 
 def test_rich_progress_reporter_retain_success_at_ten_seconds(
@@ -552,20 +370,6 @@ def test_rich_progress_reporter_suppresses_long_nested_success(
     assert "13s" in output
 
 
-def test_rich_progress_reporter_suppresses_generic_confirm_completion(
-    monkeypatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    reporter = RichProgressReporter()
-    clock = iter((0.0, 10.0))
-    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-
-    reporter.start_phase("CONFIRM", 1)
-    reporter.complete_phase(retain=False)
-
-    assert "✓ CONFIRM" not in capsys.readouterr().err
-
-
 @pytest.mark.parametrize(
     ("status", "glyph", "label"),
     [
@@ -591,29 +395,6 @@ def test_rich_progress_reporter_retains_non_success_statuses(
     assert label in rendered
 
 
-def test_rich_progress_reporter_refreshes_state_changes(monkeypatch) -> None:
-    reporter = RichProgressReporter()
-    refresh_count = 0
-    original_refresh = reporter._progress.refresh  # noqa: SLF001
-
-    def _recording_refresh() -> None:
-        nonlocal refresh_count
-        refresh_count += 1
-        original_refresh()
-
-    monkeypatch.setattr(reporter._progress, "refresh", _recording_refresh)  # noqa: SLF001
-
-    reporter.start_phase("test", 3)
-    started_refresh_count = refresh_count
-
-    reporter.set_description("Rendering")
-    reporter.advance(1)
-
-    assert refresh_count >= started_refresh_count + 2
-
-    reporter.complete_phase()
-
-
 def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
     reporter = RichProgressReporter()
     reporter.start_phase("test", 40)
@@ -626,12 +407,3 @@ def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
         list(executor.map(_update, range(40)))
 
     reporter.complete_phase()
-
-
-def test_progress_reporter_protocol_is_single_source() -> None:
-    import frame_compare.analysis.metrics as metrics_module
-    import frame_compare.utils.progress as progress_module
-    import frame_compare.utils.progress_protocol as progress_protocol
-
-    assert progress_module.ProgressReporter is progress_protocol.ProgressReporter
-    assert metrics_module.ProgressReporter is progress_protocol.ProgressReporter

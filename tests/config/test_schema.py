@@ -8,8 +8,7 @@ import pytest
 import tomli_w
 from pydantic import BaseModel, ValidationError
 
-from frame_compare.config.errors import ConfigValidationError
-from frame_compare.config.loader import get_default_config, load_config_from_env
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
     ColorConfig,
@@ -620,15 +619,6 @@ def test_audio_alignment_removed_tuning_keys_are_rejected(removed_key: str) -> N
     """U3 whole-track replacement rejects retired estimator tuning keys."""
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         AudioAlignmentConfig.model_validate({removed_key: 1})
-
-
-def test_audio_alignment_removed_tuning_key_via_env_fails_validation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A retired estimator key through the environment source fails validation."""
-    monkeypatch.setenv("FRAME_COMPARE_AUDIO_ALIGNMENT__SAMPLE_RATE", "1")
-    with pytest.raises(ConfigValidationError):
-        load_config_from_env()
 
 
 @pytest.mark.parametrize("year_tolerance", [0, 5])

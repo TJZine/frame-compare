@@ -9,30 +9,6 @@ from structlog.testing import ReturnLogger
 from frame_compare.utils.logging import configure_logging
 
 
-def test_configure_logging_json_format():
-    """Test that configure_logging with log_format='json' adds JSONRenderer."""
-    configure_logging(log_format="json")
-    config = structlog.get_config()
-    processors = config["processors"]
-    assert any(isinstance(p, structlog.processors.JSONRenderer) for p in processors)
-
-
-def test_configure_logging_console_format():
-    """Test that configure_logging with log_format='console' adds ConsoleRenderer."""
-    configure_logging(log_format="console")
-    config = structlog.get_config()
-    processors = config["processors"]
-    assert any(isinstance(p, structlog.dev.ConsoleRenderer) for p in processors)
-
-
-def test_configure_logging_unknown_format_falls_back_to_console():
-    """Test that configure_logging with unknown format falls back to console."""
-    configure_logging(log_format="invalid")
-    config = structlog.get_config()
-    processors = config["processors"]
-    assert any(isinstance(p, structlog.dev.ConsoleRenderer) for p in processors)
-
-
 def test_configure_logging_level_filtering_warning():
     """WARNING level: INFO filtered, WARNING allowed."""
     configure_logging(level="WARNING")

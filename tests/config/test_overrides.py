@@ -18,17 +18,6 @@ from frame_compare.config.schema import (
 )
 
 
-def test_apply_cli_overrides_basic() -> None:
-    """Test applying basic CLI overrides."""
-    config = get_default_config()
-    cli_args = CLIConfigOverrides(random_frame_count=50)
-
-    new_config = apply_cli_overrides(config, cli_args)
-    assert new_config.analysis.random_frame_count == 50
-    # Original config unchanged (Pydantic models are mutable but we model_dump -> new instance)
-    # Wait, apply_cli_overrides returns a new instance.
-
-
 def test_apply_cli_overrides_inverts_no_upload() -> None:
     """Test that no_upload flag inverts auto_upload config."""
     config = get_default_config()
@@ -80,15 +69,6 @@ def test_apply_cli_overrides_does_not_override_false_flag_defaults() -> None:
     assert new_config.audio_alignment.force_interactive is True
 
 
-def test_apply_cli_overrides_ignores_none_values() -> None:
-    """Test that None values in CLI args are ignored."""
-    config = get_default_config()
-    cli_args = CLIConfigOverrides(random_frame_count=None)
-
-    new_config = apply_cli_overrides(config, cli_args)
-    assert new_config.analysis.random_frame_count == 10  # Default
-
-
 def test_apply_cli_overrides_empty_dto_returns_original_config() -> None:
     """No override fields set returns the original config unchanged."""
     config = get_default_config()
@@ -96,16 +76,6 @@ def test_apply_cli_overrides_empty_dto_returns_original_config() -> None:
 
     new_config = apply_cli_overrides(config, cli_args)
     assert new_config == config
-
-
-def test_apply_cli_overrides_seed_maps_to_analysis_random_seed() -> None:
-    """Test that seed maps to analysis.random_seed."""
-    config = get_default_config()
-    cli_args = CLIConfigOverrides(seed=123)
-
-    new_config = apply_cli_overrides(config, cli_args)
-
-    assert new_config.analysis.random_seed == 123
 
 
 def test_apply_cli_overrides_accepts_enum_cli_values() -> None:

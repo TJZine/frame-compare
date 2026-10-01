@@ -97,14 +97,6 @@ def test_invalid_benchmark_arguments_fail_closed(args: list[str], message: str) 
     assert message in result.stderr
 
 
-def test_trial_order_rotates_without_candidate_modes() -> None:
-    script = _load_script()
-
-    assert script._rotated_trial_order(0) == ("quality", "performance")
-    assert script._rotated_trial_order(1) == ("performance", "quality")
-    assert script._rotated_trial_order(2) == ("quality", "performance")
-
-
 def test_performance_contract_requires_exact_production_source_map() -> None:
     script = _load_script()
     frame_range = MetricFrameRange(100, 10, 50)

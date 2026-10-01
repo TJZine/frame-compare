@@ -23,7 +23,7 @@ from rich.progress_bar import ProgressBar
 from rich.table import Column
 from rich.text import Text
 
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     FAIL,
@@ -85,7 +85,6 @@ __all__ = [
     "LogProgressReporter",
     "NullProgressReporter",
     "PlainProgressReporter",
-    "ProgressReporter",
     "RichProgressReporter",
     "align_phase_duration_text",
 ]
@@ -311,11 +310,6 @@ class RichProgressReporter:
     def no_color(self) -> bool:
         """Return whether Rich rendering disables ANSI color."""
         return self._progress.console.no_color
-
-    @property
-    def writes_to_stderr(self) -> bool:
-        """Return whether Rich progress targets stderr."""
-        return self._progress.console.stderr
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start a new phase with a rich progress bar."""

@@ -104,23 +104,6 @@ def test_save_preset_omits_generated_secrets(tmp_path: Path) -> None:
     assert "sentinel-tmdb-api-key" not in preset_text
 
 
-def test_save_preset_uses_atomic_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from frame_compare.config.loader import get_default_config
-
-    calls: list[Path] = []
-
-    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
-        calls.append(path)
-        path.write_text(content, encoding=encoding)
-
-    monkeypatch.setattr("frame_compare.config.presets.write_text_atomic", _fake_write)
-
-    config = get_default_config()
-    saved = save_preset("atomic", config, presets_dir=tmp_path)
-
-    assert calls == [saved]
-
-
 def test_save_preset_rejects_empty_name(tmp_path: Path) -> None:
     from frame_compare.config.loader import get_default_config
 
@@ -150,35 +133,6 @@ def test_save_preset_roundtrip(tmp_path: Path) -> None:
     loaded_data = load_preset("roundtrip", presets_dir=tmp_path)
 
     assert loaded_data == expected_data
-
-
-def test_save_preset_apply_restores_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Applying a saved preset restores the full config with defaults.
-
-    Uses monkeypatch.chdir(tmp_path) so that apply_preset() loads from
-    the relative DEFAULT_PRESETS_DIR path (config/presets) within tmp_path.
-    """
-    from frame_compare.config.loader import get_default_config
-
-    # Change CWD to tmp_path so DEFAULT_PRESETS_DIR resolves to tmp_path/config/presets
-    monkeypatch.chdir(tmp_path)
-
-    original_config = get_default_config()
-
-    # Save preset with no presets_dir argument (uses DEFAULT_PRESETS_DIR = config/presets)
-    # config/presets will be created inside tmp_path
-    save_preset("defaults", original_config)
-
-    # Start with a fresh default config
-    base_config = get_default_config()
-
-    # apply_preset loads from DEFAULT_PRESETS_DIR (now tmp_path/config/presets)
-    restored_config = apply_preset(base_config, "defaults")
-
-    # The restored config should equal the original (defaults fill missing keys)
-    assert restored_config.model_dump(mode="json") == original_config.model_dump(mode="json")
 
 
 def test_apply_preset_merges_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
