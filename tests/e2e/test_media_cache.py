@@ -38,12 +38,49 @@ def test_media_cache_lifecycle(
         shutil.copy2(media_files["sdr"], root.input_dir / name)
     base_arguments = ["run", "--json", "--skip-metadata", "--no-upload", "--root", str(root.root)]
     steps: list[ArtifactStep] = []
+    expected = {
+        "runs": [
+            {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
+            {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
+            {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
+            {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
+        ],
+        "corrupted": {
+            "exit_code": 5,
+            "error_code": "FC-4006",
+            "error_name": "CACHE_CORRUPTION",
+            "no_new_run_folder": True,
+        },
+        "history": [
+            ["reference + comparison", "completed", True],
+            ["reference + comparison_2", "completed", True],
+            ["reference + comparison_3", "completed", True],
+            ["reference + comparison_4", "completed", True],
+        ],
+    }
     runs = []
     run_dir = None
     for flags in ([], [], ["--from-cache-only"], ["--no-cache"]):
         arguments = [*base_arguments, *flags]
         result = run_cli(root.root, arguments, timeout=60)
         steps.append((arguments, result))
+        if result.exit_code != 0:
+            runs.append(
+                {
+                    "exit_code": result.exit_code,
+                    "metrics_cache_status": None,
+                    "frames": [],
+                }
+            )
+            record(
+                "M3-cache",
+                root,
+                steps,
+                {"runs": runs},
+                expected,
+                run_dir,
+            )
+            return
         rendered, run_dir, report = render_summary(result)
         runs.append(
             {
@@ -86,24 +123,4 @@ def test_media_cache_lifecycle(
         ),
     }
     # Cache Mode Semantics and History Command Contract.
-    expected = {
-        "runs": [
-            {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
-            {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
-            {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
-            {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
-        ],
-        "corrupted": {
-            "exit_code": 5,
-            "error_code": "FC-4006",
-            "error_name": "CACHE_CORRUPTION",
-            "no_new_run_folder": True,
-        },
-        "history": [
-            ["reference + comparison", "completed", True],
-            ["reference + comparison_2", "completed", True],
-            ["reference + comparison_3", "completed", True],
-            ["reference + comparison_4", "completed", True],
-        ],
-    }
     record("M3-cache", root, steps, summary, expected, run_dir)
