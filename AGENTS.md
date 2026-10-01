@@ -34,6 +34,13 @@ Always-on defaults:
   boundaries for consequential decisions that remain unresolved.
 - Before claiming completion, run risk-matched verification, inspect the diff, and
   preserve unrelated user changes.
+- Prove features with E2E tests in `tests/e2e/` that drive the real
+  `frame-compare` executable on generated media and leave a checked artifact; the
+  media tier runs through the Docker gate.
+- Don't add unit tests that restate code you just wrote. A bug regression test
+  must fail on the pre-fix code, once, at the highest seam that reproduces the bug.
+- Write isolated tests only for the keep categories in `python-test-design`; list
+  the failure modes before writing the code.
 
 Where to look next:
 

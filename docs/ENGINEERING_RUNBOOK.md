@@ -286,6 +286,10 @@ owner is outside a listed directory:
 - FFmpeg/ffprobe execution in `src/frame_compare/services/alignment_audio.py`
 - shared process behavior in `src/frame_compare/utils/subproc.py` affecting media calls
 - integration tests that validate real VS/FFmpeg behavior
+- `tests/e2e/` media-tier scenarios
+- behavior changes in `orchestration/`, `services/` or `analysis/` that change what a
+  media-tier scenario observes: run output, selected frames, screenshots, alignment,
+  cache or report payload
 
 Pure calculations or serialization in these owners use the applicable Python gate
 when the native execution contract is unchanged. The test suite may mock missing
