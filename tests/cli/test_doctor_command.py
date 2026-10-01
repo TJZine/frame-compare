@@ -310,10 +310,6 @@ def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: Monke
     _run_doctor_optional_failure_and_assert(monkeypatch)
 
 
-def test_doctor_stub_text(monkeypatch: MonkeyPatch) -> None:
-    _run_doctor_optional_failure_and_assert(monkeypatch)
-
-
 def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyPatch) -> None:
     check = DoctorCheck(
         name="ffmpeg",

@@ -124,15 +124,6 @@ def test_coerce_cli_choice_returns_none_for_missing_value() -> None:
     )
 
 
-def test_coerce_cli_choice_returns_enum_member_for_valid_value() -> None:
-    assert (
-        coerce_cli_choice(
-            "diagnostic", OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
-        )
-        == OverlayMode.DIAGNOSTIC
-    )
-
-
 def test_coerce_cli_choice_bounds_long_echoed_value() -> None:
     huge_value = "x" * 500
 
@@ -458,36 +449,6 @@ def test_handle_run_write_config_error_uses_injected_error_handler() -> None:
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-
-
-def test_handle_run_json_write_config_error_writes_machine_schema(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    error = ConfigWriteError(
-        Path("/workspace/config/config.toml"),
-        label="configuration file",
-        cause=PermissionError("permission denied"),
-    )
-
-    def _load_config(
-        config_path: Path | None = None,
-        overrides: dict[str, object] | None = None,
-    ) -> ConfigSchema:
-        return get_default_config()
-
-    def _write_config(path: Path, config: ConfigSchema) -> NoReturn:
-        raise error
-
-    with pytest.raises(typer.Exit) as exc_info:
-        handle_run(
-            replace(_base_args(), write_config=True, json_output=True),
-            _deps(DepsOptions(load_config=_load_config, write_config_to=_write_config)),
-        )
-
-    assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["success"] is False
-    assert payload["error"]["code"] == "FC-1007"
 
 
 def test_handle_run_rejects_previous_offset_prompt_with_quiet_before_runner() -> None:

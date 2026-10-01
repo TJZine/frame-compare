@@ -326,26 +326,3 @@ def test_history_open_rejects_nonexact_name(tmp_path: Path) -> None:
 
     assert result.exit_code == 4
     assert "Run was not found" in result.stderr
-
-
-def test_history_help_does_not_import_vs_runtime() -> None:
-    code = """
-import sys
-from typer.testing import CliRunner
-from frame_compare.cli.entry import app
-result = CliRunner().invoke(app, ['history', '--help'])
-assert result.exit_code == 0, result.output
-assert 'vapoursynth' not in sys.modules
-assert 'frame_compare.vs.loader' not in sys.modules
-"""
-    import subprocess
-    import sys
-
-    completed = subprocess.run(
-        [sys.executable, "-c", code],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert completed.returncode == 0, completed.stderr

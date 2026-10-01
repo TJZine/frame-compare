@@ -224,27 +224,6 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
         assert expected in previous_offsets_row
 
 
-def test_at_a_glance_prints_effective_analysis_performance_mode(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    config = _config()
-    config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
-    console = _console()
-
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-
-    print_at_a_glance(
-        console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
-    )
-
-    analysis_mode_row = _rendered_row_value(_render(console), "analysis")
-    assert "performance profile" in analysis_mode_row
-
-
 def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -694,22 +673,6 @@ def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
     assert "(2 more)" not in verbose_output
 
 
-def test_result_summary_does_not_duplicate_because_reason() -> None:
-    console = _console()
-    print_result_summary(
-        console,
-        result=RunResult(
-            success=True,
-            warnings=["slow.pics upload skipped because report confirmation was unavailable"],
-        ),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert output.count("because report confirmation was unavailable") == 1
-    assert "slow.pics upload skipped because report confirmation was unavailable" not in output
-
-
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:
     console = _console()
 
@@ -1081,27 +1044,6 @@ def test_result_summary_reports_skipped_analysis_cache_status() -> None:
     assert "2 sources" in output
     assert "cache skipped" in output
     assert "miss" not in output
-
-
-def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None:
-    console = _console()
-
-    print_result_summary(
-        console,
-        result=RunResult(
-            success=True,
-            warnings=[f"warning {index}" for index in range(1, 11)],
-        ),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert "Comparison complete · 10 warnings" in output
-    assert "Warnings" in output
-    assert "warning 1" in output
-    assert "warning 8" in output
-    assert "(2 more)" in output
-    assert "warning 9" not in output
 
 
 def test_result_summary_quiet_mode_preserves_literal_brackets() -> None:

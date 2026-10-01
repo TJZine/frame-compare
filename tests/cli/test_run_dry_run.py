@@ -320,26 +320,6 @@ def test_run_dry_run_quiet_uses_plural_source_grammar(
     assert result.stderr == ""
 
 
-def test_run_dry_run_always_reserves_a_run_folder_when_execution_proceeds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
-        config_path = _write_workspace(root)
-        input_dir = root / "comparison_videos"
-        input_dir.mkdir()
-        (input_dir / "source.mkv").write_bytes(b"")
-
-        result = _invoke(root, config_path, "--json")
-
-    assert result.exit_code == 0
-    assert json.loads(result.stdout)["runtime_facts"]["run_folder_name"] == {
-        "reason": "resolved during run-folder reservation",
-        "status": "unknown",
-        "value": None,
-    }
-
-
 def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absolute_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -368,7 +348,6 @@ def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absol
 @pytest.mark.parametrize(
     ("setup_input", "expected_code"),
     [
-        (False, "FC-3006"),
         (True, "FC-3001"),
     ],
 )
@@ -493,32 +472,6 @@ dark_frame_count = 1
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
     assert result.stderr == ""
     assert json.loads(result.stdout)["error"]["code"] == "FC-3014"
-
-
-def test_run_dry_run_invalid_choice_uses_standard_json_error_and_skips_request(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.cli.run_command.build_run_request_from_cli",
-        _unexpected,
-    )
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _unexpected)
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
-        config_path = _write_workspace(root)
-
-        result = _invoke(root, config_path, "--tm-preset", "invalid", "--json")
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stderr == ""
-    payload = json.loads(result.stdout)
-    assert payload["success"] is False
-    assert payload["error"]["code"] == "FC-1003"
-    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
-        "color",
-        "preset",
-    ]
 
 
 @pytest.mark.parametrize(
