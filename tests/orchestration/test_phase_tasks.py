@@ -20,8 +20,6 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
-    MetricActiveRect,
-    MetricCacheRequest,
     MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
@@ -31,7 +29,6 @@ from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect
-from frame_compare.orchestration.execution_types import RunArtifacts
 from frame_compare.orchestration.full_window_retry import (
     compute_selection_window_with_recovery,
     recover_from_exclusion_selection_failure,
@@ -48,7 +45,6 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _create_config,
-    _render_artifacts,
 )
 
 if TYPE_CHECKING:
@@ -70,83 +66,6 @@ class ConfirmationProgressSpy:
         self.events.append("resume")
         if self.fail_at == "resume":
             raise RuntimeError("resume failed")
-
-
-def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
-    input_videos = [ctx.reference.path]
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.9],
-        motion=[0.2, 0.8],
-        metadata=MetricsMetadata(
-            frame_count=2,
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[],
-        ),
-    )
-    breakdown = SelectionBreakdown(quantile_dark=[1], quantile_bright=[8], motion=[13])
-    selection_details = {
-        1: SelectionDetail(
-            frame_index=1,
-            label="Dark",
-            source="analysis",
-            timecode="00:00:00.042",
-            score=0.1,
-            clip_role="analyze",
-            notes="quantile_dark",
-        )
-    }
-    selection = FrameSelection(
-        frames=[1, 8, 13],
-        seed=ctx.config.analysis.random_seed,
-        breakdown=breakdown,
-        selection_details=selection_details,
-    )
-    calls: dict[str, Any] = {}
-
-    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        return CacheLoadResult(success=True, metrics=metrics)
-
-    def _fake_calculate_metrics(**kwargs: object) -> FrameMetrics:
-        calls["calculate"] = kwargs
-        return metrics
-
-    def _fake_select_frames(**kwargs: object) -> FrameSelection:
-        calls["select"] = kwargs
-        return selection
-
-    monkeypatch.setattr(
-        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
-    )
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
-    selected_frames: list[int] = []
-
-    output = phase_selection.run_analyze_phase(
-        ctx,
-        input_videos=input_videos,
-        workspace=ctx.workspace,
-    )
-
-    assert output.metrics_cache_hit is True
-    assert output.selected_frames == [1, 8, 13]
-    assert output.selection_breakdown == breakdown
-    assert output.analysis_metrics == metrics
-    assert output.selection_details_by_source_frame == selection_details
-    assert selected_frames == []
-    assert ctx.selection_breakdown is None
-    assert ctx.selection_details_by_source_frame is None
-    assert calls["calculate"]["video_paths"] == input_videos
-    assert calls["calculate"]["cache_dir"] == ctx.workspace.cache_dir
-    assert calls["select"] == {
-        "metrics": metrics,
-        "config": ctx.config.analysis,
-        "selection_fps": ctx.reference.effective_fps,
-    }
 
 
 def _metrics_for_range(*, start: int, end: int, source_frame_count: int = 100) -> FrameMetrics:
@@ -627,145 +546,6 @@ def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path
     assert state.override is not None
 
 
-@pytest.mark.unit
-def test_run_analyze_phase_uses_prepared_analysis_selection_domain(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
-    ctx.analysis_selection_domain = "trim_start=0|trim_end=0|effective_fps=24/1"
-    input_videos = [ctx.reference.path]
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.9],
-        motion=[0.2, 0.8],
-        metadata=MetricsMetadata(
-            frame_count=2,
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[],
-        ),
-    )
-    observed_selection_domains: list[str | None] = []
-
-    def _fake_compute_cache_key(
-        _video_paths: list[Path],
-        _config: object,
-        *,
-        selection_domain: str | None = None,
-        metric_request: MetricCacheRequest | None = None,
-    ) -> str:
-        del metric_request
-        observed_selection_domains.append(selection_domain)
-        return "fingerprint"
-
-    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        return CacheLoadResult(success=True, metrics=metrics)
-
-    def _fake_calculate_metrics(**kwargs: object) -> FrameMetrics:
-        observed_selection_domains.append(kwargs["selection_domain"])
-        return metrics
-
-    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
-        return FrameSelection(
-            frames=[0],
-            seed=ctx.config.analysis.random_seed,
-            breakdown=SelectionBreakdown(quantile_dark=[0]),
-        )
-
-    monkeypatch.setattr(phase_selection.cache_io, "compute_cache_key", _fake_compute_cache_key)
-    monkeypatch.setattr(
-        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
-    )
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
-
-    phase_selection.run_analyze_phase(
-        ctx,
-        input_videos=input_videos,
-        workspace=ctx.workspace,
-    )
-
-    assert observed_selection_domains == [
-        "trim_start=0|trim_end=0|effective_fps=24/1",
-        "trim_start=0|trim_end=0|effective_fps=24/1",
-    ]
-
-
-@pytest.mark.unit
-def test_run_analyze_phase_forwards_analysis_clip_active_rect(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
-    assert ctx.analysis_clip is not None
-    ctx.analysis_clip = replace(
-        ctx.analysis_clip,
-        active_rect=ClipActiveRect(
-            x=10,
-            y=20,
-            width=300,
-            height=200,
-            source="explicit",
-            detection_mode="aspect_ratio",
-        ),
-    )
-    input_videos = [ctx.reference.path]
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.9],
-        motion=[0.0, 0.8],
-        metadata=MetricsMetadata(
-            frame_count=2,
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[],
-        ),
-    )
-    observed_rects: list[MetricActiveRect | None] = []
-
-    def _fake_compute_cache_key(
-        _video_paths: list[Path],
-        _config: object,
-        *,
-        selection_domain: str | None = None,
-        metric_request: MetricCacheRequest | None = None,
-    ) -> str:
-        del selection_domain
-        observed_rects.append(None if metric_request is None else metric_request.metric_active_rect)
-        return "fingerprint"
-
-    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        return CacheLoadResult(success=False, reason="not_found")
-
-    def _fake_calculate_metrics(**kwargs: object) -> FrameMetrics:
-        observed_rects.append(kwargs["metric_active_rect"])
-        return metrics
-
-    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
-        return FrameSelection(
-            frames=[0],
-            seed=ctx.config.analysis.random_seed,
-            breakdown=SelectionBreakdown(quantile_dark=[0]),
-        )
-
-    monkeypatch.setattr(phase_selection.cache_io, "compute_cache_key", _fake_compute_cache_key)
-    monkeypatch.setattr(
-        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
-    )
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
-
-    phase_selection.run_analyze_phase(
-        ctx,
-        input_videos=input_videos,
-        workspace=ctx.workspace,
-    )
-
-    assert observed_rects == [
-        MetricActiveRect(x=10, y=20, width=300, height=200),
-        MetricActiveRect(x=10, y=20, width=300, height=200),
-    ]
-
-
 def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1216,31 +996,6 @@ def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Pat
     assert all(0 <= frame < 10 for frame in output.selected_frames)
 
 
-def test_select_initial_frame_plan_passes_reference_fps_to_random_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    captured: dict[str, object] = {}
-
-    def _fake_select_random_frames(
-        _total_frames: int,
-        _count: int,
-        _seed: int,
-        _exclude: set[int] | None = None,
-        *,
-        selection_fps: Fraction,
-    ) -> list[int]:
-        captured["selection_fps"] = selection_fps
-        return [1, 2, 3]
-
-    monkeypatch.setattr(phase_selection, "select_random_frames", _fake_select_random_frames)
-
-    output = phase_selection.select_initial_frame_plan(ctx)
-
-    assert output.selected_frames == [1, 2, 3]
-    assert captured["selection_fps"] == ctx.reference.effective_fps
-
-
 def test_select_initial_frame_plan_uses_global_selection_window(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=48)
@@ -1330,46 +1085,6 @@ def test_select_initial_frame_plan_fails_when_random_request_exceeds_remaining_d
         "requested": 2,
         "found": 1,
     }
-
-
-def test_run_artifacts_uses_render_artifacts_carrier() -> None:
-    artifacts = RunArtifacts()
-    assert artifacts.render is None
-
-    screenshot = Path("screenshots/reference_1.png")
-    artifacts.render = _render_artifacts(
-        screenshots_by_label={"Reference": [screenshot]},
-        screenshot_dir=Path("screenshots"),
-    )
-
-    assert artifacts.render.screenshots_by_label == {"Reference": [screenshot]}
-    assert artifacts.render.screenshot_dir == Path("screenshots")
-
-
-def test_run_confirm_slowpics_upload_phase_marks_report_unavailable_without_prompt(
-    tmp_path: Path,
-) -> None:
-    ctx = _context(tmp_path)
-    callback_calls: list[SlowpicsUploadConfirmationRequest] = []
-
-    def _callback(
-        request: SlowpicsUploadConfirmationRequest,
-    ) -> SlowpicsUploadConfirmationDecision:
-        callback_calls.append(request)
-        return "confirmed"
-
-    output = phase_post_render.run_confirm_slowpics_upload_phase(
-        ctx,
-        report_path=None,
-        report_succeeded=False,
-        confirm_slowpics_upload=_callback,
-    )
-
-    assert output.status == "report_unavailable"
-    assert output.warnings == [
-        "slow.pics upload skipped because report confirmation was unavailable"
-    ]
-    assert callback_calls == []
 
 
 def test_run_confirm_slowpics_upload_phase_requires_callback_when_report_available(

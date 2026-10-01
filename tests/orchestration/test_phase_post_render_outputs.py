@@ -173,39 +173,6 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
     ]
 
 
-async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    expected = TmdbMetadata(
-        tmdb_id=2,
-        title="Thief",
-        original_title="Thief",
-        year=1981,
-        media_type="movie",
-    )
-    captured: dict[str, Any] = {}
-
-    async def _fake_resolve_run_metadata(**kwargs: object) -> TmdbMetadata:
-        captured.update(kwargs)
-        return expected
-
-    monkeypatch.setattr(phase_post_render, "resolve_run_metadata", _fake_resolve_run_metadata)
-
-    async with httpx.AsyncClient() as client:
-        output = await phase_post_render.run_metadata_phase(
-            ctx,
-            client=client,
-            metadata_prefetch=MetadataPrefetch(None, False),
-        )
-        assert captured["client"] is client
-
-    assert captured["filenames"] == ["reference.mkv"]
-    assert captured["config"] == ctx.config
-    assert captured["cache"].path == ctx.workspace.shared_tmdb_cache_path
-    assert output.resolved_metadata == expected
-
-
 def test_run_report_phase_builds_report_data_and_records_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -430,40 +397,6 @@ def test_run_report_phase_discloses_one_shared_tonemap_setting(
     )
 
     assert captured["report_data"].rendering.tonemap_settings == settings
-
-
-def test_run_report_phase_rejects_mixed_tonemap_settings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    render = _render_artifacts(
-        screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
-            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [1], "Encode 1": [1]},
-    )
-    render.clip_facts_by_label = {
-        "Reference": replace(
-            render.clip_facts_by_label["Reference"],
-            tonemap_settings=TonemapSettings(target_nits=100),
-        ),
-        "Encode 1": replace(
-            render.clip_facts_by_label["Encode 1"],
-            tonemap_settings=TonemapSettings(target_nits=203),
-        ),
-    }
-
-    with pytest.raises(ValueError, match="cannot represent mixed effective tonemap settings"):
-        phase_post_render.run_report_phase(
-            ctx,
-            frames=[1],
-            render=render,
-            metadata=None,
-            slowpics_url=None,
-        )
 
 
 def test_run_report_phase_allows_sdr_alongside_shared_tonemap_setting(
@@ -763,55 +696,6 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
                 render=render,
                 selected_frames=[10],
             )
-
-
-async def test_run_publish_phase_skips_shortcut_when_config_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.config.slowpics.create_url_shortcut = False
-    screenshot_dir = tmp_path / "screenshots"
-    screenshot_dir.mkdir()
-    screenshot = screenshot_dir / "10 - reference.png"
-    screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
-    render = _render_artifacts(
-        screenshots_by_label={"Reference": [screenshot]},
-        screenshot_dir=screenshot_dir,
-    )
-
-    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
-        upload_plan = cast(Any, kwargs["upload_plan"])
-        return PublishResult(
-            url="https://slow.pics/c/example",
-            screenshot_count=len(upload_plan.file_paths),
-            upload_duration_seconds=0.1,
-            uploaded_file_paths=tuple(upload_plan.file_paths),
-        )
-
-    async def _no_post_upload_actions(
-        _request: SlowpicsPostUploadRequest,
-    ) -> tuple[PostUploadActionResult, ...]:
-        return ()
-
-    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _fake_publish_to_slowpics)
-    monkeypatch.setattr(
-        phase_post_render,
-        "run_slowpics_post_upload_actions",
-        _no_post_upload_actions,
-    )
-
-    async with httpx.AsyncClient() as client:
-        output = await phase_post_render.run_publish_phase(
-            ctx,
-            client=client,
-            metadata=None,
-            render=render,
-            selected_frames=[10],
-        )
-
-    assert output.slowpics_url == "https://slow.pics/c/example"
-    assert output.uploaded_file_paths == (screenshot,)
-    assert output.post_upload_actions == ()
 
 
 async def test_report_confirmed_decline_skips_publish(

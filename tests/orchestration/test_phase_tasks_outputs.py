@@ -8,10 +8,9 @@ from typing import Any, cast
 
 import pytest
 
-from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.types import FrameMetrics, MetricsMetadata, SelectionBreakdown
+from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.schema import OverlayMode
-from frame_compare.orchestration import phase_alignment, phase_render
+from frame_compare.orchestration import phase_render
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.render.types import (
     RenderedBatchResult,
@@ -19,7 +18,6 @@ from frame_compare.render.types import (
     ScreenshotBatchRequest,
 )
 from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
-from frame_compare.services.types import AlignmentResult
 from frame_compare.utils.media_facts import (
     PictureType,
     PresentationState,
@@ -27,7 +25,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
 )
 from frame_compare.vs.types import HDRMetadata
-from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner, _run_align_phase
+from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner
 
 
 def _result_for_requests(
@@ -335,48 +333,3 @@ def test_run_render_phase_rejects_backend_source_frame_mismatch(
 
     with pytest.raises(ValueError, match="do not match source mapping"):
         phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
-
-
-def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than_counts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
-    )
-    ctx.analysis_metrics = FrameMetrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=ctx.reference.effective_fps,
-            config_fingerprint="test",
-            clips=[],
-        ),
-    )
-
-    monkeypatch.setattr(
-        phase_alignment,
-        "align_clips_from_request",
-        lambda *_args, **_kwargs: [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ],
-    )
-
-    with pytest.raises(SelectionError) as exc_info:
-        _run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
-
-    assert exc_info.value.context.details == {
-        "reason": "insufficient generated candidates after alignment",
-        "requested": 4,
-        "found": 2,
-    }

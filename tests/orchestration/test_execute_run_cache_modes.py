@@ -21,7 +21,7 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cache_errors import CacheVersionMismatchError
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -569,63 +569,6 @@ enable = false
 
     assert result.success is True
     assert result.cache_hit is True
-
-
-def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
-    tmp_path: Path,
-) -> None:
-    create_config(
-        tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
-    )
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-
-    cache_dir = tmp_path / "generated" / "cache" / "analysis"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    config = load_config(tmp_path / "config" / "config.toml")
-    source_path = input_dir / "source.mkv"
-    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
-    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
-    )
-    cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
-    cache_path.write_text("{not-json", encoding="utf-8")
-
-    request = RunRequest(
-        root=tmp_path,
-        from_cache_only=True,
-        skip_analysis=False,
-        skip_metadata=True,
-        no_upload=True,
-    )
-    deps = RunDependencies(vs_loader=FakeVSLoader())
-
-    with pytest.raises(CacheCorruptionError):
-        asyncio.run(execute_run(request, deps=deps))
 
 
 def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(

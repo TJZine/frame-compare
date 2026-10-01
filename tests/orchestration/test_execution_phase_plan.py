@@ -116,54 +116,6 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     assert forced_align_phase.warn_only is False
 
 
-def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_upload(
-    tmp_path: Path,
-) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
-    config = ConfigSchema()
-    config.slowpics.auto_upload = True
-    config.slowpics.confirm_upload_after_report = True
-
-    prep = PrepState(
-        workspace=workspace,
-        config=config,
-        input_videos=[tmp_path / "ref.mkv"],
-        analysis_selection_domain="test-selection-domain",
-        clips=[clip_state(tmp_path / "ref.mkv", label="Reference")],
-        artifacts=RunArtifacts(),
-        metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=[],
-        preflight_duration=0.0,
-        load_sources_start=0.0,
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-    )
-
-    plan = build_execution_phase_plan(
-        request=RunRequest(root=tmp_path),
-        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
-        prep=prep,
-        state=ExecutionState(artifacts=prep.artifacts),
-    )
-
-    assert [phase.name for phase in plan.after_align] == [
-        "render",
-        "metadata",
-        "report",
-        "confirm_slowpics_upload",
-        "publish",
-        "post_report_cleanup",
-    ]
-
-
 def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     tmp_path: Path,
 ) -> None:

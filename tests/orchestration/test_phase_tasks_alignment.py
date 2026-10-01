@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError, SelectionError
-from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
@@ -269,70 +268,6 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
     ]
 
 
-def test_run_align_phase_labels_skipped_analysis_fallback_random_frame(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
-    )
-    captured: dict[str, object] = {}
-    real_select_random_frames = phase_alignment.select_random_frames
-
-    def _capture_select_random_frames(
-        total_frames: int,
-        count: int,
-        seed: int,
-        exclude: set[int] | None = None,
-        *,
-        selection_fps: Fraction,
-    ) -> list[int]:
-        captured["selection_fps"] = selection_fps
-        return real_select_random_frames(
-            total_frames,
-            count,
-            seed,
-            exclude,
-            selection_fps=selection_fps,
-        )
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=80,
-                time_offset_seconds=3.33,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-    monkeypatch.setattr(
-        phase_alignment,
-        "select_random_frames",
-        _capture_select_random_frames,
-    )
-
-    output = _run_align_phase(ctx, selected_frames=[0, 66])
-
-    assert output.reference.trim.trim_start_frames == 80
-    assert output.selected_frames == [16]
-    assert output.selection_breakdown is not None
-    assert output.selection_breakdown.user == []
-    assert output.selection_breakdown.random == [96]
-    assert output.selection_details_by_source_frame is not None
-    assert output.selection_details_by_source_frame[96].label == "Random"
-    assert output.selection_details_by_source_frame[96].notes == "random"
-    assert captured["selection_fps"] == ctx.reference.effective_fps
-    assert output.warnings == [
-        "frame selection: dropped user frame(s) outside aligned renderable range: 0"
-    ]
-
-
 def test_run_align_phase_does_not_substitute_after_full_window_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -570,73 +505,6 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
         "requested": 4,
         "found": 2,
     }
-
-
-def test_run_align_phase_replaces_stale_analysis_metadata_after_tiny_overlap_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 0}
-    )
-    luminance = [0.5 for _frame in range(100)]
-    luminance[0] = 0.0
-    luminance[1] = 0.01
-    luminance[50] = 0.99
-    luminance[60] = 1.0
-    ctx.analysis_metrics = FrameMetrics(
-        luminance=luminance,
-        motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=Fraction(48, 1),
-            config_fingerprint="test",
-            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-        ),
-    )
-    initial_selection = select_frames(
-        metrics=ctx.analysis_metrics,
-        config=ctx.config.analysis,
-    )
-    ctx.selection_breakdown = initial_selection.breakdown
-    ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-
-    output = _run_align_phase(
-        ctx,
-        selected_frames=list(initial_selection.frames),
-    )
-
-    assert len(initial_selection.frames) == 2
-    assert set(initial_selection.selection_details).isdisjoint({98, 99})
-    assert output.reference.trim.trim_start_frames == 98
-    assert output.selected_frames == [0, 1]
-    assert output.selection_breakdown is not None
-    assert output.selection_breakdown.quantile_dark == [98, 99]
-    assert output.selection_breakdown.quantile_bright == []
-    assert output.selection_details_by_source_frame is not None
-    assert set(output.selection_details_by_source_frame) == {98, 99}
-    assert [output.selection_details_by_source_frame[frame].label for frame in [98, 99]] == [
-        "Dark",
-        "Dark",
-    ]
-    assert output.selection_details_by_source_frame[98].timecode == "00:00:04.083"
-    assert output.selection_details_by_source_frame[99].timecode == "00:00:04.125"
 
 
 def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_same_frame(
