@@ -225,9 +225,183 @@ __all__ = [
     "Workspace",
     "artifact_root",
     "make_workspace",
+    "generate_media",
+    "decode_frame_number",
+    "render_summary",
     "read_pyproject_version",
     "read_report_data",
     "resolve_entry_point",
     "run_command",
     "write_artifact",
 ]
+
+
+def generate_media(cache_dir: Path) -> dict[str, Path]:
+    """Generate small, deterministic SDR, HDR and frame-numbered audio fixtures."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        name: cache_dir / f"{name}.mkv"
+        for name in ("sdr", "hdr", "numbered", "delayed", "unrelated")
+    }
+
+    def ffmpeg(arguments: list[str], destination: Path) -> None:
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *arguments, str(destination)],
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+
+    ffmpeg(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "nullsrc=size=128x72:rate=4:duration=3",
+            "-vf",
+            "geq=lum='16+18*N':cb=128:cr=128",
+            "-c:v",
+            "ffv1",
+            "-pix_fmt",
+            "yuv420p",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+        ],
+        paths["sdr"],
+    )
+    # The production Docker proof's HDR10 recipe, with four PQ/BT.2020 frames.
+    ffmpeg(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=64x48:rate=4:duration=1",
+            "-vf",
+            "format=yuv420p10le",
+            "-frames:v",
+            "4",
+            "-c:v",
+            "libx265",
+            "-preset",
+            "ultrafast",
+            "-x265-params",
+            "repeat-headers=1:hdr10=1:master-display=G(13250,34500)B(7500,3000)"
+            "R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400:range=limited:"
+            "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-color_primaries",
+            "bt2020",
+            "-color_trc",
+            "smpte2084",
+            "-colorspace",
+            "bt2020nc",
+            "-color_range",
+            "tv",
+        ],
+        paths["hdr"],
+    )
+    # Eight 16-pixel blocks on the top row encode N; the remaining blocks give
+    # video confirmation strong, frame-distinct motion throughout the clip.
+    pattern = (
+        "geq=lum='if(lt(Y,16),16+219*mod(floor(N/pow(2,floor(X/16))),2),"
+        "24+mod(N*37+floor(X/16)*53+floor(Y/16)*71,200))':cb=128:cr=128"
+    )
+    for name, seed in (("numbered", 1101), ("unrelated", 3303)):
+        ffmpeg(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "nullsrc=size=128x72:rate=8:duration=12",
+                "-f",
+                "lavfi",
+                "-i",
+                f"anoisesrc=color=white:sample_rate=8000:duration=12:seed={seed}",
+                "-vf",
+                pattern,
+                "-c:v",
+                "ffv1",
+                "-pix_fmt",
+                "yuv420p",
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-colorspace",
+                "bt709",
+                "-c:a",
+                "pcm_s16le",
+            ],
+            paths[name],
+        )
+    ffmpeg(
+        [
+            "-i",
+            str(paths["numbered"]),
+            "-vf",
+            "tpad=start=4:start_mode=clone,trim=end_frame=96",
+            "-af",
+            "adelay=500:all=1,atrim=duration=12",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+        ],
+        paths["delayed"],
+    )
+    return paths
+
+
+def decode_frame_number(path: Path) -> int:
+    """Decode the eight luma blocks in a numbered screenshot."""
+    from PIL import Image, ImageStat
+
+    with Image.open(path) as image:
+        luma = image.convert("L")
+        return sum(
+            (1 << bit)
+            if ImageStat.Stat(luma.crop((bit * 16 + 4, 4, bit * 16 + 12, 12))).mean[0] > 127
+            else 0
+            for bit in range(8)
+        )
+
+
+def render_summary(result: CommandResult) -> tuple[dict[str, Any], Path, Any]:
+    """Read the stable render facts from JSON, the result record and PNG files."""
+    from PIL import Image
+
+    assert result.exit_code == 0, result.stderr + result.stdout
+    payload = json.loads(result.stdout)
+    run_dir = Path(payload["report_path"]).parent
+    with (run_dir / "run_result.toml").open("rb") as stream:
+        outcome = tomllib.load(stream)
+    report = read_report_data(run_dir / "report.html")
+    screenshots = []
+    for path in sorted(run_dir.rglob("*.png")):
+        with Image.open(path) as image:
+            screenshots.append([path.relative_to(run_dir).as_posix(), image.mode, list(image.size)])
+    summary = {
+        key: payload[key]
+        for key in ("success", "frame_count", "clips_processed", "cache_hit", "errors")
+    }
+    summary.update(
+        {
+            key: outcome[key]
+            for key in ("status", "clip_count", "selected_frame_count", "metrics_cache_status")
+        }
+    )
+    summary["frames"] = [
+        [
+            frame["number"],
+            frame["category"],
+            [[image["clip"], image["source_frame"]] for image in frame["images"]],
+        ]
+        for frame in report["frames"]
+    ]
+    summary["screenshots"] = screenshots
+    return summary, run_dir, report

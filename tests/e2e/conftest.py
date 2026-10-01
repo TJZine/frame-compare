@@ -89,3 +89,10 @@ def report_data_reader() -> Callable[[Path], Any]:
 @pytest.fixture
 def pyproject_version() -> str:
     return read_pyproject_version(Path(__file__).parents[2] / "pyproject.toml")
+
+
+@pytest.fixture(scope="session")
+def media_files(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    from tests.e2e.harness import generate_media
+
+    return generate_media(tmp_path_factory.mktemp("media"))
