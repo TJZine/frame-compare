@@ -1622,8 +1622,10 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   source loading, rendering, or report generation.
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
-  is not present in the CLI override map. Fresh computed audio candidates are
-  provisional and never authoritative regardless of `previous_offsets`.
+  is not present in the CLI override map. `previous_offsets` never changes the
+  authority of a fresh computed attempt: only a `trusted_automatic` /
+  `audio_video_confirmed` result applies trims, and every other fresh result stays
+  a provisional, unapplied candidate.
   `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
   results may still write to the shared reuse cache when `cache_results = true`.
