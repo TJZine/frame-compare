@@ -5,7 +5,7 @@ search:
 
 Status: Active
 Scope: Make real-CLI end-to-end tests the primary proof for Frame Compare features, prune unit tests that E2E or retained integration tests already prove, and change the repository rules so low-value unit tests stop being added.
-Owner: Claude controller session (planning, adjudication, verification); Codex executes units A, B and C through `.handoff/` prompts. Branch `agent/e2e-test-strategy`.
+Owner: Claude controller session (planning, adjudication, verification); Codex executes units A, B, B2, C, D and E through `.handoff/` prompts. Branch `agent/e2e-test-strategy`.
 
 # E2E-first test strategy and unit-test pruning
 
@@ -55,9 +55,9 @@ Owner: Claude controller session (planning, adjudication, verification); Codex e
     clips, and with `doctor --json`.
     - The test service runs as the image's `framecompare` user (UID 1000). The
       production proof runs as the host UID (`FRAME_COMPARE_HOST_UID`).
-    - The hosted `docker-integration.yml` job runs on amd64, and only for a
-      path-filtered subset of changes. A recent hosted run's verification step took
-      about 2 minutes.
+    - The hosted `docker-integration.yml` job runs on amd64. Before S5 it ran only
+      for a path-filtered subset of changes; S5 widened the filter. A recent hosted
+      run's verification step took about 2 minutes.
     - The image declares the media runtime through environment variables
       (`FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT`, `FRAME_COMPARE_RUNTIME_KIND`,
       `FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED`, `FRAME_COMPARE_FFMPEG_EXECUTABLE`,
@@ -92,10 +92,12 @@ Owner: Claude controller session (planning, adjudication, verification); Codex e
 
 ## Goal and non-goals
 
-**Goal:** any credible feature regression fails an E2E test that drives the real
-`frame-compare` executable against generated media and leaves an artifact someone
-can inspect. The unit suite shrinks to tests that guard something E2E cannot reach
-reliably. The repository rules then keep it that way.
+**Goal:** any credible feature regression fails either an E2E test that drives the
+real `frame-compare` executable against generated media and leaves an artifact
+someone can inspect, or the single retained owner test for that behavior (S10).
+The unit suite shrinks to one owner per user-visible behavior, plus the boundary,
+failure, contract, network, security and platform cases E2E can't reach. The
+repository rules then keep it that way.
 
 Non-goals:
 - product behavior changes, except deleting production code whose only callers are
@@ -303,7 +305,7 @@ Media tier (Docker only):
   `tests/vs/test_runtime_contract.py`. The runbook sentence saying the Docker job
   "need not trigger for every relevant owner" is replaced.
 
-**S6. Deletion bar (units B and C).** Each test belongs to exactly one cluster; a
+**S6. Deletion bar (unit B; S10 governs units B2, C and D).** Each test belongs to exactly one cluster; a
 cluster is the set of tests guarding the same behavior. Every cluster gets one
 classification:
 - **`junk:<pattern>`** matches one of these patterns:
@@ -346,10 +348,11 @@ classification:
     through `tests/services/node_harness.py`), which are the runbook's documented
     viewer proof.
 
-  These are the proofs other tests are deleted against. They may lose only
-  `junk:duplicate` tests within themselves.
+  These are the proofs other tests are deleted against. Always-keep tests are
+  never deleted in units C and D.
 - **`vsview`, `windows_portable` and `workflows`** may lose tests only as `junk:*`
-  (S10 adds `delete:internal`, never `delete:covered`).
+  (S10 adds `delete:internal`). They are never `delete:covered`, except under
+  ruling U7.
   Their real E2E is a GUI session or a hosted Windows or release run, which unit C
   cannot execute.
 - A cluster whose classification is uncertain is kept. The goal is confidence, not
@@ -636,17 +639,19 @@ Checkpoint B (controller):
 - Projected remainder after units C and D: about 76.7k of 92.0k `wc -l` lines.
 
 **Samples.**
-- **Junk** records are sound. One exception, B8-087, a source grep for the
-  PowerShell `param` block, is `keep:contract`, because PowerShell requires that
-  block first.
+- **Junk** records are sound. The one exception is ruling **B8-087:
+  `keep:contract`**. It is a source grep for the PowerShell `param` block, which
+  PowerShell requires first.
 - **Internal** records show a systematic error, which the flow rule and the
   narrowed `delete:internal` above now fix:
-  - parser corpora (B2-2-003, B2-2-059) were called internal although their values
-    reach TMDB queries and labels;
-  - tests with a named owner (B6-013) skipped the mutation proof.
+  - parser corpora (**B2-2-003, B2-2-059**) were called internal although their
+    values reach TMDB queries and labels. They are re-decided by the flow rule;
+  - tests with a named owner (**B6-013**) skipped the mutation proof. They become
+    `delete:covered` with a C2 mutation.
 
-  Every `delete:internal` and `delete:junk` record is re-verified in unit B3
-  before unit C.
+  Every `delete:internal` and `delete:junk` record, and every record named in these
+  samples, is re-verified in unit C step C0. Unit B3 was folded into C0; see
+  below.
 
 **Rulings on the `keep:unresolved` questions.** Each applies to every record it
 names.
@@ -729,72 +734,131 @@ names.
 but `.` can't escape. `..` is still rejected, and the `resolve()` plus
 `is_relative_to` guard is the real protection. At most it's one dead condition.
 
-**Widening candidates.** B2 lists 76. They await individual maintainer decisions.
-None blocks unit C, because every behavior they describe has a kept test.
+**Widening candidates: all declined** (maintainer, 2026-10-01). B2 listed 76. Each
+describes a behavior that keeps a unit test, so none would let unit tests be
+deleted, and each would add E2E lines. The goal is a slimmer suite.
 
-### Unit B3: verification of internal and junk records (`.handoff/T4-codex-verify-deletions.md`)
+### Unit B3: folded into unit C (maintainer, 2026-10-01)
 
-- Read-only, in the same ten lanes.
-- Each lane re-checks every `delete:internal` and `delete:junk` record against the
-  flow rule and the narrowed `delete:internal`, and applies the rulings above.
-- Each lane writes `.handoff/test-audit/<lane>.verdicts.md`. It lists every
-  changed record (old → new classification, with a reason) and the corrected
-  totals.
-- The B2 ledger plus its verdicts file is unit C's input.
+The separate read-only verification round (`.handoff/T4-codex-verify-deletions.md`)
+was written but **not dispatched**. Its job became step C0 below, done by the same
+worker that deletes the lane. The reasons:
+- that worker must read the records anyway;
+- C2 and C5 are objective gates that don't depend on its judgment;
+- the controller reviews every C0 reclassification.
 
-### Unit C: deletions (handoff written after checkpoint B)
+### Unit C: deletions (`.handoff/T5-codex-deletions.md`)
 
-- **C1:** one area per commit, **serially**, in the lane order above.
-- **C2:** mutation proof for every approved `covered:` (S6) or `delete:covered` (S10)
-  cluster, before deleting it.
-  For each behavior the cluster asserts:
+Inputs: each lane's B2 ledger, the Checkpoint B rulings (including the records
+named under Samples), and S10 as amended (the flow rule and the narrowed
+`delete:internal`).
+
+- **Order.** One task per lane, **strictly serial**, one commit each, in lane order:
+  1a, 1b, 2, 3a, 3b, 4, 5, 6, then 7 and 8 together. Serial work keeps the coverage
+  diffs and mutations from overlapping. Ledger line numbers refer to `60d88657`
+  and drift as earlier lanes delete code, so locate each mutation by its quoted
+  text.
+- **C0: verify before deleting.** For every `delete:internal` and `delete:junk`
+  record, and every record named by a ruling or under Samples:
+  - apply the flow rule, the narrowed `delete:internal`, rulings U1–U7, B4-126
+    and B8-087.
+  - **Owner protection.** Before deleting a node, `rg` its `file::function` (without
+    the parameter suffix) across `.handoff/test-audit/*.b2.md` and `*.c0.md`. A node
+    that any record names as a `delete:covered` owner is never deleted.
+  - **Cross-lane owners.** A cross-lane owner is `delete:covered-pending(<node>)`.
+    - If the target is in an earlier lane and still exists at HEAD, it counts as
+      confirmed, and the record proceeds through C2.
+    - If the target is in a later lane, the test stays. The target is recorded in
+      `<lane>.c0.md`, so that the later lane's owner protection keeps it.
+  - Write `.handoff/test-audit/<lane>.c0.md`, listing every changed record (old →
+    new, reason, and the one-line trace `function → caller → output`) and every
+    pending target.
+- **C2: mutation proof for every `delete:covered` record**, including those C0
+  creates. For each behavior:
   1. Apply the proposed mutation.
-  2. Run every deleted test **individually** and the covering test. All must fail
-     on an assertion, not an exception, import error or crash of the child
-     process. A deleted test that doesn't fail is a distinct case: it moves to its
-     own cluster and stays. Media-tier covering tests run through the verify script
-     with `--pytest-path`.
-  3. Restore with `git checkout -- <file>` and confirm `git status` shows no source
-     change.
+  2. Run every deleted test **individually** and the owner.
+     - All must fail on an assertion failure, meaning `AssertionError` or pytest's
+       `Failed` from `raises` or `fail`. An exception, import error or child
+       process crash doesn't count.
+     - For E2E owners, the summary diff must not show a changed exit code or a
+       traceback.
+     - Native owners run with `uv run --no-sync pytest`.
+     - Docker-only owners run with
+       `docker compose run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/framecompare-home -e PYTHONUSERBASE=/home/framecompare/.local -e FRAME_COMPARE_E2E_REQUIRE_MEDIA=1 -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/c2/<record> frame-compare-test -lc '<prelude>; python -m pytest -vv -p no:cacheprovider <owner node>'`.
+       The bind mount sees the mutated source, and the artifacts stay under the
+       gitignored `generated/`.
+  3. Restore with `git restore --worktree -- <file>`, and confirm
+     `git diff --quiet -- <file>`.
 
-  Record each command and failing assertion in the ledger. A behavior whose
-  covering test doesn't fail keeps its tests; the ledger records why. Mutations are
-  never committed, and unit C is serial so they never overlap another run.
-- **C3:** delete the unlocked production seams, and update any authority document
-  that names a deleted file, in the same commit (S7).
-- **C5: native branch-coverage diff, per lane commit**, as the objective safety net
-  for distinct cases.
-  1. Create a scratch rc file outside the repository, `b2.coveragerc`, with these
-     `[run]` settings: `source = src/frame_compare`, `branch = true`,
-     `patch = subprocess`, `omit = */__main__.py`, and
-     `data_file = <scratch>/.coverage`, so nothing is written inside the
-     repository. Copy `exclude_lines` from `pyproject.toml`. Subprocess patching
-     was verified on coverage 7.16.2: the E2E child processes are measured.
+  A deleted test that doesn't fail is a distinct case: it stays, as `keep:edge`.
+  This never blocks. Mutations are never committed.
+- **C1: delete.** Delete:
+  - the junk tests, confirmed internal tests and covered tests that passed C2;
+  - support code that no remaining test, in any lane or covering proof, imports.
+- **C3:** delete the S7 production seams, and update any authority document that
+  names a deleted file or test, in the same commit.
+- **C5: native coverage diff, per lane**, as the objective safety net for distinct
+  cases.
+  1. Create a scratch rc file outside the repository, `b2.coveragerc`:
+     - `[run]`: `source = src/frame_compare`, `branch = true`,
+       `patch = subprocess`, `omit = */__main__.py`, and
+       `data_file = <scratch>/.coverage`, so nothing is written inside the
+       repository;
+     - `[report]`: `exclude_lines`, copied from `pyproject.toml`;
+     - `[json]`: `show_contexts = true`.
+
+     Subprocess patching was verified on coverage 7.16.2: the E2E child processes
+     are measured.
   2. Run `uv run --no-sync pytest -q --cov --cov-config=<scratch>/b2.coveragerc
-     --cov-report=json:<scratch>/<lane>.<phase>.json` twice before the deletions and
-     once after. Use the same machine and environment for every run.
-  3. Arcs that differ between the two "before" runs are flaky and ignored.
-  4. Group every arc covered before and missing after by function. Each such
-     function needs one of:
+     --cov-report=json:<scratch>/<lane>.<phase>.json` twice before the deletions
+     and once after. Add `--cov-context=test` to the first "before" run, which
+     records which test executed each line.
+     - A lane may reuse the previous lane's "after" run as its second "before" run
+       only if no restoration happened after it, and the tree it measured equals
+       the previous lane's commit.
+     - Use the same machine and environment for every run.
+     - If a coverage run itself fails, retry once. If it still fails, report
+       `blocked` and leave the tree clean.
+  3. Lines or branches that differ between the two "before" runs are flaky and
+     ignored.
+  4. Every line or branch executed before and missing after needs one of:
      - an S7 deletion in the same commit;
-     - a C2 mutation inside that function whose owner failed;
-     - a one-line justification the maintainer approves.
+     - a C2 mutation **on that line or branch**, whose owner failed.
 
-     Otherwise restore the deleted test.
+     Otherwise:
+     - find the deleted tests that executed it, from the first "before" run's
+       contexts. In-process tests are recorded as `<node id>|run`. Lines run only
+       inside child processes carry an empty context. If a lost line has only
+       empty contexts, restore the lane's deleted tests that spawn a process
+       reaching that code; verified with coverage 7.16.2 and pytest-cov;
+     - restore those test functions and their fixtures from
+       `git show <lane base>:<file>`;
+     - re-run only those tests under coverage, and confirm the lost lines and
+       branches are covered again.
+
+     List each restoration with a one-line justification under "needs maintainer
+     approval". A later task may delete them after approval.
   5. Docker-only code never appears in the diff, which is acceptable: C2's Docker
      mutations cover it.
-- **C4:** per commit, run:
-  - the area's remaining tests;
-  - `pyright --warnings`, `ruff check .`, `ruff format --check .`, `lint-imports`;
-  - the full native `pytest -q`;
-  - the verify script when the commit touches a media-tier owner or deletes
-    production code.
+- **C4: gates, per lane commit.**
+  - `pyright --warnings`, `ruff check .`, `ruff format --check .`, `lint-imports`.
+  - The full native `pytest -q`. A passing C5 "after" run counts as this if the
+    tree hasn't changed since.
+  - `bash tools/verify_docker_integration.sh --no-build` when the commit:
+    - deletes production code; or
+    - deletes tests or fixtures under `tests/vs/`, a conftest fixture, or a support
+      module that `tests/integration/**` uses.
+  - Before committing, `git status --short` lists only this lane's planned
+    deletions and edits.
+  - Report the `git diff --numstat`, split into production and test lines.
+- **Not in unit C:** trims, consolidation, `rewrite` annotations and renames. Those
+  belong to unit D.
 
-  Report the `git diff --numstat` split into production and test lines.
-
-Checkpoint C (controller): spot-check the mutation records and the diff, re-run the
-full native gate and one Docker gate, then update the inventory table in the
-execution record.
+Checkpoint C (controller):
+- review every C0 change, the "needs maintainer approval" list, a sample of C2
+  records and the diff;
+- re-run the full native gate and one Docker gate;
+- update the inventory in the execution record.
 
 ### Unit D: consolidation and typing (handoff written after checkpoint C)
 
@@ -825,6 +889,14 @@ execution record.
   `pyright --warnings` is clean repo-wide.
 - Update any runbook or `CONTRIBUTING.md` text that says pyright covers only
   `src/`.
+- **Align the authoring rules with S10.** `AGENTS.md` and the `python-test-design`
+  skill still use S6's keep categories (`failure-mode`, `numeric`, and so on).
+  Rewrite them to S10's vocabulary:
+  - one owner per user-visible behavior;
+  - the flow rule;
+  - the `owner`, `edge`, `failure`, `contract`, `network`, `security` and
+    `platform` categories;
+  - internal assertions are not a reason to keep a test.
 
 ## Invariants
 
@@ -851,8 +923,8 @@ Any of these stops the unit and sends a `blocked` message:
 - a media scenario can't be made byte-identical across two Docker runs;
 - a retained test fails on the base;
 - a deletion needs a production behavior change;
-- a covering test that doesn't fail under its mutation, where the worker would have
-  to weaken the cluster's classification rather than keep the cluster;
+- (not a stop condition) a covering test that doesn't fail under its mutation: the
+  deleted tests are kept as `keep:edge`, and the work continues;
 - any conflict between this plan and an authority document not listed in S5 or S8.
 
 ## Verification summary
@@ -863,8 +935,10 @@ Any of these stops the unit and sends a `blocked` message:
 | A2 | media tier skipped | direct compose run ×2, byte-identical summaries | — |
 | A3 | `tests/workflows`, `tests/vs/test_runtime_contract.py`, `bash -n` | none (fake-docker tests) | YAML parses |
 | A5 | full gate | verify script ×2 | 3 mutations fail M5/M3/M4 |
-| B | none (read-only) | — | ledger completeness |
-| C | area tests, full gate per commit | when media owners or production code change | mutation records |
+| B, B2 | none (read-only) | — | ledger completeness |
+| C | C0 records; lane tests and full gate per commit; C5 coverage diff | C2 Docker mutations; verify script when production code is deleted | mutation records |
+| D | file tests; `pyright --warnings <file>` | when a rewritten file's owners are media-tier | case mapping; one mutation per group |
+| E | `pyright --warnings` repo-wide, with `tests` included | — | — |
 
 ## Residual risks
 
@@ -872,15 +946,16 @@ Any of these stops the unit and sends a `blocked` message:
   summaries matched arm64). The first hosted run remains the final check.
 - **M4 doesn't measure pixels.** It proves the configured tonemap preset, target and
   RGB export, but no pixel statistic shows the tonemap ran. A unit test guarding
-  tonemap pixel math can only be classified `covered:M4` if its C2 mutation actually
+  tonemap pixel math can only be `delete:covered(M4)` if its C2 mutation actually
   fails M4.
 - Windows runs only the CLI tier. Windows media behavior stays covered by the
   hosted Windows portable route and the `platform` keep category.
 
 ## Rollback
 
-Each task is one commit, so rollback is `git revert <sha>`. Unit C commits are
-independent per area. Reverting one restores its tests and any seams it deleted.
+Each task is one commit, so rollback is `git revert <sha>`. Later unit C lanes can
+build on earlier lanes' S7 deletions, so revert unit C commits in reverse order.
+Reverting one restores its tests and any seams it deleted.
 
 ## Execution record
 
@@ -990,3 +1065,10 @@ independent per area. Reverting one restores its tests and any seams it deleted.
     net.
   - Unplaceable tests now become `keep:unresolved(<question>)` instead of blocking
     a lane.
+- 2026-10-01: maintainer decisions:
+  - decline all 76 widening candidates;
+  - don't dispatch T4. Its verification became unit C step C0, done by the
+    deleting worker, with C2 and C5 as the objective gates.
+
+  Unit C runs serially, lane by lane (lanes 7 and 8 together), from
+  `.handoff/T5-codex-deletions.md`.
