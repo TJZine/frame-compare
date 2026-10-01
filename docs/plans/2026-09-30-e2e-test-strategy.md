@@ -321,7 +321,7 @@ classification:
   A test whose name or docstring promises more than its input exercises gets
   renamed, not deleted, unless it also matches a pattern above.
 - **`covered:<test ids>`**: every behavior the cluster asserts makes a named E2E
-  (E*/M*) or retained integration test fail. Proven by C2.
+  (E*/M*) or always-keep test (listed below) fail. Proven by C2.
 - **`keep:<category>`**: the cluster guards something E2E can't reach reliably.
   Categories:
   - `failure-mode`: subprocess timeout or kill, malformed external data, partial or
@@ -469,15 +469,18 @@ Checkpoint A (controller):
 
 ### Unit B: discovery ledgers (handoff written after checkpoint A)
 
-- Read-only work. There are eight lanes, run as two waves of at most six workers:
-  1. `services` alignment (`test_alignment_*`, `alignment_request_test_support`);
-  2. `services` other;
-  3. `orchestration`;
-  4. `cli`;
-  5. `render`, `vs`, `analysis`;
-  6. `config`, `utils`, root `tests/*.py`;
-  7. `vsview`;
-  8. `windows_portable`, `workflows`, `scripts`, `manual`.
+- Read-only work. There are ten lanes, with at most six running at once. The two
+  largest areas are split; exact file sets are in the unit B handoff.
+  1. **1a:** `services` alignment estimator and evidence;
+  2. **1b:** `services` alignment workflow, reuse and review;
+  3. **2:** `services` other;
+  4. **3a:** `orchestration` execution and phases;
+  5. **3b:** `orchestration` other;
+  6. **4:** `cli`;
+  7. **5:** `render`, `vs`, `analysis`;
+  8. **6:** `config`, `utils`, root `tests/*.py`;
+  9. **7:** `vsview`;
+  10. **8:** `windows_portable`, `workflows`, `scripts`, `manual`.
 - Each lane writes only `.handoff/test-audit/<lane>.md`. One record per cluster:
   - test node IDs and file:line;
   - the behaviors asserted, one line each;
@@ -496,7 +499,7 @@ Checkpoint B (controller):
 - Adjudicate every record: `Approved`, `Keep` or `Needs proof`, with a one-line
   reason.
 - Check `junk:` records with the same strictness as `covered:` ones: check every
-  `junk:` record in lanes 1–4 and a sample of at least one in five elsewhere.
+  `junk:` record in lanes 1a–5 and a sample of at least one in five elsewhere.
 - The approved records become unit C's scope.
 
 ### Unit C: deletions (handoff written after checkpoint B)
@@ -571,8 +574,12 @@ Any of these stops the unit and sends a `blocked` message:
 
 ## Residual risks
 
-- Cross-architecture determinism is confirmed only by A5's emulated amd64 run or a
-  hosted run, and must be confirmed before unit C (Checkpoint A).
+- Cross-architecture determinism: confirmed by A5's emulated amd64 run (all 17
+  summaries matched arm64). The first hosted run remains the final check.
+- **M4 doesn't measure pixels.** It proves the configured tonemap preset, target and
+  RGB export, but no pixel statistic shows the tonemap ran. A unit test guarding
+  tonemap pixel math can only be classified `covered:M4` if its C2 mutation actually
+  fails M4.
 - Windows runs only the CLI tier. Windows media behavior stays covered by the
   hosted Windows portable route and the `platform` keep category.
 
@@ -645,3 +652,30 @@ independent per area. Reverting one restores its tests and any seams it deleted.
     - the skill citing plan IDs;
     - `CONTRIBUTING.md` running the media tier natively.
   - E2 exposed the cache-flag defect fixed by S9.
+- 2026-10-01: T1R completed unit A at `3d906ee2`, from base `d4f7da5a`.
+  - Commits:
+    - A4R `66defd1e`: rule text cleanup;
+    - P `33dbc6e7`: S9 fix. The E2 regression failed on the old code with exit 5,
+      FC-4002, and passed after the fix;
+    - A1R `53f626f2`: harness rework;
+    - A2 `88bb9609`: media tier M1–M6;
+    - A5 `cf8197e6`, A5R `1768a4fb`, A5S `3d906ee2`: media fixture gating and M3
+      failure recording.
+  - Evidence:
+    - native: 3,652 passed, 87 skipped. The difference from baseline is the 8 CLI
+      cases, 1 workflow case and 6 gated media cases;
+    - arm64 Docker: 294 passed twice, 0 skipped, xfailed or xpassed. The 17
+      `summary.json` files were byte-identical, and the media tier took about 16 s;
+    - the three A5 mutations each failed M5, M3 and M4 at `summary == expected`;
+    - an emulated amd64 run gave 17/17 summaries identical to arm64;
+    - the artifacts are owned by the host UID.
+  - **Checkpoint A** (controller, 2026-10-01): verified.
+    - The S9 diff matches the spec.
+    - The M3 repairs route a mid-loop failure into the checked summary without
+      weakening anything.
+    - The media scenarios carry the S4 fields as explicit literals.
+    - Native `tests/e2e`: 11 passed, 6 media skipped.
+    - The import, conftest-import and skip greps are empty apart from the media
+      gate, and pyright is clean.
+    - The A5 Docker evidence is reused under the runbook's currency rule.
+  - Unit B lanes split to ten (1a/1b, 3a/3b), because of size.
