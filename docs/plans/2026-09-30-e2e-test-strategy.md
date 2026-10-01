@@ -430,6 +430,85 @@ classification:
   - E2's case expects FC-1003, exit 2. It is the regression test and must fail on
     the pre-fix code.
 
+**S10. Revised deletion bar** (maintainer, 2026-10-01). This replaces S6's
+classification rules for units B2, C and D. S6's junk patterns, always-keep list and
+junk-only areas (`vsview`, `windows_portable`, `workflows`) still apply.
+
+Unit B under S6 kept 96% of tests (3,533 of 3,679) and proposed only 1,543 lines
+for deletion. The reason: S6 counted a test as covered only if E2E observed every
+assertion in it, and most unit tests assert internals E2E never sees.
+
+**The question for every behavior is now:** if this test were deleted, could a
+user-visible bug ship that no remaining test catches?
+
+- **User-visible** means anything a user or a persisted consumer can observe:
+  - exit codes;
+  - documented stdout and stderr content;
+  - files written: run records, report payload, screenshots, caches, config,
+    presets;
+  - requests sent to slow.pics or TMDB;
+  - process behavior: hangs, leaked children, partial or lost files;
+  - VSView behavior;
+  - Windows install and update behavior;
+  - return values and exceptions of the symbols in `docs/api.md`;
+  - whether a warning or error is emitted at default verbosity (its exact wording
+    only if frozen);
+  - cache reuse and invalidation decisions: a stale cache reused after a change is
+    a user-visible bug.
+- **Internal** means everything else, including:
+  - call counts or order on fakes;
+  - intermediate dataclass fields;
+  - private helper return values when the public output is checked elsewhere;
+  - log or progress event order that no contract documents;
+  - progress rendering and order, unless the progress output crashes, hangs or
+    corrupts stdout.
+
+  An internal assertion is never a reason to keep a test.
+- **Clusters group tests by behavior, not by function.** A cluster may span
+  functions and files within one lane. Each user-visible behavior has one owner:
+  the strongest test for it. The other tests in its cluster are deleted as covered
+  by that owner.
+- **Two tests are distinct cases** if some single-line mutation fails one and not
+  the other. When unsure, check whether they reach a different production branch.
+  Distinct cases belong to separate clusters, or become separate rows of a
+  consolidated test. POSIX and Windows variants of one behavior are distinct
+  cases.
+- **Classifications:**
+  - `delete:junk:<pattern>`: an S6 junk pattern other than `duplicate`. That
+    covers assertions that can't fail, copied sources, test-only hooks and mocks
+    that implement the asserted behavior. Also a smoke test with no assertion, when
+    a retained test runs the same path. Under S10, duplicates are always
+    `delete:covered`, so they get a mutation proof.
+  - `delete:covered(<target>)`: the named retained test fails when the cluster's
+    user-visible behavior breaks. The target may be any `keep` test in the same
+    lane, or an S6 always-keep or E2E test. A target in another lane is
+    `delete:covered-pending(<target>)` until that target is confirmed `keep`. C2
+    proves each claim by mutation.
+  - `keep:<category>`, narrowed:
+    - `owner`: the strongest test of a user-visible behavior that no E2E or
+      always-keep summary field observes. The record names the observable output it
+      checks;
+    - `edge`: one boundary input per distinct boundary, in any function, including
+      estimator cases such as a negative offset, VFR or `match_fps`, with its
+      user-visible consequence;
+    - `failure`: a failure with a user-visible consequence that no E2E or
+      always-keep test triggers (hang, leaked process, partial or lost file, wrong
+      exit or error code, corrupted persisted state);
+    - `contract`: only behavior documented in `docs/current-cli-contract.md` or
+      `docs/api.md`, a persisted format, frozen strings, or a release, Docker or
+      Windows workflow contract. The record cites the document line or the writer,
+      and names the specific field, byte or key asserted. Each contract element has
+      one owner; other tests of the same element are `delete:covered`;
+    - `network`, `security`, `platform` and `always`: unchanged from S6.
+- **Annotations on `keep` records**, used by unit D:
+  - `trim`: the internal assertions to remove from a kept test, by line;
+  - `consolidate:<group>`: kept tests in **one file** that share setup or shape and
+    can become one parametrized test. The record maps each member test to a
+    parameter row and gives the expected lines after merging.
+- **No E2E widening.** The scenario summaries stay as they are. A new summary field
+  or scenario is added only when B2 finds a user-visible behavior whose only guard
+  is a heavily faked unit test. Each such case goes to the maintainer individually.
+
 ## Units
 
 Codex runs each unit through a handoff. The Claude controller verifies each
@@ -502,15 +581,28 @@ Checkpoint B (controller):
   `junk:` record in lanes 1a–5 and a sample of at least one in five elsewhere.
 - The approved records become unit C's scope.
 
+### Unit B2: reclassification under S10 (`.handoff/T3-codex-reclassify.md`)
+
+- Read-only. The same ten lanes and file sets as unit B. Each lane reads its unit B
+  ledger as an inventory of what each test asserts, and writes
+  `.handoff/test-audit/<lane>.b2.md`.
+- Checkpoint B (controller) adjudicates the B2 ledgers instead of the unit B ones,
+  with the same rules: check every `delete` record in lanes 1a–5 and a sample of
+  at least one in five elsewhere, plus a sample of `keep` records against the
+  narrowed categories.
+
 ### Unit C: deletions (handoff written after checkpoint B)
 
 - **C1:** one area per commit, **serially**, in the lane order above.
-- **C2:** mutation proof for every approved `covered:` cluster, before deleting it.
+- **C2:** mutation proof for every approved `covered:` (S6) or `delete:covered` (S10)
+  cluster, before deleting it.
   For each behavior the cluster asserts:
   1. Apply the proposed mutation.
-  2. Run the cluster **and** its covering test. Both must fail on an assertion, not
-     an exception, import error or crash of the child process. Media-tier covering
-     tests run through the verify script with `--pytest-path`.
+  2. Run every deleted test **individually** and the covering test. All must fail
+     on an assertion, not an exception, import error or crash of the child
+     process. A deleted test that doesn't fail is a distinct case: it moves to its
+     own cluster and stays. Media-tier covering tests run through the verify script
+     with `--pytest-path`.
   3. Restore with `git checkout -- <file>` and confirm `git status` shows no source
      change.
 
@@ -519,6 +611,27 @@ Checkpoint B (controller):
   never committed, and unit C is serial so they never overlap another run.
 - **C3:** delete the unlocked production seams, and update any authority document
   that names a deleted file, in the same commit (S7).
+- **C5: native branch-coverage diff, per lane commit**, as the objective safety net
+  for distinct cases.
+  1. Create a scratch rc file outside the repository, `b2.coveragerc`, with these
+     `[run]` settings: `source = src/frame_compare`, `branch = true`,
+     `patch = subprocess`, `omit = */__main__.py`, and
+     `data_file = <scratch>/.coverage`, so nothing is written inside the
+     repository. Copy `exclude_lines` from `pyproject.toml`. Subprocess patching
+     was verified on coverage 7.16.2: the E2E child processes are measured.
+  2. Run `uv run --no-sync pytest -q --cov --cov-config=<scratch>/b2.coveragerc
+     --cov-report=json:<scratch>/<lane>.<phase>.json` twice before the deletions and
+     once after. Use the same machine and environment for every run.
+  3. Arcs that differ between the two "before" runs are flaky and ignored.
+  4. Group every arc covered before and missing after by function. Each such
+     function needs one of:
+     - an S7 deletion in the same commit;
+     - a C2 mutation inside that function whose owner failed;
+     - a one-line justification the maintainer approves.
+
+     Otherwise restore the deleted test.
+  5. Docker-only code never appears in the diff, which is acceptable: C2's Docker
+     mutations cover it.
 - **C4:** per commit, run:
   - the area's remaining tests;
   - `pyright --warnings`, `ruff check .`, `ruff format --check .`, `lint-imports`;
@@ -531,6 +644,34 @@ Checkpoint B (controller):
 Checkpoint C (controller): spot-check the mutation records and the diff, re-run the
 full native gate and one Docker gate, then update the inventory table in the
 execution record.
+
+### Unit D: consolidation and typing (handoff written after checkpoint C)
+
+- One file per task, applying that file's `trim` and `consolidate` annotations.
+  Work is serial within a file and may run in parallel across files with disjoint
+  write sets.
+- **Every original case survives.** Each case of a consolidated group maps to a
+  parameter row or a retained assertion, and the mapping is recorded in the task
+  report.
+- **Proof:** one mutation per consolidated group fails the new test on an
+  assertion.
+- **Trim safety:** a trim may not remove an assertion that C2 recorded as failing.
+  When a trimmed file owns a `delete:covered` target, rerun that target's C2
+  mutations after the trim.
+- **Case count:** the file's collected case count may drop only by approved
+  `delete` records.
+- **Typing:** each rewritten file passes `pyright --warnings <file>` under the
+  existing `tests` execution environment. Fakes use the real types or a
+  `Protocol`; `# type: ignore` is allowed only with a reason on the same line.
+
+### Unit E: pyright gate for tests (after unit D)
+
+- Fix the remaining pyright errors in files unit D didn't rewrite. There were 539
+  errors at `ae434e5c`, 294 of them in `tests/vs`.
+- Then set `include = ["src", "tests"]` in `[tool.pyright]` and confirm that
+  `pyright --warnings` is clean repo-wide.
+- Update any runbook or `CONTRIBUTING.md` text that says pyright covers only
+  `src/`.
 
 ## Invariants
 
@@ -679,3 +820,11 @@ independent per area. Reverting one restores its tests and any seams it deleted.
       gate, and pyright is clean.
     - The A5 Docker evidence is reused under the runbook's currency rule.
   - Unit B lanes split to ten (1a/1b, 3a/3b), because of size.
+- 2026-10-01: unit B (T2) completed at base `ae434e5c`. All ten lanes reported done,
+  and 3,679 nodes were ledgered exactly once. Proposed for deletion: 117 clusters,
+  146 tests, 1,543 lines. Kept: 2,531 clusters, 3,533 tests, 68,042 lines.
+  - **Maintainer decision:** adopt S10 and reclassify (B2) before any deletion. Add
+    unit D (consolidation with typing) and unit E (pyright for tests). No E2E
+    widening.
+  - The unit B ledgers stay as B2's assertion inventory. Checkpoint B moves to the
+    B2 output.
