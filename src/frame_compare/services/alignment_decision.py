@@ -375,7 +375,7 @@ def derive_stability(
     the candidate frame for in-sync container delays.
     """
     credible = [item for item in estimate.observations if item.credible]
-    if outcome == "agreed":
+    if outcome in {"agreed", "search_edge"}:
         classification = "stable"
     elif len(credible) < 3:
         classification = "insufficient_evidence"
