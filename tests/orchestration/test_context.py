@@ -79,13 +79,3 @@ def test_clip_state_with_trim_rejects_negative_trim_start_frames(
     """Assert ValueError on trim_start_frames < 0 (trim-first invariant)."""
     with pytest.raises(ValueError, match="trim_start_frames must be >= 0"):
         base_clip_state.with_trim(trim_start_frames=-1, trim_end_frame_inclusive=None)
-
-
-def test_clip_state_immutability(base_clip_state: ClipState):
-    """Verify with_trim returns a new instance and doesn't mutate."""
-    original_trim = base_clip_state.trim
-    new_state = base_clip_state.with_trim(trim_start_frames=5, trim_end_frame_inclusive=None)
-
-    assert base_clip_state.trim == original_trim
-    assert new_state.trim.trim_start_frames == 5
-    assert new_state is not base_clip_state

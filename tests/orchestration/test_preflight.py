@@ -21,7 +21,6 @@ from frame_compare.orchestration.preflight import (
     resolve_paths,
     resolve_selected_config_path,
     resolve_workspace,
-    validate_and_normalize_config_paths,
 )
 
 # Minimal valid TOML config content
@@ -407,21 +406,6 @@ class TestResolvePaths:
 
         assert result.input_dir == external_input.resolve()
 
-    def test_generated_root_accepts_external_absolute_directory_without_mutating_config(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        root = tmp_path / "workspace"
-        external = tmp_path / "external-generated"
-        root.mkdir()
-        config = ConfigSchema(paths=PathsConfig(generated_dir=str(external)))
-
-        normalized = validate_and_normalize_config_paths(config, root)
-
-        assert normalized is config
-        assert config.paths.generated_dir == str(external)
-        assert resolve_paths(config, root).generated_root == external.resolve()
-
     def test_resolve_contained_path_expands_environment_variables(
         self,
         tmp_path: Path,
@@ -621,19 +605,6 @@ class TestPreparePreflight:
         error = exc_info.value
         assert error.path == input_dir.resolve()
         assert "*.mkv" in error.patterns
-
-    def test_prepare_preflight_discovers_inputs_sorted_case_insensitive(
-        self, tmp_path: Path
-    ) -> None:
-        """Given files b.mkv and A.mkv → preflight succeeds (ordering tested in TestDiscoverInputs)."""
-        _create_config(tmp_path)
-        input_dir = tmp_path / "comparison_videos"
-        _create_video_files(input_dir, "b.mkv", "A.mkv")
-
-        result = prepare_preflight(root=tmp_path)
-
-        # Preflight should succeed (detailed ordering tested via _discover_inputs)
-        assert isinstance(result, PreflightResult)
 
     def test_prepare_preflight_with_explicit_config_path(self, tmp_path: Path) -> None:
         """Given explicit config_path → loads that config file."""

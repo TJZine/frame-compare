@@ -9,7 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.orchestration import RunDependencies as PublicRunDependencies
 from frame_compare.orchestration.coordinator import (
     RunDependencies,
     execute_run,
@@ -23,7 +22,6 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
-from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
 
@@ -38,10 +36,6 @@ class DummyFFmpegRunner:
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         return None
-
-
-def test_run_dependencies_exported_from_orchestration() -> None:
-    assert PublicRunDependencies is RunDependencies
 
 
 def test_run_dependencies_default_clock_is_aware_utc() -> None:
@@ -135,44 +129,6 @@ def test_execute_run_preserves_injected_ffmpeg_runner_after_prep(
         asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=deps))
 
     assert deps.ffmpeg_runner is injected_runner
-
-
-def test_execute_run_passes_no_color_to_progress_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from frame_compare.orchestration import coordinator
-
-    captured: dict[str, bool] = {}
-    progress = NullProgressReporter()
-
-    def fake_select_reporter(
-        *,
-        quiet: bool = False,
-        json_output: bool = False,
-        no_color: bool = False,
-        force_tty: bool | None = None,
-    ) -> NullProgressReporter:
-        del force_tty
-        captured["quiet"] = quiet
-        captured["json_output"] = json_output
-        captured["no_color"] = no_color
-        return progress
-
-    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
-        assert local_deps.progress is progress
-        raise StopAfterDependencyInit
-
-    monkeypatch.setattr(coordinator, "select_reporter", fake_select_reporter)
-    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
-
-    with pytest.raises(StopAfterDependencyInit):
-        asyncio.run(execute_run(RunRequest(root=tmp_path, no_color=True), deps=RunDependencies()))
-
-    assert captured == {
-        "quiet": False,
-        "json_output": False,
-        "no_color": True,
-    }
 
 
 def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(

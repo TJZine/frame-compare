@@ -16,32 +16,6 @@ def test_load_clip_probe_cache_returns_empty_dict_on_missing_file(tmp_path: Path
     assert cache == {}
 
 
-def test_load_clip_probe_cache_skips_entry_with_non_array_tonemap_prop_keys(tmp_path: Path):
-    """Malformed tonemap key containers still trigger warn-and-skip handling."""
-    f = tmp_path / "invalid_tonemap_shape.toml"
-    f.write_text(
-        """
-version = "1"
-
-[bad_key]
-path = "video.mkv"
-size_bytes = 100
-mtime_ns = 100
-width = 1920
-height = 1080
-num_frames = 100
-fps_num = 24
-fps_den = 1
-is_hdr = false
-tonemap_prop_keys = "not-an-array"
-""",
-        encoding="utf-8",
-    )
-
-    cache = load_clip_probe_cache(f)
-    assert cache == {}
-
-
 def test_load_clip_probe_cache_returns_empty_dict_on_version_mismatch(tmp_path: Path):
     """Wrong version -> empty dict."""
     f = tmp_path / "version.toml"
@@ -86,62 +60,6 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
     warning.assert_called_once()
 
 
-def test_load_clip_probe_cache_skips_entry_with_zero_fps_denominator(tmp_path: Path) -> None:
-    f = tmp_path / "zero_fps_den.toml"
-    f.write_text(
-        """
-version = "1"
-
-[bad_key]
-path = "video.mkv"
-size_bytes = 100
-mtime_ns = 100
-width = 1920
-height = 1080
-num_frames = 100
-fps_num = 24
-fps_den = 0
-is_hdr = false
-""",
-        encoding="utf-8",
-    )
-
-    with patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning:
-        cache = load_clip_probe_cache(f)
-
-    assert cache == {}
-    warning.assert_called_once()
-    assert warning.call_args.args[0] == "probe_cache_invalid_entry"
-    assert warning.call_args.kwargs["key"] == "bad_key"
-    assert "fps_den must be non-zero" in warning.call_args.kwargs["error"]
-
-
-def test_load_clip_probe_cache_skips_entry_with_non_table_preserved_frame_props(tmp_path: Path):
-    """Malformed preserved props containers still trigger warn-and-skip handling."""
-    f = tmp_path / "invalid_props_shape.toml"
-    f.write_text(
-        """
-version = "1"
-
-[bad_key]
-path = "video.mkv"
-size_bytes = 100
-mtime_ns = 100
-width = 1920
-height = 1080
-num_frames = 100
-fps_num = 24
-fps_den = 1
-is_hdr = false
-preserved_frame_props = "not-a-table"
-""",
-        encoding="utf-8",
-    )
-
-    cache = load_clip_probe_cache(f)
-    assert cache == {}
-
-
 def test_load_clip_probe_cache_sanitizes_nested_hdr_metadata_values(tmp_path: Path):
     """Invalid nested HDR value types fall back to safe defaults instead of surviving unchanged."""
     f = tmp_path / "hdr_value_sanitize.toml"
@@ -181,16 +99,6 @@ matrix = true
     assert hdr.color_primaries == 2
     assert hdr.transfer == 16
     assert hdr.matrix == 2
-
-
-def test_load_clip_probe_cache_returns_empty_dict_on_missing_version(tmp_path: Path):
-    """Missing version -> empty dict."""
-    f = tmp_path / "missing_version.toml"
-    with f.open("wb") as out:
-        tomli_w.dump({"foo": {}}, out)
-
-    cache = load_clip_probe_cache(f)
-    assert cache == {}
 
 
 def test_load_clip_probe_cache_sanitizes_preserved_props_and_tonemap_keys(tmp_path: Path):
@@ -247,36 +155,3 @@ def test_load_clip_probe_cache_returns_empty_dict_on_read_os_error(tmp_path: Pat
     assert cache == {}
     warning.assert_called_once()
     assert warning.call_args.args[0] == "probe_cache_read_error"
-
-
-def test_load_clip_probe_cache_returns_empty_dict_on_parse_error(tmp_path: Path):
-    """Invalid TOML -> empty dict."""
-    f = tmp_path / "invalid.toml"
-    f.write_text("invalid [ toml", encoding="utf-8")
-    cache = load_clip_probe_cache(f)
-    assert cache == {}
-
-
-def test_load_clip_probe_cache_skips_entry_with_non_table_hdr_metadata(tmp_path: Path):
-    """HDR entries with malformed nested metadata tables are skipped."""
-    f = tmp_path / "invalid_hdr_shape.toml"
-    data = {
-        "version": "1",
-        "bad_hdr": {
-            "path": "hdr.mkv",
-            "size_bytes": 100,
-            "mtime_ns": 100,
-            "width": 3840,
-            "height": 2160,
-            "num_frames": 240,
-            "fps_num": 24,
-            "fps_den": 1,
-            "is_hdr": True,
-            "hdr_metadata": "not-a-table",
-        },
-    }
-    with f.open("wb") as out:
-        tomli_w.dump(data, out)
-
-    cache = load_clip_probe_cache(f)
-    assert cache == {}

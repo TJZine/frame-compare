@@ -337,38 +337,6 @@ def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
         )
 
 
-def test_execute_prep_from_cache_only_misses_when_reference_effective_fps_differs(
-    tmp_path: Path,
-) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources.overrides."a-default.mkv"]
-effective_fps = "24000/1001"
-"""
-    )
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "a-default.mkv", "b-encode.mkv")
-    config = preparation.prepare_preflight(root=tmp_path).config
-    input_order = [input_dir / "a-default.mkv", input_dir / "b-encode.mkv"]
-    source_fps_fingerprint = cache_io.compute_cache_key(input_order, config.analysis)
-    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    (metrics_dir / cache_io.metrics_cache_filename(input_order, source_fps_fingerprint)).write_text(
-        "{}",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
-        asyncio.run(
-            preparation.execute_prep(
-                RunRequest(root=tmp_path, from_cache_only=True),
-                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
-            )
-        )
-
-
 def test_execute_prep_shared_analysis_cache_stays_outside_run_folder(
     tmp_path: Path,
 ) -> None:

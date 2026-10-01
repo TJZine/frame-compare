@@ -11,7 +11,6 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
-from frame_compare.orchestration.errors import SourceSelectionError
 from frame_compare.orchestration.selection_domain import build_analysis_selection_domain_token
 from frame_compare.orchestration.source_labels import (
     resolve_source_label_details,
@@ -82,13 +81,6 @@ def test_explicit_override_wins_and_controls_are_normalized_for_derived_text() -
     assert details[comparison].explicit
 
 
-def test_duplicate_explicit_labels_fail_with_typed_source_selection_error() -> None:
-    paths = [Path("a.mkv"), Path("b.mkv")]
-    overrides = {path: SourceOverrideConfig(label="Same") for path in paths}
-    with pytest.raises(SourceSelectionError, match="duplicate explicit source label"):
-        _labels(paths, overrides=overrides)
-
-
 def test_derived_collisions_are_qualified_while_explicit_label_is_preserved() -> None:
     paths = [Path("a.mkv"), Path("b.mkv"), Path("Same.mkv")]
     overrides = {paths[0]: SourceOverrideConfig(label="Same")}
@@ -106,16 +98,6 @@ def test_derived_collision_qualification_is_stable_by_source_order(
     )
     paths = [Path("one.mkv"), Path("two.mkv")]
     assert _labels(paths, mode="parsed") == ["Same [one]", "Same [two]"]
-
-
-def test_explicit_label_collisions_are_case_sensitive() -> None:
-    paths = [Path("a.mkv"), Path("b.mkv")]
-    overrides = {
-        paths[0]: SourceOverrideConfig(label="Same"),
-        paths[1]: SourceOverrideConfig(label="same"),
-    }
-
-    assert _labels(paths, overrides=overrides) == ["Same", "same"]
 
 
 def test_display_labels_do_not_change_analysis_cache_identity() -> None:

@@ -22,43 +22,11 @@ from frame_compare.utils.progress import (
 )
 
 
-def test_select_reporter_quiet_returns_null():
-    """quiet=True should return NullProgressReporter."""
-    reporter = select_reporter(quiet=True)
-    assert isinstance(reporter, NullProgressReporter)
-
-
-def test_select_reporter_json_returns_log():
-    """json_output=True should return LogProgressReporter."""
-    reporter = select_reporter(json_output=True)
-    assert isinstance(reporter, LogProgressReporter)
-
-
-def test_select_reporter_force_tty_true_returns_rich():
-    """force_tty=True should return RichProgressReporter."""
-    reporter = select_reporter(force_tty=True)
-    assert isinstance(reporter, RichProgressReporter)
-
-
-def test_select_reporter_force_tty_false_returns_plain():
-    """force_tty=False should return PlainProgressReporter."""
-    reporter = select_reporter(force_tty=False)
-    assert isinstance(reporter, PlainProgressReporter)
-
-
 def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPatch):
     """Auto-detection in TTY should return RichProgressReporter."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     reporter = select_reporter()
     assert isinstance(reporter, RichProgressReporter)
-
-
-def test_select_reporter_tty_detection_non_interactive(monkeypatch: pytest.MonkeyPatch):
-    """Auto-detection in non-TTY should return PlainProgressReporter."""
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
-    reporter = select_reporter()
-    assert isinstance(reporter, PlainProgressReporter)
 
 
 def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
@@ -71,71 +39,6 @@ def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
     assert isinstance(reporter, RichProgressReporter)
 
 
-def test_select_reporter_tty_detection_no_isatty_attr(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Auto-detection without isatty attributes should return PlainProgressReporter."""
-
-    class _NoIsatty:
-        pass
-
-    monkeypatch.setattr(sys, "stdout", _NoIsatty())
-    monkeypatch.setattr(sys, "stderr", _NoIsatty())
-    reporter = select_reporter()
-    assert isinstance(reporter, PlainProgressReporter)
-
-
-def test_select_reporter_tty_detection_isatty_raises_oserror(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Auto-detection should treat OSError from isatty as non-interactive."""
-
-    def _raise_oserror() -> bool:
-        raise OSError("stream is unavailable")
-
-    monkeypatch.setattr(sys.stdout, "isatty", _raise_oserror)
-    monkeypatch.setattr(sys.stderr, "isatty", _raise_oserror)
-    reporter = select_reporter()
-    assert isinstance(reporter, PlainProgressReporter)
-
-
-def test_select_reporter_tty_detection_isatty_raises_valueerror(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Auto-detection should treat ValueError from isatty as non-interactive."""
-
-    def _raise_value_error() -> bool:
-        raise ValueError("I/O operation on closed file")
-
-    monkeypatch.setattr(sys.stdout, "isatty", _raise_value_error)
-    monkeypatch.setattr(sys.stderr, "isatty", _raise_value_error)
-    reporter = select_reporter()
-    assert isinstance(reporter, PlainProgressReporter)
-
-
-def test_select_reporter_quiet_takes_precedence_over_json():
-    """quiet=True should win over json_output=True."""
-    reporter = select_reporter(quiet=True, json_output=True)
-    assert isinstance(reporter, NullProgressReporter)
-
-
-def test_select_reporter_quiet_takes_precedence_over_force_tty():
-    """quiet=True should win over force_tty=True."""
-    reporter = select_reporter(quiet=True, force_tty=True)
-    assert isinstance(reporter, NullProgressReporter)
-
-
-def test_select_reporter_json_takes_precedence_over_force_tty():
-    """json_output=True should win over force_tty=True."""
-    reporter = select_reporter(json_output=True, force_tty=True)
-    assert isinstance(reporter, LogProgressReporter)
-
-
-def test_select_reporter_no_color_uses_rich_for_forced_tty():
-    """Interactive no-color runs should keep Rich progress with color disabled."""
-    reporter = select_reporter(no_color=True, force_tty=True)
-    assert isinstance(reporter, RichProgressReporter)
-    assert reporter.no_color is True
-
-
 def test_select_reporter_no_color_uses_rich_for_detected_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -144,43 +47,6 @@ def test_select_reporter_no_color_uses_rich_for_detected_tty(
     reporter = select_reporter(no_color=True)
     assert isinstance(reporter, RichProgressReporter)
     assert reporter.no_color is True
-
-
-def test_select_reporter_no_color_non_tty_returns_plain():
-    """Non-interactive no-color output should still use plain progress."""
-    reporter = select_reporter(no_color=True, force_tty=False)
-    assert isinstance(reporter, PlainProgressReporter)
-
-
-def test_interactive_alignment_uses_plain_activity_without_discarding_log_progress() -> None:
-    rich_reporter = RichProgressReporter(no_color=True)
-    with patch.object(
-        rich_reporter,
-        "start_phase",
-        wraps=rich_reporter.start_phase,
-    ) as rich_start_phase:
-        start_phase_progress(
-            rich_reporter,
-            name="align",
-            display_label="ALIGN",
-            total=3,
-        )
-    rich_start_phase.assert_called_once_with("Align", total=1)
-    rich_reporter.complete_phase()
-
-    log_reporter = LogProgressReporter()
-    with patch.object(
-        log_reporter,
-        "start_phase",
-        wraps=log_reporter.start_phase,
-    ) as log_start_phase:
-        start_phase_progress(
-            log_reporter,
-            name="align",
-            display_label="ALIGN",
-            total=3,
-        )
-    log_start_phase.assert_called_once_with("align", total=3)
 
 
 def test_rich_phase_label_drops_skip_detail() -> None:

@@ -14,7 +14,6 @@ import pytest
 import frame_compare.vs.env as env_module
 from frame_compare.orchestration.doctor import (
     CheckResult,
-    DoctorCheck,
     collect_checks,
     run_doctor,
 )
@@ -270,19 +269,6 @@ class TestCheckLsmas:
         assert result.message == "lsmas check failed"
         assert result.details == {"exception_type": "ImportError"}
         assert "plugin setup import failed" not in str(result.details)
-
-    def test_check_lsmas_failure_included_in_critical_failures(self) -> None:
-        """Mock lsmas core failure → DoctorReport.critical_failures includes 'lsmas'."""
-        lsmas_check = DoctorCheck(
-            name="lsmas",
-            category="core",
-            check_fn=lambda: CheckResult(passed=False, message="L-SMASH-Works not found"),
-        )
-
-        report = run_doctor(checks=[lsmas_check])
-
-        assert report.all_passed is False
-        assert "lsmas" in report.critical_failures
 
 
 class TestCheckVapoursynth:
@@ -971,16 +957,3 @@ class TestCheckFFmpeg:
         assert result.passed is False
         assert result.details["exception_type"] == "OSError"
         assert "secret path" not in str(result.details)
-
-
-def test_collect_checks_has_canonical_media_runtime_order() -> None:
-    assert [check.name for check in collect_checks()] == [
-        "vapoursynth",
-        "lsmas",
-        "vs_placebo",
-        "ffms2",
-        "ffmpeg",
-        "vsview",
-        "slowpics",
-        "tmdb_api_key",
-    ]

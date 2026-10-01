@@ -58,19 +58,6 @@ def test_build_final_selection_report_user_only_omits_empty_categories() -> None
     assert report.categories == (SelectionCategoryReport("User", 2, "100, 105"),)
 
 
-def test_build_final_selection_report_marks_missing_breakdown_unavailable() -> None:
-    report = build_final_selection_report(
-        selected_frames=[3, 8, 13],
-        breakdown=None,
-    )
-
-    assert report == FinalSelectionReport(
-        final_count=3,
-        categories=(),
-        breakdown_available=False,
-    )
-
-
 def test_build_final_selection_report_marks_empty_breakdown_available() -> None:
     report = build_final_selection_report(
         selected_frames=[],

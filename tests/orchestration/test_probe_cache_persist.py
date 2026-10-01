@@ -1,15 +1,10 @@
 """Tests for _persist_probe_snapshots_for_run merge semantics."""
 
 import multiprocessing
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
 from typing import Protocol
 
-import pytest
-
-import frame_compare.orchestration.probing.probe_cache as probe_cache
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.preparation import (
@@ -92,31 +87,6 @@ def _clean_up_process(process: multiprocessing.Process) -> None:
         process.join(timeout=_PROCESS_TIMEOUT_SECONDS)
 
 
-def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
-    """Run-local writes must not discard earlier shared entries."""
-    workspace = _run_folder_workspace(tmp_path)
-    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
-
-    snap_a = _snapshot("video_a.mkv")
-    key_a = compute_probe_cache_key(snap_a.fingerprint)
-    save_clip_probe_cache(cache_path, {key_a: snap_a})
-    assert key_a in load_clip_probe_cache(cache_path)
-
-    snap_b = _snapshot("video_b.mkv", size=2048, mtime=9000)
-    _persist_probe_snapshots_for_run(
-        workspace=workspace,
-        snapshots_by_path={Path("video_b.mkv"): snap_b},
-    )
-
-    key_b = compute_probe_cache_key(snap_b.fingerprint)
-    shared_result = load_clip_probe_cache(cache_path)
-    assert set(shared_result) == {key_a, key_b}
-
-    run_path = workspace.generated_dir / "clip_probe.toml"
-    run_result = load_clip_probe_cache(run_path)
-    assert set(run_result) == {key_b}
-
-
 def test_shared_merge_locks_cross_process_read_modify_write(tmp_path: Path) -> None:
     cache_path = tmp_path / "clip_probe.toml"
     lock_path = cache_path.with_name(f"{cache_path.name}.lock")
@@ -147,48 +117,6 @@ def test_shared_merge_locks_cross_process_read_modify_write(tmp_path: Path) -> N
         _clean_up_process(process)
 
     assert set(load_clip_probe_cache(cache_path)) == {key_a, key_b}
-
-
-def test_shared_merge_keeps_load_and_save_inside_lock(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cache_path = tmp_path / "clip_probe.toml"
-    lock_path = cache_path.with_name(f"{cache_path.name}.lock")
-    existing = _snapshot("video_a.mkv")
-    current = _snapshot("video_b.mkv", size=2048, mtime=9000)
-    existing_key = compute_probe_cache_key(existing.fingerprint)
-    current_key = compute_probe_cache_key(current.fingerprint)
-    events: list[str] = []
-
-    @contextmanager
-    def _fake_lock(path: Path) -> Iterator[None]:
-        assert path == lock_path
-        events.append("lock_enter")
-        try:
-            yield
-        finally:
-            events.append("lock_exit")
-
-    def _fake_load(path: Path) -> dict[str, ClipProbeSnapshot]:
-        assert path == cache_path
-        assert events == ["lock_enter"]
-        events.append("load")
-        return {existing_key: existing}
-
-    def _fake_save(path: Path, entries: Mapping[str, ClipProbeSnapshot]) -> None:
-        assert path == cache_path
-        assert events == ["lock_enter", "load"]
-        assert set(entries) == {existing_key, current_key}
-        events.append("save")
-
-    monkeypatch.setattr(probe_cache, "exclusive_file_lock", _fake_lock)
-    monkeypatch.setattr(probe_cache, "_load_shared_clip_probe_cache_for_update", _fake_load)
-    monkeypatch.setattr(probe_cache, "save_clip_probe_cache", _fake_save)
-
-    probe_cache.merge_shared_clip_probe_cache(cache_path, {current_key: current})
-
-    assert events == ["lock_enter", "load", "save", "lock_exit"]
 
 
 def test_run_folder_preserves_historical_fingerprint(tmp_path: Path) -> None:

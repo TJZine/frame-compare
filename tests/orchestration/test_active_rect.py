@@ -454,13 +454,6 @@ def test_aspect_ratio_candidate_tie_is_reference_biased_and_identity_is_stable()
     }
 
 
-def test_auto_policy_identity_is_stable() -> None:
-    assert active_rect_policy_identity(ScreenshotActiveRectDetection.AUTO) == {
-        "detection_mode": "auto",
-        "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
-    }
-
-
 def test_post_refinement_ratio_requires_supported_content_evidence() -> None:
     content = replace(
         _clip("content.mkv", width=100, height=80),

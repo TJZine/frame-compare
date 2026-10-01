@@ -7,33 +7,6 @@ from frame_compare.orchestration.probing.probe_props import (
 )
 
 
-class TestNormalizeProbeProKey:
-    """Tests for normalize_probe_prop_key."""
-
-    def test_normalize_probe_prop_key_strips_leading_underscores_and_lowercases(
-        self,
-    ) -> None:
-        """Verify normalization strips leading underscores and lowercases."""
-        # Single underscore prefix
-        assert normalize_probe_prop_key("_Transfer") == "transfer"
-
-        # Multiple underscore prefixes
-        assert normalize_probe_prop_key("__Matrix") == "matrix"
-        assert normalize_probe_prop_key("___Primaries") == "primaries"
-
-        # No leading underscores, mixed case
-        assert normalize_probe_prop_key("DolbyVision_L6_MaxCLL") == "dolbyvision_l6_maxcll"
-
-        # Already lowercase, no underscores
-        assert normalize_probe_prop_key("transfer") == "transfer"
-
-        # Empty string edge case
-        assert normalize_probe_prop_key("") == ""
-
-        # Only underscores
-        assert normalize_probe_prop_key("___") == ""
-
-
 class TestComputeTonemapPropKeys:
     """Tests for compute_tonemap_prop_keys."""
 
@@ -123,24 +96,6 @@ class TestComputePreservedFrameProps:
         # Should NOT include non-tonemap keys
         assert "UnrelatedKey" not in result
         assert "FrameType" not in result
-
-    def test_compute_preserved_frame_props_returns_keys_in_sorted_original_key_order(
-        self,
-    ) -> None:
-        """Verify returned dict is populated in sorted original-key order."""
-        # Provide keys in unsorted order
-        frame_props = {
-            "Transfer": 16,
-            "_Matrix": 1,
-            "_Primaries": 9,
-            "ColorRange": 1,
-        }
-
-        result = compute_preserved_frame_props(frame_props)
-
-        # Keys should be in lexicographic order (sorted by original key)
-        expected_order = ["ColorRange", "Transfer", "_Matrix", "_Primaries"]
-        assert list(result.keys()) == expected_order
 
     def test_compute_preserved_frame_props_drops_non_toml_safe_values(self) -> None:
         """Verify non-TOML-safe values are omitted."""

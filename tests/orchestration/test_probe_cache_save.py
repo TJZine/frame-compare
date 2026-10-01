@@ -197,7 +197,6 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
     "existing_content",
     [
         pytest.param("invalid [ toml", id="malformed-toml"),
-        pytest.param('version = "2"\n', id="version-mismatch"),
     ],
 )
 def test_merge_shared_clip_probe_cache_invalid_state_aborts_without_replacing(

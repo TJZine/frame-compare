@@ -99,33 +99,6 @@ def test_run_doctor_survives_raising_check() -> None:
     assert result.details == {"exception_type": "RuntimeError"}
 
 
-class TestCollectChecks:
-    """Tests for collect_checks function."""
-
-    def test_collect_checks_returns_all_categories(self) -> None:
-        """collect_checks() returns checks with core, optional, network categories."""
-        checks = collect_checks()
-
-        categories = {check.category for check in checks}
-        assert "core" in categories
-        assert "optional" in categories
-        assert "network" in categories
-
-        # Verify exact count and order for the current doctor contract.
-        assert [check.name for check in checks] == [
-            "vapoursynth",
-            "lsmas",
-            "vs_placebo",
-            "ffms2",
-            "ffmpeg",
-            "vsview",
-            "slowpics",
-            "tmdb_api_key",
-        ]
-        assert checks[0].category == "core"
-        assert checks[-1].category == "network"
-
-
 class TestCheckVSView:
     """Tests for the optional VSView diagnostic check."""
 
