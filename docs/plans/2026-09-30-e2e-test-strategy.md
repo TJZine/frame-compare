@@ -99,7 +99,7 @@ reliably. The repository rules then keep it that way.
 
 Non-goals:
 - product behavior changes, except deleting production code whose only callers are
-  tests (S7);
+  tests (S7) and the maintainer-authorized fix in S9;
 - new dependencies;
 - coverage measurement in CI;
 - live network tests;
@@ -408,6 +408,28 @@ classification:
   `tests/e2e/`, both tiers and the two environment variables.
 - **No new `test-audit` skill.** S6 and S7 carry the audit procedure.
 
+**S9. Authorized product fix: cache-flag conflict** (maintainer, 2026-09-30).
+- **The defect:** `--no-cache --from-cache-only` behaves differently by mode.
+  - With `--dry-run`, it is rejected early as `CONFIG_VALIDATION_ERROR` (FC-1003,
+    exit 2).
+  - In a real run, CLI validation skips it, and `execute_prep`
+    (`orchestration/preparation.py`) rejects it later as `METRICS_CALCULATION_ERROR`
+    (FC-4002, exit 5).
+- **The fix:** every pipeline run and every dry run rejects the pair at the CLI
+  before any runtime work, with FC-1003 and exit 2.
+  - The check runs right after `validate_run_contracts` on both paths, so the
+    existing error order holds.
+  - `--write-config` and `--diagnose-paths`, which ignore cache flags, are
+    unchanged.
+  - The policy lives once, in `orchestration/analysis_policy.py`, beside the
+    skip-analysis policy. The CLI and `execute_prep` both call it.
+  - `RunRequest` is public (`docs/api.md`), so `execute_prep` keeps a guard for
+    direct API callers through the same policy function, which raises
+    `ConfigValidationError`.
+  - The contract's cache section names the error.
+  - E2's case expects FC-1003, exit 2. It is the regression test and must fail on
+    the pre-fix code.
+
 ## Units
 
 Codex runs each unit through a handoff. The Claude controller verifies each
@@ -509,7 +531,8 @@ execution record.
 
 ## Invariants
 
-- No product behavior change, apart from S7's deletion of test-only production code.
+- No product behavior change, apart from S7's deletion of test-only production code
+  and S9's fix.
 - No test-only production seams: no new flags, env reads, hooks or exports in
   `src/`.
 - No new dependencies and no new pytest plugins.
@@ -604,3 +627,21 @@ independent per area. Reverting one restores its tests and any seams it deleted.
   - M3 step 5 corruption mechanics and M6 event parsing;
   - explicit commit steps;
   - the amd64 check before unit C.
+- 2026-09-30: T1 first dispatch, base `ed183652`.
+  - Committed:
+    - A4 `458feea4`: rules;
+    - A1 `4ffb7440`: harness, E1–E5, 11 tests;
+    - A3 `fe128841`: CI and Docker wiring.
+  - A2 blocked on a real contract conflict, and A5 was not dispatched.
+  - The controller resolved the conflict in `922e9421`. The stale sentence at the
+    old contract line 1625 predated the video check; the code and the final-state
+    list are authoritative, so M5 stands.
+  - Controller review of A1 and A4 found rework, done in the T1R handoff:
+    - the artifact writer's read-back self-comparison;
+    - scenario configs replacing the network-safe defaults;
+    - tests importing helpers from `conftest.py`;
+    - E4's artifact recording one of seven steps;
+    - E3's expected listing copied from the value under test;
+    - the skill citing plan IDs;
+    - `CONTRIBUTING.md` running the media tier natively.
+  - E2 exposed the cache-flag defect fixed by S9.
