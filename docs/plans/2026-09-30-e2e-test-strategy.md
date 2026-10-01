@@ -4,7 +4,7 @@ search:
 ---
 
 Status: Active
-Scope: Make real-CLI end-to-end tests the primary proof for Frame Compare features, prune unit tests that E2E or retained integration tests already prove, and change the repository rules so low-value unit tests stop being added.
+Scope: Make real-CLI end-to-end tests the primary proof for Frame Compare features, prune unit tests that E2E, retained integration tests or a single retained owner per behavior already prove (S10), consolidate and type-check the rest, and change the repository rules so low-value unit tests stop being added.
 Owner: Claude controller session (planning, adjudication, verification); Codex executes units A, B, B2, C, D and E through `.handoff/` prompts. Branch `agent/e2e-test-strategy`.
 
 # E2E-first test strategy and unit-test pruning
@@ -49,12 +49,14 @@ Owner: Claude controller session (planning, adjudication, verification); Codex e
   - **`windows-portable-build.yml`** also runs the full `pytest -q` on Windows with
     `--extra vsview`, which installs VapourSynth and `vapoursynth-lsmas` there. The
     CLI tier (S2) therefore runs on Windows as well.
-  - **Docker** (`tools/verify_docker_integration.sh`) runs
-    `tests/integration/ tests/vs/` in the `frame-compare-test` image. It then proves
-    the production image with one real `frame-compare run` on two FFmpeg-generated
-    clips, and with `doctor --json`.
-    - The test service runs as the image's `framecompare` user (UID 1000). The
-      production proof runs as the host UID (`FRAME_COMPARE_HOST_UID`).
+  - **Docker** (`tools/verify_docker_integration.sh`) ran `tests/integration/ tests/vs/`
+    in the `frame-compare-test` image before S5. It then proves the production
+    image with one real `frame-compare run` on two FFmpeg-generated clips, and with
+    `doctor --json`.
+    - The test service ran as the image's `framecompare` user (UID 1000), and the
+      production proof as the host UID (`FRAME_COMPARE_HOST_UID`).
+    - Since S5 (`fe128841`), the test service also runs `tests/e2e/`, as the host
+      UID.
     - The hosted `docker-integration.yml` job runs on amd64. Before S5 it ran only
       for a path-filtered subset of changes; S5 widened the filter. A recent hosted
       run's verification step took about 2 minutes.
@@ -763,8 +765,11 @@ named under Samples), and S10 as amended (the flow rule and the narrowed
   - apply the flow rule, the narrowed `delete:internal`, rulings U1–U7, B4-126
     and B8-087.
   - **Owner protection.** Before deleting a node, `rg` its `file::function` (without
-    the parameter suffix) across `.handoff/test-audit/*.b2.md` and `*.c0.md`. A node
-    that any record names as a `delete:covered` owner is never deleted.
+    the parameter suffix) across `.handoff/test-audit/*.b2.md` and `*.c0.md`.
+    - Count only matches inside a `delete:covered(...)` or
+      `delete:covered-pending(...)` target, or in a `c0.md` owner field. The
+      node's own record always matches, and doesn't count.
+    - A node that any record names as an owner is never deleted.
   - **Cross-lane owners.** A cross-lane owner is `delete:covered-pending(<node>)`.
     - If the target is in an earlier lane and still exists at HEAD, it counts as
       confirmed, and the record proceeds through C2.
@@ -780,8 +785,9 @@ named under Samples), and S10 as amended (the flow rule and the narrowed
      - All must fail on an assertion failure, meaning `AssertionError` or pytest's
        `Failed` from `raises` or `fail`. An exception, import error or child
        process crash doesn't count.
-     - For E2E owners, the summary diff must not show a changed exit code or a
-       traceback.
+     - For E2E owners, the summary diff must be in the fields the mutation
+       targets. A Python traceback on stderr, or a change in fields the mutation
+       doesn't target, disqualifies the proof.
      - Native owners run with `uv run --no-sync pytest`.
      - Docker-only owners run with
        `docker compose run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/framecompare-home -e PYTHONUSERBASE=/home/framecompare/.local -e FRAME_COMPARE_E2E_REQUIRE_MEDIA=1 -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/c2/<record> frame-compare-test -lc '<prelude>; python -m pytest -vv -p no:cacheprovider <owner node>'`.
@@ -817,17 +823,21 @@ named under Samples), and S10 as amended (the flow rule and the narrowed
        only if no restoration happened after it, and the tree it measured equals
        the previous lane's commit.
      - Use the same machine and environment for every run.
-     - If a coverage run itself fails, retry once. If it still fails, report
-       `blocked` and leave the tree clean.
+     - A failing "before" run blocks the lane after one retry; leave the tree
+       clean.
+     - A failing "after" run is handled like a C4 gate failure: restore the
+       responsible deleted tests and re-run.
   3. Lines or branches that differ between the two "before" runs are flaky and
      ignored.
   4. Every line or branch executed before and missing after needs one of:
      - an S7 deletion in the same commit;
-     - a C2 mutation **on that line or branch**, whose owner failed.
+     - a C2 mutation whose owner failed, placed on that line or branch, or in the
+       same straight-line block or branch as it.
 
      Otherwise:
      - find the deleted tests that executed it, from the first "before" run's
-       contexts. In-process tests are recorded as `<node id>|run`. Lines run only
+       contexts. In-process tests are recorded as `<node id>|run`, `|setup` or
+       `|teardown`; match `<node id>|*`. Lines run only
        inside child processes carry an empty context. If a lost line has only
        empty contexts, restore the lane's deleted tests that spawn a process
        reaching that code; verified with coverage 7.16.2 and pytest-cov;
@@ -838,8 +848,10 @@ named under Samples), and S10 as amended (the flow rule and the narrowed
 
      List each restoration with a one-line justification under "needs maintainer
      approval". A later task may delete them after approval.
-  5. Docker-only code never appears in the diff, which is acceptable: C2's Docker
-     mutations cover it.
+  5. **Docker-route records.** Some code was covered natively only by a deleted
+     test whose owner runs in Docker. That code is resolved by the record's Docker
+     C2 mutation, under the same block rule as step 4. Code that only Docker runs
+     never appears in the native diff at all.
 - **C4: gates, per lane commit.**
   - `pyright --warnings`, `ruff check .`, `ruff format --check .`, `lint-imports`.
   - The full native `pytest -q`. A passing C5 "after" run counts as this if the
@@ -936,7 +948,7 @@ Any of these stops the unit and sends a `blocked` message:
 | A3 | `tests/workflows`, `tests/vs/test_runtime_contract.py`, `bash -n` | none (fake-docker tests) | YAML parses |
 | A5 | full gate | verify script ×2 | 3 mutations fail M5/M3/M4 |
 | B, B2 | none (read-only) | — | ledger completeness |
-| C | C0 records; lane tests and full gate per commit; C5 coverage diff | C2 Docker mutations; verify script when production code is deleted | mutation records |
+| C | C0 records; full gate per commit (the C5 "after" run may count); C5 line and branch diff | C2 Docker mutations; verify script per the C4 triggers | mutation records |
 | D | file tests; `pyright --warnings <file>` | when a rewritten file's owners are media-tier | case mapping; one mutation per group |
 | E | `pyright --warnings` repo-wide, with `tests` included | — | — |
 
