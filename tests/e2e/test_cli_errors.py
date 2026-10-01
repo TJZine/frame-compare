@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from .conftest import CommandResult, Workspace, _write_artifact
+from tests.e2e.harness import CommandResult, Workspace
 
 ERROR_CASES = (
     pytest.param(
@@ -109,7 +108,7 @@ def test_cli_errors_are_typed_and_json_only(
     expected_name: str,
     run_cli: Callable[..., CommandResult],
     workspace: Callable[..., Workspace],
-    artifact_root: Path,
+    record: Callable[..., None],
 ) -> None:
     root = workspace(case["config"])
     if scenario_id == "missing-input":
@@ -139,5 +138,4 @@ def test_cli_errors_are_typed_and_json_only(
         "stream": "stdout",
         "other_stream_empty": True,
     }
-    _write_artifact(artifact_root, f"E2-{scenario_id}", arguments, root.root, result, summary)
-    assert summary == expected
+    record(f"E2-{scenario_id}", root, [(arguments, result)], summary, expected)

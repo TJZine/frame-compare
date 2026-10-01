@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import CommandResult, Workspace, _write_artifact
+from tests.e2e.harness import CommandResult, Workspace
 
 
 def _workspace_listing(root: Path) -> list[str]:
@@ -20,7 +20,7 @@ def _workspace_listing(root: Path) -> list[str]:
 def test_cli_dry_run_is_side_effect_free(
     run_cli: Callable[..., CommandResult],
     workspace: Callable[..., Workspace],
-    artifact_root: Path,
+    record: Callable[..., None],
 ) -> None:
     root = workspace(
         {
@@ -30,9 +30,6 @@ def test_cli_dry_run_is_side_effect_free(
                 "bright_frame_count": 1,
                 "random_seed": 7,
             },
-            "slowpics": {"auto_upload": False},
-            "tmdb": {"enabled": False},
-            "report": {"auto_open": False},
         }
     )
     (root.input_dir / "reference.mkv").touch()
@@ -60,6 +57,14 @@ def test_cli_dry_run_is_side_effect_free(
         "workspace_before": before,
         "workspace_after": after,
     }
+    expected_workspace = [
+        "comparison_videos",
+        "comparison_videos/comparison.mkv",
+        "comparison_videos/reference.mkv",
+        "config",
+        "config/config.toml",
+        "generated",
+    ]
     expected = {
         "top_level_keys": [
             "checks_not_performed",
@@ -84,9 +89,8 @@ def test_cli_dry_run_is_side_effect_free(
             "requested_user_frames": [],
             "strategy": ["random", "dark", "bright"],
         },
-        "workspace_before": before,
-        "workspace_after": before,
+        "workspace_before": expected_workspace,
+        "workspace_after": expected_workspace,
     }
-    _write_artifact(artifact_root, "E3-dry-run", arguments, root.root, result, summary)
+    record("E3-dry-run", root, [(arguments, result)], summary, expected)
     assert result.exit_code == 0
-    assert summary == expected

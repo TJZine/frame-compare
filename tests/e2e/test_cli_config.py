@@ -4,26 +4,26 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from pathlib import Path
 
 import pytest
 
-from .conftest import CommandResult, Workspace, _write_artifact
+from tests.e2e.harness import CommandResult, Workspace
 
 
 def _run(
     run_cli: Callable[..., CommandResult],
     root: Workspace,
     arguments: list[str],
-) -> CommandResult:
-    return run_cli(root.root, [*arguments, "--root", str(root.root)])
+) -> tuple[list[str], CommandResult]:
+    exact_arguments = [*arguments, "--root", str(root.root)]
+    return exact_arguments, run_cli(root.root, exact_arguments)
 
 
 @pytest.mark.e2e
 def test_cli_config_and_preset_persistence(
     run_cli: Callable[..., CommandResult],
     workspace: Callable[..., Workspace],
-    artifact_root: Path,
+    record: Callable[..., None],
 ) -> None:
     root = workspace()
     (root.input_dir / "reference.mkv").touch()
@@ -43,16 +43,16 @@ def test_cli_config_and_preset_persistence(
         "--skip-metadata",
         "--no-upload",
     ]
-    write_result = _run(run_cli, root, write_arguments)
-    before_result = _run(
+    write_arguments, write_result = _run(run_cli, root, write_arguments)
+    before_arguments, before_result = _run(
         run_cli,
         root,
         ["run", "--dry-run", "--json", "--skip-metadata", "--no-upload"],
     )
     before_selection = json.loads(before_result.stdout)["selection"]
-    save_result = _run(run_cli, root, ["preset", "save", "p1"])
-    list_result = _run(run_cli, root, ["preset", "list"])
-    change_result = _run(
+    save_arguments, save_result = _run(run_cli, root, ["preset", "save", "p1"])
+    list_arguments, list_result = _run(run_cli, root, ["preset", "list"])
+    change_arguments, change_result = _run(
         run_cli,
         root,
         [
@@ -70,8 +70,8 @@ def test_cli_config_and_preset_persistence(
             "--no-upload",
         ],
     )
-    apply_result = _run(run_cli, root, ["preset", "apply", "p1"])
-    after_result = _run(
+    apply_arguments, apply_result = _run(run_cli, root, ["preset", "apply", "p1"])
+    after_arguments, after_result = _run(
         run_cli,
         root,
         ["run", "--dry-run", "--json", "--skip-metadata", "--no-upload"],
@@ -127,7 +127,18 @@ def test_cli_config_and_preset_persistence(
         },
         "preset_list": ["p1"],
     }
-    _write_artifact(
-        artifact_root, "E4-config-persistence", [*write_arguments], root.root, after_result, summary
+    record(
+        "E4-config-persistence",
+        root,
+        [
+            (write_arguments, write_result),
+            (before_arguments, before_result),
+            (save_arguments, save_result),
+            (list_arguments, list_result),
+            (change_arguments, change_result),
+            (apply_arguments, apply_result),
+            (after_arguments, after_result),
+        ],
+        summary,
+        expected,
     )
-    assert summary == expected
