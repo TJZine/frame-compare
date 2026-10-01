@@ -174,14 +174,13 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     }
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
+        "src/**",
+        "tests/**",
         "uv.lock",
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
-        "tests/workflows/**",
-        "src/frame_compare/analysis/**",
-        "src/frame_compare/render/**",
-        "src/frame_compare/vs/**",
+        ".github/workflows/docker-integration.yml",
     } <= set(workflow_paths)
 
 

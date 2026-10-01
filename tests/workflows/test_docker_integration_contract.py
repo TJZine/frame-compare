@@ -13,26 +13,15 @@ from ._helpers import bash_executable_or_skip as _bash_executable_or_skip
 
 RESOURCE_TEST = "tests/integration/test_alignment_streaming_resources.py"
 
-ALIGNMENT_TRIGGER_PATHS = (
+DOCKER_TRIGGER_PATHS = (
+    "src/**",
+    "tests/**",
+    "pyproject.toml",
+    "uv.lock",
+    "Dockerfile",
+    "docker-compose*.yml",
+    "tools/verify_docker_*.sh",
     ".github/workflows/docker-integration.yml",
-    "src/frame_compare/services/alignment*.py",
-    "src/frame_compare/services/errors.py",
-    "src/frame_compare/services/types.py",
-    "src/frame_compare/orchestration/phase_alignment.py",
-    "src/frame_compare/orchestration/execution.py",
-    "src/frame_compare/orchestration/execution_types.py",
-    "src/frame_compare/orchestration/context.py",
-    "src/frame_compare/utils/subproc.py",
-    "src/frame_compare/utils/types.py",
-    "src/frame_compare/utils/alignment_evidence.py",
-)
-
-ALIGNMENT_TEST_TRIGGER_PATTERNS = (
-    "tests/services/test_alignment*.py",
-    "tests/services/alignment_request_test_support.py",
-    "tests/orchestration/test_phase_alignment*.py",
-    "tests/orchestration/test_phase_tasks_alignment.py",
-    "tests/orchestration/phase_task_helpers.py",
 )
 
 
@@ -49,10 +38,11 @@ if [ "$1" = info ]; then
 fi
 if [ "$1" = compose ] && [ "$2" = run ]; then
   printf '%s\\n' "$@" > "$FRAME_COMPARE_DOCKER_INVOCATION"
-  if [ "${FRAME_COMPARE_DOCKER_MODE:-fail}" = skip ]; then
-    printf '1 skipped\\n'
-    exit 0
-  fi
+  case "${FRAME_COMPARE_DOCKER_MODE:-fail}" in
+    skip) printf '1 skipped\\n'; exit 0 ;;
+    xfailed) printf '1 xfailed\\n'; exit 0 ;;
+    xpassed) printf '1 xpassed\\n'; exit 0 ;;
+  esac
   exit 17
 fi
 printf 'unexpected docker invocation: %s\\n' "$*" >&2
@@ -101,23 +91,67 @@ def _path_matches_workflow(path: str, workflow_paths: list[str]) -> bool:
     return any(fnmatchcase(path, pattern) for pattern in workflow_paths)
 
 
-def test_default_verifier_excludes_only_opt_in_resource_module(
+def _docker_invocation_args(invocation: str) -> list[str]:
+    lines = invocation.splitlines()
+    return lines[: lines.index("-c") + 1]
+
+
+def _docker_environment_args(invocation: str) -> list[str]:
+    args = _docker_invocation_args(invocation)
+    return [args[index + 1] for index, value in enumerate(args[:-1]) if value == "-e"]
+
+
+def _is_upload_artifact_step(step: dict[str, object]) -> bool:
+    uses = step.get("uses")
+    return isinstance(uses, str) and uses.startswith("actions/upload-artifact@")
+
+
+def test_default_verifier_runs_e2e_and_excludes_only_opt_in_resource_module(
     repo_root: Path, tmp_path: Path
 ) -> None:
     result, invocation = _run_verifier(repo_root, tmp_path)
 
     assert result.returncode == 17
     command = shlex.split(invocation.splitlines()[-1])
-    assert command[-3:] == ["--ignore=" + RESOURCE_TEST, "tests/integration/", "tests/vs/"]
+    assert command[-4:] == [
+        "--ignore=" + RESOURCE_TEST,
+        "tests/e2e/",
+        "tests/integration/",
+        "tests/vs/",
+    ]
     assert command.count("tests/integration/") == 1
     assert command.count("tests/vs/") == 1
 
 
-def test_verifier_keeps_global_zero_skip_guard(repo_root: Path, tmp_path: Path) -> None:
-    result, _ = _run_verifier(repo_root, tmp_path, mode="skip")
+def test_verifier_rejects_skipped_xfailed_and_xpassed_tests(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    for mode in ("skip", "xfailed", "xpassed"):
+        mode_tmp = tmp_path / mode
+        mode_tmp.mkdir()
+        result, _ = _run_verifier(repo_root, mode_tmp, mode=mode)
 
-    assert result.returncode == 3
-    assert "this gate requires zero skips" in result.stderr
+        assert result.returncode == 3
+        assert "zero non-passing outcomes" in result.stderr
+
+
+def test_verifier_passes_host_user_media_environment_and_artifacts(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    result, invocation = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode == 17
+    args = _docker_invocation_args(invocation)
+    user_index = args.index("--user")
+    uid_gid = args[user_index + 1].split(":")
+    assert len(uid_gid) == 2
+    assert all(part.isdigit() for part in uid_gid)
+    assert {
+        "HOME=/tmp/framecompare-home",
+        "PYTHONUSERBASE=/home/framecompare/.local",
+        "FRAME_COMPARE_E2E_REQUIRE_MEDIA=1",
+        "FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e",
+    } <= set(_docker_environment_args(invocation))
 
 
 def test_explicit_pytest_path_is_not_hidden_by_default_exclusion(
@@ -178,49 +212,43 @@ def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(
     assert "--build" not in resource_command
 
 
-def test_workflow_triggers_alignment_resource_owners_and_tests(repo_root: Path) -> None:
+def test_workflow_triggers_all_docker_runtime_and_test_paths(repo_root: Path) -> None:
     workflow_paths = _pull_request_paths(repo_root)
 
-    assert set(ALIGNMENT_TRIGGER_PATHS) <= set(workflow_paths)
-    assert set(ALIGNMENT_TEST_TRIGGER_PATTERNS) <= set(workflow_paths)
-    assert "tests/integration/**" in workflow_paths
-    assert "tests/workflows/**" in workflow_paths
-    assert "src/frame_compare/services/**" not in workflow_paths
-    assert "src/frame_compare/orchestration/**" not in workflow_paths
-
-    matching_paths = (
-        ".github/workflows/docker-integration.yml",
-        "src/frame_compare/services/alignment_audio.py",
-        "src/frame_compare/orchestration/execution_types.py",
-        "src/frame_compare/utils/subproc.py",
-        "tests/services/test_alignment_streaming.py",
-        "tests/services/alignment_request_test_support.py",
-        "tests/orchestration/test_phase_alignment_contract.py",
-        "tests/orchestration/test_phase_tasks_alignment.py",
-        "tests/orchestration/phase_task_helpers.py",
-        RESOURCE_TEST,
+    assert workflow_paths == list(DOCKER_TRIGGER_PATHS)
+    assert all(
+        _path_matches_workflow(path, workflow_paths)
+        for path in (
+            "src/frame_compare/services/release_identity.py",
+            "src/frame_compare/orchestration/phase_render.py",
+            "tests/e2e/test_media_render.py",
+            "Dockerfile",
+            RESOURCE_TEST,
+        )
     )
-    assert all(_path_matches_workflow(path, workflow_paths) for path in matching_paths)
 
-    alignment_modules = [
-        path.relative_to(repo_root).as_posix()
-        for path in (repo_root / "src/frame_compare/services").glob("alignment*.py")
+
+def test_workflow_uploads_e2e_artifacts_after_verification(repo_root: Path) -> None:
+    steps = _docker_steps(repo_root)
+    verification_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "bash tools/verify_docker_integration.sh --no-cache"
+    )
+    upload_matches = [
+        (index, step) for index, step in enumerate(steps) if _is_upload_artifact_step(step)
     ]
-    assert alignment_modules
-    assert all(_path_matches_workflow(path, workflow_paths) for path in alignment_modules)
 
-
-def test_workflow_does_not_trigger_unrelated_service_orchestration_paths(
-    repo_root: Path,
-) -> None:
-    workflow_paths = _pull_request_paths(repo_root)
-
-    unrelated_paths = (
-        "src/frame_compare/services/release_identity.py",
-        "src/frame_compare/services/update.py",
-        "src/frame_compare/services/report/renderer.py",
-        "src/frame_compare/orchestration/phase_render.py",
-        "src/frame_compare/orchestration/selection_report.py",
-        "docs/current-architecture.md",
+    assert len(upload_matches) == 1
+    upload_index, upload_step = upload_matches[0]
+    assert upload_index > verification_index
+    assert upload_step["if"] == "always()"
+    assert upload_step["uses"] == (
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     )
-    assert all(not _path_matches_workflow(path, workflow_paths) for path in unrelated_paths)
+    assert upload_step["with"] == {
+        "name": "docker-e2e-artifacts",
+        "path": "generated/e2e",
+        "if-no-files-found": "warn",
+        "retention-days": "14",
+    }
