@@ -136,15 +136,13 @@ uv run --no-sync pytest -q
 uv run --no-sync pytest -m unit
 uv run --no-sync pytest -m "not vs_required"
 uv run --no-sync pytest -q tests/e2e/ -m "e2e and not vs_required"  # CLI tier
-FRAME_COMPARE_E2E_REQUIRE_MEDIA=1 FRAME_COMPARE_E2E_ARTIFACTS="$PWD/generated/e2e" \
-  uv run --no-sync pytest -q tests/e2e/ -m "e2e and vs_required"  # media tier
+bash tools/verify_docker_integration.sh --pytest-path tests/e2e  # media tier
 uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
 ```
 
-The CLI tier runs without a media runtime. The media tier is gated by
-`FRAME_COMPARE_E2E_REQUIRE_MEDIA=1`; `FRAME_COMPARE_E2E_ARTIFACTS` selects the
-directory for its inspectable scenario artifacts. The Docker gate sets both variables
-for the pinned media runtime.
+The CLI tier runs without a media runtime. The media tier is Docker-only: the gate
+sets `FRAME_COMPARE_E2E_REQUIRE_MEDIA=1` and `FRAME_COMPARE_E2E_ARTIFACTS` for the
+pinned media runtime and its inspectable scenario artifacts.
 
 These examples do not replace the runbook. Changes to CLI/config contracts, runtime
 owners, Docker, Windows portable packaging, release workflows, or architectural

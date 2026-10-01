@@ -12,7 +12,8 @@ writing the test.
 
 - Put credible feature proofs in `tests/e2e/`: run the installed `frame-compare`
   executable as a child process against generated media, use an isolated `--root`,
-  and leave the S3 artifact (`command.txt`, streams, run output, `summary.json`).
+  and leave an inspectable artifact containing `command.txt`, stdout and stderr,
+  run output, and `summary.json`.
 - E2E tests read only exit codes, stdout, stderr, and produced files. They do not
   import `frame_compare`, mock or monkeypatch it, reach the network, or use snapshots.
 - The CLI tier needs no media runtime. The media tier is marked `e2e` and
@@ -38,7 +39,7 @@ Before writing one, answer: what behavior does it protect; what credible regress
 fails it; why do E2E and integration not already catch it; and does it need a production
 seam that no production caller needs? If the last answer is yes, do not write it.
 
-Use only these S6 categories: `failure-mode` (timeouts, malformed data, partial or
+Use only these categories: `failure-mode` (timeouts, malformed data, partial or
 atomic writes, cancellation, cleanup); `network` (strict HTTP boundary tests);
 `security`; `numeric`; `contract`; and `platform`. In isolated tests, mock HTTP,
 subprocess, clock, browser, and heavy-runtime boundaries, not the owned collaborator.
