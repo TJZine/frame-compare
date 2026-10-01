@@ -74,7 +74,7 @@ def record(artifact_root: Path) -> Callable[..., None]:
     return record_artifact
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def media_gate() -> Iterator[None]:
     if os.environ.get("FRAME_COMPARE_E2E_REQUIRE_MEDIA") != "1":
         pytest.skip("media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1")
@@ -92,7 +92,7 @@ def pyproject_version() -> str:
 
 
 @pytest.fixture(scope="session")
-def media_files(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+def media_files(media_gate: None, tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     from tests.e2e.harness import generate_media
 
     return generate_media(tmp_path_factory.mktemp("media"))
