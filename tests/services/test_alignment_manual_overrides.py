@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import IO, Any
 from unittest.mock import patch
 
 from frame_compare.services.alignment_manual_overrides import (
@@ -125,10 +126,17 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
     override = _override("comp", 99)
     original_open = Path.open
 
-    def _open_with_read_failure(open_path: Path, mode: str = "r", *args: object, **kwargs: object):
+    def _open_with_read_failure(
+        open_path: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[Any]:
         if open_path == path and "r" in mode:
             raise OSError("stale handle")
-        return original_open(open_path, mode, *args, **kwargs)
+        return original_open(open_path, mode, buffering, encoding, errors, newline)
 
     with (
         patch("pathlib.Path.open", _open_with_read_failure),
