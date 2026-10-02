@@ -1288,3 +1288,38 @@ Reverting one restores its tests and any seams it deleted.
   - The five unused video-wiring helpers deleted in lane 1a were a separate
     maintainer amendment, relayed through the controller and recorded in
     `1a.d.md`.
+- 2026-10-02: **T6R repair checkpoint accepted by the controller**, at
+  `a8a1f12e84e41811de10ab1f2240e42cff2ff656`. Unit E may be dispatched after
+  this plan-only checkpoint is committed and its clean-state gate is checked.
+  - All ten lanes completed the fixed `53b60b4c..47a9ad4c` assertion audit,
+    with exhaustive exclusions, flow classifications and producer mutations in
+    `.handoff/test-audit/<lane>.d-repair.md`.
+  - Restored checks and commits:
+    - 3a: 78, `f969157f`; 1a: 22, `94a943cd`; 1b: 27, `4d351721`;
+    - 2: 13, `01a1786d`; 6: 6, `17db3c4b`;
+    - 3b: 4, `42464da6`; 4: 2, `4c6ab6ab`; 5: 0, `7f650849`
+      (audit-only commit; retained assertions proved its carrier group);
+    - 7: 24, `860c5866` and `cfca3318`; 8: 30, `a8a1f12e`.
+    Counts follow each record's current-check and historical-site mapping.
+  - B3a-150 is repaired: `test_phase_tasks_alignment.py:125,126` checks
+    reference/comparison selected audio streams, and `:133,134` checks
+    `max_offset_seconds` and `channel_strategy`. The controller's comparison
+    mutation now fails the restored assertion; settings mutations also fail.
+  - Scope ruling: T6R's newer explicit exclusions do not exempt different-input
+    S11/R2 D1 rewrites. Lane 1a's 19 removed exception sites were included;
+    12 were restored and seven proved by retained assertions. Unhandled errors
+    alone were never accepted as assertion proof.
+  - The user explicitly approved the sole one-commit-per-lane exception: one
+    supplemental lane 7 commit for two Qt button-parent placement checks.
+  - Controller inspected the repair diff and final gate output. Closing native
+    `pytest -rf`: **3,069 passed, 90 skipped**, no failures/errors, 139.17s.
+    Every task's closing native suite passed; no failing native node IDs were
+    reported. Changed-file pyright, Ruff, formatting and import gates passed.
+    Docker was not triggered by the repairs; skipped platform execution is not
+    claimed as verified. Test lines: **81,505**, from `wc -l tests/**/*.py`.
+  - Seven worker chats were dispatched serially with the verbatim instructions
+    from `.codex/agents/worker.toml`, explicitly `gpt-6.1-sol` / `medium`.
+    All confirmed `CONFIGURED ROLE: worker`; runtime metadata was unavailable.
+  - All production mutations were restored and the final checkout was clean.
+    An external fast-forward to `a997ef51` during lane 3a was preserved; no
+    production changes were committed by the repair workers. Nothing pushed.
