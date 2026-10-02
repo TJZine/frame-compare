@@ -144,6 +144,7 @@ docker_env_args=(
   -e PYTHONUSERBASE=/home/framecompare/.local
   -e FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
   -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e
+  -e FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache
 )
 if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
   docker_env_args+=(-e FRAME_COMPARE_REQUIRE_LIBPLACEBO=1)

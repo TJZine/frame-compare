@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
+import os
 import shutil
 import statistics
+import tempfile
 import time
 import tomllib
 from collections.abc import Callable
@@ -578,7 +581,25 @@ def _write_media_set(root: Path) -> _MediaSet:
 
 @pytest.fixture(scope="session")
 def u4_media(tmp_path_factory: pytest.TempPathFactory) -> _MediaSet:
-    return _write_media_set(tmp_path_factory.mktemp("alignment-u4"))
+    root = tmp_path_factory.mktemp("alignment-u4")
+    cache = os.environ.get("FRAME_COMPARE_TEST_MEDIA_CACHE")
+    if cache:
+        version = run_subprocess(["ffmpeg", "-version"], timeout_seconds=10).stdout
+        key = hashlib.sha256(Path(__file__).read_bytes() + version).hexdigest()
+        generator_root = Path(cache).resolve() / Path(__file__).stem
+        generator_root.mkdir(parents=True, exist_ok=True)
+        cached = generator_root / key
+        if not cached.exists():
+            with tempfile.TemporaryDirectory(dir=generator_root, prefix=".tmp-") as temporary:
+                _write_media_set(Path(temporary))
+                Path(temporary).rename(cached)
+        # ponytail: one verifier at a time; add locking if overlapping runs are needed.
+        for previous in generator_root.iterdir():
+            if previous != cached and previous.is_dir():
+                shutil.rmtree(previous)
+        for media in cached.iterdir():
+            (root / media.name).symlink_to(media)
+    return _write_media_set(root)
 
 
 def _align_pair(
