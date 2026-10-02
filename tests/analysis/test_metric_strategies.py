@@ -279,7 +279,7 @@ def test_quality_planestats_is_full_resolution_combined_and_dense(
     recorder = AnalysisTimingRecorder()
 
     luminance, motion = calculate_quality_planestats_metrics(
-        clip,
+        cast(VideoNode, clip),
         timing_recorder=recorder,
     )
 
@@ -303,7 +303,7 @@ def test_quality_planestats_converts_non_yuv_like_quality_without_downscaling(
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     clip = FakeBalancedClip([0.2, 0.4], width=1920, height=1080, color_family=99)
 
-    luminance, motion = calculate_quality_planestats_metrics(clip)
+    luminance, motion = calculate_quality_planestats_metrics(cast(VideoNode, clip))
 
     assert luminance == [0.2, 0.4]
     assert motion == [0.0, 0.2]
@@ -318,7 +318,7 @@ def test_quality_planestats_applies_active_rect_without_resize(
     clip = FakeBalancedClip([0.1, 0.6], width=640, height=360)
 
     luminance, motion = calculate_quality_planestats_metrics(
-        clip,
+        cast(VideoNode, clip),
         metric_active_rect=MetricActiveRect(x=10, y=20, width=400, height=200),
     )
 
@@ -343,7 +343,7 @@ def test_quality_planestats_reports_missing_frame_properties(
         MetricsCalculationError,
         match="quality metric analysis",
     ):
-        calculate_quality_planestats_metrics(FakeBalancedClip([0.0, 1.0]))
+        calculate_quality_planestats_metrics(cast(VideoNode, FakeBalancedClip([0.0, 1.0])))
 
 
 def test_quality_planestats_wraps_graph_failure_and_completes_progress(
@@ -362,7 +362,7 @@ def test_quality_planestats_wraps_graph_failure_and_completes_progress(
 
     with pytest.raises(MetricsCalculationError, match="graph construction"):
         calculate_quality_planestats_metrics(
-            FakeBalancedClip([0.0, 1.0]),
+            cast(VideoNode, FakeBalancedClip([0.0, 1.0])),
             reporter=reporter,
         )
 
@@ -385,7 +385,9 @@ def test_quality_planestats_is_used_by_normal_quality_dispatch(
     assert result.performance_mode == "quality"
     quality.assert_called_once()
     with pytest.raises(ValueError):
-        AnalysisConfig(performance_mode="quality-planestats-candidate")
+        AnalysisConfig(
+            performance_mode=cast(AnalysisPerformanceMode, "quality-planestats-candidate")
+        )
 
 
 def test_quality_strategy_bounds_range_and_preserves_motion_lookbehind(
@@ -421,7 +423,7 @@ def test_performance_strategy_crops_without_spatial_resize(
 
     result = calculate_metric_strategy(
         source,
-        AnalysisConfig(performance_mode="performance"),
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
         reporter=None,
         metric_active_rect=MetricActiveRect(x=10, y=20, width=400, height=200),
     )
@@ -440,7 +442,7 @@ def test_performance_strategy_constant_clip_is_deterministic_with_zero_motion(
     monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
     source = MagicMock()
     source.clip = FakeBalancedClip([0.25, 0.25, 0.25], width=160, height=90)
-    config = AnalysisConfig(performance_mode="performance")
+    config = AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE)
 
     first = calculate_metric_strategy(source, config, reporter=None)
     second = calculate_metric_strategy(source, config, reporter=None)
@@ -452,12 +454,14 @@ def test_performance_strategy_constant_clip_is_deterministic_with_zero_motion(
 
 
 def test_performance_metric_identity_is_distinct_and_stable() -> None:
-    quality = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="quality"))
+    quality = stable_metric_algorithm_identity_json(
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.QUALITY)
+    )
     first_performance = stable_metric_algorithm_identity_json(
-        AnalysisConfig(performance_mode="performance")
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE)
     )
     second_performance = stable_metric_algorithm_identity_json(
-        AnalysisConfig(performance_mode="performance")
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE)
     )
 
     assert first_performance == second_performance

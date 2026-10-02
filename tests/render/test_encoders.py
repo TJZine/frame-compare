@@ -2,12 +2,14 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from PIL import Image
+from vapoursynth import VideoNode
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
@@ -206,8 +208,8 @@ class _FakeFpngClip:
 def test_render_frame_vs_dispatch(mock_render_vs):
     clip = FakeClip()
     request = RenderRequest(
-        clip=clip,  # type: ignore
-        diagnostic_source=clip,  # type: ignore
+        clip=cast(VideoNode, clip),
+        diagnostic_source=cast(VideoNode, clip),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -249,8 +251,8 @@ def test_render_frame_overlay_integration(mock_render_vs):
     clip = FakeClip()
     overlay = _overlay(frame=100)
     request = RenderRequest(
-        clip=clip,  # type: ignore
-        diagnostic_source=clip,  # type: ignore
+        clip=cast(VideoNode, clip),
+        diagnostic_source=cast(VideoNode, clip),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=overlay,
@@ -306,8 +308,8 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
 
     render_frame_detailed(
         RenderRequest(
-            clip=clip,  # type: ignore[arg-type]
-            diagnostic_source=clip,  # type: ignore[arg-type]
+            clip=cast(VideoNode, clip),
+            diagnostic_source=cast(VideoNode, clip),
             frame_number=3,
             output_path=output,
             overlay=None,
@@ -348,8 +350,8 @@ def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overl
 
     render_frame_detailed(
         RenderRequest(
-            clip=clip,  # type: ignore[arg-type]
-            diagnostic_source=clip,  # type: ignore[arg-type]
+            clip=cast(VideoNode, clip),
+            diagnostic_source=cast(VideoNode, clip),
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -378,8 +380,8 @@ def test_render_frame_vs_auto_falls_back_to_pillow_when_overlay_is_present(
 
     render_frame_detailed(
         RenderRequest(
-            clip=clip,  # type: ignore[arg-type]
-            diagnostic_source=clip,  # type: ignore[arg-type]
+            clip=cast(VideoNode, clip),
+            diagnostic_source=cast(VideoNode, clip),
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=overlay,
@@ -406,8 +408,8 @@ def test_render_frame_vs_pillow_writer_ignores_available_fpng(
 
     render_frame_detailed(
         RenderRequest(
-            clip=clip,  # type: ignore[arg-type]
-            diagnostic_source=clip,  # type: ignore[arg-type]
+            clip=cast(VideoNode, clip),
+            diagnostic_source=cast(VideoNode, clip),
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -429,8 +431,8 @@ def test_render_frame_vs_fpng_requires_plugin_when_explicit(
     with pytest.raises(EncodingError) as exc_info:
         render_frame_detailed(
             RenderRequest(
-                clip=clip,  # type: ignore[arg-type]
-                diagnostic_source=clip,  # type: ignore[arg-type]
+                clip=cast(VideoNode, clip),
+                diagnostic_source=cast(VideoNode, clip),
                 frame_number=3,
                 output_path=tmp_path / "out.png",
                 overlay=None,
@@ -455,8 +457,8 @@ def test_render_frame_vs_fpng_rejects_overlay_when_explicit(
     with pytest.raises(EncodingError) as exc_info:
         render_frame_detailed(
             RenderRequest(
-                clip=clip,  # type: ignore[arg-type]
-                diagnostic_source=clip,  # type: ignore[arg-type]
+                clip=cast(VideoNode, clip),
+                diagnostic_source=cast(VideoNode, clip),
                 frame_number=3,
                 output_path=tmp_path / "out.png",
                 overlay=_overlay(frame=3),
@@ -483,8 +485,8 @@ def test_render_frame_vs_auto_falls_back_to_pillow_for_tonemapped_limited_rgb(
 
     render_frame_detailed(
         RenderRequest(
-            clip=clip,  # type: ignore[arg-type]
-            diagnostic_source=clip,  # type: ignore[arg-type]
+            clip=cast(VideoNode, clip),
+            diagnostic_source=cast(VideoNode, clip),
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -510,8 +512,8 @@ def test_render_frame_vs_fpng_rejects_tonemapped_limited_rgb_when_explicit(
     with pytest.raises(EncodingError) as exc_info:
         render_frame_detailed(
             RenderRequest(
-                clip=clip,  # type: ignore[arg-type]
-                diagnostic_source=clip,  # type: ignore[arg-type]
+                clip=cast(VideoNode, clip),
+                diagnostic_source=cast(VideoNode, clip),
                 frame_number=3,
                 output_path=tmp_path / "out.png",
                 overlay=None,
@@ -778,7 +780,7 @@ def test_clip_to_rgb24_for_pillow_maps_yuv_matrix_for_pillow(
 
     clip = _FakeClip(fmt=fmt, props=props)
 
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+    result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
 
     assert result == "bicubic"
     assert clip.resize.calls[0][0] == "Bicubic"
@@ -791,7 +793,7 @@ def test_clip_to_rgb24_for_pillow_already_rgb24_passthrough(monkeypatch) -> None
 
     fmt = SimpleNamespace(id=1, color_family=2)
     clip = _FakeClip(fmt=fmt, props={"_Matrix": 5})
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+    result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
 
     assert result is clip
     assert clip.resize.calls == []
@@ -803,7 +805,7 @@ def test_clip_to_rgb24_for_pillow_rgb_non_24_uses_point(monkeypatch) -> None:
 
     fmt = SimpleNamespace(id=999, color_family=2)
     clip = _FakeClip(fmt=fmt, props={})
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+    result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
 
     assert result == "point"
     assert clip.resize.calls[0][0] == "Point"
@@ -830,7 +832,7 @@ def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(
     )
     clip.resize.Point = MagicMock(return_value=clip)
 
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+    result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
 
     assert result == "props"
     clip.resize.Point.assert_called_once_with(format=1)
@@ -855,7 +857,7 @@ def test_clip_to_rgb24_for_pillow_skips_expand_when_not_limited_internal_tonemap
     fmt = SimpleNamespace(id=999, color_family=2)
     clip = _FakeClip(fmt=fmt, props=props)
 
-    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+    result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
 
     assert result == "point"
     assert clip.resize.calls[0] == ("Point", {"format": 1})
@@ -903,8 +905,8 @@ def test_render_vs_reads_picture_type_from_exact_diagnostic_source(
     source = _Node("B")
     result = render_frame_detailed(
         RenderRequest(
-            clip=transformed,  # type: ignore[arg-type]
-            diagnostic_source=source,  # type: ignore[arg-type]
+            clip=cast(VideoNode, transformed),
+            diagnostic_source=cast(VideoNode, source),
             frame_number=7,
             output_path=tmp_path / "out.png",
             overlay=None,
@@ -952,8 +954,8 @@ def test_render_vs_applies_geometry_plan_before_saving(
     clip = _RgbClip()
     render_frame_detailed(
         RenderRequest(
-            clip=clip,  # type: ignore[arg-type]
-            diagnostic_source=clip,  # type: ignore[arg-type]
+            clip=cast(VideoNode, clip),
+            diagnostic_source=cast(VideoNode, clip),
             frame_number=3,
             output_path=output,
             overlay=None,
@@ -990,8 +992,8 @@ def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
 
     result = render_frame_detailed(
         RenderRequest(
-            clip=object(),  # type: ignore[arg-type]
-            diagnostic_source=_Source(),  # type: ignore[arg-type]
+            clip=cast(VideoNode, object()),
+            diagnostic_source=cast(VideoNode, _Source()),
             frame_number=3,
             output_path=tmp_path / "out.png",
             overlay=None,

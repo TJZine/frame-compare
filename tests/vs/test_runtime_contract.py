@@ -7,10 +7,12 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 
 import frame_compare.vs.runtime_contract as runtime_contract
+from frame_compare.errors import JSONValue
 from frame_compare.vs.runtime_contract import (
     DEBIAN_FFMPEG_PACKAGE_VERSION,
     FFMS2_SOURCE_TREE_SHA256,
@@ -40,6 +42,28 @@ from frame_compare.vs.runtime_contract import (
 )
 
 
+class _LsmashWorksIdentity(TypedDict):
+    build: str
+    distribution_version: str
+    native_release: str
+    decoder_ffmpeg: dict[str, JSONValue]
+
+
+class _DecoderIdentity(TypedDict):
+    vapoursynth: dict[str, JSONValue]
+    l_smash_works: _LsmashWorksIdentity
+    obuparse: dict[str, JSONValue]
+
+
+class _RuntimeComponents(TypedDict):
+    decoder: _DecoderIdentity
+    standalone_ffmpeg: dict[str, JSONValue]
+    tone_mapping: dict[str, dict[str, JSONValue]]
+    ffms2: dict[str, JSONValue]
+    plugin_layout: dict[str, JSONValue]
+    qt_deployment: dict[str, JSONValue]
+
+
 def test_runtime_profile_uses_explicit_deployment_kind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -60,7 +84,7 @@ def test_unmanaged_macos_has_its_own_native_profile(monkeypatch: pytest.MonkeyPa
 
     assert media_runtime_profile() == "native-macos"
     identity = media_runtime_identity("full", profile="native-macos")
-    components = identity["components"]
+    components = cast(_RuntimeComponents, identity["components"])
     assert components["decoder"]["l_smash_works"]["build"] == "unmanaged-native"
     assert components["standalone_ffmpeg"] == {
         "selection_kind": "unmanaged-native",
@@ -76,7 +100,7 @@ def test_unmanaged_windows_does_not_inherit_portable_identity(
 
     assert media_runtime_profile() == "unmanaged-windows"
     identity = media_runtime_identity("full", profile="unmanaged-windows")
-    components = identity["components"]
+    components = cast(_RuntimeComponents, identity["components"])
     assert components["decoder"]["l_smash_works"]["build"] == "unmanaged-native"
     assert components["standalone_ffmpeg"] == {
         "selection_kind": "unmanaged-native",
@@ -99,7 +123,7 @@ def test_unmanaged_linux_does_not_inherit_debian_package_identity(
 
     assert media_runtime_profile() == "unmanaged-linux"
     identity = media_runtime_identity("full", profile="unmanaged-linux")
-    components = identity["components"]
+    components = cast(_RuntimeComponents, identity["components"])
     assert components["decoder"]["l_smash_works"]["build"] == "unmanaged-native"
     assert components["standalone_ffmpeg"] == {
         "selection_kind": "unmanaged-native",
@@ -127,15 +151,16 @@ def test_all_scope_fingerprints_are_deterministic_and_distinct() -> None:
 
 
 def test_windows_and_debian_decoder_profiles_do_not_share_cache_identity() -> None:
-    for scope in ("analysis", "probe", "index", "full"):
+    scopes: tuple[runtime_contract.MediaRuntimeScope, ...] = ("analysis", "probe", "index", "full")
+    for scope in scopes:
         assert media_runtime_fingerprint(scope, profile="windows-x64") != media_runtime_fingerprint(
             scope, profile="debian-trixie"
         )
 
     windows = media_runtime_identity("analysis", profile="windows-x64")
     linux = media_runtime_identity("analysis", profile="debian-trixie")
-    windows_lsw = windows["components"]["decoder"]["l_smash_works"]
-    linux_lsw = linux["components"]["decoder"]["l_smash_works"]
+    windows_lsw = cast(_RuntimeComponents, windows["components"])["decoder"]["l_smash_works"]
+    linux_lsw = cast(_RuntimeComponents, linux["components"])["decoder"]["l_smash_works"]
     assert windows_lsw["distribution_version"] == "1310.0.0.0"
     assert linux_lsw["decoder_ffmpeg"]["package_version"] == DEBIAN_FFMPEG_PACKAGE_VERSION
 
@@ -153,17 +178,18 @@ def test_analysis_identity_excludes_tone_mapping_components() -> None:
 def test_full_runtime_plugin_layout_is_profile_specific() -> None:
     windows = media_runtime_identity("full", profile="windows-x64")
 
-    assert windows["components"]["plugin_layout"] == {
+    assert cast(_RuntimeComponents, windows["components"])["plugin_layout"] == {
         "vapoursynth": "site-packages/vapoursynth/plugins"
     }
-    for profile in (
+    profiles: tuple[runtime_contract.MediaRuntimeProfile, ...] = (
         "debian-trixie",
         "unmanaged-windows",
         "unmanaged-linux",
         "native-macos",
-    ):
+    )
+    for profile in profiles:
         identity = media_runtime_identity("full", profile=profile)
-        assert identity["components"]["plugin_layout"] == {
+        assert cast(_RuntimeComponents, identity["components"])["plugin_layout"] == {
             "vapoursynth": "site-packages/vapoursynth/plugins",
             "extra": "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
             "manifest": "VapourSynth Manifest V1",
@@ -173,7 +199,7 @@ def test_full_runtime_plugin_layout_is_profile_specific() -> None:
 def test_windows_full_runtime_tracks_qt_deployment_profile_only() -> None:
     windows = media_runtime_identity("full", profile="windows-x64")
 
-    assert windows["components"]["qt_deployment"] == {
+    assert cast(_RuntimeComponents, windows["components"])["qt_deployment"] == {
         "profile": WINDOWS_QT_DEPLOYMENT_PROFILE,
         "binding": "PySide6",
         "binding_release": WINDOWS_PYSIDE6_RELEASE,
@@ -181,17 +207,25 @@ def test_windows_full_runtime_tracks_qt_deployment_profile_only() -> None:
         "multimedia_ffmpeg_release": WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
         "webengine": "excluded",
     }
-    assert (
-        "qt_deployment" not in media_runtime_identity("full", profile="debian-trixie")["components"]
+    assert "qt_deployment" not in cast(
+        _RuntimeComponents, media_runtime_identity("full", profile="debian-trixie")["components"]
     )
-    for scope in ("analysis", "probe", "alignment", "index"):
-        assert (
-            "qt_deployment"
-            not in media_runtime_identity(scope, profile="windows-x64")["components"]
+    scopes: tuple[runtime_contract.MediaRuntimeScope, ...] = (
+        "analysis",
+        "probe",
+        "alignment",
+        "index",
+    )
+    for scope in scopes:
+        assert "qt_deployment" not in cast(
+            _RuntimeComponents, media_runtime_identity(scope, profile="windows-x64")["components"]
         )
 
     report = supported_media_runtime_report(profile="windows-x64")
-    assert report["components"]["qt_deployment"] == windows["components"]["qt_deployment"]
+    assert (
+        cast(_RuntimeComponents, report["components"])["qt_deployment"]
+        == cast(_RuntimeComponents, windows["components"])["qt_deployment"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -222,10 +256,16 @@ def test_probe_fingerprint_tracks_standalone_ffmpeg_lineage(
 def test_alignment_identity_includes_decoder_and_standalone_ffmpeg() -> None:
     identity = media_runtime_identity("alignment", profile="windows-x64")
 
-    assert set(identity["components"]) == {"decoder", "standalone_ffmpeg"}
-    assert identity["components"]["decoder"]["vapoursynth"]["release"] == "R80"
-    assert "l_smash_works" in identity["components"]["decoder"]
-    assert identity["components"]["standalone_ffmpeg"]["license_profile"] == "LGPL-only"
+    assert set(cast(_RuntimeComponents, identity["components"])) == {"decoder", "standalone_ffmpeg"}
+    assert (
+        cast(_RuntimeComponents, identity["components"])["decoder"]["vapoursynth"]["release"]
+        == "R80"
+    )
+    assert "l_smash_works" in cast(_RuntimeComponents, identity["components"])["decoder"]
+    assert (
+        cast(_RuntimeComponents, identity["components"])["standalone_ffmpeg"]["license_profile"]
+        == "LGPL-only"
+    )
 
 
 def test_alignment_fingerprint_tracks_decoder_lineage(
@@ -239,7 +279,9 @@ def test_alignment_fingerprint_tracks_decoder_lineage(
 def test_debian_ffmpeg_identity_records_gpl_enabled_license_profile() -> None:
     identity = media_runtime_identity("alignment", profile="debian-trixie")
 
-    assert identity["components"]["standalone_ffmpeg"]["license_profile"] == ("GPL-2.0-or-later")
+    assert cast(_RuntimeComponents, identity["components"])["standalone_ffmpeg"][
+        "license_profile"
+    ] == ("GPL-2.0-or-later")
 
 
 def test_index_token_is_profile_scoped() -> None:
@@ -310,11 +352,21 @@ def test_windows_ffmpeg_executable_token_matches_selected_artifact(repo_root: Pa
 def test_supported_report_contains_observable_component_contract() -> None:
     report = supported_media_runtime_report(profile="debian-trixie")
 
-    assert report["components"]["decoder"]["vapoursynth"]["release"] == "R80"
-    assert report["components"]["decoder"]["l_smash_works"]["native_release"] == ("1310.0.0.0")
-    assert report["components"]["decoder"]["obuparse"]["soname"] == "libobuparse.so.2"
-    assert report["components"]["ffms2"]["included"] is True
-    assert report["components"]["tone_mapping"]["vs_placebo"]["release"] == "2.0.4"
+    assert (
+        cast(_RuntimeComponents, report["components"])["decoder"]["vapoursynth"]["release"] == "R80"
+    )
+    assert cast(_RuntimeComponents, report["components"])["decoder"]["l_smash_works"][
+        "native_release"
+    ] == ("1310.0.0.0")
+    assert (
+        cast(_RuntimeComponents, report["components"])["decoder"]["obuparse"]["soname"]
+        == "libobuparse.so.2"
+    )
+    assert cast(_RuntimeComponents, report["components"])["ffms2"]["included"] is True
+    assert (
+        cast(_RuntimeComponents, report["components"])["tone_mapping"]["vs_placebo"]["release"]
+        == "2.0.4"
+    )
     assert report["fingerprints"]["full"] == media_runtime_fingerprint(
         "full", profile="debian-trixie"
     )

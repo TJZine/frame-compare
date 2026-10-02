@@ -1,5 +1,6 @@
 """Tests for tonemapping module."""
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,7 +39,7 @@ def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_runtime_usable, 
     """Verify unsupported tone curve raises error in libplacebo path."""
     mock_detect.return_value = {"libplacebo": True}
     mock_clip = MagicMock()
-    settings = TonemapSettings(enabled=True, tone_curve="invalid")  # type: ignore[arg-type]
+    settings = TonemapSettings(enabled=True, tone_curve=cast(ToneCurve, "invalid"))
 
     with pytest.raises(TonemapError) as exc:
         apply_tonemap(mock_clip, settings)

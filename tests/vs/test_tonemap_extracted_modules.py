@@ -131,7 +131,12 @@ def test_fallback_tonemap_prefers_explicit_source_peak_over_metadata() -> None:
 
 
 def test_fallback_tonemap_uses_probed_hdr_signal_for_untagged_yuv_conversion() -> None:
-    clip = _Clip(props={}, format_id=vs.YUV420P10, color_family=vs.YUV, bits_per_sample=10)
+    clip = _Clip(
+        props={},
+        format_id=cast(int, vars(vs)["YUV420P10"]),
+        color_family=vs.YUV,
+        bits_per_sample=10,
+    )
     metadata = HDRMetadata(None, 1000, 400, 9, 16, 9)
 
     fallback_tonemap(cast("VideoNode", clip), TonemapSettings(), metadata)
@@ -209,7 +214,12 @@ def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
 
 
 def test_libplacebo_uses_probed_hdr_signal_for_untagged_yuv_conversion() -> None:
-    clip = _Clip(props={}, format_id=vs.YUV420P10, color_family=vs.YUV, bits_per_sample=10)
+    clip = _Clip(
+        props={},
+        format_id=cast(int, vars(vs)["YUV420P10"]),
+        color_family=vs.YUV,
+        bits_per_sample=10,
+    )
     placebo = _Placebo([clip])
     core = SimpleNamespace(placebo=placebo)
     metadata = HDRMetadata(None, 1000, 400, 9, 16, 9)

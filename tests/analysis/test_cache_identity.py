@@ -57,7 +57,7 @@ def test_compute_cache_key_changes_by_analysis_performance_mode(tmp_path: Path) 
     v1 = create_video_file(tmp_path, "v1.mkv")
     keys = {
         compute_cache_key([v1], AnalysisConfig(performance_mode=mode))
-        for mode in ("quality", "performance")
+        for mode in (AnalysisPerformanceMode.QUALITY, AnalysisPerformanceMode.PERFORMANCE)
     }
 
     assert len(keys) == 2
@@ -158,7 +158,7 @@ def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
 def test_metric_algorithm_identity_changes_with_media_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = AnalysisConfig(performance_mode="quality")
+    config = AnalysisConfig(performance_mode=AnalysisPerformanceMode.QUALITY)
     original = stable_metric_algorithm_identity_json(config)
     captured_scopes: list[str] = []
 

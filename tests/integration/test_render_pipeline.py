@@ -1,4 +1,6 @@
+from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 import pytest
 from PIL import Image
@@ -94,7 +96,7 @@ def test_overlay_application_adds_visible_content(sample_image_path: Path):
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
-                pixel_data = list(result.getdata())
+                pixel_data = list(cast(Iterable[int | float | tuple[int, ...]], result.getdata()))
         assert len(set(pixel_data)) > 1
 
 

@@ -71,8 +71,9 @@ def test_overlay_config_is_immutable_and_keeps_source_domain() -> None:
     )
     assert config.comparison_frame == 1
     assert config.source_frame == 3
+    field = "label"
     with pytest.raises(FrozenInstanceError):
-        config.label = "changed"  # type: ignore[misc]
+        setattr(config, field, "changed")
 
 
 def test_rendered_batch_requires_identical_labels_and_counts() -> None:

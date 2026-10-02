@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -73,4 +74,6 @@ def test_vs_render_converts_rgbs_to_png(tmp_path: Path):
         assert img.format == "PNG"
         extrema = img.getextrema()
         assert extrema is not None
-        assert all(channel_max > 0 for _, channel_max in extrema)
+        assert all(
+            channel_max > 0 for _, channel_max in cast(tuple[tuple[float, float], ...], extrema)
+        )

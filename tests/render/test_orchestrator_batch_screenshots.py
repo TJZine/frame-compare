@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.config.schema import ColorConfig, ConfigSchema, ScreenshotsConfig
 from frame_compare.render.batch.orchestrator import (
     render_screenshots_from_batch_detailed,
 )
@@ -197,7 +197,7 @@ def test_render_screenshots_from_batch_constructs_configured_default_runner(
 ) -> None:
     config = ConfigSchema(
         color=ColorConfig(enable_tonemap=False),
-        screenshots={"ffmpeg_timeout_seconds": 47.0},
+        screenshots=ScreenshotsConfig(ffmpeg_timeout_seconds=47.0),
     )
     request = _batch_request("clip.mkv", "clip", [1])
     expanded = _expanded(tmp_path, [request])

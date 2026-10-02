@@ -1,4 +1,5 @@
 from fractions import Fraction
+from typing import cast
 
 import pytest
 
@@ -42,7 +43,7 @@ def test_performance_metrics_require_a_sorted_explicit_source_map() -> None:
 def test_selection_default_factories_are_isolated() -> None:
     first_breakdown = SelectionBreakdown()
     second_breakdown = SelectionBreakdown()
-    first_breakdown.user.append(1)
+    cast(list[int], first_breakdown.user).append(1)
 
     first_selection = FrameSelection(frames=[], seed=1, breakdown=first_breakdown)
     second_selection = FrameSelection(frames=[], seed=2, breakdown=second_breakdown)

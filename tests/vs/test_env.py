@@ -1,5 +1,6 @@
 """Tests for VapourSynth environment detection."""
 
+from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -133,13 +134,19 @@ def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(
     mock_vs = MagicMock()
     vs_attempts = {"count": 0}
 
-    def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+    def _fake_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] | None = (),
+        level: int = 0,
+    ) -> object:
         if name == "vapoursynth":
             vs_attempts["count"] += 1
             if vs_attempts["count"] == 1:
                 raise ImportError("missing runtime DLL")
             return mock_vs
-        return original_import(name, *args, **kwargs)
+        return original_import(name, globals, locals, fromlist, level)
 
     register_dirs = MagicMock()
     monkeypatch.setattr(env_module, "register_windows_dll_dirs", register_dirs)
@@ -453,7 +460,7 @@ def test_require_plugin_missing_raises_error() -> None:
     """Verify error raised for missing plugin."""
     core = make_mock_core()
     with pytest.raises(PluginNotFoundError) as exc:
-        require_plugin(core, "libplacebo")  # type: ignore
+        require_plugin(cast(Core, core), "libplacebo")
     assert exc.value.code == "FC-2003"
 
 
