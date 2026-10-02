@@ -5,7 +5,6 @@ import pytest
 from frame_compare.services.metadata_parsing import (
     parse_filename,
     parse_filename_with_release_identity,
-    parse_release_identity,
 )
 from frame_compare.services.release_identity import (
     ContentIdentity,
@@ -66,7 +65,7 @@ from frame_compare.services.release_identity import (
     ],
 )
 def test_real_parser_corpus(filename: str, expected: tuple[object, ...]) -> None:
-    identity = parse_release_identity(filename)
+    _, identity = parse_filename_with_release_identity(filename)
     assert (
         identity.service,
         identity.source_type,
@@ -78,23 +77,32 @@ def test_real_parser_corpus(filename: str, expected: tuple[object, ...]) -> None
 
 @pytest.mark.parametrize("code_token", ["CC", "PLAY", "HBO", "HMAX", "iT", "MAX", "SHO", "STAN"])
 def test_needs_web_services_without_web_next_give_no_service(code_token: str) -> None:
-    identity = parse_release_identity(f"Show.S01E01.1080p.{code_token}.DDP5.1.H.264-GRP.mkv")
+    _, identity = parse_filename_with_release_identity(
+        f"Show.S01E01.1080p.{code_token}.DDP5.1.H.264-GRP.mkv"
+    )
     assert identity.service is None
 
 
 def test_hbo_max_without_web_next_gives_no_service() -> None:
-    identity = parse_release_identity("Show.S01E01.1080p.HBO.MAX.DDP5.1.H.264-GRP.mkv")
+    _, identity = parse_filename_with_release_identity(
+        "Show.S01E01.1080p.HBO.MAX.DDP5.1.H.264-GRP.mkv"
+    )
     assert identity.service is None
 
 
 def test_it_without_web_next_gives_no_service() -> None:
-    identity = parse_release_identity("Show.S01E01.1080p.IT.DDP5.1.H.264-GRP.mkv")
+    _, identity = parse_filename_with_release_identity("Show.S01E01.1080p.IT.DDP5.1.H.264-GRP.mkv")
     assert identity.service is None
 
 
 def test_screenshots_it_file_descriptor() -> None:
-    identity = parse_release_identity(
-        "Show.2024.2160p.iT.WEB-DL.DV.HDR.H.265-ThisBlockHasProblems.mkv"
+    identity = ReleaseIdentity(
+        ContentIdentity("Show", 2024),
+        "2160p",
+        "iT",
+        "WEB-DL",
+        ("DV", "HDR"),
+        "ThisBlockHasProblems",
     )
     assert (
         format_release_descriptor(identity) == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
@@ -129,13 +137,15 @@ def test_guessit_streaming_service_names_map_to_display_codes(
     )
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: {})
 
-    identity = parse_release_identity("Show.mkv")
+    _, identity = parse_filename_with_release_identity("Show.mkv")
 
     assert identity.service == expected
 
 
 def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
-    identity = parse_release_identity("Show.S01E05.1080p.AMZN.WEBRip.HLG-GROUP.mkv")
+    identity = ReleaseIdentity(
+        ContentIdentity("Show", season=1, episode=5), "1080p", "AMZN", "WEBRip", ("HLG",), "GROUP"
+    )
 
     assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
 
@@ -153,7 +163,7 @@ def test_compact_aliases_and_specific_revision_precedence(
     claims: tuple[str, ...],
     revisions: tuple[str, ...],
 ) -> None:
-    identity = parse_release_identity(filename)
+    _, identity = parse_filename_with_release_identity(filename)
     assert identity.dynamic_range_claims == claims
     assert identity.revision_tags == revisions
 
@@ -170,7 +180,7 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
     )
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: {})
 
-    identity = parse_release_identity("Movie.1080p.WEB-DL-GROUP.mkv")
+    _, identity = parse_filename_with_release_identity("Movie.1080p.WEB-DL-GROUP.mkv")
 
     assert identity.content.title == "Movie Title"
     assert identity.release_group == "GROUP EVIL"
@@ -341,5 +351,5 @@ def test_short_names_resolve_remaining_collisions() -> None:
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("frame_compare.services.metadata_parsing.guessit", lambda _name: 42)
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: None)
-    identity = parse_release_identity("odd_name.mkv")
+    _, identity = parse_filename_with_release_identity("odd_name.mkv")
     assert identity.content == ContentIdentity("odd name", title_origin="fallback")

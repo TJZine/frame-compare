@@ -309,17 +309,6 @@ _SOURCE_PATTERNS = (
 )
 
 
-def parse_release_identity(
-    filename: str,
-    parser_priority: ParserPriority = "auto",
-    *,
-    alternate_policy: AlternateParserPolicy = "merge",
-) -> ReleaseIdentity:
-    """Parse presentation-only filename claims, failing open to the filename stem."""
-    fields = _parse_fields(filename, parser_priority, alternate_policy)
-    return _release_identity(filename, fields)
-
-
 def parse_filename_with_release_identity(
     filename: str,
     parser_priority: ParserPriority = "auto",

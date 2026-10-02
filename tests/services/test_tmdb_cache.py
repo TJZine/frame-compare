@@ -60,9 +60,12 @@ async def test_cache_preserves_order_and_separates_search_and_alias_entries(
 
 
 @pytest.mark.anyio
-async def test_empty_entries_are_cacheable_through_the_ttl_boundary(tmp_path: Path) -> None:
+async def test_empty_entries_are_cacheable_through_the_ttl_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     now = [datetime(2026, 1, 1, tzinfo=UTC)]
-    cache = TmdbCache(tmp_path / "tmdb.toml", clock=lambda: now[0])
+    monkeypatch.setattr(tmdb_cache, "_utc_now", lambda: now[0])
+    cache = TmdbCache(tmp_path / "tmdb.toml")
     endpoint = "https://api.example.test/movie/1/alternative_titles"
     params = {"api_key": "a" * 32}
 
@@ -75,9 +78,12 @@ async def test_empty_entries_are_cacheable_through_the_ttl_boundary(tmp_path: Pa
 
 
 @pytest.mark.anyio
-async def test_positive_entries_expire_after_thirty_days(tmp_path: Path) -> None:
+async def test_positive_entries_expire_after_thirty_days(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     now = [datetime(2026, 1, 1, tzinfo=UTC)]
-    cache = TmdbCache(tmp_path / "tmdb.toml", clock=lambda: now[0])
+    monkeypatch.setattr(tmdb_cache, "_utc_now", lambda: now[0])
+    cache = TmdbCache(tmp_path / "tmdb.toml")
     endpoint = "https://api.example.test/search/movie"
     params = _search_params("Known")
 
@@ -90,9 +96,12 @@ async def test_positive_entries_expire_after_thirty_days(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_future_dated_entry_is_not_reused(tmp_path: Path) -> None:
+async def test_future_dated_entry_is_not_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     now = [datetime(2026, 1, 1, tzinfo=UTC)]
-    cache = TmdbCache(tmp_path / "tmdb.toml", clock=lambda: now[0])
+    monkeypatch.setattr(tmdb_cache, "_utc_now", lambda: now[0])
+    cache = TmdbCache(tmp_path / "tmdb.toml")
     endpoint = "https://api.example.test/search/movie"
     params = _search_params("Known")
 
@@ -160,7 +169,8 @@ async def test_cache_prunes_oldest_entries_by_count_deterministically(
     monkeypatch.setattr(tmdb_cache, "TMDB_CACHE_MAX_BYTES", 10_000)
     now = [datetime(2026, 1, 1, tzinfo=UTC)]
     cache_path = tmp_path / "tmdb.toml"
-    cache = TmdbCache(cache_path, clock=lambda: now[0])
+    monkeypatch.setattr(tmdb_cache, "_utc_now", lambda: now[0])
+    cache = TmdbCache(cache_path)
     endpoint = "https://api.example.test/search/movie"
     params = [_search_params(f"Title {index}") for index in range(3)]
 

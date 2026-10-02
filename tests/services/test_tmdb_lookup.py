@@ -246,7 +246,7 @@ async def test_tmdb_failures_do_not_leak_api_key_through_json_tracebacks(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         try:
-            await tmdb_lookup.lookup_tmdb(
+            await tmdb_lookup.search_tmdb(
                 ParsedMetadata(title="Arrival"),
                 MetadataConfig(api_key=api_key),
                 client,
@@ -293,21 +293,23 @@ async def test_tmdb_lookup_skips_malformed_search_result_items() -> None:
             )
         )
     ) as client:
-        result = await tmdb_lookup.lookup_tmdb(
+        result = await tmdb_lookup.search_tmdb(
             ParsedMetadata(title="Valid Show"),
             MetadataConfig(api_key="a" * 32),
             client,
         )
 
-    assert result == TmdbMetadata(
-        tmdb_id=42,
-        title="Valid Show",
-        original_title="Valid Show Original",
-        year=0,
-        media_type="tv",
-        poster_url=None,
-        backdrop_url=None,
-    )
+    assert result == [
+        TmdbMetadata(
+            tmdb_id=42,
+            title="Valid Show",
+            original_title="Valid Show Original",
+            year=0,
+            media_type="tv",
+            poster_url=None,
+            backdrop_url=None,
+        )
+    ]
 
 
 @pytest.mark.anyio
@@ -319,7 +321,7 @@ async def test_tmdb_lookup_malformed_top_level_payload_raises_domain_error(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
     ) as client:
         with pytest.raises(TmdbError) as excinfo:
-            await tmdb_lookup.lookup_tmdb(
+            await tmdb_lookup.search_tmdb(
                 ParsedMetadata(title="No Results"),
                 MetadataConfig(api_key="a" * 32),
                 client,

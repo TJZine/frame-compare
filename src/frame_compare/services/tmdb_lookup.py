@@ -388,37 +388,3 @@ async def fetch_tmdb_alternative_titles(
 def is_valid_tmdb_api_key(api_key: str) -> bool:
     """Return whether a TMDB API key matches the API v3 key format."""
     return TMDB_KEY_REGEX.fullmatch(api_key) is not None
-
-
-async def lookup_tmdb(
-    parsed: ParsedMetadata,
-    config: MetadataConfig,
-    client: httpx.AsyncClient,
-    *,
-    cache: TmdbCache | None = None,
-) -> TmdbMetadata | None:
-    """
-    Look up media on TMDB.
-
-    Preconditions:
-    - If config.api_key is None, return None without making a request
-    - If config.api_key is not a valid 32-character hex string, raise
-      TmdbError with message containing "Invalid API key format"
-
-    Args:
-        parsed: Metadata from filename parsing
-        config: TMDB configuration
-        client: HTTP client (injected, not owned)
-
-    Returns:
-        TmdbMetadata if found, None otherwise
-
-    Raises:
-        TmdbError: If API key is invalid format, or API call fails
-        TmdbRateLimitedError: If rate limited (HTTP 429)
-    """
-    if cache is None:
-        results = await search_tmdb(parsed, config, client)
-    else:
-        results = await search_tmdb(parsed, config, client, cache=cache)
-    return results[0] if results else None

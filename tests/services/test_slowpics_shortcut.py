@@ -131,17 +131,20 @@ def test_create_slowpics_url_shortcut_overwrites_same_deterministic_path(
 
 def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "workspace"
 
     def _raise_write_error(_path: Path, _content: str) -> None:
         raise PermissionError("locked")
 
+    monkeypatch.setattr(
+        "frame_compare.services.slowpics_shortcut.write_text_atomic", _raise_write_error
+    )
     result = create_slowpics_url_shortcut(
         workspace=_workspace(root, run_dir=root / "generated" / "Example"),
         slowpics_url="https://slow.pics/c/example-key",
         collection_title="Example",
-        text_writer=_raise_write_error,
     )
 
     assert result.success is False
