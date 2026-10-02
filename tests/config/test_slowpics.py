@@ -13,11 +13,27 @@ from frame_compare.config.slowpics import (
 @pytest.mark.parametrize(
     ("template", "context", "expected"),
     [
+        (
+            "${FileName}|${Filename}|${Label}|${OriginalLanguage}|${OriginalTitle}|"
+            "${TMDBCategory}|${TMDBId}|${Title}|${Year}",
+            {
+                "FileName": "filename",
+                "Filename": "filename",
+                "Label": "label",
+                "OriginalLanguage": "originallanguage",
+                "OriginalTitle": "originaltitle",
+                "TMDBCategory": "tmdbcategory",
+                "TMDBId": "tmdbid",
+                "Title": "title",
+                "Year": "year",
+            },
+            "filename|filename|label|originallanguage|originaltitle|tmdbcategory|tmdbid|title|year",
+        ),
         ("${Title}/${Year}", {}, "/"),
         ("Cost $$5: ${Title}", {"Title": "Example"}, "Cost $5: Example"),
         ("${Title}", {"Title": "Good", "Unused": "bad\n"}, "Good"),
     ],
-    ids=["missing-values", "escaped-dollar", "unused-control"],
+    ids=["all-placeholders", "missing-values", "escaped-dollar", "unused-control"],
 )
 def test_renderer_substitutes_only_used_template_values(
     template: str, context: dict[str, str], expected: str

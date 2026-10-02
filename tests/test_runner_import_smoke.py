@@ -35,6 +35,8 @@ def test_runner_run_propagates_result(
     result = runner.run(request, dependencies=deps)
 
     assert result is expected
+    assert captured["request"] is request
+    assert captured["deps"] is deps
 
 
 def test_runner_run_raises_when_event_loop_running(

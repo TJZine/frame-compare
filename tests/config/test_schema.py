@@ -265,6 +265,7 @@ def test_slowpics_config_public_surface_is_frozen_to_approved_fields_and_default
         "webhook_url": None,
     }
 
+    assert list(SlowpicsConfig.model_fields) == list(expected_defaults)
     assert SlowpicsConfig().model_dump(mode="json") == expected_defaults
     assert get_default_config().slowpics.model_dump(mode="json") == expected_defaults
 

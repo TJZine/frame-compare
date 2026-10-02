@@ -284,8 +284,9 @@ async def test_config_write_replaces_symlink_without_touching_referent(
 
     monkeypatch.setattr(script.preparation, "execute_prep", execute_prep)
 
-    await script._prepare_pair(pair, pair_root, object())
+    result = await script._prepare_pair(pair, pair_root, object())
 
+    assert result is prepared
     assert not config_file.is_symlink()
     assert config_file.read_text(encoding="utf-8").startswith("[paths]")
     assert outside_config.read_text(encoding="utf-8") == "unchanged"

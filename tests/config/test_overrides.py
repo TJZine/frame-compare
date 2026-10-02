@@ -127,6 +127,8 @@ def test_apply_cli_overrides_maps_explicit_fields(
             assert actual is value
         else:
             assert actual == value
+    if overrides.tm_target_nits is not None:
+        assert "target_nits" in updated.color.model_fields_set
 
 
 def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_override() -> None:
