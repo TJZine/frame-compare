@@ -37,6 +37,8 @@ def test_select_reporter_no_color_uses_rich_for_detected_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Auto-detected interactive no-color runs should keep Rich progress."""
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     output = StringIO()
 

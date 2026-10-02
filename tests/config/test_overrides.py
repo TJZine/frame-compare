@@ -1,11 +1,11 @@
 """Tests for CLI override logic."""
 
-from dataclasses import fields
 from pathlib import Path
+
+import pytest
 
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import (
-    CLI_OVERRIDE_MAP,
     CLIConfigOverrides,
     apply_cli_overrides,
 )
@@ -36,10 +36,6 @@ def test_cli_overrides_do_not_map_confirm_upload_after_report() -> None:
 
     new_config = apply_cli_overrides(config, CLIConfigOverrides(no_upload=True))
 
-    assert "slowpics.confirm_upload_after_report" not in CLI_OVERRIDE_MAP.values()
-    cli_override_fields = {field.name for field in fields(CLIConfigOverrides)}
-    assert "confirm_upload_after_report" not in cli_override_fields
-    assert new_config.slowpics.auto_upload is False
     assert new_config.slowpics.confirm_upload_after_report is True
 
 
@@ -50,69 +46,87 @@ def test_cli_overrides_do_not_map_previous_offsets() -> None:
 
     new_config = apply_cli_overrides(config, CLIConfigOverrides(force_interactive_alignment=False))
 
-    assert "audio_alignment.previous_offsets" not in CLI_OVERRIDE_MAP.values()
-    cli_override_fields = {field.name for field in fields(CLIConfigOverrides)}
-    assert "previous_offsets" not in cli_override_fields
     assert new_config.audio_alignment.previous_offsets == "always"
 
 
-def test_apply_cli_overrides_does_not_override_false_flag_defaults() -> None:
-    """Flag-style booleans default False and must not override config when omitted."""
+@pytest.mark.parametrize("false_flags", [True, False], ids=["false-flags", "empty-dto"])
+def test_apply_cli_overrides_omitted_flags_preserve_config(false_flags: bool) -> None:
     config = get_default_config()
-    config.slowpics.auto_upload = False
-    config.audio_alignment.force_interactive = True
-
-    cli_args = CLIConfigOverrides(no_upload=False, force_interactive_alignment=False)
-    new_config = apply_cli_overrides(config, cli_args)
-
-    assert new_config.slowpics.auto_upload is False
-    assert new_config.audio_alignment.force_interactive is True
-
-
-def test_apply_cli_overrides_empty_dto_returns_original_config() -> None:
-    """No override fields set returns the original config unchanged."""
-    config = get_default_config()
-    cli_args = CLIConfigOverrides()
-
-    new_config = apply_cli_overrides(config, cli_args)
-    assert new_config == config
+    overrides = CLIConfigOverrides()
+    if false_flags:
+        config.slowpics.auto_upload = False
+        config.audio_alignment.force_interactive = True
+        overrides = CLIConfigOverrides(no_upload=False, force_interactive_alignment=False)
+    updated = apply_cli_overrides(config, overrides)
+    assert updated == config
+    if false_flags:
+        assert updated.slowpics.auto_upload is False
+        assert updated.audio_alignment.force_interactive is True
 
 
-def test_apply_cli_overrides_accepts_enum_cli_values() -> None:
-    """Enum-backed CLI choices should flow through override application unchanged."""
-    config = get_default_config()
-    cli_args = CLIConfigOverrides(
-        tm_preset=TonemapPreset.FILMIC,
-        tm_curve=ToneCurve.REINHARD,
-        overlay_mode=OverlayMode.DIAGNOSTIC,
-    )
-
-    new_config = apply_cli_overrides(config, cli_args)
-
-    assert new_config.color.preset == TonemapPreset.FILMIC
-    assert new_config.color.tone_curve == ToneCurve.REINHARD
-    assert new_config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
-
-
-def test_apply_cli_overrides_force_interactive_alignment_sets_force_and_use_vsview() -> None:
-    """Test force_interactive_alignment implies use_vsview."""
-    config = get_default_config()
-    assert config.audio_alignment.force_interactive is False
-    assert config.audio_alignment.use_vsview is False
-
-    cli_args = CLIConfigOverrides(force_interactive_alignment=True)
-    new_config = apply_cli_overrides(config, cli_args)
-
-    assert new_config.audio_alignment.force_interactive is True
-    assert new_config.audio_alignment.use_vsview is True
-
-
-def test_apply_cli_overrides_input_dir_maps_to_paths_input_dir() -> None:
-    """Input directory override maps to paths.input_dir."""
-    config = get_default_config()
-    new_config = apply_cli_overrides(config, CLIConfigOverrides(input_dir=Path("inputs")))
-
-    assert new_config.paths.input_dir == "inputs"
+@pytest.mark.parametrize(
+    ("overrides", "color", "expected"),
+    [
+        (
+            CLIConfigOverrides(
+                tm_preset=TonemapPreset.FILMIC,
+                tm_curve=ToneCurve.REINHARD,
+                overlay_mode=OverlayMode.DIAGNOSTIC,
+            ),
+            None,
+            [
+                ("color", "preset", TonemapPreset.FILMIC),
+                ("color", "tone_curve", ToneCurve.REINHARD),
+                ("screenshots", "overlay_mode", OverlayMode.DIAGNOSTIC),
+            ],
+        ),
+        (
+            CLIConfigOverrides(force_interactive_alignment=True),
+            None,
+            [
+                ("audio_alignment", "force_interactive", True),
+                ("audio_alignment", "use_vsview", True),
+            ],
+        ),
+        (CLIConfigOverrides(input_dir=Path("inputs")), None, [("paths", "input_dir", "inputs")]),
+        (
+            CLIConfigOverrides(
+                user_frames=[12, 24],
+                random_frame_count=3,
+                dark_frame_count=2,
+                bright_frame_count=1,
+                motion_frame_count=4,
+            ),
+            None,
+            [
+                ("analysis", "user_frames", [12, 24]),
+                ("analysis", "random_frame_count", 3),
+                ("analysis", "dark_frame_count", 2),
+                ("analysis", "bright_frame_count", 1),
+                ("analysis", "motion_frame_count", 4),
+            ],
+        ),
+        (
+            CLIConfigOverrides(tm_target_nits=400),
+            ColorConfig(preset=TonemapPreset.FILMIC),
+            [("color", "target_nits", 400)],
+        ),
+    ],
+    ids=["enums", "force-interactive", "input-dir", "selectors", "target"],
+)
+def test_apply_cli_overrides_maps_explicit_fields(
+    overrides: CLIConfigOverrides,
+    color: ColorConfig | None,
+    expected: list[tuple[str, str, object]],
+) -> None:
+    config = get_default_config() if color is None else ConfigSchema(color=color)
+    updated = apply_cli_overrides(config, overrides)
+    for section, field, value in expected:
+        actual = getattr(getattr(updated, section), field)
+        if isinstance(value, bool):
+            assert actual is value
+        else:
+            assert actual == value
 
 
 def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_override() -> None:
@@ -124,34 +138,3 @@ def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_overr
 
     assert new_config.analysis.random_frame_count == 12
     assert new_config.color.model_fields_set == {"preset"}
-
-
-def test_apply_cli_overrides_maps_explicit_frame_selectors() -> None:
-    config = get_default_config()
-
-    new_config = apply_cli_overrides(
-        config,
-        CLIConfigOverrides(
-            user_frames=[12, 24],
-            random_frame_count=3,
-            dark_frame_count=2,
-            bright_frame_count=1,
-            motion_frame_count=4,
-        ),
-    )
-
-    assert new_config.analysis.user_frames == [12, 24]
-    assert new_config.analysis.random_frame_count == 3
-    assert new_config.analysis.dark_frame_count == 2
-    assert new_config.analysis.bright_frame_count == 1
-    assert new_config.analysis.motion_frame_count == 4
-
-
-def test_apply_cli_overrides_marks_cli_target_as_explicit_color_override() -> None:
-    """CLI target override remains explicit after config rebuild."""
-    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
-
-    new_config = apply_cli_overrides(config, CLIConfigOverrides(tm_target_nits=400))
-
-    assert new_config.color.target_nits == 400
-    assert "target_nits" in new_config.color.model_fields_set

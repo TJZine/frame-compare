@@ -109,30 +109,35 @@ def test_classify_outcome(
     )
 
 
-def test_refusal_rate_counts_same_content_pairs_only() -> None:
+@pytest.mark.parametrize(
+    ("records", "expected_rate", "expected_counts"),
+    [
+        (
+            [
+                {"outcome": "correct_applied", "expected_automatic": "applied"},
+                {"outcome": "correct_applied", "expected_automatic": "applied"},
+                {"outcome": "provisional", "expected_automatic": "applied"},
+                {"outcome": "unavailable", "expected_automatic": "applied"},
+                {"outcome": "correctly_withheld", "expected_automatic": "not_applied"},
+                {"outcome": "correctly_withheld", "expected_automatic": "not_applied"},
+            ],
+            0.5,
+            (2, 4),
+        ),
+        ([{"outcome": "correctly_withheld", "expected_automatic": "not_applied"}], None, None),
+    ],
+)
+def test_refusal_rate_and_eligible_counts(
+    records: list[dict[str, Any]],
+    expected_rate: float | None,
+    expected_counts: tuple[int, int] | None,
+) -> None:
     script = _load_script()
-    records: list[dict[str, Any]] = [
-        {"outcome": "correct_applied", "expected_automatic": "applied"},
-        {"outcome": "correct_applied", "expected_automatic": "applied"},
-        {"outcome": "provisional", "expected_automatic": "applied"},
-        {"outcome": "unavailable", "expected_automatic": "applied"},
-        {"outcome": "correctly_withheld", "expected_automatic": "not_applied"},
-        {"outcome": "correctly_withheld", "expected_automatic": "not_applied"},
-    ]
-
-    assert script.refusal_rate(records) == pytest.approx(0.5)
-    assert script.refusal_counts(records) == (2, 4)
-
-
-def test_refusal_rate_without_eligible_pairs_is_none() -> None:
-    script = _load_script()
-
-    assert (
-        script.refusal_rate(
-            [{"outcome": "correctly_withheld", "expected_automatic": "not_applied"}]
-        )
-        is None
-    )
+    if expected_rate is None:
+        assert script.refusal_rate(records) is None
+    else:
+        assert script.refusal_rate(records) == pytest.approx(expected_rate)
+        assert script.refusal_counts(records) == expected_counts
 
 
 @pytest.mark.parametrize(
@@ -279,9 +284,8 @@ async def test_config_write_replaces_symlink_without_touching_referent(
 
     monkeypatch.setattr(script.preparation, "execute_prep", execute_prep)
 
-    result = await script._prepare_pair(pair, pair_root, object())
+    await script._prepare_pair(pair, pair_root, object())
 
-    assert result is prepared
     assert not config_file.is_symlink()
     assert config_file.read_text(encoding="utf-8").startswith("[paths]")
     assert outside_config.read_text(encoding="utf-8") == "unchanged"

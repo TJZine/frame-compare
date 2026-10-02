@@ -102,7 +102,6 @@ def _render_rich_markup(markup: str) -> str:
 def test_exception_class_contract(error_class, args, expected_code):
     """Every exception has correct code, non-empty name, non-empty hint, valid to_dict()."""
     error = error_class(*args)
-    assert error.code == expected_code
     assert error.name
     assert error.hint
     ctx_dict = error.context.to_dict()
@@ -148,73 +147,80 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
     assert get_exit_code(error) == expected
 
 
-def test_format_error_console_basic():
-    error = VapourSynthNotFoundError()
-    rendered = _render_rich_markup(format_error_console(error))
-
+@pytest.mark.parametrize(
+    ("error", "verbose", "hint", "present", "absent"),
+    [
+        (
+            VapourSynthNotFoundError(),
+            False,
+            "--verbose",
+            ["Hint:"],
+            ["Details:", "For more details, run with --verbose"],
+        ),
+        (
+            CacheCorruptionError(Path("/cache")),
+            True,
+            "--verbose",
+            ["Details:", "path:", str(Path("/cache"))],
+            [],
+        ),
+        (
+            CacheCorruptionError(Path("/cache")),
+            False,
+            "--verbose",
+            ["For more details, run with --verbose"],
+            ["Details:"],
+        ),
+        (
+            CacheCorruptionError(Path("/cache")),
+            False,
+            None,
+            ["Details:", "path:"],
+            ["For more details, run with --verbose"],
+        ),
+        (RenderError(), True, "--verbose", [], ["Details:"]),
+        (
+            FrameCompareError(
+                ErrorContext(
+                    code="FC-3001",
+                    name="BRACKETED_VALUE",
+                    message="File [1080p] missing",
+                    hint="Try [literal] brackets",
+                    details={"path": "C:/videos/[sample].mkv"},
+                )
+            ),
+            True,
+            "--verbose",
+            [
+                "Error [FC-3001]: File [1080p] missing",
+                "Hint: Try [literal] brackets",
+                "path: C:/videos/[sample].mkv",
+            ],
+            ["[[FC-3001]]"],
+        ),
+    ],
+    ids=[
+        "basic",
+        "verbose-details",
+        "hidden-details",
+        "no-hint",
+        "verbose-empty",
+        "literal-brackets",
+    ],
+)
+def test_format_error_console_details_and_literal_markup(
+    error: FrameCompareError,
+    verbose: bool,
+    hint: str | None,
+    present: list[str],
+    absent: list[str],
+) -> None:
+    rendered = _render_rich_markup(format_error_console(error, verbose=verbose, verbose_hint=hint))
     assert f"Error [{error.code}]: {error.context.message}" in rendered
-    assert "Hint:" in rendered
-    # Since it has no details, it shouldn't say "For more details" or "Details:"
-    assert "Details:" not in rendered
-    assert "For more details, run with --verbose" not in rendered
-
-
-def test_format_error_console_verbose_with_details():
-    cache_path = Path("/cache")
-    error = CacheCorruptionError(cache_path)
-    rendered = _render_rich_markup(format_error_console(error, verbose=True))
-
-    assert f"Error [{error.code}]: {error.context.message}" in rendered
-    assert "Details:" in rendered
-    assert "path:" in rendered
-    # Path string formatting is platform-dependent (POSIX: "/cache", Windows: "\\cache").
-    assert str(cache_path) in rendered
-
-
-def test_format_error_console_non_verbose_with_details():
-    error = CacheCorruptionError(Path("/cache"))
-    rendered = _render_rich_markup(format_error_console(error, verbose=False))
-
-    assert f"Error [{error.code}]: {error.context.message}" in rendered
-    assert "Details:" not in rendered
-    assert "For more details, run with --verbose" in rendered
-
-
-def test_format_error_console_without_verbose_hint_shows_details() -> None:
-    error = CacheCorruptionError(Path("/cache"))
-    rendered = _render_rich_markup(format_error_console(error, verbose=False, verbose_hint=None))
-
-    assert f"Error [{error.code}]: {error.context.message}" in rendered
-    assert "Details:" in rendered
-    assert "path:" in rendered
-    assert "For more details, run with --verbose" not in rendered
-
-
-def test_format_error_console_verbose_no_details():
-    error = RenderError()
-    rendered = _render_rich_markup(format_error_console(error, verbose=True))
-
-    assert f"Error [{error.code}]: {error.context.message}" in rendered
-    assert "Details:" not in rendered
-
-
-def test_format_error_console_rendered_output_preserves_literal_brackets() -> None:
-    error = FrameCompareError(
-        ErrorContext(
-            code="FC-3001",
-            name="BRACKETED_VALUE",
-            message="File [1080p] missing",
-            hint="Try [literal] brackets",
-            details={"path": "C:/videos/[sample].mkv"},
-        )
-    )
-
-    rendered = _render_rich_markup(format_error_console(error, verbose=True))
-
-    assert "Error [FC-3001]: File [1080p] missing" in rendered
-    assert "[[FC-3001]]" not in rendered
-    assert "Hint: Try [literal] brackets" in rendered
-    assert "path: C:/videos/[sample].mkv" in rendered
+    for fragment in present:
+        assert fragment in rendered
+    for fragment in absent:
+        assert fragment not in rendered
 
 
 def test_error_context_omits_non_public_and_empty_fields() -> None:

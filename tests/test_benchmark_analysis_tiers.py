@@ -410,7 +410,7 @@ def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> 
         )
 
 
-def test_main_writes_atomic_production_report(
+def test_main_writes_expected_production_report(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

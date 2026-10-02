@@ -73,21 +73,35 @@ def test_load_slowpics_naming_and_source_label_fields_from_toml(tmp_path: Path) 
     assert config.slowpics.image_upload_timeout_seconds == 240.0
 
 
-def test_toml_file_not_found_raises() -> None:
-    """Test that missing config file raises ConfigNotFoundError."""
-    with pytest.raises(ConfigNotFoundError) as exc:
-        load_config(config_path=Path("non_existent.toml"))
-    assert "Configuration file not found" in str(exc.value)
-
-
-def test_toml_syntax_error_raises(tmp_path: Path) -> None:
-    """Test that invalid TOML syntax raises ConfigParseError."""
-    config_file = tmp_path / "bad.toml"
-    config_file.write_text("invalid = [", encoding="utf-8")
-
-    with pytest.raises(ConfigParseError) as exc:
-        load_config(config_path=config_file)
-    assert "Failed to parse" in str(exc.value)
+@pytest.mark.parametrize(
+    ("raw", "filename", "content", "error_type", "message"),
+    [
+        (False, "non_existent.toml", None, ConfigNotFoundError, "Configuration file not found"),
+        (False, "bad.toml", "invalid = [", ConfigParseError, "Failed to parse"),
+        (True, "missing.toml", None, ConfigNotFoundError, None),
+    ],
+)
+def test_config_load_rejects_missing_or_malformed_files(
+    tmp_path: Path,
+    raw: bool,
+    filename: str,
+    content: str | None,
+    error_type: type[ConfigNotFoundError] | type[ConfigParseError],
+    message: str | None,
+) -> None:
+    path = tmp_path / filename
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    with pytest.raises(error_type) as exc:
+        if raw:
+            load_raw_config(path)
+        else:
+            load_config(config_path=path)
+    if message is not None:
+        assert message in str(exc.value)
+    else:
+        assert isinstance(exc.value, ConfigNotFoundError)
+        assert exc.value.path == path
 
 
 def test_toml_with_utf8_bom_is_accepted(tmp_path: Path) -> None:
@@ -156,15 +170,6 @@ def test_raw_config_load_ignores_environment_and_redacts_invalid_input(
     assert "raw-secret" not in str(exc_info.value.context.to_dict())
 
 
-def test_raw_config_load_missing_file_uses_config_not_found_error(tmp_path: Path) -> None:
-    config_file = tmp_path / "missing.toml"
-
-    with pytest.raises(ConfigNotFoundError) as exc_info:
-        load_raw_config(config_file)
-
-    assert exc_info.value.path == config_file
-
-
 def test_empty_overrides_leave_defaults_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -197,31 +202,29 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert config.analysis.random_frame_count == 30
 
 
-def test_tmdb_api_key_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy TMDB_API_KEY alias is no longer supported."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
-
-    config = load_config()
-    assert config.tmdb.api_key is None
-
-
-def test_tmdb_api_key_nested_var_takes_precedence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("environment", "section", "field", "expected"),
+    [
+        ({"TMDB_API_KEY": "legacy_key"}, "tmdb", "api_key", None),
+        (
+            {"TMDB_API_KEY": "legacy_key", "FRAME_COMPARE_TMDB__API_KEY": "sentinel-tmdb-api-key"},
+            "tmdb",
+            "api_key",
+            "sentinel-tmdb-api-key",
+        ),
+        ({"FRAME_COMPARE_LOG_LEVEL": "DEBUG"}, "logging", "level", "INFO"),
+    ],
+)
+def test_config_environment_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: dict[str, str],
+    section: str,
+    field: str,
+    expected: object,
 ) -> None:
-    """Canonical TMDB nested var is used when both vars are set."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
-    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
-
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
     config = load_config()
-    assert config.tmdb.api_key == "sentinel-tmdb-api-key"
-
-
-def test_log_level_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy FRAME_COMPARE_LOG_LEVEL alias is no longer supported."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("FRAME_COMPARE_LOG_LEVEL", "DEBUG")
-
-    config = load_config()
-    assert config.logging.level == "INFO"
+    assert getattr(getattr(config, section), field) == expected

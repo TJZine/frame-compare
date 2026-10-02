@@ -45,11 +45,25 @@ def test_load_preset_success(tmp_path: Path) -> None:
     assert data == {"key": "value"}
 
 
-def test_load_preset_not_found_raises(tmp_path: Path) -> None:
-    """Test that missing preset raises PresetNotFoundError."""
-    with pytest.raises(PresetNotFoundError) as exc:
-        load_preset("missing", presets_dir=tmp_path)
-    assert "Preset not found" in str(exc.value)
+@pytest.mark.parametrize(
+    ("name", "content", "error_type", "message"),
+    [
+        ("missing", None, PresetNotFoundError, "Preset not found"),
+        ("bad", "invalid = [", PresetInvalidError, "Invalid preset file"),
+    ],
+)
+def test_load_preset_rejects_missing_or_invalid_toml(
+    tmp_path: Path,
+    name: str,
+    content: str | None,
+    error_type: type[PresetNotFoundError] | type[PresetInvalidError],
+    message: str,
+) -> None:
+    if content is not None:
+        (tmp_path / f"{name}.toml").write_text(content, encoding="utf-8")
+    with pytest.raises(error_type) as exc:
+        load_preset(name, presets_dir=tmp_path)
+    assert message in str(exc.value)
 
 
 def test_load_preset_rejects_path_traversal(tmp_path: Path) -> None:
@@ -57,18 +71,17 @@ def test_load_preset_rejects_path_traversal(tmp_path: Path) -> None:
         load_preset("../escape", presets_dir=tmp_path)
 
 
-def test_load_preset_rejects_empty_name(tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", ["load", "save", "apply"])
+def test_preset_operations_reject_empty_names(tmp_path: Path, operation: str) -> None:
+    from frame_compare.config.loader import get_default_config
+
     with pytest.raises(PresetNameInvalidError):
-        load_preset("", presets_dir=tmp_path)
-
-
-def test_preset_invalid_toml_raises_parse_error(tmp_path: Path) -> None:
-    """Test that invalid TOML preset raises PresetInvalidError."""
-    (tmp_path / "bad.toml").write_text("invalid = [", encoding="utf-8")
-
-    with pytest.raises(PresetInvalidError) as exc:
-        load_preset("bad", presets_dir=tmp_path)
-    assert "Invalid preset file" in str(exc.value)
+        if operation == "load":
+            load_preset("", presets_dir=tmp_path)
+        elif operation == "save":
+            save_preset("", get_default_config(), presets_dir=tmp_path)
+        else:
+            apply_preset(get_default_config(), "", presets_dir=tmp_path)
 
 
 def test_save_preset_creates_file(tmp_path: Path) -> None:
@@ -102,14 +115,6 @@ def test_save_preset_omits_generated_secrets(tmp_path: Path) -> None:
     preset_text = (tmp_path / "safe.toml").read_text(encoding="utf-8")
     assert "secret-token" not in preset_text
     assert "sentinel-tmdb-api-key" not in preset_text
-
-
-def test_save_preset_rejects_empty_name(tmp_path: Path) -> None:
-    from frame_compare.config.loader import get_default_config
-
-    config = get_default_config()
-    with pytest.raises(PresetNameInvalidError):
-        save_preset("", config, presets_dir=tmp_path)
 
 
 def test_save_preset_roundtrip(tmp_path: Path) -> None:
@@ -157,14 +162,6 @@ def test_apply_preset_merges_values(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     assert new_config.analysis.random_frame_count == 50
     assert new_config.paths.input_dir == "comparison_videos"  # Unchanged
-
-
-def test_apply_preset_rejects_empty_name(tmp_path: Path) -> None:
-    from frame_compare.config.loader import get_default_config
-
-    config = get_default_config()
-    with pytest.raises(PresetNameInvalidError):
-        apply_preset(config, "", presets_dir=tmp_path)
 
 
 def test_save_preset_deterministic_output(tmp_path: Path) -> None:

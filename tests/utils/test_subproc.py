@@ -2,31 +2,33 @@ import asyncio
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from frame_compare.utils.subproc import resolve_executable, run_subprocess
 
 
-def test_run_subprocess_check_true():
-    """Assert usage of check=True defaults."""
-    # Running a simple command that succeeds
-    result = run_subprocess([sys.executable, "-c", "print('hello')"])
-    assert result.returncode == 0
-    assert b"hello" in result.stdout
-
-
-def test_run_subprocess_check_false():
-    """Assert non-zero exit does NOT raise; returns CompletedProcess with returncode != 0."""
-    # Running a simple command that fails
-    result = run_subprocess([sys.executable, "-c", "import sys; sys.exit(1)"], check=False)
-    assert result.returncode == 1
-
-
-def test_run_subprocess_failure():
-    """Assert CalledProcessError raised on exit 1 (when check=True)."""
-    with pytest.raises(subprocess.CalledProcessError):
-        run_subprocess([sys.executable, "-c", "import sys; sys.exit(1)"])
+@pytest.mark.parametrize(
+    ("script", "check", "expected_code", "expected_stdout"),
+    [
+        ("print('hello')", True, 0, b"hello"),
+        ("import sys; sys.exit(1)", False, 1, None),
+        ("import sys; sys.exit(1)", True, None, None),
+    ],
+)
+def test_run_subprocess_exit_handling(
+    script: str, check: bool, expected_code: int | None, expected_stdout: bytes | None
+) -> None:
+    argv = [sys.executable, "-c", script]
+    if expected_code is None:
+        with pytest.raises(subprocess.CalledProcessError):
+            run_subprocess(argv, check=check, timeout_seconds=10)
+    else:
+        result = run_subprocess(argv, check=check, timeout_seconds=10)
+        assert result.returncode == expected_code
+        if expected_stdout is not None:
+            assert expected_stdout in result.stdout
 
 
 def test_run_subprocess_timeout():
@@ -62,76 +64,68 @@ def test_run_subprocess_inside_running_event_loop() -> None:
 
 
 @pytest.mark.parametrize(
-    ("executable", "environment", "requested"),
+    ("executable", "environment", "requested", "state", "message"),
     [
-        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "ffmpeg"),
-        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "FFMPEG.EXE"),
-        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "ffprobe"),
-        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "FFPROBE.EXE"),
+        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "ffmpeg", "valid", None),
+        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "FFMPEG.EXE", "valid", None),
+        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "ffprobe", "valid", None),
+        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "FFPROBE.EXE", "valid", None),
+        (
+            "missing-ffmpeg.exe",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+            "ffmpeg",
+            "missing",
+            "missing-ffmpeg",
+        ),
+        (
+            "missing-ffprobe.exe",
+            "FRAME_COMPARE_FFPROBE_EXECUTABLE",
+            "ffprobe",
+            "missing",
+            "missing-ffprobe",
+        ),
+        (
+            "ffmpeg",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+            "ffmpeg",
+            "empty",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE is empty",
+        ),
+        (
+            "ffprobe",
+            "FRAME_COMPARE_FFPROBE_EXECUTABLE",
+            "ffprobe",
+            "empty",
+            "FRAME_COMPARE_FFPROBE_EXECUTABLE is empty",
+        ),
+        pytest.param(
+            "ffmpeg",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+            "ffmpeg",
+            "nonexec",
+            "ffmpeg",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows does not expose POSIX execute bits"
+            ),
+        ),
     ],
 )
-def test_resolve_executable_prefers_absolute_media_override(
+def test_resolve_executable_media_overrides(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
     executable: str,
     environment: str,
     requested: str,
+    state: str,
+    message: str | None,
 ) -> None:
     binary = tmp_path / executable
-    binary.write_bytes(b"")
-    binary.chmod(0o755)
-    monkeypatch.setenv(environment, str(binary.resolve()))
-
-    assert resolve_executable(requested) == str(binary.resolve())
-
-
-@pytest.mark.parametrize(
-    ("executable", "environment"),
-    [
-        ("ffmpeg", "FRAME_COMPARE_FFMPEG_EXECUTABLE"),
-        ("ffprobe", "FRAME_COMPARE_FFPROBE_EXECUTABLE"),
-    ],
-)
-def test_resolve_executable_fails_closed_for_invalid_media_override(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-    executable: str,
-    environment: str,
-) -> None:
-    missing = tmp_path / f"missing-{executable}.exe"
-    monkeypatch.setenv(environment, str(missing.resolve()))
-
-    with pytest.raises(FileNotFoundError, match=f"missing-{executable}"):
-        resolve_executable(executable)
-
-
-@pytest.mark.parametrize(
-    ("executable", "environment"),
-    [
-        ("ffmpeg", "FRAME_COMPARE_FFMPEG_EXECUTABLE"),
-        ("ffprobe", "FRAME_COMPARE_FFPROBE_EXECUTABLE"),
-    ],
-)
-def test_resolve_executable_fails_closed_for_empty_media_override(
-    monkeypatch: pytest.MonkeyPatch,
-    executable: str,
-    environment: str,
-) -> None:
-    monkeypatch.setenv(environment, "")
-
-    with pytest.raises(FileNotFoundError, match=f"{environment} is empty"):
-        resolve_executable(executable)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
-def test_resolve_executable_rejects_non_executable_media_override(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-) -> None:
-    binary = tmp_path / "ffmpeg"
-    binary.write_bytes(b"")
-    binary.chmod(0o644)
-    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary.resolve()))
-
-    with pytest.raises(FileNotFoundError, match="ffmpeg"):
-        resolve_executable("ffmpeg")
+    if state in {"valid", "nonexec"}:
+        binary.write_bytes(b"")
+        binary.chmod(0o755 if state == "valid" else 0o644)
+    monkeypatch.setenv(environment, "" if state == "empty" else str(binary.resolve()))
+    if message is None:
+        assert resolve_executable(requested) == str(binary.resolve())
+    else:
+        with pytest.raises(FileNotFoundError, match=message):
+            resolve_executable(requested)
