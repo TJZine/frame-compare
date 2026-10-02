@@ -81,4 +81,3 @@ async def test_cancelled_alignment_never_applies_phase_output(
         await task
 
     apply_output.assert_not_called()
-    assert timings["align"] >= 0

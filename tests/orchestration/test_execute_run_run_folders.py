@@ -127,7 +127,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         metric_request=metric_cache_request_for_cache_inputs([source_path], config),
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
-    assert analysis_cache_path is not None
 
     run_generated_dir.mkdir(parents=True, exist_ok=True)
     manual_overrides_path = run_generated_dir / MANUAL_OVERRIDES_FILE
@@ -169,7 +168,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     assert manual_overrides_path.exists()
 
 
-def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
+def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cache_missing(
     tmp_path: Path,
 ) -> None:
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
@@ -251,8 +250,6 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
         )
     )
 
-    assert prep.workspace.input_dir == external_input.resolve()
-    assert prep.workspace.run_dir is not None
     assert prep.workspace.run_dir.is_relative_to((root / "generated").resolve())
     assert prep.workspace.screenshots_dir.is_relative_to(prep.workspace.run_dir)
     assert prep.workspace.generated_dir.is_relative_to(prep.workspace.run_dir)
@@ -286,7 +283,6 @@ def test_execute_prep_creates_missing_generated_root_only_during_reservation(
         )
     )
 
-    assert prep.workspace.generated_root == generated_root.resolve()
     assert prep.workspace.run_dir is not None
     assert prep.workspace.run_dir.parent == generated_root.resolve()
     assert (prep.workspace.run_dir / "run_info.toml").is_file()

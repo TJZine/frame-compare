@@ -196,35 +196,9 @@ def test_empty_input_failure_before_reservation_creates_no_result(tmp_path: Path
     assert list(tmp_path.rglob("run_result.toml")) == []
 
 
+@pytest.mark.parametrize("logger_fails", [False, True], ids=["writer", "writer-and-logger"])
 def test_completed_result_write_failure_is_warning_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
-    create_video_files(tmp_path / "comparison_videos", "source.mkv")
-
-    def fail_write(_run_dir: Path, _record: object) -> None:
-        raise PermissionError("secret-path")
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        fail_write,
-    )
-    result = asyncio.run(
-        execute_run(
-            _request(tmp_path),
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
-            ),
-        )
-    )
-
-    assert result.success is True
-    assert result.warnings == ["history: run result could not be recorded"]
-    assert list(tmp_path.rglob("run_result.toml")) == []
-
-
-def test_completed_result_write_and_logger_failure_are_warning_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, logger_fails: bool
 ) -> None:
     create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
@@ -236,31 +210,39 @@ def test_completed_result_write_and_logger_failure_are_warning_only(
         raise RuntimeError("logger failure")
 
     monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        fail_write,
+        "frame_compare.orchestration.run_result_lifecycle.write_run_result", fail_write
     )
-    monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.log.warning",
-        fail_log,
-    )
-
+    if logger_fails:
+        monkeypatch.setattr(
+            "frame_compare.orchestration.run_result_lifecycle.log.warning", fail_log
+        )
     result = asyncio.run(
         execute_run(
             _request(tmp_path),
             deps=RunDependencies(
-                vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
+                vs_loader=FakeVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
             ),
         )
     )
 
     assert result.success is True
     assert result.warnings == ["history: run result could not be recorded"]
+    assert list(tmp_path.rglob("run_result.toml")) == []
 
 
-@pytest.mark.parametrize("control_error", [KeyboardInterrupt(), SystemExit(2)])
-def test_completed_result_process_control_write_failure_propagates(
+@pytest.mark.parametrize(
+    ("execution_fails", "control_error"),
+    [
+        pytest.param(False, KeyboardInterrupt(), id="completed-interrupt"),
+        pytest.param(False, SystemExit(2), id="completed-exit"),
+        pytest.param(True, KeyboardInterrupt(), id="failed-interrupt"),
+    ],
+)
+def test_result_process_control_write_failure_propagates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    execution_fails: bool,
     control_error: BaseException,
 ) -> None:
     create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
@@ -270,16 +252,16 @@ def test_completed_result_process_control_write_failure_propagates(
         raise control_error
 
     monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        fail_write,
+        "frame_compare.orchestration.run_result_lifecycle.write_run_result", fail_write
     )
-
+    loader = FailingVSLoader(RuntimeError("original")) if execution_fails else FakeVSLoader()
     with pytest.raises(type(control_error)) as raised:
         asyncio.run(
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
+                    vs_loader=loader,
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )
@@ -313,36 +295,6 @@ def test_failed_result_write_failure_preserves_original_exception(
         )
 
     assert raised.value is original
-
-
-def test_failed_result_process_control_write_failure_propagates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
-    create_video_files(tmp_path / "comparison_videos", "source.mkv")
-    original = RuntimeError("original")
-    interrupt = KeyboardInterrupt()
-
-    def interrupt_write(_run_dir: Path, _record: object) -> None:
-        raise interrupt
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        interrupt_write,
-    )
-
-    with pytest.raises(KeyboardInterrupt) as raised:
-        asyncio.run(
-            execute_run(
-                _request(tmp_path),
-                deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
-                ),
-            )
-        )
-
-    assert raised.value is interrupt
 
 
 def test_failure_after_alignment_records_known_selected_frame_count(

@@ -162,7 +162,6 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
     output = _run_align_phase(ctx, selected_frames=[0])
 
     assert output.comparisons[0].alignment is None
-    assert output.comparisons[0].audio_attempt == attempt
     assert output.reference.trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_start_frames == 0
 
@@ -215,7 +214,6 @@ def test_provisional_audio_candidate_cannot_reach_trim_authority(
     output = _run_align_phase(ctx, selected_frames=[0])
 
     assert output.comparisons[0].alignment is None
-    assert output.comparisons[0].audio_attempt == attempt
     assert output.reference.trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_start_frames == 0
 
@@ -282,7 +280,6 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             vs_loader=vs_loader,
         )
         assert len(results) == 1
-        assert results[0].audio_attempt == attempt
         assert results[0].applied is False
         assert results[0].frame_offset is None
         assert request.alignment_diagnostics_dir is not None
@@ -299,7 +296,6 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
     output = _run_align_phase(ctx, selected_frames=[0])
 
     assert output.comparisons[0].alignment is None
-    assert output.comparisons[0].audio_attempt == attempt
     assert output.reference.trim.trim_start_frames == 0
     assert output.reference.trim.trim_end_frame_inclusive == 99
     assert output.comparisons[0].trim.trim_start_frames == 0

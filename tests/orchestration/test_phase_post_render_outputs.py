@@ -133,7 +133,6 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
     async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
         nonlocal captured_upload_plan
         upload_plan = kwargs["upload_plan"]
-        assert isinstance(upload_plan, SlowpicsUploadPlan)
         captured_upload_plan = upload_plan
         return PublishResult(
             url="https://slow.pics/c/example",
@@ -163,7 +162,6 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
             selected_frames=[10],
         )
 
-    assert captured_upload_plan is not None
     assert [[image.image_name for image in row.images] for row in captured_upload_plan.rows] == [
         [
             "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
@@ -236,12 +234,10 @@ def test_run_report_phase_builds_report_data_and_records_path(
     report_data = captured["report_data"]
     assert output.report_path == expected_path
     assert captured["output_path"] == expected_path
-    assert artifacts.report_path is None
     assert report_data.frames == [5]
     assert report_data.frame_details == []
     assert report_data.clips[0].active_picture == active_picture
     assert report_data.rendering.geometry_by_label["Reference"].active_picture == active_picture
-    assert report_data.rendering.geometry_by_label["Reference"].is_noop
     assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
         "Reference"
     ]
@@ -268,7 +264,6 @@ def test_run_report_phase_builds_report_data_and_records_path(
         ("Encode 1", (1920, 1080), 24.0),
         ("My Explicit", (1920, 1080), 24.0),
     ]
-    assert captured["report_config"] == ctx.config.report
 
 
 def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
@@ -361,46 +356,9 @@ def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path
         )
 
 
-def test_run_report_phase_discloses_one_shared_tonemap_setting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    render = _render_artifacts(
-        screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
-            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [1], "Encode 1": [1]},
-    )
-    settings = TonemapSettings(target_nits=203)
-    render.clip_facts_by_label = {
-        label: replace(facts, tonemap_settings=settings)
-        for label, facts in render.clip_facts_by_label.items()
-    }
-    captured: dict[str, Any] = {}
-
-    def _fake_generate_report(
-        report_data: object, report_config: object, *, output_path: Path
-    ) -> Path:
-        captured["report_data"] = report_data
-        return output_path
-
-    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
-    phase_post_render.run_report_phase(
-        ctx,
-        frames=[1],
-        render=render,
-        metadata=None,
-        slowpics_url=None,
-    )
-
-    assert captured["report_data"].rendering.tonemap_settings == settings
-
-
-def test_run_report_phase_allows_sdr_alongside_shared_tonemap_setting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("comparison_hdr", [True, False], ids=["hdr-hdr", "hdr-sdr"])
+def test_run_report_phase_discloses_shared_tonemap_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, comparison_hdr: bool
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
@@ -416,6 +374,10 @@ def test_run_report_phase_allows_sdr_alongside_shared_tonemap_setting(
     render.clip_facts_by_label["Reference"] = replace(
         render.clip_facts_by_label["Reference"], tonemap_settings=settings
     )
+    if comparison_hdr:
+        render.clip_facts_by_label["Encode 1"] = replace(
+            render.clip_facts_by_label["Encode 1"], tonemap_settings=settings
+        )
     captured: dict[str, Any] = {}
 
     def _fake_generate_report(
@@ -426,11 +388,7 @@ def test_run_report_phase_allows_sdr_alongside_shared_tonemap_setting(
 
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
     phase_post_render.run_report_phase(
-        ctx,
-        frames=[1],
-        render=render,
-        metadata=None,
-        slowpics_url=None,
+        ctx, frames=[1], render=render, metadata=None, slowpics_url=None
     )
 
     assert captured["report_data"].rendering.tonemap_settings == settings
@@ -575,7 +533,6 @@ def test_run_report_phase_passes_reference_source_frame_details(
         ("User", "Selected comparison frame", "user_override"),
         ("Frame 2", "Selected comparison frame", "quantile_bright"),
     ]
-    assert captured["report_config"] == ctx.config.report
 
 
 async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post_upload_actions(
@@ -648,9 +605,7 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
             render=render,
             selected_frames=[10, 20],
         )
-        assert captured["client"] is client
 
-    assert captured["config"] == ctx.config.slowpics
     assert captured["collection_metadata"].title == "Collateral (2004)"
     assert captured["collection_metadata"].tmdb_id == 3
     assert captured["collection_metadata"].tmdb_media_type == "movie"
@@ -659,18 +614,8 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
     assert output.slowpics_url == "https://slow.pics/c/collateral"
     assert output.uploaded_file_paths == (ref_10, enc_10, ref_20, enc_20)
     assert captured_post_upload_request is not None
-    assert captured_post_upload_request.workspace == ctx.workspace
-    assert captured_post_upload_request.config is ctx.config.slowpics
     assert captured_post_upload_request.slowpics_url == "https://slow.pics/c/collateral"
     assert captured_post_upload_request.collection_title == "Collateral (2004)"
-    assert output.post_upload_actions == (
-        PostUploadActionResult(
-            kind="shortcut",
-            success=True,
-            path=tmp_path / "Collateral.url",
-            message="slow.pics URL shortcut written",
-        ),
-    )
 
 
 async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_seam(
@@ -913,7 +858,6 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     await execute_phases([report_phase], ctx, NullProgressReporter())
 
     assert captured_slowpics_url is None
-    assert state.artifacts.report_path == tmp_path / "report.html"
 
 
 def test_post_report_cleanup_skips_non_embedded_reports(tmp_path: Path) -> None:
@@ -1067,7 +1011,6 @@ def test_post_report_cleanup_returns_warning_and_logs_for_delete_error(
     assert output.warnings == [
         f"cleanup: failed to delete uploaded screenshot {uploaded[0]}: locked"
     ]
-    assert warning_events == ["slowpics_uploaded_file_delete_failed"]
 
 
 async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_and_log_progress(

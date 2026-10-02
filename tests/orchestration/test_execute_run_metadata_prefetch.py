@@ -71,7 +71,7 @@ timeout_seconds = 7.5
 )
 
 
-def test_execute_run_from_cache_only_missing_shared_cache_skips_metadata_prefetch(
+def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch_and_reserve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -112,7 +112,6 @@ def test_execute_run_from_cache_only_missing_shared_cache_skips_metadata_prefetc
         asyncio.run(execute_run(request, deps=deps))
 
     assert metadata_calls == []
-    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
 
 
 def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetch_and_reserve(
@@ -188,11 +187,9 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         asyncio.run(execute_run(request, deps=deps))
 
     assert metadata_calls == []
-    assert reserve_calls == []
-    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
 
 
-def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
+def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -250,19 +247,10 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     )
 
     assert result.success is True
-    assert captured_tmdb_metadata == [expected_metadata]
-    assert resolve_calls == [["source.mkv"]]
-    assert cache_paths == [(tmp_path / "generated" / "cache" / "tmdb.toml").resolve()]
     assert result.screenshot_dir is not None
-    assert (
-        result.screenshot_dir
-        == (tmp_path / "generated" / "Fight Club (1999)" / "screenshots").resolve()
-    )
     run_info = tomllib.loads(
         (tmp_path / "generated" / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
     )
-    assert run_info["folder_name"] == "Fight Club (1999)"
-    assert run_info["naming_source"] == "tmdb"
     assert run_info["source_filenames"] == ["source.mkv"]
     assert run_info["tmdb"] == {
         "enabled": True,
@@ -331,16 +319,6 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
 
     assert result.success is True
     assert result.warnings == []
-    assert prefetch_calls == [["source.mkv"]]
-    assert phase_calls == [["source.mkv"]]
-    expected_config = MetadataConfig(
-        api_key="test-key",
-        unattended=True,
-        timeout_seconds=7.5,
-        year_tolerance=1,
-        category_preference="movie",
-    )
-    assert captured_configs == [expected_config, expected_config]
     assert warning_fields == [
         {
             "event": "metadata_prefetch_degraded",

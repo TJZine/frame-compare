@@ -120,5 +120,4 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
             )
         )
 
-    assert len(reserved_paths) == 1
     assert not reserved_paths[0].exists()

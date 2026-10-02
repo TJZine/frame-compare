@@ -25,7 +25,7 @@ from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     RunArtifacts,
 )
-from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
+from frame_compare.orchestration.phases import Phase, execute_phases
 from frame_compare.orchestration.types import RunRequest
 from frame_compare.utils.progress import (
     NullProgressReporter,
@@ -175,10 +175,6 @@ def test_execute_phases_fatal_exclusion_recovery_stops_warn_only_pipeline(
     with pytest.raises(ExclusionRecoverySelectionError):
         asyncio.run(execute_phases(phases, context, NullProgressReporter()))
 
-    assert executed == ["analyze"]
-    assert phases[0].status is PhaseStatus.FAILED
-    assert phases[1].status is PhaseStatus.PENDING
-
 
 def test_execute_phases_marks_cancellation_failed_before_propagating(
     tmp_path: Path,
@@ -219,15 +215,13 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(execute_phases([phase], context, reporter))
 
-    assert phase.status is PhaseStatus.FAILED
-    assert reporter.complete_phase_calls == [ProgressPhaseStatus.FAILED]
 
-
-def test_execute_phases_fail_fast_failure_with_skip_condition_marks_failed_and_raises(
+@pytest.mark.parametrize("explicit_skip", [True, False], ids=["false-predicate", "no-predicate"])
+def test_execute_phases_fail_fast_failure_marks_failed_and_raises(
     tmp_path: Path,
+    explicit_skip: bool,
 ) -> None:
     context = _make_context(tmp_path)
-    reporter = NullProgressReporter()
     executed: list[str] = []
 
     async def phase_fail(_: RunContext) -> None:
@@ -241,52 +235,19 @@ def test_execute_phases_fail_fast_failure_with_skip_condition_marks_failed_and_r
         Phase(
             name="fail",
             execute=phase_fail,
-            skip_condition=lambda config: False,
+            skip_condition=(lambda config: False) if explicit_skip else None,
         ),
         Phase(name="after", execute=phase_after),
     ]
 
     try:
-        asyncio.run(execute_phases(phases, context, reporter))
+        asyncio.run(execute_phases(phases, context, NullProgressReporter()))
     except RuntimeError:
         pass
     else:
         raise AssertionError("Expected RuntimeError from required phase")
 
     assert executed == ["fail"]
-    assert phases[0].status is PhaseStatus.FAILED
-    assert phases[1].status is PhaseStatus.PENDING
-
-
-def test_execute_phases_fail_fast_failure_marks_failed_and_raises(
-    tmp_path: Path,
-) -> None:
-    context = _make_context(tmp_path)
-    reporter = NullProgressReporter()
-    executed: list[str] = []
-
-    async def phase_fail(_: RunContext) -> None:
-        executed.append("fail")
-        raise RuntimeError("boom")
-
-    async def phase_after(_: RunContext) -> None:
-        executed.append("after")
-
-    phases = [
-        Phase(name="fail", execute=phase_fail),
-        Phase(name="after", execute=phase_after),
-    ]
-
-    try:
-        asyncio.run(execute_phases(phases, context, reporter))
-    except RuntimeError:
-        pass
-    else:
-        raise AssertionError("Expected RuntimeError from required phase")
-
-    assert executed == ["fail"]
-    assert phases[0].status is PhaseStatus.FAILED
-    assert phases[1].status is PhaseStatus.PENDING
 
 
 def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:

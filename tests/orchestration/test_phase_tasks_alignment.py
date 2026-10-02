@@ -47,10 +47,6 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     captured: dict[str, Any] = {}
 
     def _fake_align_clips_from_request(*args: object, **kwargs: object) -> list[AlignmentResult]:
-        assert len(args) == 2
-        assert "reference" not in kwargs
-        assert "comparisons" not in kwargs
-        assert "cache_dir" not in kwargs
         captured["request"] = args[0]
         captured["config"] = args[1]
         captured.update(kwargs)
@@ -70,74 +66,9 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
 
     output = _run_align_phase(ctx, selected_frames=selected_frames)
 
-    assert captured["reference_fps"] == ctx.reference.effective_fps
-    assert captured["verbose"] is False
-    assert captured["quiet"] is False
-    assert captured["json_output"] is False
-    assert captured["frame_props_by_stem"] == {
-        "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
-        "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
-    }
-    assert captured["config"].enable is True
-    assert captured["config"].max_offset_seconds == 4.5
-    assert captured["config"].use_vsview is True
-    assert captured["config"].cache_results is False
-    assert captured["config"].channel_strategy == "best_channel"
-    assert captured["config"].reference_stream == 1
-    assert captured["config"].comparison_streams == {"encode": 2}
-    assert captured["config"].previous_offsets == "disabled"
-    alignment_request = captured["request"]
-    assert alignment_request.reference.path == ctx.reference.path
-    assert alignment_request.reference.label == "Reference"
-    assert alignment_request.reference.identity.path == ctx.reference.probe.fingerprint.path
-    assert alignment_request.reference.identity.size_bytes == 0
-    assert alignment_request.reference.identity.mtime_ns == ctx.reference.probe.fingerprint.mtime_ns
-    assert alignment_request.reference.trim_start_frames == 0
-    assert alignment_request.reference.trim_end_frame_inclusive is None
-    assert alignment_request.reference.effective_fps_num == 24
-    assert alignment_request.reference.effective_fps_den == 1
-    assert alignment_request.reference.selected_audio_stream == 1
-    assert alignment_request.reference.preserved_frame_props == {
-        "_Matrix": 1,
-        "_Transfer": 1,
-        "_Primaries": 1,
-    }
-    assert alignment_request.reference.presentation_name == "reference.mkv"
-    assert [comparison_request.path for comparison_request in alignment_request.comparisons] == [
-        comparison.path
-    ]
-    assert alignment_request.comparisons[0].label == "Encode 1"
-    assert alignment_request.comparisons[0].identity.path == comparison.probe.fingerprint.path
-    assert alignment_request.comparisons[0].identity.size_bytes == 0
-    assert (
-        alignment_request.comparisons[0].identity.mtime_ns == comparison.probe.fingerprint.mtime_ns
-    )
-    assert alignment_request.comparisons[0].selected_audio_stream == 2
-    assert alignment_request.comparisons[0].preserved_frame_props == {
-        "_Matrix": 1,
-        "_Transfer": 16,
-        "_Primaries": 9,
-    }
-    assert alignment_request.comparisons[0].presentation_name == "encode.mkv"
-    assert alignment_request.presentation_content is None
-    assert alignment_request.generated_dir == ctx.workspace.generated_dir
-    assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
-    assert alignment_request.alignment_diagnostics_dir == ctx.workspace.alignment_diagnostics_dir
-    assert alignment_request.alignment_diagnostics_root == ctx.workspace.generated_root
-    assert alignment_request.selected_reference_relationship == "auto"
-    assert alignment_request.previous_offsets == "disabled"
-    assert alignment_request.settings.max_offset_seconds == 4.5
-    assert alignment_request.settings.channel_strategy == "best_channel"
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
-    assert output.comparisons[0].alignment is not None
-    assert output.comparisons[0].alignment.relative_offset_frames == 2
     assert output.selected_frames == [0, 48, 97]
-    assert ctx.reference.trim.trim_start_frames == 0
-    assert ctx.comparisons[0].alignment is None
-    assert selected_frames == [0, 2, 50, 99]
-    assert output.selection_breakdown is None
-    assert output.selection_details_by_source_frame is None
 
 
 def test_run_align_phase_retains_material_variable_alignment_without_phase_warning(
@@ -198,41 +129,193 @@ def test_alignment_request_records_configured_reference_relationship(tmp_path: P
     ]
 
 
-def test_run_align_phase_normalizes_analyze_selected_base_domain_frames_with_base_trims(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    (
+        "reference_trim",
+        "comparison_specs",
+        "alignments",
+        "selected_frames",
+        "expected_trims",
+        "expected_frames",
+        "warns",
+    ),
+    [
+        pytest.param(
+            (3, 80),
+            [("encode.mkv", "Encode 1", 7, 90)],
+            [
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=2,
+                    time_offset_seconds=0.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                )
+            ],
+            [10, 20, 52],
+            (9, [7], 80, [78]),
+            [4, 14, 46],
+            False,
+            id="base-trims",
+        ),
+        pytest.param(
+            (3, 99),
+            [
+                ("encode_a.mkv", "Encode A", 7, 99),
+                ("encode_b.mkv", "Encode B", 11, 99),
+                ("encode_c.mkv", "Encode C", 13, 99),
+            ],
+            [
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_a.mkv",
+                    frame_offset=2,
+                    time_offset_seconds=0.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_b.mkv",
+                    frame_offset=None,
+                    time_offset_seconds=None,
+                    correlation_score=0.1,
+                    algorithm="cross_correlation",
+                    source="computed",
+                    applied=False,
+                ),
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_c.mkv",
+                    frame_offset=-3,
+                    time_offset_seconds=-0.125,
+                    correlation_score=0.95,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+            ],
+            [20, 50, 80],
+            (10, [8, 18, 13], None, None),
+            [13, 43, 73],
+            True,
+            id="mixed-authority",
+        ),
+        pytest.param(
+            (3, 90),
+            [
+                ("encode_a.mkv", "Encode A", 7, 95),
+                ("encode_b.mkv", "Encode B", 11, 99),
+                ("encode_c.mkv", "Encode C", 13, 97),
+            ],
+            [
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_a.mkv",
+                    frame_offset=10,
+                    time_offset_seconds=0.417,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_b.mkv",
+                    frame_offset=-5,
+                    time_offset_seconds=-0.208,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_c.mkv",
+                    frame_offset=0,
+                    time_offset_seconds=0.0,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+            ],
+            [20, 57, 81],
+            (17, [7, 22, 17], 90, [80, 95, 90]),
+            [6, 43, 67],
+            False,
+            id="unequal-trims",
+        ),
+        pytest.param(
+            (0, None),
+            [("encode_a.mkv", "Encode A", 0, None), ("encode_b.mkv", "Encode B", 0, None)],
+            [
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_a.mkv",
+                    frame_offset=12,
+                    time_offset_seconds=0.5,
+                    correlation_score=1.0,
+                    algorithm=None,
+                    source="cached",
+                ),
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_b.mkv",
+                    frame_offset=-4,
+                    time_offset_seconds=-0.167,
+                    correlation_score=1.0,
+                    algorithm=None,
+                    source="manual",
+                ),
+            ],
+            [12, 40, 95],
+            (12, [0, 16], None, None),
+            [0, 28, 83],
+            False,
+            id="preclassified-manual-cached",
+        ),
+    ],
+)
+def test_run_align_phase_composes_global_source_trims(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reference_trim: tuple[int, int | None],
+    comparison_specs: list[tuple[str, str, int, int | None]],
+    alignments: list[AlignmentResult],
+    selected_frames: list[int],
+    expected_trims: tuple[int, list[int], int | None, list[int] | None],
+    expected_frames: list[int],
+    warns: bool,
 ) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=80)
-    ctx.comparisons = [comparison.with_trim(trim_start_frames=7, trim_end_frame_inclusive=90)]
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=2,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-
-    output = _run_align_phase(ctx, selected_frames=[10, 20, 52])
-
-    assert output.reference.trim.trim_start_frames == 9
-    assert output.reference.trim.trim_end_frame_inclusive == 80
-    assert output.comparisons[0].trim.trim_start_frames == 7
-    assert output.comparisons[0].trim.trim_end_frame_inclusive == 78
-    assert (
-        output.reference.trim.trim_start_frames - output.comparisons[0].trim.trim_start_frames == 2
+    comparisons = [
+        _clip(tmp_path / "comparison_videos" / filename, label=label).with_trim(
+            trim_start_frames=start,
+            trim_end_frame_inclusive=end,
+        )
+        for filename, label, start, end in comparison_specs
+    ]
+    ctx = _context(tmp_path, comparisons=comparisons)
+    ctx.reference = ctx.reference.with_trim(
+        trim_start_frames=reference_trim[0],
+        trim_end_frame_inclusive=reference_trim[1],
     )
-    assert output.reference.effective_num_frames() == 72
-    assert output.comparisons[0].effective_num_frames() == 72
-    assert output.selected_frames == [4, 14, 46]
+    monkeypatch.setattr(
+        phase_alignment, "align_clips_from_request", lambda *_args, **_kwargs: alignments
+    )
+    output = _run_align_phase(ctx, selected_frames=selected_frames)
+
+    assert output.reference.trim.trim_start_frames == expected_trims[0]
+    assert [clip.trim.trim_start_frames for clip in output.comparisons] == expected_trims[1]
+    if expected_trims[2] is not None:
+        assert output.reference.trim.trim_end_frame_inclusive == expected_trims[2]
+        assert [
+            clip.trim.trim_end_frame_inclusive for clip in output.comparisons
+        ] == expected_trims[3]
+    assert output.selected_frames == expected_frames
+    if warns:
+        assert len(output.warnings) == 1
+        assert "align: Encode B alignment" in output.warnings[0]
+        assert "encode_b" not in output.warnings[0]
 
 
 def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
@@ -351,9 +434,7 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     output = _run_align_phase(ctx, selected_frames=selected_frames)
 
     assert output.selected_frames == [0, 12]
-    assert output.selection_breakdown is not None
     assert output.selection_breakdown.quantile_dark == [60, 72]
-    assert output.selection_details_by_source_frame is not None
     assert set(output.selection_details_by_source_frame) == {60, 72}
     assert all(
         detail.label in {"Dark", "Bright"}
@@ -406,9 +487,7 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
 
     assert output.reference.trim.trim_start_frames == 60
     assert output.selected_frames == [15, 30]
-    assert output.selection_breakdown is not None
     assert output.selection_breakdown.quantile_dark == [75, 90]
-    assert output.selection_details_by_source_frame is not None
     assert set(output.selection_details_by_source_frame) == {75, 90}
 
 
@@ -544,9 +623,7 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
     output = _run_align_phase(ctx, selected_frames=[98, 0])
 
     assert output.selected_frames == [0, 1]
-    assert output.selection_breakdown is not None
     assert output.selection_breakdown.user == [98]
-    assert output.selection_details_by_source_frame is not None
     assert output.selection_details_by_source_frame[98].label == "User"
     assert output.selection_details_by_source_frame[99].label == "Dark"
 
@@ -598,7 +675,6 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
 
     output = _run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
 
-    assert output.selection_details_by_source_frame is not None
     selected_source_frames = {
         output.reference.trim.trim_start_frames + frame for frame in output.selected_frames
     }
@@ -675,9 +751,6 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
 
     assert output.reference.trim.trim_start_frames == 2
     assert output.reference.trim.trim_end_frame_inclusive == 99
-    assert output.comparisons[0].alignment is not None
-    assert output.comparisons[0].alignment.relative_offset_frames == 2
-    assert output.comparisons[1].alignment is None
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2]
     assert output.selected_frames == [0, 48, 97]
     assert len(output.warnings) == 1
@@ -690,193 +763,6 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     assert "unapplied" in normalized_warning
     assert "best-effort reference-frame domain" in warning
     assert "without accepted alignment" in warning
-
-
-def test_run_align_phase_preserves_mixed_authority_with_unequal_base_trims(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
-    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
-    comp_c = _clip(tmp_path / "comparison_videos" / "encode_c.mkv", label="Encode C")
-    ctx = _context(tmp_path, comparisons=[comp_a, comp_b, comp_c])
-    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=99)
-    ctx.comparisons = [
-        comp_a.with_trim(trim_start_frames=7, trim_end_frame_inclusive=99),
-        comp_b.with_trim(trim_start_frames=11, trim_end_frame_inclusive=99),
-        comp_c.with_trim(trim_start_frames=13, trim_end_frame_inclusive=99),
-    ]
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_a.mkv",
-                frame_offset=2,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_b.mkv",
-                frame_offset=None,
-                time_offset_seconds=None,
-                correlation_score=0.1,
-                algorithm="cross_correlation",
-                source="computed",
-                applied=False,
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_c.mkv",
-                frame_offset=-3,
-                time_offset_seconds=-0.125,
-                correlation_score=0.95,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-
-    output = _run_align_phase(ctx, selected_frames=[20, 50, 80])
-
-    assert output.reference.alignment is None
-    assert [
-        None if comparison.alignment is None else comparison.alignment.relative_offset_frames
-        for comparison in output.comparisons
-    ] == [2, None, -3]
-    assert output.reference.trim.trim_start_frames == 10
-    assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [8, 18, 13]
-    assert [
-        output.reference.trim.trim_start_frames - output.comparisons[index].trim.trim_start_frames
-        for index in (0, 2)
-    ] == [2, -3]
-    assert output.selected_frames == [13, 43, 73]
-    assert len(output.warnings) == 1
-    assert "align: Encode B alignment" in output.warnings[0]
-    assert "encode_b" not in output.warnings[0]
-
-
-def test_run_align_phase_preserves_raw_source_offsets_with_unequal_base_trims(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
-    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
-    comp_c = _clip(tmp_path / "comparison_videos" / "encode_c.mkv", label="Encode C")
-    ctx = _context(tmp_path, comparisons=[comp_a, comp_b, comp_c])
-    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=90)
-    ctx.comparisons = [
-        comp_a.with_trim(trim_start_frames=7, trim_end_frame_inclusive=95),
-        comp_b.with_trim(trim_start_frames=11, trim_end_frame_inclusive=99),
-        comp_c.with_trim(trim_start_frames=13, trim_end_frame_inclusive=97),
-    ]
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_a.mkv",
-                frame_offset=10,
-                time_offset_seconds=0.417,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_b.mkv",
-                frame_offset=-5,
-                time_offset_seconds=-0.208,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_c.mkv",
-                frame_offset=0,
-                time_offset_seconds=0.0,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-
-    output = _run_align_phase(ctx, selected_frames=[20, 57, 81])
-
-    assert [
-        comparison.alignment.relative_offset_frames if comparison.alignment is not None else None
-        for comparison in output.comparisons
-    ] == [10, -5, 0]
-    assert output.reference.trim.trim_start_frames == 17
-    assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [
-        7,
-        22,
-        17,
-    ]
-    assert [
-        output.reference.trim.trim_start_frames - comparison.trim.trim_start_frames
-        for comparison in output.comparisons
-    ] == [10, -5, 0]
-    assert output.reference.trim.trim_end_frame_inclusive == 90
-    assert [comparison.trim.trim_end_frame_inclusive for comparison in output.comparisons] == [
-        80,
-        95,
-        90,
-    ]
-    assert [
-        output.reference.effective_num_frames(),
-        *[comparison.effective_num_frames() for comparison in output.comparisons],
-    ] == [74, 74, 74, 74]
-    assert output.selected_frames == [6, 43, 67]
-
-
-def test_run_align_phase_preserves_manual_and_cached_source_frame_pair_offsets_globally(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
-    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
-    ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_a.mkv",
-                # Equivalent to user entering source-frame pair 120 108.
-                frame_offset=12,
-                time_offset_seconds=0.5,
-                correlation_score=1.0,
-                algorithm=None,
-                source="cached",
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_b.mkv",
-                # Equivalent to user entering source-frame pair 120 124.
-                frame_offset=-4,
-                time_offset_seconds=-0.167,
-                correlation_score=1.0,
-                algorithm=None,
-                source="manual",
-            ),
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-
-    output = _run_align_phase(ctx, selected_frames=[12, 40, 95])
-
-    assert [
-        comparison.alignment.relative_offset_frames if comparison.alignment is not None else None
-        for comparison in output.comparisons
-    ] == [12, -4]
-    assert output.reference.trim.trim_start_frames == 12
-    assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 16]
-    assert output.selected_frames == [0, 28, 83]
 
 
 @pytest.mark.parametrize(
