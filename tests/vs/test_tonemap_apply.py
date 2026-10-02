@@ -137,20 +137,25 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_unusable(
     assert result is mock_fallback.return_value
 
 
+@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo", return_value=MagicMock())
 @patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_rejects_non_positive_target_nits_before_processing(
-    mock_runtime_usable, mock_detect
+    mock_runtime_usable, mock_detect, mock_libplacebo
 ):
     """Invalid target_nits should fail early with explicit validation error."""
     mock_detect.return_value = {"libplacebo": True}
     mock_clip = MagicMock()
     settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.BT2390, target_nits=0)
 
-    with pytest.raises(TonemapError, match="target_nits must be > 0"):
+    with (
+        patch("vapoursynth.core", MagicMock()),
+        pytest.raises(TonemapError, match="target_nits must be > 0"),
+    ):
         apply_tonemap(mock_clip, settings)
 
     mock_runtime_usable.assert_not_called()
+    mock_libplacebo.assert_not_called()
 
 
 @patch("frame_compare.vs.tonemap_conversion.detect_hdr")

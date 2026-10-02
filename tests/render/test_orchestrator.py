@@ -1,4 +1,5 @@
 from concurrent.futures import CancelledError, Future
+from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event, Lock, Thread
 from unittest.mock import MagicMock, patch
@@ -10,7 +11,6 @@ from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
-    render_batch,
     render_batch_detailed,
 )
 from frame_compare.render.types import (
@@ -122,7 +122,7 @@ def test_render_batch_fail_fast(mock_render_request):
 
         mock_render.side_effect = side_effect
         with pytest.raises(RuntimeError, match="Failed"):
-            render_batch(requests, parallelism=2)
+            render_batch_detailed(requests, parallelism=2)
 
         invoked_requests = [call.args[0] for call in mock_render.call_args_list]
         assert requests[2] in invoked_requests
@@ -292,7 +292,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
 
     def run_render() -> None:
         try:
-            render_batch(requests, parallelism=2)
+            render_batch_detailed(requests, parallelism=2)
         except BaseException as exc:
             render_exceptions.append(exc)
         finally:
@@ -383,17 +383,20 @@ def test_render_batch_marks_progress_failed_on_exception(mock_render_request) ->
         ),
         pytest.raises(RuntimeError, match="Failed"),
     ):
-        render_batch([mock_render_request], parallelism=1, reporter=reporter)
+        render_batch_detailed([mock_render_request], parallelism=1, reporter=reporter)
 
     reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
 def test_render_batch_sequential(mock_render_request):
-    requests = [mock_render_request] * 3
+    requests = [
+        replace(mock_render_request, frame_number=index, output_path=Path(f"out_{index}.png"))
+        for index in range(3)
+    ]
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
         mock_render.side_effect = _rendered
-        results = render_batch(requests, parallelism=1)
-        assert results == [r.output_path for r in requests]
+        results = [rendered.path for rendered in render_batch_detailed(requests, parallelism=1)]
+        assert results == [Path("out_0.png"), Path("out_1.png"), Path("out_2.png")]
         assert mock_render.call_count == 3
 
 

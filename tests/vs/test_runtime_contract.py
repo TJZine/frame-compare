@@ -50,13 +50,13 @@ def test_runtime_profile_uses_explicit_deployment_kind(
     assert media_runtime_profile() == "debian-trixie"
 
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows")
-    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "win32")
+    monkeypatch.setattr(runtime_contract.sys, "platform", "win32")
     assert media_runtime_profile() == "unmanaged-windows"
 
 
 def test_unmanaged_macos_has_its_own_native_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
-    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "darwin")
+    monkeypatch.setattr(runtime_contract.sys, "platform", "darwin")
 
     assert media_runtime_profile() == "native-macos"
     identity = media_runtime_identity("full", profile="native-macos")
@@ -72,7 +72,7 @@ def test_unmanaged_windows_does_not_inherit_portable_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
-    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "win32")
+    monkeypatch.setattr(runtime_contract.sys, "platform", "win32")
 
     assert media_runtime_profile() == "unmanaged-windows"
     identity = media_runtime_identity("full", profile="unmanaged-windows")
@@ -95,7 +95,7 @@ def test_unmanaged_linux_does_not_inherit_debian_package_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
-    monkeypatch.setattr("frame_compare.vs.runtime_contract.sys.platform", "linux")
+    monkeypatch.setattr(runtime_contract.sys, "platform", "linux")
 
     assert media_runtime_profile() == "unmanaged-linux"
     identity = media_runtime_identity("full", profile="unmanaged-linux")

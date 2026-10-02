@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from frame_compare.render.batch.orchestrator import render_batch
-from frame_compare.render.encoders import render_frame
+from frame_compare.render.batch.orchestrator import render_batch_detailed
+from frame_compare.render.encoders import render_frame_detailed
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
     EncoderSettings,
@@ -62,7 +62,7 @@ def test_ffmpeg_render_creates_valid_png(mock_video_path: Path, integration_outp
         encoder_settings=EncoderSettings(),
     )
 
-    result = render_frame(request, renderer="ffmpeg")
+    result = render_frame_detailed(request, renderer="ffmpeg").path
 
     assert result == output_path
     assert output_path.exists()
@@ -113,7 +113,7 @@ def test_render_batch_ordering_contract(mock_video_path: Path, integration_outpu
         )
         requests.append(req)
 
-    results = render_batch(requests, parallelism=1)
+    results = [rendered.path for rendered in render_batch_detailed(requests, parallelism=1)]
 
     assert len(results) == 3
     for i in range(3):
@@ -126,4 +126,4 @@ def test_render_batch_ordering_contract(mock_video_path: Path, integration_outpu
 
 @pytest.mark.integration
 def test_render_batch_empty_requests_returns_empty() -> None:
-    assert render_batch([]) == []
+    assert [rendered.path for rendered in render_batch_detailed([])] == []

@@ -16,7 +16,6 @@ from frame_compare.render.encoders import (
     _maybe_expand_tonemapped_video_range,
     apply_overlay_to_file,
     render_ffmpeg_batch_detailed,
-    render_frame,
     render_frame_detailed,
 )
 from frame_compare.render.errors import EncodingError, FrameExtractionError, RenderError
@@ -213,7 +212,7 @@ def test_render_frame_vs_dispatch(mock_render_vs):
         overlay=None,
         encoder_settings=EncoderSettings(),
     )
-    render_frame(request, renderer="auto")
+    render_frame_detailed(request, renderer="auto")
     mock_render_vs.assert_called_once()
 
 
@@ -226,7 +225,7 @@ def test_render_frame_ffmpeg_dispatch(mock_ffmpeg_runner):
         overlay=None,
         encoder_settings=EncoderSettings(),
     )
-    render_frame(request, renderer="auto")
+    render_frame_detailed(request, renderer="auto")
     mock_ffmpeg_runner.assert_called_once()
 
 
@@ -241,7 +240,7 @@ def test_render_frame_mismatch_error():
         encoder_settings=EncoderSettings(),
     )
     with pytest.raises(FrameExtractionError, match="Failed to extract frame 100"):
-        render_frame(request, renderer="vapoursynth")
+        render_frame_detailed(request, renderer="vapoursynth")
 
 
 def test_render_frame_overlay_integration(mock_render_vs):
@@ -256,7 +255,7 @@ def test_render_frame_overlay_integration(mock_render_vs):
         overlay=overlay,
         encoder_settings=EncoderSettings(),
     )
-    render_frame(request, renderer="auto")
+    render_frame_detailed(request, renderer="auto")
 
     mock_render_vs.assert_called_once()
     # Check args
@@ -275,7 +274,7 @@ def test_render_frame_overlay_integration_ffmpeg(mock_ffmpeg_runner, mock_apply_
         overlay=_overlay(frame=100),
         encoder_settings=EncoderSettings(),
     )
-    render_frame(request, renderer="ffmpeg")
+    render_frame_detailed(request, renderer="ffmpeg")
     mock_ffmpeg_runner.assert_called_once()
     mock_apply_overlay_file.assert_called_once()
 
@@ -304,7 +303,7 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     clip = _FakeFpngClip()
     output = tmp_path / "out.png"
 
-    render_frame(
+    render_frame_detailed(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
             diagnostic_source=clip,  # type: ignore[arg-type]
@@ -346,7 +345,7 @@ def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overl
     pillow = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
 
-    render_frame(
+    render_frame_detailed(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
             diagnostic_source=clip,  # type: ignore[arg-type]
@@ -376,7 +375,7 @@ def test_render_frame_vs_auto_falls_back_to_pillow_when_overlay_is_present(
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
     overlay = _overlay(frame=3)
 
-    render_frame(
+    render_frame_detailed(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
             diagnostic_source=clip,  # type: ignore[arg-type]
@@ -404,7 +403,7 @@ def test_render_frame_vs_pillow_writer_ignores_available_fpng(
     pillow = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
 
-    render_frame(
+    render_frame_detailed(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
             diagnostic_source=clip,  # type: ignore[arg-type]
@@ -427,7 +426,7 @@ def test_render_frame_vs_fpng_requires_plugin_when_explicit(
     clip = _FakeFpngClip()
 
     with pytest.raises(EncodingError) as exc_info:
-        render_frame(
+        render_frame_detailed(
             RenderRequest(
                 clip=clip,  # type: ignore[arg-type]
                 diagnostic_source=clip,  # type: ignore[arg-type]
@@ -453,7 +452,7 @@ def test_render_frame_vs_fpng_rejects_overlay_when_explicit(
     clip = _FakeFpngClip()
 
     with pytest.raises(EncodingError) as exc_info:
-        render_frame(
+        render_frame_detailed(
             RenderRequest(
                 clip=clip,  # type: ignore[arg-type]
                 diagnostic_source=clip,  # type: ignore[arg-type]
@@ -481,7 +480,7 @@ def test_render_frame_vs_auto_falls_back_to_pillow_for_tonemapped_limited_rgb(
     pillow = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs_pillow", pillow)
 
-    render_frame(
+    render_frame_detailed(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
             diagnostic_source=clip,  # type: ignore[arg-type]
@@ -508,7 +507,7 @@ def test_render_frame_vs_fpng_rejects_tonemapped_limited_rgb_when_explicit(
     clip = _FakeFpngClip(props={"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0})
 
     with pytest.raises(EncodingError) as exc_info:
-        render_frame(
+        render_frame_detailed(
             RenderRequest(
                 clip=clip,  # type: ignore[arg-type]
                 diagnostic_source=clip,  # type: ignore[arg-type]
@@ -569,7 +568,7 @@ def test_render_frame_ffmpeg_passes_geometry_plan_to_runner() -> None:
         geometry_plan=plan,
     )
 
-    render_frame(request, renderer="ffmpeg")
+    render_frame_detailed(request, renderer="ffmpeg")
 
     runner.extract_frame.assert_called_once_with(
         Path("test.mp4"),
@@ -591,7 +590,7 @@ def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() ->
     )
 
     with pytest.raises(RenderError) as exc_info:
-        render_frame(request, renderer="ffmpeg")
+        render_frame_detailed(request, renderer="ffmpeg")
 
     assert "scale dimensions must be positive" in exc_info.value.context.message
 
@@ -689,7 +688,7 @@ def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
         overlay=_overlay(OverlayMode.NONE, frame=100),
         encoder_settings=EncoderSettings(),
     )
-    render_frame(request, renderer="ffmpeg")
+    render_frame_detailed(request, renderer="ffmpeg")
     mock_ffmpeg_runner.assert_called_once()
     mock_apply_overlay_file.assert_not_called()
 
@@ -707,7 +706,7 @@ def test_error_wrapping(mock_ffmpeg_runner):
     )
 
     with pytest.raises(RenderError) as excinfo:
-        render_frame(request, renderer="ffmpeg")
+        render_frame_detailed(request, renderer="ffmpeg")
 
     assert isinstance(excinfo.value.__cause__, FFmpegNotFoundError)
 
@@ -725,7 +724,7 @@ def test_render_frame_reraises_source_load_error(mock_ffmpeg_runner):
     )
 
     with pytest.raises(SourceLoadError, match="ffprobe failed"):
-        render_frame(request, renderer="ffmpeg")
+        render_frame_detailed(request, renderer="ffmpeg")
 
 
 class _FakeResize:
@@ -1008,7 +1007,7 @@ def test_render_vs_applies_geometry_plan_before_saving(
 
     output = tmp_path / "out.png"
     clip = _RgbClip()
-    render_frame(
+    render_frame_detailed(
         RenderRequest(
             clip=clip,  # type: ignore[arg-type]
             diagnostic_source=clip,  # type: ignore[arg-type]
