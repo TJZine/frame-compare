@@ -58,7 +58,7 @@ uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
 
@@ -186,6 +186,14 @@ including a worker's observed results. Rerun affected checks after integration o
 other changes invalidate it; run additional integration proof for interactions not
 covered by unit results. Do not repeat an unchanged clean gate solely at closeout.
 
+Full native runs use the measured local count of four workers with `--dist loadgroup`.
+Focused selections, including single-test runs, may stay serial; `addopts` does not
+enable parallelism. Native CI uses `-n auto --dist loadgroup` because runner core
+counts differ. Windows portable CI stays serial. New tests must be parallel-safe:
+use `tmp_path` and `monkeypatch`, avoid fixed paths or ports, and use `xdist_group`
+only with a stated concrete reason. Existing groups serialize browser tests sharing
+a Chrome profile and the alignment-u4 module sharing session-generated media.
+
 ### Fast Local Sanity
 
 Use for docs-only changes and small internal refactors that do not touch runtime behavior.
@@ -220,7 +228,7 @@ uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
 
@@ -300,6 +308,25 @@ Canonical command for the default Docker media runtime:
 ```bash
 bash tools/verify_docker_integration.sh
 ```
+
+The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
+10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
+Use `--pytest-path tests/e2e` for focused development or scenario proof; it does not
+replace the full gate when the runtime/dependency/media triggers above apply.
+The script builds images by default. After `docker-test` dependency or `uv.lock`
+changes, rebuild before using the new plugin/runtime; `--no-build` reuses only
+known-current images.
+
+The verifier exports `FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache`
+(host `generated/test-media-cache`). Only u4 media is cached, under
+`<cache>/<generator>/<key>/`; E2E media is regenerated. The SHA-256 key includes the
+exact generator source and complete `ffmpeg -version` output, obtained with an
+explicit timeout. Generation publishes by same-filesystem rename and prunes only
+that generator's old keys. Tests consume temporary symlinks so source indexes stay
+outside the cache. Unset the variable to generate in temporary storage as before.
+Run the verifier one at a time from a checkout: overlapping pruning is unsupported.
+No CI cache was added; Docker CI retains `--no-cache` and cold regeneration receives
+no warm-cache speedup.
 
 If this path cannot be run locally, record it as documented-only until an observed
 matching-SHA run of `.github/workflows/docker-integration.yml` supplies the proof.

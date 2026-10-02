@@ -28,6 +28,32 @@ reproducing seam. Ask: could a user-visible bug ship if this test were deleted?
   `tests/conftest.py` VapourSynth mock does not establish runtime capability;
   report the matching Docker, browser, distribution or Windows proof.
 
+## Parallel and cached verification
+
+- Full native command: `uv run --no-sync pytest -q -n4 --dist loadgroup`.
+  Focused selections may stay serial; do not add parallelism to `addopts`.
+  Native CI uses `-n auto --dist loadgroup`; Windows portable CI stays serial.
+- New tests must be parallel-safe: use `tmp_path` and `monkeypatch`, avoid fixed
+  paths or ports, and use `xdist_group` only with a stated concrete reason.
+  Existing `browser` grouping protects a shared Chrome profile; `alignment-u4`
+  grouping generates its session media on one worker.
+- The full `bash tools/verify_docker_integration.sh` gate uses ten workers with
+  `--dist loadgroup` for E2E, integration and VS tests, plus runtime and
+  production-image proofs. Follow the runbook's runtime/dependency/media triggers.
+  `--pytest-path tests/e2e` is focused development/scenario proof, not a substitute
+  for a required full gate. Rebuild after `docker-test` dependency or `uv.lock`
+  changes before using the new plugin; the default builds, while `--no-build`
+  requires known-current images.
+- `FRAME_COMPARE_TEST_MEDIA_CACHE` enables only u4 media caching. The verifier
+  exports `/workspace/generated/test-media-cache` (host `generated/test-media-cache`),
+  using `<cache>/<generator>/<key>/`. SHA-256 includes exact generator source and
+  complete FFmpeg version output obtained with an explicit timeout. Publish on the
+  same filesystem and prune only that generator's old keys. Consume temporary
+  symlinks so indexes stay outside the cache; unset the variable for temporary
+  generation. Run verifiers one at a time per checkout because pruning cannot
+  overlap. E2E media is uncached; no CI cache was added, Docker CI retains
+  `--no-cache`, and cold regeneration has no warm-cache speedup.
+
 ## One owner per observable behavior
 
 Group by behavior, not function. Keep the strongest owner; prove duplicates are
