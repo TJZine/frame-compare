@@ -262,6 +262,11 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
         "year": 1999,
         "media_type": "movie",
     }
+    assert captured_tmdb_metadata == [expected_metadata]
+    assert resolve_calls == [["source.mkv"]]
+    assert cache_paths == [(tmp_path / "generated" / "cache" / "tmdb.toml").resolve()]
+    assert run_info["folder_name"] == "Fight Club (1999)"
+    assert run_info["naming_source"] == "tmdb"
 
 
 def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
@@ -337,6 +342,15 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
         "failed": True,
         "error_type": "TmdbError",
     }
+
+    expected_config = MetadataConfig(
+        api_key="test-key",
+        unattended=True,
+        timeout_seconds=7.5,
+        year_tolerance=1,
+        category_preference="movie",
+    )
+    assert captured_configs == [expected_config, expected_config]
 
 
 def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(

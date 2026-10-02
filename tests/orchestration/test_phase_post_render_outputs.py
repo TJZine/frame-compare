@@ -267,6 +267,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         ("Encode 1", (1920, 1080), 24.0),
         ("My Explicit", (1920, 1080), 24.0),
     ]
+    assert captured["report_config"] == ctx.config.report
 
 
 def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
@@ -536,6 +537,7 @@ def test_run_report_phase_passes_reference_source_frame_details(
         ("User", "Selected comparison frame", "user_override"),
         ("Frame 2", "Selected comparison frame", "quantile_bright"),
     ]
+    assert captured["report_config"] == ctx.config.report
 
 
 async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post_upload_actions(
@@ -619,6 +621,17 @@ async def test_run_publish_phase_sets_url_from_publish_result_and_delegates_post
     assert captured_post_upload_request is not None
     assert captured_post_upload_request.slowpics_url == "https://slow.pics/c/collateral"
     assert captured_post_upload_request.collection_title == "Collateral (2004)"
+    assert captured["config"] == ctx.config.slowpics
+    assert captured_post_upload_request.workspace == ctx.workspace
+    assert captured_post_upload_request.config is ctx.config.slowpics
+    assert output.post_upload_actions == (
+        PostUploadActionResult(
+            kind="shortcut",
+            success=True,
+            path=tmp_path / "Collateral.url",
+            message="slow.pics URL shortcut written",
+        ),
+    )
 
 
 async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_seam(

@@ -167,6 +167,9 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     assert any(warning.endswith(": 120") for warning in output.warnings)
     assert not any(warning.endswith(": 10") for warning in output.warnings)
     assert config_path.read_bytes() == authored_bytes
+    assert confirmation_requests[0].eligible_frame_count == 20
+    assert ctx.preflight_warnings == ["probe warning"]
+    assert output.replaces_frame_plan_selection is True
 
 
 @pytest.mark.parametrize("margin_seconds", [0.0, 40 / 24])
@@ -738,6 +741,7 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
     expected_dark: list[int],
     expected_bright: list[int] | None,
 ) -> None:
+    selection_inputs: dict[str, object] = {}
     ctx = _context(tmp_path)
     if domain in {"analysis-source", "sparse"}:
         ctx.analysis_clip = ctx.reference.with_trim(
@@ -782,6 +786,7 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
         )
 
         def _fake_select_frames(**_kwargs: object) -> FrameSelection:
+            selection_inputs.update(_kwargs)
             details = {
                 0: SelectionDetail(
                     frame_index=0,
@@ -822,6 +827,39 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
     if domain == "untrimmed-analysis":
         assert details_by_frame[10].timecode == "00:00:00.417"
         assert details_by_frame[14].timecode == "00:00:00.583"
+
+    if domain in {"base-trim", "untrimmed-analysis"}:
+        assert details_by_frame[10].frame_index == 10
+
+    if domain == "base-trim":
+        assert cast(FrameMetrics, selection_inputs["metrics"]).luminance == [
+            10.0,
+            11.0,
+            12.0,
+            13.0,
+            14.0,
+        ]
+
+    if domain == "analysis-source":
+        assert cast(FrameMetrics, selection_inputs["metrics"]).luminance == [
+            float(frame) for frame in range(25, 35)
+        ]
+
+    if domain == "untrimmed-analysis":
+        assert cast(FrameMetrics, selection_inputs["metrics"]).luminance == [
+            0.0,
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+        ]
+
+    if domain == "global-window":
+        assert cast(FrameMetrics, selection_inputs["metrics"]).luminance[0] == 24.0
+        assert len(cast(FrameMetrics, selection_inputs["metrics"]).luminance) == 48
+
+    if domain == "analysis-source":
+        assert selection_inputs["selection_fps"] == ctx.reference.effective_fps
 
 
 def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Path) -> None:

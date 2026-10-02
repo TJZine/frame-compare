@@ -84,6 +84,14 @@ enable = false
         review_summary: AlignmentReviewSummary | None = None,
         vs_loader=None,
     ):
+        assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
+        assert request.reference.identity.path == request.reference.path
+        assert [comparison.identity.path for comparison in request.comparisons] == [
+            comparison.path for comparison in request.comparisons
+        ]
+        assert json_output is False
+        assert quiet is False
+        assert verbose is False
         return [
             AlignmentResult(
                 reference_clip=request.reference.path.name,
@@ -411,3 +419,4 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         ("Reference", 100),
         ("Encode 1", 80),
     ]
+    assert captured["report_config"] == config.report

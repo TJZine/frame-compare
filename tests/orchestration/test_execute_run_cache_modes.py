@@ -284,6 +284,7 @@ enable = false
 def test_execute_run_from_cache_only_uses_scoped_cache(
     tmp_path: Path,
     source_config: str,
+    monkeypatch: pytest.MonkeyPatch,
     filenames: tuple[str, ...],
     analysis_filename: str,
 ) -> None:
@@ -325,6 +326,16 @@ enable = false
     request = RunRequest(
         root=tmp_path, from_cache_only=True, skip_analysis=False, skip_metadata=True, no_upload=True
     )
+    diagnostics_by_stage: dict[str, list[str]] = {}
+
+    def _record_emit(
+        *, stage: str, diagnostics: list[str] | tuple[str, ...] = (), **_kwargs: object
+    ) -> None:
+        diagnostics_by_stage[stage] = list(diagnostics)
+
+    monkeypatch.setattr(
+        "frame_compare.orchestration.coordinator.emit_consolidated_fps_report", _record_emit
+    )
     result = asyncio.run(
         execute_run(
             request,
@@ -337,6 +348,11 @@ enable = false
 
     assert result.success is True
     assert result.cache_hit is True
+
+    if analysis_filename == "analysis.mkv":
+        assert diagnostics_by_stage["after_load_sources"] == [
+            "Analysis source: Comparison 1 | selected by configured policy"
+        ]
 
 
 def test_execute_run_from_cache_only_rejects_full_frame_cache_for_active_rect_source(

@@ -105,7 +105,7 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
         picture_types={"Reference": ["B"], "Encode 1": ["P"]},
     )
 
-    phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
+    output = phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
 
     requests = captured["batch_requests"]
     assert [
@@ -117,6 +117,10 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
     assert requests[0].selection_labels == ["Dark"]
     assert requests[0].filename_label == "reference"
     assert captured["output_dir"] == ctx.workspace.screenshots_dir
+    assert captured["options"].overlay_mode == OverlayMode.NONE
+    assert output.render.frame_facts_by_label["Reference"] == [
+        RenderedFrameFacts(source_frame=4, picture_type="B")
+    ]
 
 
 def test_run_render_phase_maps_multiple_clips_in_stable_order(

@@ -164,6 +164,7 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
     assert output.comparisons[0].alignment is None
     assert output.reference.trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_start_frames == 0
+    assert output.comparisons[0].audio_attempt == attempt
 
 
 def test_provisional_audio_candidate_cannot_reach_trim_authority(
@@ -216,6 +217,7 @@ def test_provisional_audio_candidate_cannot_reach_trim_authority(
     assert output.comparisons[0].alignment is None
     assert output.reference.trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_start_frames == 0
+    assert output.comparisons[0].audio_attempt == attempt
 
 
 def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
@@ -300,3 +302,4 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
     assert output.reference.trim.trim_end_frame_inclusive == 99
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_end_frame_inclusive == 99
+    assert output.comparisons[0].audio_attempt == attempt

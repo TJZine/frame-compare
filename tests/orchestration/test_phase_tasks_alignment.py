@@ -23,6 +23,7 @@ from frame_compare.orchestration.full_window_retry import FullWindowRetryOverrid
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentResult
 from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.utils.types import AlignmentRequest
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -75,6 +76,64 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.selected_frames == [0, 48, 97]
+    assert captured["verbose"] is False
+    assert captured["quiet"] is False
+    assert captured["json_output"] is False
+
+    alignment_request = cast(AlignmentRequest, captured["request"])
+
+    assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
+    assert alignment_request.reference.identity.path == ctx.reference.probe.fingerprint.path
+    assert alignment_request.comparisons[0].identity.path == comparison.probe.fingerprint.path
+    assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert captured["frame_props_by_stem"] == {
+        "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+        "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+    }
+    assert captured["config"].enable is True
+    assert captured["config"].max_offset_seconds == 4.5
+    assert captured["config"].use_vsview is True
+    assert captured["config"].cache_results is False
+    assert captured["config"].channel_strategy == "best_channel"
+    assert captured["config"].reference_stream == 1
+    assert captured["config"].comparison_streams == {"encode": 2}
+    assert captured["config"].previous_offsets == "disabled"
+    assert alignment_request.reference.label == "Reference"
+    assert alignment_request.comparisons[0].label == "Encode 1"
+    assert alignment_request.reference.identity.size_bytes == 0
+    assert alignment_request.comparisons[0].identity.size_bytes == 0
+    assert alignment_request.reference.identity.mtime_ns == ctx.reference.probe.fingerprint.mtime_ns
+    assert (
+        alignment_request.comparisons[0].identity.mtime_ns == comparison.probe.fingerprint.mtime_ns
+    )
+    assert alignment_request.reference.trim_start_frames == 0
+    assert alignment_request.reference.trim_end_frame_inclusive is None
+    assert alignment_request.reference.effective_fps_num == 24
+    assert alignment_request.reference.effective_fps_den == 1
+    assert alignment_request.reference.preserved_frame_props == {
+        "_Matrix": 1,
+        "_Transfer": 1,
+        "_Primaries": 1,
+    }
+    assert alignment_request.comparisons[0].preserved_frame_props == {
+        "_Matrix": 1,
+        "_Transfer": 16,
+        "_Primaries": 9,
+    }
+    assert alignment_request.reference.presentation_name == "reference.mkv"
+    assert alignment_request.comparisons[0].presentation_name == "encode.mkv"
+    assert alignment_request.reference.selected_audio_stream == 1
+    assert alignment_request.comparisons[0].selected_audio_stream == 2
+    assert alignment_request.presentation_content is None
+    assert alignment_request.generated_dir == ctx.workspace.generated_dir
+    assert alignment_request.alignment_diagnostics_dir == ctx.workspace.alignment_diagnostics_dir
+    assert alignment_request.alignment_diagnostics_root == ctx.workspace.generated_root
+    assert alignment_request.selected_reference_relationship == "auto"
+    assert alignment_request.previous_offsets == "disabled"
+    assert alignment_request.settings.max_offset_seconds == 4.5
+    assert alignment_request.settings.channel_strategy == "best_channel"
+    assert output.selection_breakdown is None
+    assert output.selection_details_by_source_frame is None
 
 
 def test_run_align_phase_retains_material_variable_alignment_without_phase_warning(
@@ -322,6 +381,7 @@ def test_run_align_phase_composes_global_source_trims(
         assert len(output.warnings) == 1
         assert "align: Encode B alignment" in output.warnings[0]
         assert "encode_b" not in output.warnings[0]
+        assert output.reference.alignment is None
 
 
 def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
