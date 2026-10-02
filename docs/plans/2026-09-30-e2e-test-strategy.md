@@ -923,44 +923,121 @@ Checkpoint C (controller):
 - re-run the full native gate and one Docker gate;
 - update the inventory in the execution record.
 
-### Unit D: consolidation and typing (handoff written after checkpoint C)
+### Checkpoint C rulings: the approval list (maintainer, 2026-10-01)
 
-- One file per task, applying that file's `trim` and `consolidate` annotations.
-  Work is serial within a file and may run in parallel across files with disjoint
-  write sets.
-- **Every original case survives.** Each case of a consolidated group maps to a
-  parameter row or a retained assertion, and the mapping is recorded in the task
-  report.
-- **Proof:** one mutation per consolidated group fails the new test on an
-  assertion.
-- **Rewrites:** each `rewrite:<what>` annotation is applied, and one mutation shows
-  the repaired assertion can fail. That includes unit C's R1 records: inline the
-  expected values, then delete the test-only symbol.
-- **Trim safety:** a trim may not remove an assertion that C2 recorded as failing.
-  When a trimmed file owns a `delete:covered` target, rerun that target's C2
-  mutations after the trim.
-- **Case count:** the file's collected case count may drop only by approved
-  `delete` records.
-- **Typing:** each rewritten file passes `pyright --warnings <file>` under the
-  existing `tests` execution environment. Fakes use the real types or a
-  `Protocol`; `# type: ignore` is allowed only with a reason on the same line.
+Unit C restored about 70 tests whose deletion lost native coverage. The maintainer
+approved this split:
 
-### Unit E: pyright gate for tests (after unit D)
+IDs are short B2 record numbers within each lane: lane 1b's B060 is ledger record
+`B1b-060`. Each lane's `.c.md` lists them, with node IDs, under "needs maintainer
+approval".
 
-- Fix the remaining pyright errors in files unit D didn't rewrite. There were 539
-  errors at `ae434e5c`, 294 of them in `tests/vs`.
-- Then set `include = ["src", "tests"]` in `[tool.pyright]` and confirm that
+- **Delete (D0), accepting their coverage loss.** These are progress-display
+  details, internal under S10:
+  - lane 1b: B060, B151;
+  - lane 3a: B026, B027, B028, B175, B188, B189, B190;
+  - lane 3b: B113, B296, B297;
+  - lane 6: B151, B152, B156, B160–B164, B168, B172, B180–B182, B184. B183 was
+    already deleted in unit C.
+- **Keep everything else**, including:
+  - all twelve lane 2 records: the parser corpus, streaming-service display
+    codes, folder-name edges, TMDB key redaction and malformed TMDB responses;
+  - lane 3a: B067, B107, B148, B187, B191;
+  - lane 3b: B283, B285, B293, B329, B330, B333, B334;
+  - lane 5: B079, B360, B362, B363;
+  - lane 6: B004, and B167, B169, B170, B171, B177, which are crash guards for the
+    plain and Rich progress lifecycles;
+  - lane 7: B102, B103, B104.
+
+### Unit D: consolidation, rewrites and typing (`.handoff/T6-codex-consolidate.md`)
+
+One task per lane, **strictly serial**, because consolidation and rewrite proofs
+mutate `src/`. The order is the same as unit C: 1a, 1b, 2, 3a, 3b, 4, 5, 6, then
+7 and 8 together. Each task works only on its lane's surviving tests and, for R1,
+the production symbols its records name. Its inputs:
+- the lane's `.c.md` (and `1a.c-s11.md`): unit C's `rewrite` records and R1
+  symbols left for unit D;
+- the B2 ledger's `trim`, `consolidate`, `rewrite` and rename annotations, applied
+  only to tests that still exist;
+- the D0 list above.
+
+**Scope limits:**
+- Unit D deletes only the D0 list and R1 symbols. A "reconsider" note in a `.c.md`
+  record is recorded in the task record, not acted on.
+- A lane may edit another lane's or `tests/integration`'s files only where its own
+  R1 records name them as consumers of a symbol it deletes. Today that means:
+  - lane 5: the render-wrapper consumers in `tests/integration/test_render_*.py`;
+  - lane 6: B3b-293, for `RichProgressReporter.no_color`;
+  - lane 4: B4-192 for `force_tty`, which lane 3b leaves in place.
+- Production edits are R1 deletions under S7, plus docstrings or comments that
+  name a deleted R1 symbol.
+
+Steps, in order:
+
+- **D0.** Delete the approved tests. Their C5 losses are accepted, not restored.
+- **D1. Rewrites.**
+  - Apply every unit C `rewrite` record and B2 `rewrite` annotation. That includes
+    R1: inline the expected values, or migrate to the real API, then delete the
+    test-only symbol under S7 checks.
+  - Each rewrite is proved by the mutation its record names, which fails the
+    rewritten test on an assertion.
+- **D2. Trims.**
+  - A trim may not remove an assertion that C2 recorded as failing.
+  - When a trimmed file owns a `delete:covered` target, rerun that target's C2
+    mutations after the trim.
+- **D3. Consolidation.**
+  - Each group's surviving members become one parametrized test.
+  - Every original case maps to a parameter row or a retained assertion, and the
+    mapping goes in the task record.
+  - The file's collected case count may drop only by approved deletions and by
+    the merges recorded in the case-mapping table.
+  - One mutation per group fails the new test on an assertion.
+- **D4. Renames** from the ledger annotations.
+- **D5. Typing.** Every Python file in the lane passes
+  `pyright --warnings <file>` under the existing `tests` execution environment.
+  - Fakes use the real types or a `Protocol`.
+  - `# type: ignore` is allowed only with a reason on the same line.
+  - There were 504 errors in `tests/` at `3682ed88`: 294 in `tests/vs`, 67 in
+    orchestration, 39 in cli, 36 in integration, and the rest spread out.
+- **Mutation restores:** before mutating a file with uncommitted lane edits, stage
+  that file. `git restore --worktree` returns to the staged state, and
+  `git diff --quiet -- <file>` then confirms the restore.
+- **Gates:**
+  - after commits (a) and (b): the lane's own tests;
+  - once per lane, before commit (c): the full native `pytest`;
+  - `pyright --warnings` on the lane's files, `ruff check .`, `ruff format --check .`
+    and `lint-imports`;
+  - `bash tools/verify_docker_integration.sh --no-build` when the lane deletes
+    production code or touches `tests/vs/`, a conftest, or support that
+    `tests/integration/**` uses.
+- **Commits:** at most three per lane: D0–D1; D2–D4; D5.
+- Lane 3b also fixes the stale `FramePlan` docstring at
+  `orchestration/context.py:143`.
+
+**Checkpoint D (controller, before unit E):**
+- compare each lane's `assert` line count before and after, excluding D0 and its
+  deleted tests;
+- sample the case-mapping tables and rewrite mutations;
+- run the full native gate.
+
+### Unit E: pyright gate and rules (`.handoff/T7-codex-typing-rules.md`, after checkpoint D)
+
+- Type-check the files no lane owns: `tests/integration/**`, `tests/browser/**`,
+  `tests/e2e/**`, and `tests/conftest.py`. Fix type-only regressions in any
+  `tests/` file.
+- Set `include = ["src", "tests"]` in `[tool.pyright]`, and confirm that
   `pyright --warnings` is clean repo-wide.
 - Update any runbook or `CONTRIBUTING.md` text that says pyright covers only
   `src/`.
-- **Align the authoring rules with S10.** `AGENTS.md` and the `python-test-design`
-  skill still use S6's keep categories (`failure-mode`, `numeric`, and so on).
-  Rewrite them to S10's vocabulary:
+- **Align the authoring rules with S10.** Rewrite `AGENTS.md`'s three testing
+  bullets and the `python-test-design` skill to S10's vocabulary:
   - one owner per user-visible behavior;
   - the flow rule;
   - the `owner`, `edge`, `failure`, `contract`, `network`, `security` and
     `platform` categories;
-  - internal assertions are not a reason to keep a test.
+  - R1, R2, and that internal assertions are not a reason to keep a test.
+- **Final gates:** the full native gate, and one
+  `bash tools/verify_docker_integration.sh --no-build`.
 
 ## Invariants
 
@@ -976,8 +1053,9 @@ Checkpoint C (controller):
 - E2E never reaches the network, and never writes outside its `tmp_path` workspace
   and `artifact_root`.
 - Mutations are temporary, serial and never committed.
-- Commits use `git commit --only -- <paths>`, one per task, with a Conventional
-  Commit subject. Workers sharing the checkout never rely on the shared index.
+- Commits use `git commit --only -- <paths>`, with a Conventional Commit subject:
+  one per task, except unit D, which allows up to three per lane. Workers sharing
+  the checkout never rely on the shared index.
 
 ## Stop conditions
 
@@ -1001,8 +1079,8 @@ Any of these stops the unit and sends a `blocked` message:
 | A5 | full gate | verify script ×2 | 3 mutations fail M5/M3/M4 |
 | B, B2 | none (read-only) | — | ledger completeness |
 | C | C0 records; full gate per commit (the C5 "after" run may count); C5 line and branch diff | C2 Docker mutations; verify script per the C4 triggers | mutation records |
-| D | file tests; `pyright --warnings <file>` | when a rewritten file's owners are media-tier | case mapping; one mutation per group |
-| E | `pyright --warnings` repo-wide, with `tests` included | — | — |
+| D | lane `pyright --warnings`; full gate per lane | verify script per the D gate triggers | case mapping; one mutation per group and per rewrite |
+| E | `pyright --warnings` repo-wide, with `tests` included; full gate | verify script once | rules text against S10 and S11 |
 
 ## Residual risks
 
@@ -1017,7 +1095,8 @@ Any of these stops the unit and sends a `blocked` message:
 
 ## Rollback
 
-Each task is one commit, so rollback is `git revert <sha>`. Later unit C lanes can
+Each task is one commit (up to three per lane in unit D), so rollback is
+`git revert <sha>`, in reverse order within a lane. Later unit C lanes can
 build on earlier lanes' S7 deletions, so revert unit C commits in reverse order.
 Reverting one restores its tests and any seams it deleted.
 
