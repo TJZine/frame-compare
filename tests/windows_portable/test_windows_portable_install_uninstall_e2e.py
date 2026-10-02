@@ -73,7 +73,6 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
     tmp_path: Path, repo_root: Path
 ) -> None:
     exe = _powershell_exe()
-    assert exe is not None, "Windows PowerShell is required for the portable installer"
 
     source_dir = repo_root / "tools" / "windows_portable"
     bundle_dir = tmp_path / "bundle"

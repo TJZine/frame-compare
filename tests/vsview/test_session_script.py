@@ -257,46 +257,40 @@ def _execute_ready_block(
     return stderr.getvalue()
 
 
-def test_generated_ready_block_reports_outputs_and_hints_verbatim(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output = _execute_ready_block(tmp_path, monkeypatch, stderr_encoding="utf-8")
-
-    assert "VSView is open \u00b7 waiting for you" in output
-    assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
-    assert "Unlink playheads, then position every source on the same visible moment." in output
-    assert "Save the alignment in the panel, then close VSView to continue Frame Compare." in output
-    assert "2160p \u00b7 REF" in output
-    assert "2160p \u00b7 A" in output
-    assert "2160p \u00b7 B" in output
-    lines = output.splitlines()
-    assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
-    assert any("LongerB" in line and "Provisional +0f - NOT APPLIED" in line for line in lines)
-
-
-def test_generated_ready_block_ascii_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output = _execute_ready_block(tmp_path, monkeypatch, stderr_encoding="ascii")
-
-    assert "> VSView is open \u00b7 waiting for you" in output.splitlines()
-    assert "  1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
-    assert "  hints    ShortA   Audio alignment accepted: +0f" in output.splitlines()
-
-
-def test_generated_ready_block_falls_back_on_malformed_audio_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("case", ["utf8", "ascii", "malformed"])
+def test_generated_ready_block_output_cases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
     output = _execute_ready_block(
         tmp_path,
         monkeypatch,
-        stderr_encoding="utf-8",
-        audio_review_by_key={"ref:a": _accepted_review(), "ref:b": _malformed_review()},
+        stderr_encoding="ascii" if case == "ascii" else "utf-8",
+        audio_review_by_key={"ref:a": _accepted_review(), "ref:b": _malformed_review()}
+        if case == "malformed"
+        else None,
     )
-
-    lines = output.splitlines()
-    assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
-    assert any("LongerB" in line and "No usable audio candidate" in line for line in lines)
+    if case == "utf8":
+        assert "VSView is open \u00b7 waiting for you" in output
+        assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
+        assert "Unlink playheads, then position every source on the same visible moment." in output
+        assert (
+            "Save the alignment in the panel, then close VSView to continue Frame Compare."
+            in output
+        )
+        assert "2160p \u00b7 REF" in output
+        assert "2160p \u00b7 A" in output
+        assert "2160p \u00b7 B" in output
+        lines = output.splitlines()
+        assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
+        assert any("LongerB" in line and "Provisional +0f - NOT APPLIED" in line for line in lines)
+    elif case == "ascii":
+        assert "> VSView is open \u00b7 waiting for you" in output.splitlines()
+        assert "  1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
+        assert "  hints    ShortA   Audio alignment accepted: +0f" in output.splitlines()
+    else:
+        lines = output.splitlines()
+        assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
+        assert any("LongerB" in line and "No usable audio candidate" in line for line in lines)
 
 
 def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:

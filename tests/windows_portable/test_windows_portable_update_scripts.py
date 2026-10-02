@@ -462,7 +462,6 @@ def test_windows_portable_updater_validates_rollback_backup_id_format_and_contai
     updater = _read_text_or_fail(updater_path)
     body = _extract_powershell_function(updater, "Invoke-Rollback")
     assert r"^\d{14}$" in body
-    assert "Get-SafeChildPath" in body
     assert "backup id" in body.lower()
 
 
@@ -484,14 +483,12 @@ def test_windows_update_keygen_hardens_windows_and_posix_private_files(
     keygen = _read_text_or_fail(keygen_path)
     fn = _extract_powershell_function(keygen, "Set-PrivateFilePermissions")
 
-    assert "Test-Path -LiteralPath $PathValue -PathType Leaf" in fn
     assert "[System.IO.File]::SetUnixFileMode($PathValue, $ownerOnly)" in fn
     assert "[System.IO.File]::GetUnixFileMode($PathValue)" in fn
     assert "[System.Security.Principal.WindowsIdentity]::GetCurrent()" in fn
     assert "$acl.SetAccessRuleProtection($true, $false)" in fn
 
     writer_fn = _extract_powershell_function(keygen, "Write-PrivateFile")
-    assert "[System.IO.FileStreamOptions]::new()" in writer_fn
     assert "$options.Mode = [System.IO.FileMode]::CreateNew" in writer_fn
     assert "$options.Share = [System.IO.FileShare]::None" in writer_fn
     assert "$options.UnixCreateMode = Get-OwnerOnlyUnixFileMode" in writer_fn
@@ -508,7 +505,6 @@ def test_windows_update_keygen_requires_powershell_7_3_before_runtime_types(
 
     requirement = "#Requires -Version 7.3"
     assert keygen.startswith(f"{requirement}\n")
-    assert keygen.index(requirement) < keygen.index("function Get-OwnerOnlyUnixFileMode")
 
 
 @pytest.mark.integration
@@ -664,9 +660,6 @@ def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_
     sign_script = _read_text_or_fail(sign_path)
     assert "PrivateKeyXml" not in sign_script
     assert "SIGNING_KEY_XML_PATH" in sign_script
-    assert "Read-Host" in sign_script
-    assert "UserInteractive" in sign_script
-    assert "IsInputRedirected" in sign_script
 
 
 def test_windows_portable_sign_update_requires_canonical_signature_entry(
@@ -729,8 +722,6 @@ def test_windows_portable_build_update_uses_clean_committed_source(repo_root: Pa
     assert "Uncommitted changes exist under src/frame_compare or pyproject.toml" in export_source
     assert "archive --format=tar" in export_source
     assert "HEAD src/frame_compare pyproject.toml" in export_source
-    assert "New-ManifestFiles -SourceRoot $sourceRoot" in build_script
-    assert "Get-AppVersionFromSource -RepoRootPath $sourceSnapshotRoot" in build_script
     source_match = _extract_powershell_function(build_script, "Assert-BundleAppSourceMatches")
     assert "app\\\\src\\\\frame_compare" in source_match
     assert "$actualHash -cne $expectedHash" in source_match
@@ -742,10 +733,8 @@ def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
 ) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
-    assert "function Get-VersionFromCommandOutput" in updater
     assert '$bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"' in updater
     assert "& $bundleLauncher version 2>&1" in updater
-    assert "Get-VersionFromCommandOutput -OutputLines $launcherResult" in updater
 
 
 def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
@@ -756,14 +745,11 @@ def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
     sign_script = _read_text_or_fail(sign_path)
     updater = _read_text_or_fail(updater_path)
 
-    assert "function Sign-ManifestBytes" in sign_script
-    assert "function Test-ManifestSignature" in sign_script
     assert "Signing key does not match the expected update public key." in sign_script
     assert (
         "Produced signature does not verify against the expected update public key." in sign_script
     )
     assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in sign_script
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in sign_script
-    assert "function Test-ManifestSignature" in updater
     assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in updater
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in updater

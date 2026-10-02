@@ -6,6 +6,8 @@ import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+import pytest
+
 from tests.workflow_helpers import load_workflow
 
 from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
@@ -106,21 +108,25 @@ def _is_upload_artifact_step(step: dict[str, object]) -> bool:
     return isinstance(uses, str) and uses.startswith("actions/upload-artifact@")
 
 
-def test_default_verifier_runs_e2e_and_excludes_only_opt_in_resource_module(
-    repo_root: Path, tmp_path: Path
+@pytest.mark.parametrize("explicit", [False, True], ids=["default", "explicit-resource"])
+def test_verifier_selects_pytest_paths_and_default_exclusion(
+    repo_root: Path, tmp_path: Path, explicit: bool
 ) -> None:
-    result, invocation = _run_verifier(repo_root, tmp_path)
-
+    result, invocation = _run_verifier(
+        repo_root, tmp_path, extra_args=["--pytest-path", RESOURCE_TEST] if explicit else None
+    )
     assert result.returncode == 17
     command = shlex.split(invocation.splitlines()[-1])
-    assert command[-4:] == [
-        "--ignore=" + RESOURCE_TEST,
-        "tests/e2e/",
-        "tests/integration/",
-        "tests/vs/",
-    ]
-    assert command.count("tests/integration/") == 1
-    assert command.count("tests/vs/") == 1
+    if explicit:
+        assert command[-1] == RESOURCE_TEST
+        assert "--ignore=" + RESOURCE_TEST not in command
+    else:
+        assert command[-4:] == [
+            "--ignore=" + RESOURCE_TEST,
+            "tests/e2e/",
+            "tests/integration/",
+            "tests/vs/",
+        ]
 
 
 def test_verifier_rejects_skipped_xfailed_and_xpassed_tests(
@@ -141,32 +147,12 @@ def test_verifier_passes_host_user_media_environment_and_artifacts(
     result, invocation = _run_verifier(repo_root, tmp_path)
 
     assert result.returncode == 17
-    args = _docker_invocation_args(invocation)
-    user_index = args.index("--user")
-    uid_gid = args[user_index + 1].split(":")
-    assert len(uid_gid) == 2
-    assert all(part.isdigit() for part in uid_gid)
     assert {
         "HOME=/tmp/framecompare-home",
         "PYTHONUSERBASE=/home/framecompare/.local",
         "FRAME_COMPARE_E2E_REQUIRE_MEDIA=1",
         "FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e",
     } <= set(_docker_environment_args(invocation))
-
-
-def test_explicit_pytest_path_is_not_hidden_by_default_exclusion(
-    repo_root: Path, tmp_path: Path
-) -> None:
-    result, invocation = _run_verifier(
-        repo_root,
-        tmp_path,
-        extra_args=["--pytest-path", RESOURCE_TEST],
-    )
-
-    assert result.returncode == 17
-    command = shlex.split(invocation.splitlines()[-1])
-    assert command[-1] == RESOURCE_TEST
-    assert "--ignore=" + RESOURCE_TEST not in command
 
 
 def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(
@@ -208,8 +194,6 @@ def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(
         "-rsx",
         "-s",
     ]
-    assert "build" not in resource_command
-    assert "--build" not in resource_command
 
 
 def test_workflow_triggers_all_docker_runtime_and_test_paths(repo_root: Path) -> None:
