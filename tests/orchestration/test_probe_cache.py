@@ -64,3 +64,4 @@ def test_probe_cache_key_changes_with_scoped_runtime_fingerprint(monkeypatch) ->
     monkeypatch.setattr(probe_cache, "media_runtime_fingerprint", _fingerprint)
 
     assert compute_probe_cache_key(fingerprint) != original
+    assert observed_scopes == ["probe"]

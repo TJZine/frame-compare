@@ -164,6 +164,8 @@ def test_execute_prep_analysis_source_fastest_cache_only_rejects_before_probe(
             )
         )
 
+    assert loader.loaded == []
+
 
 def test_execute_prep_analysis_source_fastest_skipped_analysis_does_not_benchmark(
     tmp_path: Path,

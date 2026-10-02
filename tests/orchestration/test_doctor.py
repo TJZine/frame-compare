@@ -878,6 +878,7 @@ class TestCheckFFmpeg:
 
         report = run_doctor(checks=checks)
 
+        assert [check.name for check, _result in report.checks] == ["ffms2", "ffmpeg"]
         assert report.all_passed is False
         assert report.critical_failures == []
 
