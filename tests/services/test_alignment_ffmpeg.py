@@ -40,6 +40,19 @@ from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 def test_probe_fps_success(mock_run: MagicMock, stdout: bytes, expected: Fraction) -> None:
     mock_run.return_value.stdout = stdout
     assert _probe_fps(Path("test.mkv")) == expected
+    assert mock_run.call_args.args[0] == [
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate",
+        "-of",
+        "csv=p=0",
+        "test.mkv",
+    ]
+    assert mock_run.call_args.kwargs["timeout_seconds"] == 15.0
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")

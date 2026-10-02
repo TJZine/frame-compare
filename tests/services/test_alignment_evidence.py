@@ -556,6 +556,21 @@ def test_round_trip_complete_rejected_and_aborted() -> None:
 
 def test_producer_construction_of_invalid_attempt_raises() -> None:
     valid = attempt_with_chunks(2)
+    with pytest.raises(ValueError, match="unavailable decision"):
+        replace(valid, status="aborted")
+    with pytest.raises(ValueError, match="nest"):
+        replace(valid, audio=replace(valid.audio, agreeing_chunks=3))
+    with pytest.raises(ValueError, match="finite number"):
+        AudioChunkColumns(
+            starts=(0,),
+            counts=(240000,),
+            active=(True,),
+            lags=(0,),
+            psrs=(float("inf"),),
+            credible=(True,),
+            agrees=(True,),
+            total_samples=240000,
+        )
     unavailable_timeout = replace(
         valid.decision,
         state="unavailable",
@@ -566,6 +581,18 @@ def test_producer_construction_of_invalid_attempt_raises() -> None:
     # A non-complete attempt keeps covering rows when it has them; only a
     # partial row set disagrees with the plan.
     assert replace(valid, status="aborted", decision=unavailable_timeout).status == "aborted"
+    partial_payload = asdict(valid)
+    partial_payload["status"] = "aborted"
+    partial_payload["decision"] = {
+        "state": "unavailable",
+        "candidate": None,
+        "primary_reason": "timeout",
+        "failed_gates": ["timeout"],
+    }
+    for key in ("starts", "counts", "active", "lags", "psrs", "credible", "agrees"):
+        partial_payload["chunks"][key] = partial_payload["chunks"][key][:1]
+    with pytest.raises(ValueError, match="every planned chunk"):
+        evidence_from_payload(AudioAlignmentAttempt, partial_payload)
 
 
 def test_collection_failure_round_trips_at_pair_level() -> None:
@@ -573,6 +600,21 @@ def test_collection_failure_round_trips_at_pair_level() -> None:
     assert evidence_from_payload(AudioCollectionFailure, asdict(failure)) == failure
     attempt = attempt_with_chunks(0)
     assert attempt.collection_failure is None
+    with pytest.raises(ValueError, match="unknown keys"):
+        evidence_from_payload(
+            AudioCollectionFacts,
+            {
+                "role": "reference",
+                "emitted_samples": 0,
+                "eof_sample": 0,
+                "elapsed_seconds": 0.0,
+                "returncode": 0,
+                "stderr_bytes": 0,
+                "stderr_truncated": False,
+                "cleanup_completed": True,
+                "failure_category": None,
+            },
+        )
 
 
 def test_unbounded_psr_round_trips() -> None:

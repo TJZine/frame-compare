@@ -936,6 +936,11 @@ def test_real_cadence_aliases_do_not_confirm_a_wrong_offset(tmp_path: Path, cade
     assert result.scored_offsets == (-1, 0, 1, 2, 3)
     assert result.confirmed_offset is None
     assert len(result.positions) == 12
+    winners = [
+        alignment_video._position_winner(position.score_by_offset, result.scored_offsets)
+        for position in result.positions
+    ]
+    assert winners == [(None, 0.0)] * 12
     assert all(position.score_by_offset.count(0.0) >= 2 for position in result.positions)
     decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"

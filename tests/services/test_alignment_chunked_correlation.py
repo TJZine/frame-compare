@@ -86,6 +86,8 @@ def test_matrix_positives_agree(variant: str, shift: int) -> None:
     assert abs(estimate.global_lag + shift) <= 1
     if variant in ("same", "remix", "downmix", "dub"):
         assert estimate.global_lag == -shift
+    active = [item for item in estimate.observations if item.active]
+    assert estimate.agreeing_count == estimate.credible_count == len(active)
 
 
 def test_genuine_negative_15_db_snr_still_aligns() -> None:
@@ -104,6 +106,8 @@ def test_matrix_long_intro_agrees() -> None:
     estimate = run_estimate(reference, comparison)
     assert estimate.outcome == "agreed"
     assert estimate.global_lag == -20 * AUDIO_ANALYSIS_SAMPLE_RATE
+    active = [item for item in estimate.observations if item.active]
+    assert estimate.agreeing_count == estimate.credible_count == len(active)
 
 
 def test_matrix_insert_gives_two_runs() -> None:
@@ -134,6 +138,8 @@ def test_matrix_negatives_never_agree(comparison_kind: str) -> None:
         comparison = make_program(31337, 120.0)
     estimate = run_estimate(reference, comparison)
     assert estimate.outcome == "no_single_offset"
+    assert estimate.active_count > 0
+    assert estimate.credible_count == 0
 
 
 @pytest.mark.parametrize("comparison_kind", ["silence", "quiet"])
@@ -178,6 +184,8 @@ def test_agreement_boundary_79_vs_80_percent(
         lag = 0 if index < agreeing else 1000
         accumulator.add(index, chunk, _lag_window(chunk, lag, lag_samples))
     estimate = accumulator.finish()
+    assert estimate.credible_count == total
+    assert estimate.agreeing_count == agreeing
     assert estimate.outcome == expected
 
 
@@ -208,6 +216,8 @@ def test_short_sources() -> None:
     """4 s, 20 s and 60 s sources stay eligible with the planned chunking."""
     shift = 500
     tiny = make_program(SEED, 4.0)
+    plan = plan_audio_chunks(len(tiny), len(tiny), 1.0)
+    assert plan.chunks == ((0, len(tiny)),)
     estimate = run_estimate(tiny, shift_signal(tiny, shift), 1.0)
     assert estimate.outcome == "agreed"
     assert estimate.global_lag == -shift
