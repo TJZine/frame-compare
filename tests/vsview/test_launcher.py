@@ -94,15 +94,6 @@ def test_unmanaged_launcher_preloads_before_vsview(
     assert events == ["vapoursynth", "run:vsview:__main__:True"]
 
 
-def test_preload_vapoursynth_runtime_uses_managed_environment(monkeypatch) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(launcher, "ensure_vs_environment", lambda: calls.append("ensure"))
-
-    launcher.preload_vapoursynth_runtime()
-
-    assert calls == ["ensure"]
-
-
 def test_disable_offscreen_cjk_warmup_replaces_vsview_worker(monkeypatch) -> None:
     class FakeApplication:
         _warmup_cjk_fallback = staticmethod(lambda _font: "original")

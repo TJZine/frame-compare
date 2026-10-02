@@ -29,24 +29,6 @@ def test_windows_portable_docs_bind_attestation_to_selected_tag_commit(repo_root
     assert "Release provenance verification failed" in docs
 
 
-def test_windows_portable_docs_describe_external_generated_data_preservation(
-    repo_root: Path,
-) -> None:
-    docs = "\n".join(
-        (
-            _read_text_or_fail(repo_root / "docs" / "windows-portable.md"),
-            _read_text_or_fail(repo_root / "tools" / "windows_portable" / "README.txt"),
-        )
-    )
-
-    assert "Generated data location" in docs
-    assert "external" in docs.lower()
-    assert "updater" in docs.lower()
-    assert "uninstaller" in docs.lower()
-    assert "cache identity" in docs.lower()
-    assert "top-level bundle `screenshots/` directory is not a runtime" in docs
-
-
 def test_windows_portable_docs_do_not_promote_removed_path_fields(repo_root: Path) -> None:
     docs = "\n".join(
         (

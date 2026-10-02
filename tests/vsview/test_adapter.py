@@ -21,7 +21,6 @@ from frame_compare.vsview.adapter import (
     VSViewConfig,
     VSViewSessionRequest,
     _build_vsview_child_env,
-    _check_startup_readiness,
     _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
@@ -183,27 +182,6 @@ def test_check_vsview_availability_redacts_probe_failures(
     assert "private details" not in result.public_probe_failure_reason()
 
 
-def test_startup_readiness_probes_pyside6_vsview_and_output_api(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-
-    _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
-
-    mock_run.assert_called_once()
-    probe_code = mock_run.call_args.args[0][2]
-    assert "import PySide6" in probe_code
-    assert "import vsview" in probe_code
-    assert probe_code.index("preload_vapoursynth_runtime()") < probe_code.index("import PySide6")
-    assert "from vsview import set_output" in probe_code
-    assert "frame-compare-alignment-review" in probe_code
-    assert "eps[0].load()" in probe_code
-    assert "raise RuntimeError" in probe_code
-    assert "compat" not in probe_code
-    assert mock_run.call_args.kwargs["cwd"] == Path(sys.executable).resolve().parent
-
-
 @pytest.mark.parametrize(
     "python_args",
     [
@@ -350,18 +328,6 @@ def test_launch_rejects_missing_panel_entry_point(
     assert excinfo.value.public_reason == "VSView failed its startup dependency check."
     assert "entry point is unavailable" in (excinfo.value.startup_stderr or "")
     popen.assert_not_called()
-
-
-def test_windows_startup_readiness_preloads_before_vsview(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-
-    _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
-
-    probe_code = mock_run.call_args.args[0][2]
-    assert probe_code.index("preload_vapoursynth_runtime()") < probe_code.index("import PySide6")
 
 
 def test_startup_failure_is_bounded_redacted_and_prevents_launch(

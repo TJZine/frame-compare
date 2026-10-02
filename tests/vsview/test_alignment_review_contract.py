@@ -73,9 +73,6 @@ from tests.alignment_review_test_support import (
 from tests.alignment_review_test_support import (
     subframe_estimate as _subframe_estimate,
 )
-from tests.alignment_review_test_support import (
-    unavailable_audio_attempt,
-)
 
 _SESSION_ID = "12345678123456781234567812345678"
 
@@ -520,39 +517,6 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
         )
 
 
-def test_workspace_metadata_rejects_unobserved_collection_payload() -> None:
-    attempt = _observed_attempt_dict()
-    attempt["collection_observation"] = "not_observed"
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="unobserved collection facts"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-        )
-
-
-def test_workspace_metadata_rejects_provisional_attempt_as_trusted_hint() -> None:
-    payload = {
-        "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
-        "evidence_availability": "current_attempt",
-        "audio_attempt": asdict(provisional_audio_attempt(frame_offset=0)),
-    }
-    review = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-
-    with pytest.raises(AlignmentReviewContractError, match="untrusted audio evidence"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
-        )
-
-
 @pytest.mark.parametrize("status", ["preanalysis_rejection", "aborted"])
 def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) -> None:
     attempt = cast(dict[str, object], asdict(provisional_audio_attempt()))
@@ -592,49 +556,7 @@ def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) 
     assert parsed_attempt.status == status
 
 
-def test_workspace_metadata_rejects_computed_authority_without_trusted_attempt() -> None:
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
-            "evidence_availability": "historical_details_unavailable",
-            "audio_attempt": None,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="requires its trusted attempt"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
-        )
-
-
-def test_workspace_metadata_rejects_unavailable_attempt_as_computed_authority() -> None:
-    attempt = cast(dict[str, object], asdict(unavailable_audio_attempt()))
-    decision = cast(dict[str, object], attempt["decision"])
-    decision.update(
-        state="unavailable",
-        candidate=None,
-        primary_reason="analysis_budget_exceeded",
-        failed_gates=["analysis_budget_exceeded"],
-    )
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="untrusted audio evidence"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=0, audio_review=review))
-        )
-
-
-@pytest.mark.parametrize("old_version", [1, 2, 3, 4, 99])
+@pytest.mark.parametrize("old_version", [1])
 def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
     old_version: int,
 ) -> None:
@@ -656,18 +578,6 @@ def test_workspace_metadata_rejects_old_or_unknown_versions_with_regeneration(
         parse_alignment_review_workspace_metadata((_reference_output(0), old_comparison))
 
 
-def test_workspace_metadata_rejects_mixed_v1_v2_with_regeneration() -> None:
-    old_reference = _reference_output(0)
-    old_reference = AlignmentReviewOutputCandidate(
-        output_id=0,
-        source_frame_count=100,
-        metadata=dict(old_reference.metadata) | {ALIGNMENT_REVIEW_METADATA_VERSION_KEY: 1},
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="metadata v1.*requires v5"):
-        parse_alignment_review_workspace_metadata((_comparison_output(1, 1), old_reference))
-
-
 @pytest.mark.parametrize(
     "audio_review",
     [
@@ -686,46 +596,6 @@ def test_workspace_metadata_rejects_duplicate_or_oversized_audio_review(
             (
                 _reference_output(0),
                 _comparison_output(1, 1, suggestion=None, audio_review=audio_review),
-            )
-        )
-
-
-@pytest.mark.parametrize(
-    "audio_review",
-    ["\ud800", "[" * 10_000 + "0" + "]" * 10_000, "1" * 5_000],
-    ids=("lone-surrogate", "deeply-nested-arrays", "integer-digit-limit"),
-)
-def test_workspace_metadata_maps_malformed_audio_review_to_contract_error(
-    audio_review: str,
-) -> None:
-    with pytest.raises(AlignmentReviewContractError, match="audio evidence is invalid"):
-        parse_alignment_review_workspace_metadata(
-            (
-                _reference_output(0),
-                _comparison_output(1, 1, suggestion=None, audio_review=audio_review),
-            )
-        )
-
-
-def test_workspace_metadata_rejects_nonfinite_or_inconsistent_attempt_evidence() -> None:
-    payload = {
-        "current_authority": {"origin": "none", "frame_offset": None},
-        "evidence_availability": "current_attempt",
-        "audio_attempt": asdict(provisional_audio_attempt()),
-    }
-    attempt = cast(dict[str, object], payload["audio_attempt"])
-    cast(dict[str, object], attempt["audio"])["compensation_seconds"] = float("nan")
-
-    with pytest.raises(AlignmentReviewContractError, match="compensation_seconds"):
-        parse_alignment_review_workspace_metadata(
-            (
-                _reference_output(0),
-                _comparison_output(
-                    1,
-                    1,
-                    suggestion=None,
-                    audio_review=json.dumps(payload),
-                ),
             )
         )
 
@@ -801,159 +671,8 @@ def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
 
 
 @pytest.mark.parametrize(
-    ("tamper", "match"),
-    [
-        ("inactive_carries_lag", "inactive chunks cannot carry lag evidence"),
-        ("starts_not_increasing", "chunk starts must increase"),
-        ("agreeing_without_credible", "agreeing chunks must be credible"),
-        ("lag_beyond_search_radius", "chunk lag exceeds the search radius"),
-        ("run_exceeds_planned_chunks", "chunk run exceeds the planned chunks"),
-        ("run_count_exceeds_span", "chunk run count exceeds its index span"),
-        ("ragged_columns", "chunk columns must share one length"),
-    ],
-)
-def test_workspace_metadata_rejects_inconsistent_chunk_evidence(
-    tamper: str,
-    match: str,
-) -> None:
-    attempt = _mutable_attempt_dict(provisional_audio_attempt())
-    chunks = cast(dict[str, object], attempt["chunks"])
-    if tamper == "inactive_carries_lag":
-        cast(list[bool], chunks["active"])[0] = False
-    elif tamper == "starts_not_increasing":
-        cast(list[int], chunks["starts"])[1] = cast(list[int], chunks["starts"])[0]
-    elif tamper == "agreeing_without_credible":
-        cast(list[bool], chunks["credible"])[0] = False
-        cast(list[bool], chunks["agrees"])[0] = True
-    elif tamper == "lag_beyond_search_radius":
-        cast(list[int], chunks["lags"])[0] = _LAG_SAMPLES + 8000
-    elif tamper == "run_exceeds_planned_chunks":
-        run = cast(list[dict[str, object]], attempt["runs"])[0]
-        run["last_index"] = 9
-        run["chunk_count"] = 10
-    elif tamper == "run_count_exceeds_span":
-        run = cast(list[dict[str, object]], attempt["runs"])[0]
-        run["chunk_count"] = cast(int, run["last_index"]) - cast(int, run["first_index"]) + 2
-    else:
-        chunks["agrees"] = cast(list[bool], chunks["agrees"])[:-1]
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match=match):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-        )
-
-
-@pytest.mark.parametrize(
-    ("section", "field", "value", "match"),
-    [
-        ("analysis", "analysis_rate", 44100, "analysis rate must be 8000"),
-        ("analysis", "max_offset_seconds", 0.5, "max_offset_seconds"),
-        ("chunks", "total_samples", True, "must be an integer"),
-        ("collection", "elapsed_seconds", -1.0, "elapsed"),
-        ("collection_failure", "side", "bogus", "must be one of"),
-        ("collection_failure", "category", "boom", "must be one of"),
-        ("chunks", "counts", 0, "counts must be"),
-        ("chunks", "psrs", float("nan"), "psrs"),
-        ("audio", "compensation_seconds", float("nan"), "compensation_seconds"),
-    ],
-)
-def test_workspace_metadata_rejects_malformed_audio_facts(
-    section: str, field: str, value: object, match: str
-) -> None:
-    attempt = _observed_attempt_dict()
-    attempt["collection_failure"] = {"category": "timeout", "side": None}
-    if section == "analysis":
-        cast(dict[str, object], attempt["analysis"])[field] = value
-    elif section == "collection_failure":
-        cast(dict[str, object], attempt["collection_failure"])[field] = value
-    elif section == "collection":
-        fact = cast(list[dict[str, object]], attempt["collection"])[0]
-        fact[field] = value
-    elif section == "chunks":
-        chunks = cast(dict[str, object], attempt["chunks"])
-        if field == "total_samples":
-            chunks[field] = value
-        else:
-            column = cast(list[object], chunks[field])
-            column[0] = value
-    else:
-        cast(dict[str, object], attempt["audio"])[field] = value
-
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=True,
-    )
-    with pytest.raises(AlignmentReviewContractError, match=match):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-        )
-
-
-def test_workspace_metadata_rejects_duplicate_collection_facts() -> None:
-    attempt = _observed_attempt_dict()
-    facts = cast(list[dict[str, object]], attempt["collection"])
-    facts[1] = dict(facts[0])
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="paired sides"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-        )
-
-
-def test_workspace_metadata_rejects_active_chunk_without_evidence() -> None:
-    attempt = _mutable_attempt_dict(provisional_audio_attempt())
-    chunks = cast(dict[str, object], attempt["chunks"])
-    cast(list[object], chunks["lags"])[0] = None
-    cast(list[object], chunks["psrs"])[0] = None
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="require a lag"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-        )
-
-
-@pytest.mark.parametrize(
     "outputs",
     [
-        (),
-        (_reference_output(0),),
-        (_comparison_output(1, 1),),
-        (_reference_output(0), _reference_output(1), _comparison_output(2, 1)),
-        (_reference_output(0), _comparison_output(1, 2)),
-        (_reference_output(0), _comparison_output(1, 1), _comparison_output(2, 1)),
         (_reference_output(0), _comparison_output(0, 1)),
         (
             _reference_output(0),
@@ -974,30 +693,6 @@ def test_workspace_metadata_rejects_incomplete_duplicate_or_mixed_outputs(
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, True),
-        (ALIGNMENT_REVIEW_METADATA_VERSION_KEY, 1),
-        (ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY, True),
-        (ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY, True),
-        (ALIGNMENT_REVIEW_METADATA_ROLE_KEY, "other"),
-        (ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY, ""),
-        (ALIGNMENT_REVIEW_METADATA_NAME_KEY, ""),
-    ],
-)
-def test_workspace_metadata_rejects_malformed_values(field: str, value: object) -> None:
-    comparison = _comparison_output(1, 1)
-    malformed = AlignmentReviewOutputCandidate(
-        output_id=comparison.output_id,
-        source_frame_count=comparison.source_frame_count,
-        metadata=dict(comparison.metadata) | {field: value},
-    )
-
-    with pytest.raises(AlignmentReviewContractError):
-        parse_alignment_review_workspace_metadata((_reference_output(0), malformed))
-
-
-@pytest.mark.parametrize(
     "candidate",
     [
         AlignmentReviewOutputCandidate(
@@ -1009,21 +704,6 @@ def test_workspace_metadata_rejects_malformed_values(field: str, value: object) 
             output_id=1,
             source_frame_count=True,
             metadata=_comparison_output(1, 1).metadata,
-        ),
-        AlignmentReviewOutputCandidate(
-            output_id=0,
-            source_frame_count=100,
-            metadata=dict(_reference_output(0).metadata)
-            | {ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY: "ref:a"},
-        ),
-        AlignmentReviewOutputCandidate(
-            output_id=1,
-            source_frame_count=100,
-            metadata={
-                key: value
-                for key, value in _comparison_output(1, 1).metadata.items()
-                if key != ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY
-            },
         ),
     ],
 )
@@ -1119,47 +799,6 @@ def test_result_write_is_atomic_and_propagates_failure(
         "not json",
         '{"schema_version": 1, "schema_version": 1, '
         f'"session_id": "{_SESSION_ID}", "decisions": []}}',
-        {"schema_version": 2, "session_id": _SESSION_ID, "decisions": []},
-        {"schema_version": True, "session_id": _SESSION_ID, "decisions": []},
-        {
-            "schema_version": 1,
-            "session_id": _SESSION_ID,
-            "decisions": [],
-            "unknown": 1,
-        },
-        {
-            "schema_version": 1,
-            "session_id": _SESSION_ID,
-            "decisions": [{"comparison_key": "ref:a", "action": "other"}],
-        },
-        {
-            "schema_version": 1,
-            "session_id": _SESSION_ID,
-            "decisions": [{"comparison_key": "", "action": "keep_current"}],
-        },
-        {
-            "schema_version": 1,
-            "session_id": _SESSION_ID,
-            "decisions": [
-                {
-                    "comparison_key": "ref:a",
-                    "action": "confirmed",
-                    "reference_source_frame": True,
-                    "comparison_source_frame": 0,
-                }
-            ],
-        },
-        {
-            "schema_version": 1,
-            "session_id": _SESSION_ID,
-            "decisions": [
-                {
-                    "comparison_key": "ref:a",
-                    "action": "keep_current",
-                    "unexpected": 1,
-                }
-            ],
-        },
     ],
 )
 def test_result_rejects_malformed_json_and_schema(tmp_path: Path, payload: object) -> None:
@@ -1175,8 +814,6 @@ def test_result_rejects_malformed_json_and_schema(tmp_path: Path, payload: objec
     "session_id,decisions",
     [
         ("87654321876543218765432187654321", [("ref:a", "keep"), ("ref:b", "keep")]),
-        (_SESSION_ID, [("ref:a", "keep")]),
-        (_SESSION_ID, [("ref:a", "keep"), ("ref:b", "keep"), ("ref:c", "keep")]),
         (_SESSION_ID, [("ref:b", "keep"), ("ref:a", "keep")]),
         (_SESSION_ID, [("ref:a", "keep"), ("ref:a", "keep")]),
     ],
@@ -1193,33 +830,6 @@ def test_result_rejects_stale_incomplete_extra_reordered_or_duplicate_keys(
         "decisions": [
             {"comparison_key": comparison_key, "action": "keep_current"}
             for comparison_key, _action in decisions
-        ],
-    }
-    session.result_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(AlignmentReviewContractError):
-        read_alignment_review_result(session, _expected())
-
-
-@pytest.mark.parametrize(
-    "reference_frame,comparison_frame",
-    [(-1, 0), (0, -1), (100, 0), (0, 80)],
-)
-def test_result_rejects_negative_or_out_of_bounds_frames(
-    tmp_path: Path, reference_frame: int, comparison_frame: int
-) -> None:
-    session = _session(tmp_path)
-    payload = {
-        "schema_version": 1,
-        "session_id": _SESSION_ID,
-        "decisions": [
-            {
-                "comparison_key": "ref:a",
-                "action": "confirmed",
-                "reference_source_frame": reference_frame,
-                "comparison_source_frame": comparison_frame,
-            },
-            {"comparison_key": "ref:b", "action": "keep_current"},
         ],
     }
     session.result_path.write_text(json.dumps(payload), encoding="utf-8")

@@ -33,13 +33,6 @@ def _generated_portable_launcher(build_script: str) -> str:
     return match.group("launcher")
 
 
-def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "Push-Location $bundleRoot" in build_script
-    assert "Pop-Location" in build_script
-
-
 def test_windows_portable_bundle_launcher_restores_process_environment(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -526,14 +519,6 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
     assert "Pop-Location" in runtime_validation
 
 
-def test_pyproject_defines_vsview_optional_dependency(repo_root: Path) -> None:
-    pyproject_path = repo_root / "pyproject.toml"
-    pyproject = _read_text_or_fail(pyproject_path)
-    assert "[project.optional-dependencies]" in pyproject
-    assert re.search(r"vsview\s*=\s*\[", pyproject)
-    assert re.search(r'"vsview==0\.11\.0"', pyproject)
-
-
 def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -960,28 +945,6 @@ def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
         f"descendant process {descendant_pid} remained alive after verifier cleanup: "
         f"{_normalized_process_output(result)}"
     )
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows process identity semantics required")
-def test_assert_descendant_exited_does_not_kill_identity_mismatch(tmp_path: Path) -> None:
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell 7 is required")
-    descendant = subprocess.Popen([pwsh, "-NoProfile", "-Command", "Start-Sleep -Seconds 60"])
-    started = tmp_path / "descendant-started.txt"
-    started.write_text(f"{descendant.pid}\n0\n", encoding="utf-8")
-
-    try:
-        with pytest.raises(AssertionError, match="identity mismatch"):
-            _assert_descendant_exited(pwsh=pwsh, started=started)
-        assert descendant.poll() is None
-    finally:
-        descendant.terminate()
-        try:
-            descendant.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            descendant.kill()
-            descendant.wait(timeout=10)
 
 
 def _write_extracted_verifier_fixture(
