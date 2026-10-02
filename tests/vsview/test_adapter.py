@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from frame_compare.vs.source import source_index_path
 from frame_compare.vsview.adapter import (
     VSViewAvailabilityStatus,
     VSViewConfig,
@@ -25,6 +26,7 @@ from frame_compare.vsview.adapter import (
     launch_alignment_verification_session,
 )
 from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_VERSION,
     AlignmentReviewContractError,
 )
 from frame_compare.vsview.errors import VSViewError
@@ -370,11 +372,12 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     availability = MagicMock(side_effect=AssertionError("disabled launch must not probe"))
     monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", availability)
 
-    session, _wait_seconds = launch_alignment_verification_session(
+    session, wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=False),
     )
 
+    assert wait_seconds == 0.0
     assert session.script_path.parent == tmp_path / "vsview_sessions"
     assert session.script_path.name.startswith("vsview_ref_")
     assert session.result_path.name.endswith(".alignment-result.json")
@@ -418,6 +421,9 @@ def test_launch_timeout_terminates_child(
             _session_request(tmp_path),
             VSViewConfig(enabled=True),
         )
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_not_called()
 
 
 def _execute_generated_script(
@@ -559,6 +565,9 @@ def test_generated_session_registers_named_outputs_in_input_order(
         1,
         2,
     ]
+    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {
+        ALIGNMENT_REVIEW_METADATA_VERSION
+    }
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
 
 
@@ -567,7 +576,7 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    output_calls, _metadata, _props, _loader_calls = _execute_generated_script(
+    output_calls, _metadata, _props, loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("a",),
@@ -575,6 +584,12 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
         unusable_index_stems={"ref", "a"},
     )
 
+    assert loader_calls == [
+        ("ref", str(source_index_path(tmp_path / "ref.mkv")), None),
+        ("ref", None, 0),
+        ("a", str(source_index_path(tmp_path / "a.mkv")), None),
+        ("a", None, 0),
+    ]
     assert output_calls == [("ref", 0, "Reference"), ("a", 1, "Comparison 1")]
     assert capsys.readouterr().err.count("without an L-SMASH index cache") == 2
 

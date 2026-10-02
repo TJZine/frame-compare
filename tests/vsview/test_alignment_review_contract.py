@@ -511,9 +511,27 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
 
 
 @pytest.mark.parametrize("status", ["preanalysis_rejection", "aborted"])
-def test_workspace_metadata_accepts_noncomplete_unavailable_decision(status: str) -> None:
+def test_workspace_metadata_rejects_available_and_accepts_unavailable_noncomplete_decision(
+    status: str,
+) -> None:
     attempt = cast(dict[str, object], asdict(provisional_audio_attempt()))
     attempt["status"] = status
+    available_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": attempt,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with pytest.raises(AlignmentReviewContractError, match="non-complete audio attempts"):
+        parse_alignment_review_workspace_metadata(
+            (
+                _reference_output(0),
+                _comparison_output(1, 1, suggestion=None, audio_review=available_review),
+            )
+        )
     decision = cast(dict[str, object], attempt["decision"])
     decision.update(state="unavailable", candidate=None)
     review = json.dumps(
@@ -609,9 +627,19 @@ def test_build_audio_review_map_bounds_native_projection_for_many_chunks() -> No
     review = payloads["ref:a"]
     assert len(review.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
 
-    parse_alignment_review_workspace_metadata(
+    workspace = parse_alignment_review_workspace_metadata(
         (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
     )
+
+    parsed = workspace.comparisons[0].audio_review.audio_attempt
+    assert parsed is not None
+    assert parsed.chunks.rows_omitted is True
+    assert parsed.chunks.starts == ()
+    assert parsed.chunks.total_samples == 2160 * _CHUNK_SAMPLES
+    assert len(parsed.runs) == 1
+    assert parsed.audio.credible_chunks == 2160
+    assert parsed.audio.compensation_seconds == attempt.audio.compensation_seconds
+    assert parsed.audio.subframe_estimate == attempt.audio.subframe_estimate
 
 
 def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
@@ -733,6 +761,8 @@ def test_result_round_trip_accepts_confirmed_and_keep_current(tmp_path: Path) ->
         "  ]\n"
         "}\n"
     )
+
+    assert read_alignment_review_result(session, _expected()) == result
 
 
 def test_result_write_propagates_writer_failure_without_result(

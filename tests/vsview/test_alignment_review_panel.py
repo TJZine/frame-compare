@@ -44,6 +44,7 @@ from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
 )
 from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
+    vsview_register_toolpanel,
 )
 from tests.alignment_review_test_support import (  # noqa: E402
     audio_review as _audio_review,
@@ -344,6 +345,7 @@ def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
 
     _call_hook(panel.on_workspace_loaded)
 
+    assert timeline.cleared == [("frame_compare_alignment_review", True)]
     assert "Inactive" in panel.progress_label.text()
     assert not panel.use_positions_button.isEnabled()
     assert not panel.keep_button.isEnabled()
@@ -414,6 +416,8 @@ def test_session_read_failure_is_bounded_and_sanitized(
 def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
     panel, _api, _script = _panel(tmp_path)
 
+    assert cast(Any, vsview_register_toolpanel).vsview_impl["tryfirst"] is True
+    assert AlignmentReviewPanel.identifier == "frame_compare_alignment_review"
     assert AlignmentReviewPanel.display_name == "Frame Compare Alignment Review"
     assert panel.guidance_label.wordWrap()
     assert panel.guidance_label.text() == (
@@ -744,12 +748,14 @@ def test_markers_use_only_owned_group_and_role_relevant_bounded_suggestions(
     panel, api, _script = _panel(tmp_path, comparison_count=2)
     _visit(panel, api, 0, 20)
 
+    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", False)
     assert [marker[1] for marker in api.timeline.added] == [12, 12]
     assert all(marker[2] == "#3daee9" for marker in api.timeline.added)
 
     api.timeline.added.clear()
     _visit(panel, api, 1, 5)
 
+    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", False)
     assert api.timeline.added[0][0:3] == (
         "frame_compare_alignment_review",
         0,
@@ -765,6 +771,7 @@ def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) ->
 
     _visit(panel, api, 0, 12)
 
+    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
     assert api.timeline.added == []
     details_label = cast(QLabel, panel.audio_detail_groups[0].findChild(QLabel))
     assert "marker omitted" in details_label.text().lower()
@@ -1210,8 +1217,10 @@ def test_deactivation_clears_only_owned_marker_group(tmp_path: Path, next_worksp
     else:
         api.voutputs = [SimpleNamespace(vs_index=0, kwargs={})]
 
+    before = len(api.timeline.cleared)
     _call_hook(panel.on_workspace_loaded)
 
+    assert api.timeline.cleared[before:] == [("frame_compare_alignment_review", True)]
     assert "Inactive" in panel.progress_label.text()
 
 
