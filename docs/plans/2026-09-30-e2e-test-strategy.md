@@ -1146,3 +1146,28 @@ Reverting one restores its tests and any seams it deleted.
   - **Maintainer decision:** adopt S11 (R1 and R2) to cut over-retention. Unit C
     paused after lane 1a and resumes from `.handoff/T5R-codex-deletions-resume.md`,
     starting with a catch-up pass for lane 1a.
+- 2026-10-01: unit C completed at `a0c4717f`, resumed from `bdf9a7fd` under S11.
+  - Commits: 1a `c2f3be2d`, 1a catch-up `57ee36ad`, 1b `f2d39549`, 2 `6a8a4c09`,
+    3a `8e3e5233`, 3b `7d79fab6`, 4 `72ed794a`, 5 `0247de07`, 6 `6f79c9f4`, 7 and 8
+    `a0c4717f`.
+  - Removed: 579 cases and 7,507 test lines. S11 removed 22 production symbols
+    (368 `src/` lines) and 195 R2 cases. The accepted R2 coverage losses are 100
+    lines and 86 branches.
+  - Test lines: 92,040 → 84,533 (`wc -l`).
+  - **Checkpoint C** (controller, 2026-10-01): verified.
+    - Native: pyright 0/0, ruff and formatting clean, `lint-imports` 2/2 kept,
+      bandit with no medium findings. The full `pytest`: 3,074 passed, 90 skipped.
+    - Docker: the post-commit `verify_docker_integration.sh --no-build` log at
+      HEAD: 284 passed, 0 skipped, all proof markers. Reused under the currency
+      rule, because the tree is unchanged.
+    - The production deletions have no remaining references (`git grep`),
+      including tools, docs and `pyproject.toml`.
+      - `tools/benchmark_analysis_tiers.py` still loads.
+      - `resolve_metadata(prompt_callback=)` had no production caller.
+      - FC-3004 was raised only from the deleted test-only `frame_plan` and was
+        documented nowhere.
+    - One stale docstring, `orchestration/context.py:143` (`FramePlan`), goes to
+      unit D.
+    - The thread settings were reported as UNVERIFIED, because Codex exposes no
+      runtime metadata. Every thread was dispatched explicitly with
+      `gpt-6.1-sol` / `medium`.
