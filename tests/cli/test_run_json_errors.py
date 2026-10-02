@@ -496,6 +496,53 @@ def test_run_json_invalid_choice_outputs_config_error_schema(
     assert payload["error"]["details"]["validation_errors"][0]["loc"] == loc
 
 
+def test_run_json_redacts_secret_config_inputs_from_validation_errors(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid config")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG
+            + """
+[slowpics]
+webhook_url = ["sentinel-webhook-secret"]
+
+[tmdb]
+api_key = ["sentinel-tmdb-secret"]
+""",
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    assert "sentinel-webhook-secret" not in result.stdout
+    assert "sentinel-tmdb-secret" not in result.stdout
+    payload = json.loads(result.stdout)
+    validation_errors = payload["error"]["details"]["validation_errors"]
+    assert {tuple(error["loc"]): error["input"] for error in validation_errors} == {
+        ("slowpics", "webhook_url"): "<redacted>",
+        ("tmdb", "api_key"): "<redacted>",
+    }
+
+
 def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,

@@ -100,9 +100,9 @@ jobs:
       - name: Install locked audit tool
         run: uv sync --group dev --frozen
 
-      - name: Export locked runtime graph
+      - name: Export locked dependency graph
         run: >-
-          uv export --frozen --no-dev --all-extras --no-emit-project
+          uv export --frozen --all-groups --all-extras --no-emit-project
           --format requirements.txt
           --output-file "${{ runner.temp }}/audit-requirements.txt"
 

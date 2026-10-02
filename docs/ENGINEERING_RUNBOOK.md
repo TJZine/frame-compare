@@ -152,11 +152,11 @@ or different fingerprints, before any unsafe dependency override; each refusal
 requires a complete portable bundle reinstall. Crossing a media-runtime
 fingerprint also requires a complete portable bundle reinstall.
 
-Locked runtime dependency audit (PowerShell):
+Locked dependency audit (PowerShell):
 
 ```powershell
 $auditRequirements = Join-Path $env:TEMP "frame-compare-audit-requirements.txt"
-uv export --frozen --no-dev --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
+uv export --frozen --all-groups --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
 uv run --no-sync pip-audit --strict --require-hashes --disable-pip --progress-spinner off --timeout 20 --vulnerability-service pypi --requirement $auditRequirements
 Remove-Item -LiteralPath $auditRequirements
 ```

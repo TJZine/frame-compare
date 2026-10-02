@@ -7,6 +7,24 @@ from typing import cast
 
 from frame_compare.errors import ErrorContext, FrameCompareError, JSONValue
 
+_SECRET_CONFIG_LOCATIONS = frozenset(
+    {
+        ("slowpics", "webhook_url"),
+        ("tmdb", "api_key"),
+    }
+)
+
+
+def _is_secret_config_location(location: JSONValue) -> bool:
+    if not isinstance(location, list) or len(location) < 2:
+        return False
+    section, field = location[:2]
+    return (
+        isinstance(section, str)
+        and isinstance(field, str)
+        and (section, field) in _SECRET_CONFIG_LOCATIONS
+    )
+
 
 class ConfigError(FrameCompareError):
     """Base class for configuration errors."""
@@ -54,8 +72,17 @@ class ConfigValidationError(ConfigError):
         message: str | None = None,
         hint: str = "Check field types and constraints",
     ) -> None:
+        sanitized_errors: list[dict[str, JSONValue]] = []
+        for error in errors:
+            sanitized_error = error.copy()
+            if "input" in sanitized_error and _is_secret_config_location(
+                sanitized_error.get("loc")
+            ):
+                sanitized_error["input"] = "<redacted>"
+            sanitized_errors.append(sanitized_error)
+
         fields: list[str] = []
-        for e in errors:
+        for e in sanitized_errors:
             loc = e.get("loc")
             if isinstance(loc, list) and loc:
                 fields.append(str(loc[-1]))
@@ -63,7 +90,7 @@ class ConfigValidationError(ConfigError):
                 fields.append("unknown")
 
         # Cast to avoid invariance issues with list[dict[str, JSONValue]] vs list[JSONValue]
-        safe_errors = cast("JSONValue", errors)
+        safe_errors = cast("JSONValue", sanitized_errors)
 
         super().__init__(
             ErrorContext(
@@ -74,7 +101,7 @@ class ConfigValidationError(ConfigError):
                 details={"validation_errors": safe_errors},
             )
         )
-        self.validation_errors = errors
+        self.validation_errors = sanitized_errors
 
 
 class PresetNotFoundError(ConfigError):

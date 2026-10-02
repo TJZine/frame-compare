@@ -1568,6 +1568,10 @@ config table rejects unknown keys, including nested source override and active
 rectangle tables. A misspelled or stale key inside an owned table therefore
 fails config validation instead of silently using a default.
 
+Validation details retain rejected non-secret inputs for diagnostics. Inputs at
+`slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`
+before human, JSON, doctor, preset, or other typed config errors can expose them.
+
 The implemented `[logging]` surface contains only:
 
 - `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
