@@ -22,6 +22,8 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
+from frame_compare.render.geometry import RenderGeometryPlan
+from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
 
@@ -31,7 +33,14 @@ class StopAfterDependencyInit(RuntimeError):
 
 
 class DummyFFmpegRunner:
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(
+        self,
+        video: Path,
+        frame_num: int,
+        output: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> RenderedFrameFacts:
         raise RuntimeError("Not used in tests.")
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
@@ -70,9 +79,7 @@ def test_execute_run_initializes_local_dependencies_without_mutating_injected_de
         assert local_deps.http_client is not None
         prep_completed = True
         return SimpleNamespace(
-            config=ConfigSchema(
-                screenshots={"ffmpeg_timeout_seconds": 47.0},
-            )
+            config=ConfigSchema.model_validate({"screenshots": {"ffmpeg_timeout_seconds": 47.0}})
         )
 
     def fake_default_ffmpeg_runner(*, extraction_timeout_seconds: float):
@@ -139,7 +146,7 @@ def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
     captured_local_deps: RunDependencies | None = None
 
     def _confirm(
-        _request: SlowpicsUploadConfirmationRequest,
+        request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision:
         return "confirmed"
 
@@ -178,7 +185,7 @@ def test_execute_run_removes_full_window_confirmation_in_unattended_modes(
     captured_local_deps: RunDependencies | None = None
 
     def _confirm(
-        _request: FullWindowRetryConfirmationRequest,
+        request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         raise AssertionError("unattended mode must not confirm")
 

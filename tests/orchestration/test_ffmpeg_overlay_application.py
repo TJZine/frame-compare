@@ -32,7 +32,7 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
 
-    config = ConfigSchema(screenshots={"use_ffmpeg": True})
+    config = ConfigSchema.model_validate({"screenshots": {"use_ffmpeg": True}})
 
     workspace = WorkspacePaths(
         root=tmp_path.resolve(),

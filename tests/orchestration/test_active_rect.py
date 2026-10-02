@@ -156,7 +156,7 @@ def test_invalid_explicit_override_raises_source_selection_error() -> None:
         },
     ],
 )
-def test_unsafe_metadata_falls_back_to_full_frame(props: dict[str, int]) -> None:
+def test_unsafe_metadata_falls_back_to_full_frame(props: dict[str, str | int | float]) -> None:
     clip = _clip("ref.mkv", width=1920, height=1080, props=props)
 
     resolved = _resolve([clip], detection=ScreenshotActiveRectDetection.PROVIDED)

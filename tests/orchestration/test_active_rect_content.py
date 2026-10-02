@@ -288,7 +288,9 @@ def test_auto_refinement_does_not_sample_static_non_full_frame_rects() -> None:
     ]
 
     class FailingSampler:
-        def sample_luma_frames(self, _clip: ClipState, _indices: list[int]) -> list[object]:
+        def sample_luma_frames(
+            self, clip: ClipState, source_frame_indices: Sequence[int]
+        ) -> list[npt.NDArray[np.float32]]:
             raise AssertionError("sampler should not be called")
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
@@ -319,11 +321,11 @@ def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_f
         def sample_luma_frames(
             self,
             clip: ClipState,
-            indices: list[int],
+            source_frame_indices: Sequence[int],
         ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
             if clip.path.name == "failed.mkv":
                 raise RuntimeError("sample boom")
-            return [_letterbox_frame(top=10, bottom=10) for _index in indices]
+            return [_letterbox_frame(top=10, bottom=10) for _index in source_frame_indices]
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
         clips=clips,
@@ -348,10 +350,10 @@ def test_full_window_retry_can_recompute_content_derived_rect() -> None:
     class FullWindowSampler:
         def sample_luma_frames(
             self,
-            _clip: ClipState,
-            indices: list[int],
+            clip: ClipState,
+            source_frame_indices: Sequence[int],
         ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
-            return [_pillarbox_frame(left=12, right=12) for _index in indices]
+            return [_pillarbox_frame(left=12, right=12) for _index in source_frame_indices]
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
         clips=[clip],
@@ -385,10 +387,10 @@ def test_full_window_retry_clears_stale_content_rect_when_full_window_has_no_cro
     class NoCropSampler:
         def sample_luma_frames(
             self,
-            _clip: ClipState,
-            indices: list[int],
+            clip: ClipState,
+            source_frame_indices: Sequence[int],
         ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
-            return [_content_pattern(80, 100) for _index in indices]
+            return [_content_pattern(80, 100) for _index in source_frame_indices]
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
         clips=clips,
@@ -416,8 +418,8 @@ def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> No
     class IterationFailingSampler:
         def sample_luma_frames(
             self,
-            _clip: ClipState,
-            _indices: Sequence[int],
+            clip: ClipState,
+            source_frame_indices: Sequence[int],
         ) -> Iterator[npt.NDArray[np.float32]]:
             yield _letterbox_frame(top=10, bottom=10)
             raise RuntimeError("iteration boom")

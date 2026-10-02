@@ -53,7 +53,9 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
 
-    config = ConfigSchema(screenshots={"use_ffmpeg": True, "overlay_mode": "standard"})
+    config = ConfigSchema.model_validate(
+        {"screenshots": {"use_ffmpeg": True, "overlay_mode": "standard"}}
+    )
     workspace = WorkspacePaths(
         root=tmp_path.resolve(),
         input_dir=(tmp_path / "comparison_videos").resolve(),
@@ -114,7 +116,9 @@ def test_selection_detail_label_is_looked_up_in_reference_source_frame_domain_af
 
     monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", _record_apply)
 
-    config = ConfigSchema(screenshots={"use_ffmpeg": True, "overlay_mode": "standard"})
+    config = ConfigSchema.model_validate(
+        {"screenshots": {"use_ffmpeg": True, "overlay_mode": "standard"}}
+    )
     workspace = WorkspacePaths(
         root=tmp_path.resolve(),
         input_dir=(tmp_path / "comparison_videos").resolve(),

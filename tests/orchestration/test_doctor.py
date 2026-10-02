@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
@@ -27,6 +28,7 @@ def _completed_process(stdout: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.CompletedProcess([], 0, stdout.encode(), b"")
 
 
+@pytest.fixture(autouse=True)
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
@@ -386,13 +388,19 @@ class TestCheckVapoursynth:
         mock_vs.__api_version__ = SimpleNamespace(api_major=4, api_minor=3)
         vs_attempts = {"count": 0}
 
-        def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+        def _fake_import(
+            name: str,
+            globals: Mapping[str, object] | None = None,
+            locals: Mapping[str, object] | None = None,
+            fromlist: Sequence[str] = (),
+            level: int = 0,
+        ) -> object:
             if name == "vapoursynth":
                 vs_attempts["count"] += 1
                 if vs_attempts["count"] == 1:
                     raise ImportError("missing runtime DLL")
                 return mock_vs
-            return original_import(name, *args, **kwargs)
+            return original_import(name, globals, locals, fromlist, level)
 
         with (
             patch("frame_compare.vs.env.register_windows_dll_dirs"),

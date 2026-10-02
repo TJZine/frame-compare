@@ -184,6 +184,7 @@ def test_execute_prep_analysis_source_reference_selects_selected_reference(
         )
     )
 
+    assert prep.analysis_clip is not None
     assert prep.analysis_clip is prep.clips[0]
     assert prep.analysis_clip.path == input_dir / "01-reference.mkv"
 
@@ -270,6 +271,7 @@ def test_execute_prep_invalid_analysis_source_selector_fails_when_metrics_requir
             )
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["role"] == "sources.analysis_source"
 
 

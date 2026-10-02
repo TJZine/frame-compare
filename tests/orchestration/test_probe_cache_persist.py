@@ -2,6 +2,7 @@
 
 import multiprocessing
 from fractions import Fraction
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Protocol
 
@@ -78,7 +79,7 @@ def _merge_cache_in_child(
     completed.set()
 
 
-def _clean_up_process(process: multiprocessing.Process) -> None:
+def _clean_up_process(process: BaseProcess) -> None:
     if process.pid is None:
         return
     if process.is_alive():

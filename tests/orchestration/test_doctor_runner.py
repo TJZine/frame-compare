@@ -15,6 +15,7 @@ from frame_compare.orchestration.doctor import (
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 
 
+@pytest.fixture(autouse=True)
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)

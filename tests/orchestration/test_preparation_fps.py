@@ -166,6 +166,7 @@ effective_fps = "25/1"
             )
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["comparison_fps"] == "25"
 
 
@@ -304,6 +305,7 @@ effective_fps = "25/1"
             )
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["comparison_fps"] == "25"
 
 

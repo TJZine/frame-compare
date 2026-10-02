@@ -256,10 +256,10 @@ class TestResolvePaths:
         config = ConfigSchema(paths=PathsConfig(generated_dir=generated_dir))
         original_resolve = Path.resolve
 
-        def fail_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        def fail_resolve(path: Path, strict: bool = False) -> Path:
             if path == failing_path:
                 raise error
-            return original_resolve(path, *args, **kwargs)
+            return original_resolve(path, strict=strict)
 
         monkeypatch.setattr(Path, "resolve", fail_resolve)
         with pytest.raises(ConfigValidationError) as exc_info:

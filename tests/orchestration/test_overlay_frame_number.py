@@ -16,6 +16,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.render.types import RenderedFrameResult
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
@@ -48,7 +49,14 @@ class FakeVSLoader:
 
 
 class FakeFFmpegRunner:
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(
+        self,
+        video: Path,
+        frame_num: int,
+        output: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> RenderedFrameFacts:
         _, _, _ = video, frame_num, output
         raise AssertionError("FFmpeg extraction path is not exercised in this test")
 
