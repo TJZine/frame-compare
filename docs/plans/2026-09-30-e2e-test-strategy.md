@@ -1065,8 +1065,8 @@ generated Docker media fixtures, fixing slow tests, and CI speedups. The
 condition: no large adverse effects.
 
 **Starting point:**
-- native suite: about 115 s for 3,050 tests on 10 cores, run serially;
-- Docker gate: about 7.5 min, 434 s of it pytest. The alignment acceptance media
+- native suite: about 109 s for 3,069 tests on 10 cores, run serially;
+- Docker gate: about 431 s of pytest for 276 tests, plus the runtime proofs. The alignment acceptance media
   is regenerated on every run.
 
 **Steps, serial:** F1 measure → F2 xdist (native) → F3a parallel container
@@ -1089,6 +1089,11 @@ F5 CI (parallel only) → F6 docs.
   Otherwise it is reverted and reported. F5 (CI) is exempt: it can't be measured
   without pushing.
 - Timeouts are never raised to accommodate parallelism.
+- **Worker count is measured, not assumed.** F2 and F3a compare 2, 4 and 8 workers
+  and `auto`, and pick the fastest stable count. Stability runs, the command canon
+  and the verify script use that count; CI uses `-n auto`. F3a reports whether the
+  single-worker `alignment-u4` group becomes the critical path, as a follow-up
+  rather than new machinery.
 - The Docker media cache is read-only to tests: files are symlinked into each
   worker's temp directory, so L-SMASH `.lwi` indexes never land in the cache.
   Cached media is verified by FFmpeg stream hashes, not byte hashes, because
