@@ -256,6 +256,9 @@ def test_unknown_duration_rejected_before_decode(
 
     assert result.applied is False
     assert result.diagnostic == "selected_audio_timeline_unavailable"
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.status == "preanalysis_rejection"
+    assert result.audio_attempt.collection_observation == "not_observed"
 
 
 @pytest.mark.parametrize("budget", ["fft", "chunk-count"])
@@ -283,6 +286,8 @@ def test_planning_budget_rejects_before_decode(
     (result,) = _align(reference, comparison, config, tmp_path)
     assert result.applied is False
     assert result.diagnostic == "analysis_budget_exceeded"
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.status == "preanalysis_rejection"
 
 
 def _failure_facts() -> tuple[CollectionFacts, CollectionFacts]:
@@ -336,6 +341,15 @@ def test_collection_failure_is_aborted_with_category(
 
     assert result.applied is False
     assert result.diagnostic == "timeout"
+    attempt = result.audio_attempt
+    assert attempt is not None
+    assert attempt.status == "aborted"
+    assert attempt.chunks.starts == ()
+    assert attempt.collection_observation == "observed"
+    assert attempt.collection_failure is not None
+    assert attempt.collection_failure.category == "timeout"
+    assert attempt.collection_failure.side is None
+    assert attempt.collection[0].emitted_samples == 10
 
 
 def test_cleanup_failure_is_fatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -376,6 +390,8 @@ def test_identity_change_mid_collection_is_aborted(
 
     assert result.applied is False
     assert result.diagnostic == "source_identity_changed"
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.status == "aborted"
 
 
 def test_pre_collection_identity_change_is_aborted_per_comparison(
@@ -424,6 +440,10 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
     changed = by_name[mutated.name]
     assert changed.applied is False
     assert changed.diagnostic == "source_identity_changed"
+    assert changed.audio_attempt is not None
+    assert changed.audio_attempt.status == "aborted"
+    assert changed.audio_attempt.collection_observation == "not_observed"
+    assert changed.audio_attempt.collection == ()
 
     untouched = by_name[ok.name]
     assert untouched.applied is False
@@ -519,6 +539,7 @@ def test_entry_identity_mismatch_has_no_attempt(
 
     assert result.applied is False
     assert result.diagnostic == "source_identity_changed"
+    assert result.audio_attempt is None
 
 
 def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

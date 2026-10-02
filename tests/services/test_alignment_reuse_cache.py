@@ -336,6 +336,7 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
     assert entry.origin == "computed"
     assert result.correlation_score == 0.876
+    assert result.algorithm == "cross_correlation"
     assert result.frame_offset == 42
 
     content = (request.shared_alignment_cache_dir / CACHE_FILE_NAME).read_text(encoding="utf-8")
@@ -437,6 +438,7 @@ def test_shared_reuse_cache_round_trips_interactive_confirmed_entry_with_score_o
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
     assert entry.origin == "interactive_confirmed"
     assert result.correlation_score == 1.0
+    assert result.algorithm is None
     assert entry.computed_result is None
 
 
@@ -478,6 +480,7 @@ def test_shared_reuse_cache_round_trips_interactive_entry_with_computed_fallback
     assert entry.result.frame_offset == 47
     assert entry.result.stability == summary
     assert entry.computed_result is not None
+    assert entry.computed_result.algorithm == "cross_correlation"
     assert entry.computed_result.frame_offset == 42
     assert entry.computed_result.correlation_score == pytest.approx(0.876)
     assert entry.computed_result.stability == summary

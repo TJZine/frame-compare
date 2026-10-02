@@ -280,6 +280,14 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
 
     assert results[0].source == "cached"
     assert results[0].frame_offset == 7
+    assert results[0].algorithm == "cross_correlation"
+    assert results[0].correlation_score == pytest.approx(0.87)
+    review = json.loads(mock_vs.call_args.kwargs["audio_review_by_key"]["ref:comp"])
+    assert review == {
+        "audio_attempt": None,
+        "current_authority": {"frame_offset": 7, "origin": "shared_computed_offsets"},
+        "evidence_availability": "historical_details_unavailable",
+    }
     terminal = capsys.readouterr().err
     assert "Accepted audio alignment reused: +7f - APPLIED" in terminal
     assert "Historical chunk and selected-stream details are unavailable" in terminal
@@ -848,7 +856,7 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
             return_value=AlignmentVSViewOutcome({"ref:comp_manual": 5}, "confirmed"),
         ),
-        patch("frame_compare.services.alignment.save_reusable_offsets"),
+        patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
         results = align_clips_from_request(
             request,
@@ -860,6 +868,12 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
         ("manual", 5),
         ("computed", 0),
     ]
+    _, provenances = mock_save_shared.call_args.args
+    by_key = {item.result.comparison_clip: item.provenance for item in provenances}
+    assert by_key == {
+        "comp_manual.mkv": "interactive_confirmed_this_run",
+        "comp_computed.mkv": "computed_this_run",
+    }
 
 
 @pytest.mark.parametrize(
