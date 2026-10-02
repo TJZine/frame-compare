@@ -861,6 +861,7 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
 
     def _writer(path: Path, content: str, *, encoding: str) -> None:
         assert path == destination
+        assert encoding == "utf-8"
         calls.append(content)
 
     write_wizard_config_payload(destination, payload, text_writer=_writer)

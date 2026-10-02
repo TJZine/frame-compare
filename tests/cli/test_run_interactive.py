@@ -100,6 +100,7 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
         verbose_hint: str | None = "--verbose",
     ) -> int:
         assert isinstance(error, ConfigValidationError)
+        assert no_color is False
         handled_errors.append(error)
         return int(ExitCode.CONFIG_ERROR)
 
