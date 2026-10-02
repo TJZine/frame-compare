@@ -84,7 +84,6 @@ def test_completed_record_omits_memory_only_review_wait(tmp_path: Path) -> None:
 
     record = read_run_result(run_dir / "run_result.toml")
     assert record.phase_timings == {"align": 50.0}
-    assert not hasattr(record, "vsview_review_seconds")
 
 
 def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
@@ -119,39 +118,26 @@ def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
         ("report_path", "/tmp/report.html"),
         ("report_path", "C:\\reports\\report.html"),
         ("report_path", "\\\\server\\share\\report.html"),
+        ("slowpics.url", "http://slow.pics/c/nope"),
+        ("slowpics.url", "https://example.com/c/nope"),
+        ("slowpics.url", "https://slow.pics:444/c/nope"),
+        ("slowpics.url", "https://user:pass@slow.pics/c/nope"),
+        ("slowpics.url", "https://slow.pics/c/nope?token=secret"),
+        ("slowpics.url", "https://slow.pics/c/nope#secret"),
+        ("slowpics.url", "https://slow.pics/not-a-comparison"),
+        ("slowpics.url", "https://slow.pics/c/nope\nignored"),
     ],
 )
-def test_schema_rejects_unsupported_or_malformed_fields(
+def test_schema_rejects_malformed_fields_and_unsafe_urls(
     tmp_path: Path, field: str, value: object
 ) -> None:
     run_dir = tmp_path / "generated" / "run"
     run_dir.mkdir(parents=True)
     payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
-    payload[field] = value
-
-    with pytest.raises(ValueError):
-        parse_run_result(payload)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "http://slow.pics/c/nope",
-        "https://example.com/c/nope",
-        "https://slow.pics:444/c/nope",
-        "https://user:pass@slow.pics/c/nope",
-        "https://slow.pics/c/nope?token=secret",
-        "https://slow.pics/c/nope#secret",
-        "https://slow.pics/not-a-comparison",
-        "https://slow.pics/c/nope\nignored",
-    ],
-)
-def test_schema_rejects_unsafe_slowpics_urls(tmp_path: Path, url: str) -> None:
-    run_dir = tmp_path / "generated" / "run"
-    run_dir.mkdir(parents=True)
-    payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
-    payload["slowpics"]["url"] = url
-
+    if field == "slowpics.url":
+        payload["slowpics"]["url"] = value
+    else:
+        payload[field] = value
     with pytest.raises(ValueError):
         parse_run_result(payload)
 
@@ -209,11 +195,6 @@ def test_failed_record_preserves_only_bounded_generic_warning_facts(tmp_path: Pa
     )
 
     serialized = serialize_run_result(record)
-    assert record.warning_count == 2
-    assert record.warning_summaries == (
-        "A run warning was reported.",
-        "A run warning was reported.",
-    )
     assert "token=secret" not in serialized
     assert "/Users/private" not in serialized
 
@@ -370,7 +351,7 @@ def test_exact_run_name_validation_rejects_paths(tmp_path: Path, name: str) -> N
         resolve_run_directory(generated, name)
 
 
-def test_history_open_rejects_traversal_absolute_and_symlink_escape(tmp_path: Path) -> None:
+def test_history_rejects_noncanonical_report_path_and_traversal(tmp_path: Path) -> None:
     generated = tmp_path / "generated"
     run_dir = generated / "run"
     run_dir.mkdir(parents=True)

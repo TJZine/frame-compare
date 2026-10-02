@@ -5,6 +5,8 @@ import tomllib
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from frame_compare.services.run_info import (
     RunInfo,
     RunInfoTmdbPrefetchFacts,
@@ -17,32 +19,33 @@ def _parsed_toml(content: str) -> dict[str, object]:
     return tomllib.loads(content)
 
 
-def test_serialize_run_info_uses_utc_z_created_at() -> None:
-    content = serialize_run_info(
-        RunInfo(
-            created_at=datetime(2026, 6, 8, 12, 34, 56, tzinfo=timezone(timedelta(hours=-4))),
-            folder_name="Fight Club (1999)",
-            naming_source="tmdb",
-            source_filenames=["source.mkv", "encode.mkv"],
-        )
-    )
-
-    parsed = _parsed_toml(content)
-    assert parsed["created_at"] == "2026-06-08T16:34:56Z"
-
-
-def test_serialize_run_info_treats_naive_clock_as_utc() -> None:
-    content = serialize_run_info(
-        RunInfo(
-            created_at=datetime(2026, 6, 8, 12, 34, 56),
-            folder_name="source",
-            naming_source="filename_stems",
-            source_filenames=["source.mkv"],
-        )
-    )
-
-    parsed = _parsed_toml(content)
-    assert parsed["created_at"] == "2026-06-08T12:34:56Z"
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        pytest.param(
+            RunInfo(
+                created_at=datetime(2026, 6, 8, 12, 34, 56, tzinfo=timezone(timedelta(hours=-4))),
+                folder_name="Fight Club (1999)",
+                naming_source="tmdb",
+                source_filenames=["source.mkv", "encode.mkv"],
+            ),
+            "2026-06-08T16:34:56Z",
+            id="test_serialize_run_info_uses_utc_z_created_at",
+        ),
+        pytest.param(
+            RunInfo(
+                created_at=datetime(2026, 6, 8, 12, 34, 56),
+                folder_name="source",
+                naming_source="filename_stems",
+                source_filenames=["source.mkv"],
+            ),
+            "2026-06-08T12:34:56Z",
+            id="test_serialize_run_info_treats_naive_clock_as_utc",
+        ),
+    ],
+)
+def test_serialize_run_info_normalizes_created_at(info: RunInfo, expected: str) -> None:
+    assert _parsed_toml(serialize_run_info(info))["created_at"] == expected
 
 
 def test_serialize_run_info_writes_resolved_tmdb_facts_without_nulls() -> None:

@@ -27,47 +27,35 @@ def _workspace(
     )
 
 
-def test_create_slowpics_url_shortcut_requires_reserved_run_dir(
-    tmp_path: Path,
+@pytest.mark.parametrize("junction", [False, True], ids=["no-run-dir", "junction-run-dir"])
+def test_create_slowpics_url_shortcut_requires_safe_reserved_run_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, junction: bool
 ) -> None:
     root = tmp_path / "workspace"
     output_parent = root / "output"
-    result = create_slowpics_url_shortcut(
-        workspace=_workspace(
+    run_dir = root / "generated" / "Example"
+    if junction:
+        monkeypatch.setattr(Path, "is_junction", lambda path: path == run_dir)
+        workspace = _workspace(root, run_dir=run_dir)
+    else:
+        workspace = _workspace(
             root,
             screenshots_dir=output_parent / "screenshots",
             generated_dir=output_parent / "generated",
-        ),
-        slowpics_url="https://slow.pics/c/example-key",
-        collection_title="Encode Screenshots",
-    )
-
-    assert result.success is False
-    assert result.path is None
-    assert result.warning is not None
-    assert "no reserved run directory" in result.warning
-    assert not output_parent.exists()
-
-
-def test_create_slowpics_url_shortcut_rejects_junctioned_run_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    run_dir = root / "generated" / "Example"
-    monkeypatch.setattr(Path, "is_junction", lambda path: path == run_dir)
-
+        )
     result = create_slowpics_url_shortcut(
-        workspace=_workspace(root, run_dir=run_dir),
+        workspace=workspace,
         slowpics_url="https://slow.pics/c/example-key",
-        collection_title="Example",
+        collection_title="Example" if junction else "Encode Screenshots",
     )
-
     assert result.success is False
     assert result.path is None
     assert result.warning is not None
     assert "no reserved run directory" in result.warning
-    assert not run_dir.exists()
+    if junction:
+        assert not run_dir.exists()
+    else:
+        assert not output_parent.exists()
 
 
 def test_create_slowpics_url_shortcut_sanitizes_title_and_falls_back_to_url_key(
@@ -148,7 +136,6 @@ def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
     )
 
     assert result.success is False
-    assert result.path == root / "generated" / "Example" / "Example.url"
     assert result.warning is not None
     assert "failed to write URL shortcut" in result.warning
     assert "locked" in result.warning

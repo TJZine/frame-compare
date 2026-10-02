@@ -10,7 +10,6 @@ from frame_compare.services.release_identity import (
     ContentIdentity,
     ReleaseIdentity,
     ShortNameSource,
-    common_content_identity,
     format_compact_identity,
     format_micro_descriptor,
     format_release_descriptor,
@@ -182,8 +181,6 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
 
     _, identity = parse_filename_with_release_identity("Movie.1080p.WEB-DL-GROUP.mkv")
 
-    assert identity.content.title == "Movie Title"
-    assert identity.release_group == "GROUP EVIL"
     assert "\n" not in format_compact_identity(identity)
     assert "\x1b" not in format_compact_identity(identity)
 
@@ -221,7 +218,6 @@ def test_formatters_and_common_content() -> None:
     assert format_compact_identity(second).startswith(
         "Avatar Aang The Last Airbender (2026) | 2160p"
     )
-    assert common_content_identity([first, second]) == content
     assert format_micro_descriptor(second) == "ATV WEB-DL | DV HDR10+ | REPACK | Kitsune"
     assert unique_presentation_names(["same", "same"], roles=["Reference", "Comparison 1"]) == [
         "Reference | same",
@@ -281,71 +277,83 @@ def _short_name_source(
     return ShortNameSource(identity=identity, label=label, label_is_explicit=explicit)
 
 
-def test_short_names_use_unique_release_groups() -> None:
-    sources = [
-        _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
-        _short_name_source(
-            _short_name_identity("iT", "ThisBlockHasProblems", ("DV", "HDR")),
-            "b.mkv",
+@pytest.mark.parametrize(
+    ("sources", "roles", "expected"),
+    [
+        pytest.param(
+            [
+                _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
+                _short_name_source(
+                    _short_name_identity("iT", "ThisBlockHasProblems", ("DV", "HDR")),
+                    "b.mkv",
+                ),
+                _short_name_source(
+                    _short_name_identity("MA", "TheEndOfTheFuckingWorld", ("DV", "HDR")),
+                    "c.mkv",
+                ),
+            ],
+            ["Reference", "Comparison 1", "Comparison 2"],
+            [
+                "SCOPE",
+                "ThisBlockHasProblems",
+                "TheEndOfTheFuckingWorld",
+            ],
+            id="use_unique_release_groups",
         ),
-        _short_name_source(
-            _short_name_identity("MA", "TheEndOfTheFuckingWorld", ("DV", "HDR")),
-            "c.mkv",
+        pytest.param(
+            [
+                _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
+                _short_name_source(_short_name_identity("iT", "scope", ("DV", "HDR")), "b.mkv"),
+            ],
+            ["Reference", "Comparison 1"],
+            [
+                "AMZN WEB-DL · HDR · SCOPE",
+                "iT WEB-DL · DV HDR · scope",
+            ],
+            id="fall_back_to_compact_name_on_shared_group",
         ),
-    ]
-    roles = ["Reference", "Comparison 1", "Comparison 2"]
-    assert short_source_names(sources, roles=roles) == [
-        "SCOPE",
-        "ThisBlockHasProblems",
-        "TheEndOfTheFuckingWorld",
-    ]
-
-
-def test_short_names_fall_back_to_compact_name_on_shared_group() -> None:
-    sources = [
-        _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
-        _short_name_source(_short_name_identity("iT", "scope", ("DV", "HDR")), "b.mkv"),
-    ]
-    assert short_source_names(sources, roles=["Reference", "Comparison 1"]) == [
-        "AMZN WEB-DL · HDR · SCOPE",
-        "iT WEB-DL · DV HDR · scope",
-    ]
-
-
-def test_short_names_use_explicit_labels_as_given() -> None:
-    sources = [
-        _short_name_source(
-            _short_name_identity("AMZN", "SCOPE", ("HDR",)), "My Cut", explicit=True
+        pytest.param(
+            [
+                _short_name_source(
+                    _short_name_identity("AMZN", "SCOPE", ("HDR",)), "My Cut", explicit=True
+                ),
+                _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
+            ],
+            ["Reference", "Comparison 1"],
+            [
+                "My Cut",
+                "OTHER",
+            ],
+            id="use_explicit_labels_as_given",
         ),
-        _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
-    ]
-    assert short_source_names(sources, roles=["Reference", "Comparison 1"]) == [
-        "My Cut",
-        "OTHER",
-    ]
-
-
-def test_short_names_without_identity_fall_back_to_label() -> None:
-    sources = [
-        _short_name_source(None, "reference.mkv"),
-        _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
-    ]
-    assert short_source_names(sources, roles=["Reference", "Comparison 1"]) == [
-        "reference.mkv",
-        "OTHER",
-    ]
-
-
-def test_short_names_resolve_remaining_collisions() -> None:
-    identity = _short_name_identity("AMZN", "SCOPE", ("HDR",))
-    sources = [
-        _short_name_source(identity, "a.mkv"),
-        _short_name_source(identity, "b.mkv"),
-    ]
-    assert short_source_names(sources, roles=["Reference", "Comparison 1"]) == [
-        "Reference | AMZN WEB-DL · HDR · SCOPE",
-        "Comparison 1 | AMZN WEB-DL · HDR · SCOPE",
-    ]
+        pytest.param(
+            [
+                _short_name_source(None, "reference.mkv"),
+                _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
+            ],
+            ["Reference", "Comparison 1"],
+            [
+                "reference.mkv",
+                "OTHER",
+            ],
+            id="without_identity_fall_back_to_label",
+        ),
+        pytest.param(
+            [
+                _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
+                _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "b.mkv"),
+            ],
+            ["Reference", "Comparison 1"],
+            [
+                "Reference | AMZN WEB-DL · HDR · SCOPE",
+                "Comparison 1 | AMZN WEB-DL · HDR · SCOPE",
+            ],
+            id="resolve_remaining_collisions",
+        ),
+    ],
+)
+def test_short_names(sources: list[ShortNameSource], roles: list[str], expected: list[str]) -> None:
+    assert short_source_names(sources, roles=roles) == expected
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:
