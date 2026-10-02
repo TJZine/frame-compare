@@ -3,7 +3,6 @@
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
-from typing import Literal
 
 import pytest
 
@@ -14,31 +13,23 @@ from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapsh
 from frame_compare.orchestration.selection_domain import build_analysis_selection_domain_token
 from frame_compare.orchestration.source_labels import (
     resolve_source_label_details,
-    resolve_source_labels,
 )
 from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 
 
-def _labels(
-    paths: list[Path],
-    *,
-    mode: Literal["stem", "filename", "parsed"] = "stem",
-    parser: Literal["auto", "guessit", "anitopy"] = "auto",
-    overrides: dict[Path, SourceOverrideConfig] | None = None,
-) -> list[str]:
-    resolved = resolve_source_labels(
-        ordered_paths=paths,
-        overrides_by_path=overrides or {},
-        label_mode=mode,
-        label_parser=parser,
-    )
-    return [resolved[path] for path in paths]
-
-
 def test_stem_and_filename_modes_preserve_order() -> None:
     paths = [Path("Reference Source.mkv"), Path("Encode Source.webm")]
-    assert _labels(paths) == ["Reference Source", "Encode Source"]
-    assert _labels(paths, mode="filename") == ["Reference Source.mkv", "Encode Source.webm"]
+    stem_details = resolve_source_label_details(
+        ordered_paths=paths, overrides_by_path={}, label_mode="stem", label_parser="auto"
+    )
+    assert [stem_details[path].value for path in paths] == ["Reference Source", "Encode Source"]
+    filename_details = resolve_source_label_details(
+        ordered_paths=paths, overrides_by_path={}, label_mode="filename", label_parser="auto"
+    )
+    assert [filename_details[path].value for path in paths] == [
+        "Reference Source.mkv",
+        "Encode Source.webm",
+    ]
 
 
 def test_parsed_mode_and_parser_priority(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,26 +48,27 @@ def test_parsed_mode_and_parser_priority(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
     monkeypatch.setattr("frame_compare.orchestration.source_labels.parse_filename", fake_parse)
-    assert _labels([Path("source.mkv")], mode="parsed", parser="guessit") == [
-        "[Group] Episode Name S01E02 – Arrival"
-    ]
+    path = Path("source.mkv")
+    details = resolve_source_label_details(
+        ordered_paths=[path], overrides_by_path={}, label_mode="parsed", label_parser="guessit"
+    )
+    assert [details[path].value] == ["[Group] Episode Name S01E02 – Arrival"]
     assert priorities == ["guessit:fallback"]
 
 
 def test_explicit_override_wins_and_controls_are_normalized_for_derived_text() -> None:
     reference = Path("Reference\nSource.mkv")
     comparison = Path("comparison.mkv")
-    assert _labels(
-        [reference, comparison],
-        overrides={comparison: SourceOverrideConfig(label="Custom Encode")},
-    ) == ["Reference Source", "Custom Encode"]
-
     details = resolve_source_label_details(
         ordered_paths=[reference, comparison],
         overrides_by_path={comparison: SourceOverrideConfig(label="Custom Encode")},
         label_mode="stem",
         label_parser="auto",
     )
+    assert [details[path].value for path in [reference, comparison]] == [
+        "Reference Source",
+        "Custom Encode",
+    ]
     assert not details[reference].explicit
     assert details[comparison].explicit
 
@@ -84,7 +76,10 @@ def test_explicit_override_wins_and_controls_are_normalized_for_derived_text() -
 def test_derived_collisions_are_qualified_while_explicit_label_is_preserved() -> None:
     paths = [Path("a.mkv"), Path("b.mkv"), Path("Same.mkv")]
     overrides = {paths[0]: SourceOverrideConfig(label="Same")}
-    assert _labels(paths, overrides=overrides) == ["Same", "b", "Same [Same]"]
+    details = resolve_source_label_details(
+        ordered_paths=paths, overrides_by_path=overrides, label_mode="stem", label_parser="auto"
+    )
+    assert [details[path].value for path in paths] == ["Same", "b", "Same [Same]"]
 
 
 def test_derived_collision_qualification_is_stable_by_source_order(
@@ -97,7 +92,10 @@ def test_derived_collision_qualification_is_stable_by_source_order(
         lambda *_args, **_kwargs: ParsedMetadata(title="Same"),
     )
     paths = [Path("one.mkv"), Path("two.mkv")]
-    assert _labels(paths, mode="parsed") == ["Same [one]", "Same [two]"]
+    details = resolve_source_label_details(
+        ordered_paths=paths, overrides_by_path={}, label_mode="parsed", label_parser="auto"
+    )
+    assert [details[path].value for path in paths] == ["Same [one]", "Same [two]"]
 
 
 def test_display_labels_do_not_change_analysis_cache_identity() -> None:

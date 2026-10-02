@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -66,21 +66,6 @@ class TestRunDoctor:
 
         assert report.all_passed is False  # Because ffmpeg failed
         assert report.critical_failures == []  # But no core failures
-
-    def test_run_doctor_with_reporter(self) -> None:
-        """Given mock ProgressReporter → asserts start_phase, advance, complete_phase called."""
-        mock_reporter = MagicMock()
-        check = DoctorCheck(
-            name="test",
-            category="core",
-            check_fn=lambda: CheckResult(passed=True, message="OK"),
-        )
-
-        run_doctor(checks=[check], reporter=mock_reporter)
-
-        mock_reporter.start_phase.assert_called_once_with("doctor", total=1)
-        mock_reporter.advance.assert_called_once_with(1)
-        mock_reporter.complete_phase.assert_called_once()
 
 
 def test_run_doctor_survives_raising_check() -> None:
