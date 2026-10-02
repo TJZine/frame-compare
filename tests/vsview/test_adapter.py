@@ -206,7 +206,7 @@ def test_managed_python_children_ignore_hostile_inherited_python_paths(
     monkeypatch.setenv("PYTHONPATH", str(hostile_python_path))
     child_env = _build_vsview_child_env(no_color=False)
 
-    returncode, wait_seconds = _run_vsview_command(
+    returncode, _wait_seconds = _run_vsview_command(
         [sys.executable, *python_args],
         env=child_env,
     )
@@ -345,7 +345,7 @@ def test_launch_uses_managed_launcher(
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
 
-    session, wait_seconds = launch_alignment_verification_session(
+    session, _wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=True),
     )
@@ -370,7 +370,7 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     availability = MagicMock(side_effect=AssertionError("disabled launch must not probe"))
     monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", availability)
 
-    session, wait_seconds = launch_alignment_verification_session(
+    session, _wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=False),
     )
@@ -535,7 +535,7 @@ def test_generated_session_registers_named_outputs_in_input_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output_calls, output_metadata, _props, loader_calls = _execute_generated_script(
+    output_calls, output_metadata, _props, _loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("zeta", "alpha"),
@@ -567,7 +567,7 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    output_calls, _metadata, _props, loader_calls = _execute_generated_script(
+    output_calls, _metadata, _props, _loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("a",),

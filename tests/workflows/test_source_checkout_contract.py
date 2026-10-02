@@ -443,6 +443,8 @@ def test_source_checkout_preserves_destination_during_race(
     timeout_shim = _timeout_shim(tmp_path)
     _race_git_shim(tmp_path)
     real_git = shutil.which("git")
+    if real_git is None:
+        pytest.fail("git is required for the checkout race proof")
 
     completed = _run_checkout(
         repo_root,

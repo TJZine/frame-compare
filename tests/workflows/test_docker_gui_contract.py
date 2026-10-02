@@ -98,6 +98,26 @@ def test_docker_gui_source_has_required_markers_and_narrow_x11_permissions(repo_
     assert "color=c=white:size=64x48:rate=1:duration=3" in script
     assert "color=c=gray:size=64x48:rate=1:duration=3" in script
     assert 'expected_names = {0: "Reference", 1: "Comparison 1", 2: "Comparison 2"}' in script
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_workspace_loaded()",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "active_panel.use_positions_button.click()",
+        "app.processEvents()",
+    )
+    _assert_adjacent_statements(
+        script,
+        "keep_panel.keep_button.click()",
+        "app.processEvents()",
+    )
     assert '"0/3 positions captured"' in script
     assert r'"3/3 positions captured \u2014 ready to confirm"' in script
     assert '"Confirm these aligned positions"' in script

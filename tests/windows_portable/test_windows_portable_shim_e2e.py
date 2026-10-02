@@ -558,6 +558,8 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
         repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     )
     match = re.search(r"\$ps1 = @'\r?\n(?P<launcher>.*?)\r?\n'@", build_script, re.DOTALL)
+    if match is None:
+        pytest.fail("Generated bundle launcher is missing")
 
     bundle_dir = tmp_path / "bundle"
     python_dir = bundle_dir / "python"

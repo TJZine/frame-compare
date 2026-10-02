@@ -971,6 +971,7 @@ def _write_extracted_verifier_fixture(
         for scope in ("analysis", "probe", "alignment", "index", "full")
     }
     requirements_sha = hashlib.sha256(b"requirements").hexdigest()
+    artifact_license = {"spdx": "MIT", "url": "https://example.invalid/license"}
     artifact = {
         "id": "fixture-runtime",
         "name": "Fixture Runtime",
@@ -979,10 +980,7 @@ def _write_extracted_verifier_fixture(
         "source_url": "https://example.invalid/runtime-source.tar.gz",
         "sha256": hashlib.sha256(b"runtime").hexdigest(),
         "bytes": 7,
-        "license": {
-            "spdx": "MIT",
-            "url": "https://example.invalid/license",
-        },
+        "license": artifact_license,
     }
     corresponding_source = {
         "name": "Fixture Source",
@@ -1040,8 +1038,8 @@ def _write_extracted_verifier_fixture(
                 "binary_sha256": artifact["sha256"],
                 "binary_url": artifact["url"],
                 "id": artifact["id"],
-                "license_spdx": artifact["license"]["spdx"],
-                "license_url": artifact["license"]["url"],
+                "license_spdx": artifact_license["spdx"],
+                "license_url": artifact_license["url"],
                 "name": artifact["name"],
                 "source_url": artifact["source_url"],
                 "version": artifact["version"],
