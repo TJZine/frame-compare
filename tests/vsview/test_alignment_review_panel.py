@@ -710,6 +710,8 @@ def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
     assert panel.body_scroll.horizontalScrollBar().maximum() == 0
     assert panel.use_positions_button.isVisible()
     assert panel.keep_button.isVisible()
+    assert panel.use_positions_button.parent() is panel
+    assert panel.keep_button.parent() is panel
 
     panel.hide()
 
