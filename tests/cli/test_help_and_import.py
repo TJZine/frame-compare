@@ -4,7 +4,8 @@ from pytest import MonkeyPatch
 from typer.core import TyperGroup
 from typer.main import get_command
 
-from frame_compare.cli.entry import _stabilize_typer_help_width, app
+from frame_compare.cli.cli_helpers import stabilize_typer_help_width
+from frame_compare.cli.entry import app
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
 from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
 
@@ -402,7 +403,7 @@ def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> Non
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("TERMINAL_WIDTH", "200")
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
-    _stabilize_typer_help_width()
+    stabilize_typer_help_width()
     assert typer_rich_utils.MAX_WIDTH == 200
 
 
@@ -413,6 +414,6 @@ def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
 ) -> None:
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", 120)
 
-    _stabilize_typer_help_width(terminal_width)
+    stabilize_typer_help_width(terminal_width)
 
     assert typer_rich_utils.MAX_WIDTH == 120

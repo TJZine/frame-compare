@@ -938,6 +938,7 @@ def test_result_summary_uses_singular_warning_title() -> None:
 
     output = _render(console)
     assert "Comparison complete · 1 warning" in output
+    assert "Comparison complete · 1 warnings" not in output
     assert "Warnings" in output
 
 
@@ -955,6 +956,7 @@ def test_result_summary_upload_failure_shows_warning_title() -> None:
 
     output = _render(console)
     assert "Comparison complete · 1 warning" in output
+    assert "Comparison complete · 1 warnings" not in output
     assert "Comparison failed" not in output
     assert "Warnings" in output
     assert "publish: connection reset" in output

@@ -16,7 +16,6 @@ from frame_compare.cli.cli_helpers import (
     handle_error,
     open_url_in_browser,
     resolve_root_and_config,
-    stabilize_typer_help_width,
     write_config_to,
 )
 from frame_compare.cli.cli_helpers import (
@@ -101,7 +100,6 @@ app = typer.Typer(
 )
 
 
-_stabilize_typer_help_width = stabilize_typer_help_width
 _resolve_root_and_config = resolve_root_and_config
 _copy_text_to_clipboard = copy_text_to_clipboard
 _open_url_in_browser = open_url_in_browser
