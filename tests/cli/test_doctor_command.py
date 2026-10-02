@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pytest import MonkeyPatch
@@ -58,7 +59,7 @@ _AUDITED_HINTS = (
 
 
 def _doctor_check_entry(payload: dict[str, object], check_id: str) -> dict[str, object]:
-    checks = payload["doctor"]["checks"]
+    checks = cast(dict[str, object], payload["doctor"])["checks"]
     assert isinstance(checks, list)
     for entry in checks:
         assert isinstance(entry, dict)

@@ -249,8 +249,8 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     monkeypatch: MonkeyPatch,
 ) -> None:
     config = _config()
-    config.paths.input_dir = Path("[bold]input[end]")
-    config.paths.generated_dir = Path("[cyan]generated[end]")
+    config.paths.input_dir = "[bold]input[end]"
+    config.paths.generated_dir = "[cyan]generated[end]"
     console = _console()
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
@@ -448,8 +448,8 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
     input_dir = root.parent / "external-media" / "very-long-source-directory"
     generated_dir = root.parent / "external-output" / "very-long-generated-directory"
     config = _config()
-    config.paths.input_dir = input_dir
-    config.paths.generated_dir = generated_dir
+    config.paths.input_dir = str(input_dir)
+    config.paths.generated_dir = str(generated_dir)
     config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
     console = _console_at_width(width)
 

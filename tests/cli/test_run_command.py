@@ -1,7 +1,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, cast
 
 import pytest
 import typer
@@ -30,10 +30,14 @@ from frame_compare.orchestration import RunRequest, RunResult
 from .run_command_test_support import (
     DepsOptions,
     RecordingRunner,
-    _base_args,
-    _deps,
     _raise_unexpected_load,
     _raise_unexpected_write,
+)
+from .run_command_test_support import (
+    base_args as _base_args,
+)
+from .run_command_test_support import (
+    deps as _deps,
 )
 
 
@@ -296,7 +300,7 @@ def test_handle_run_write_config_preserves_authored_generated_directory() -> Non
             DepsOptions(
                 runner=runner,
                 load_config=lambda *_args, **_kwargs: config,
-                write_config_to=lambda _path, value: written.append(value),
+                write_config_to=lambda path, config: written.append(config),
             )
         ),
     )
@@ -368,7 +372,7 @@ def test_handle_run_allows_external_generated_root(mode: str) -> None:
             DepsOptions(
                 runner=runner,
                 load_config=lambda *_args, **_kwargs: config,
-                write_config_to=lambda _path, value: written.append(value),
+                write_config_to=lambda path, config: written.append(config),
             )
         ),
     )
@@ -541,7 +545,9 @@ def test_handle_run_write_config_rejects_previous_offsets_before_writing() -> No
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
     assert written_paths == []
-    assert {tuple(error["loc"]) for error in handled_errors[0].validation_errors} == {
+    assert {
+        tuple(cast(list[str], error["loc"])) for error in handled_errors[0].validation_errors
+    } == {
         ("audio_alignment", "force_interactive"),
         ("audio_alignment", "previous_offsets"),
     }

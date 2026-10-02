@@ -36,9 +36,15 @@ from .cli_helpers import _normalize_cli_output
 from .run_command_test_support import (
     DepsOptions,
     RecordingRunner,
-    _base_args,
-    _deps,
-    _prompt_required_config,
+)
+from .run_command_test_support import (
+    base_args as _base_args,
+)
+from .run_command_test_support import (
+    deps as _deps,
+)
+from .run_command_test_support import (
+    prompt_required_config as _prompt_required_config,
 )
 
 
@@ -73,7 +79,7 @@ from .run_command_test_support import (
 )
 def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
     args_update: dict[str, object],
-    deps_update: dict[str, object],
+    deps_update: dict[str, bool],
     config: ConfigSchema,
     expected_message: str,
 ) -> None:
@@ -105,7 +111,8 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
                     runner=runner,
                     load_config=_load_config,
                     handle_error=_handle_validation_error,
-                    **deps_update,
+                    stdout_is_tty=deps_update.get("stdout_is_tty", False),
+                    stdin_is_tty=deps_update.get("stdin_is_tty", False),
                 )
             ),
         )
@@ -284,13 +291,18 @@ def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
 )
 def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
     args_update: dict[str, object],
-    deps_update: dict[str, object],
+    deps_update: dict[str, bool],
 ) -> None:
     config = get_default_config()
     config.analysis.ignore_lead_seconds = 240.0
     dependencies = build_runner_dependencies(
         args=replace(_base_args(), **args_update),
-        deps=_deps(DepsOptions(**deps_update)),
+        deps=_deps(
+            DepsOptions(
+                stdin_is_tty=deps_update.get("stdin_is_tty", False),
+                stdout_is_tty=deps_update.get("stdout_is_tty", False),
+            )
+        ),
         config=config,
         console=Console(file=StringIO(), no_color=True),
         resolve_effective_config=lambda: config,
