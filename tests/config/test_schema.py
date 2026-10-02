@@ -278,17 +278,19 @@ def test_slowpics_webhook_url_trims_values_and_treats_blank_as_disabled() -> Non
 
 
 def test_sources_config_defaults_and_override_schema() -> None:
-    config = SourcesConfig(
-        reference="00-reference.mkv",
-        match_fps="assume_reference",
-        overrides={
-            "01-encode.mkv": SourceOverrideConfig(
-                trim_start_frames=12,
-                trim_end_frames=3,
-                effective_fps="24000/1001",
-                active_rect=SourceActiveRectConfig(x=240, y=0, width=1440, height=1080),
-            )
-        },
+    config = SourcesConfig.model_validate(
+        {
+            "reference": "00-reference.mkv",
+            "match_fps": "assume_reference",
+            "overrides": {
+                "01-encode.mkv": {
+                    "trim_start_frames": 12,
+                    "trim_end_frames": 3,
+                    "effective_fps": "24000/1001",
+                    "active_rect": {"x": 240, "y": 0, "width": 1440, "height": 1080},
+                }
+            },
+        }
     )
 
     override = config.overrides["01-encode.mkv"]
@@ -316,7 +318,7 @@ def test_source_override_accepts_num_den_effective_fps(
     value: str,
     expected: Fraction,
 ) -> None:
-    override = SourceOverrideConfig(effective_fps=value)
+    override = SourceOverrideConfig.model_validate({"effective_fps": value})
 
     assert override.effective_fps == expected
 

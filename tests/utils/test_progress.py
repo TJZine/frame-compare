@@ -85,7 +85,7 @@ def test_rich_progress_reporter_suspend_and_resume_preserves_active_task() -> No
 def test_rich_progress_reporter_hides_parent_while_nested_phase_is_active(
     monkeypatch,
 ) -> None:
-    reporter = RichProgressReporter()
+    reporter, _output = _captured_rich_reporter(monkeypatch, no_color=False)
     update_calls: list[tuple[object, dict[str, object]]] = []
     original_update = reporter._progress.update  # noqa: SLF001
 

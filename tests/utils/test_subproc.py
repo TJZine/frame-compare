@@ -23,9 +23,13 @@ def test_run_subprocess_exit_handling(
     argv = [sys.executable, "-c", script]
     if expected_code is None:
         with pytest.raises(subprocess.CalledProcessError):
-            run_subprocess(argv, check=check, timeout_seconds=10)
+            run_subprocess(argv, timeout_seconds=10)
     else:
-        result = run_subprocess(argv, check=check, timeout_seconds=10)
+        result = (
+            run_subprocess(argv, timeout_seconds=10)
+            if check
+            else run_subprocess(argv, check=False, timeout_seconds=10)
+        )
         assert result.returncode == expected_code
         if expected_stdout is not None:
             assert expected_stdout in result.stdout

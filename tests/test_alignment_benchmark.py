@@ -302,7 +302,7 @@ async def test_results_write_replaces_symlink_without_touching_referent(
     outside_results.write_text("unchanged", encoding="utf-8")
     results_file = output / "pair-results.json"
     results_file.symlink_to(outside_results)
-    record = {
+    record: dict[str, object] = {
         "pair_id": pair.pair_id,
         "category": pair.category,
         "expected_frame": 0,
