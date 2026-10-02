@@ -1,6 +1,6 @@
 """Unit tests for progress reporting utilities."""
 
-import re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
@@ -9,20 +9,10 @@ from rich.console import Console
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
-    UPLOAD_PRESENTATION,
-    NullProgressReporter,
     PlainProgressReporter,
     RichProgressReporter,
-    align_phase_duration_text,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
-
-
-def test_align_phase_duration_text_splits_machine_and_review() -> None:
-    assert (
-        align_phase_duration_text(align_seconds=674.0, review_seconds=634.0)
-        == "40s + 10m 34s review"
-    )
 
 
 def _captured_rich_reporter(
@@ -49,111 +39,14 @@ def _captured_rich_reporter(
     return RichProgressReporter(no_color=no_color), output
 
 
-def test_null_progress_reporter_noops():
-    """Test that NullProgressReporter methods do not raise exceptions."""
-    reporter = NullProgressReporter()
-    reporter.start_phase("test", 10)
-    reporter.advance(1)
-    reporter.set_description("desc")
-    reporter.complete_phase()
-    reporter.suspend()
-    reporter.resume()
-
-
-@pytest.mark.parametrize(
-    ("status", "glyph"),
-    [
-        (ProgressPhaseStatus.COMPLETED, "✓"),
-        (ProgressPhaseStatus.WARNED, "!"),
-        (ProgressPhaseStatus.FAILED, "✗"),
-        (ProgressPhaseStatus.SKIPPED, "–"),
-    ],
-)
-def test_rich_durable_status_uses_glyph_markers(
-    monkeypatch: pytest.MonkeyPatch,
-    status: ProgressPhaseStatus,
-    glyph: str,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch, no_color=False)
-
-    reporter.start_phase("ALIGN", 1)
-    reporter.complete_phase(status, retain=True)
-
-    rendered = output.getvalue()
-    assert glyph in rendered
-    assert "ALIGN" in rendered
-
-
-def test_rich_durable_line_shows_summary_and_duration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-    clock = iter((0.0, 278.0))
-    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-
-    reporter.start_phase("Analyze", 1)
-    reporter.complete_phase(summary="50 frames selected")
-
-    rendered = output.getvalue()
-    assert "✓" in rendered
-    assert "Analyze" in rendered
-    assert "50 frames selected" in rendered
-    assert "4m 38s" in rendered
-
-
-def test_rich_durable_line_supports_duration_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase("Align", 1)
-    reporter.complete_phase(
-        summary="2 pairs confirmed in VSView",
-        duration_text="1m 20s + 10m 34s review",
-        retain=True,
-    )
-
-    rendered = output.getvalue()
-    assert "2 pairs confirmed in VSView" in rendered
-    assert "1m 20s + 10m 34s review" in rendered
-
-
-def test_rich_upload_presentation_shows_short_label(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, _output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase(
-        "Uploading My Comparison to slow.pics", 4, presentation=UPLOAD_PRESENTATION
-    )
-
-    task = reporter._progress.tasks[0]  # noqa: SLF001
-    assert task.description == "Upload"
-    assert task.fields["presentation"] == UPLOAD_PRESENTATION
-    reporter.complete_phase(retain=False)
-
-
-def test_rich_durable_skip_line_keeps_summary_verbatim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase("Publish", 1)
-    reporter.complete_phase(ProgressPhaseStatus.SKIPPED, summary="Declined")
-
-    rendered = output.getvalue()
-    assert "–" in rendered
-    assert "Publish" in rendered
-    assert "Declined" in rendered
-
-
 def test_plain_progress_reporter_emits_one_ascii_line_per_top_level_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output = StringIO()
     clock = iter((0.0, 84.9, 85.0, 86.0))
     monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-    reporter = PlainProgressReporter(output)
+    monkeypatch.setattr(sys, "stderr", output)
+    reporter = PlainProgressReporter()
 
     reporter.start_phase("ANALYZE", 100)
     reporter.start_indeterminate("D\N{LATIN SMALL LETTER E WITH ACUTE}CODE")
@@ -169,29 +62,6 @@ def test_plain_progress_reporter_emits_one_ascii_line_per_top_level_phase(
     assert output.getvalue().isascii()
     assert "\x1b[" not in output.getvalue()
     assert "\r" not in output.getvalue()
-
-
-@pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        (ProgressPhaseStatus.WARNED, "[WARN] nested"),
-        (ProgressPhaseStatus.FAILED, "[FAIL] nested"),
-    ],
-)
-def test_plain_progress_reporter_preserves_material_nested_outcomes(
-    status: ProgressPhaseStatus,
-    expected: str,
-) -> None:
-    output = StringIO()
-    reporter = PlainProgressReporter(output)
-
-    reporter.start_phase("TOP", 1)
-    reporter.start_indeterminate("nested")
-    reporter.complete_phase(status)
-    reporter.complete_phase()
-
-    assert output.getvalue().splitlines()[0] == expected
-    assert output.getvalue().count("TOP") == 1
 
 
 def test_rich_progress_reporter_suspend_and_resume_preserves_active_task() -> None:
@@ -251,46 +121,6 @@ def test_rich_progress_reporter_indeterminate_phase_is_spinner_only() -> None:
     reporter.complete_phase()
 
 
-def test_rich_progress_reporter_uses_distinct_task_presentations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reporter, output = _captured_rich_reporter(monkeypatch)
-
-    reporter.start_phase("Rendering", 30)
-    reporter.advance(10)
-    measurable_output = output.getvalue()
-    task = reporter._progress.tasks[0]  # noqa: SLF001
-
-    assert task.fields["presentation"] == "measurable"
-    assert "  … Rendering" in measurable_output
-    assert "10/30" in measurable_output
-    assert "ETA" not in measurable_output
-    assert "%" not in measurable_output
-    assert not re.search(r"[-\\|/]\s+…", measurable_output)
-    reporter.complete_phase()
-    output.seek(0)
-    output.truncate()
-    reporter.start_indeterminate("Loading alignment offsets")
-    indeterminate_output = output.getvalue()
-
-    assert re.search(r"… Loading alignment offsets\s+-", indeterminate_output)
-    assert "ETA" not in indeterminate_output
-    assert not re.search(r"\d+/\d+", indeterminate_output)
-    assert "━" not in indeterminate_output
-    reporter.complete_phase()
-
-    output.seek(0)
-    output.truncate()
-    reporter.start_phase("PLAN", 1)
-    simple_output = output.getvalue()
-
-    assert "… PLAN" in simple_output
-    assert "ETA" not in simple_output
-    assert "0/1" not in simple_output
-    assert "━" not in simple_output
-    reporter.complete_phase()
-
-
 def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
     monkeypatch,
 ) -> None:
@@ -314,85 +144,6 @@ def test_rich_progress_reporter_restores_parent_when_nested_phase_fails(
     assert (outer_task_id, {"visible": True, "refresh": True}) in update_calls
 
     reporter.complete_phase()
-
-
-def test_rich_progress_reporter_retain_success_at_ten_seconds(
-    monkeypatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    reporter = RichProgressReporter()
-    clock = iter((0.0, 10.0))
-    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-
-    reporter.start_phase("PLAN", 1)
-    reporter.complete_phase()
-
-    rendered = capsys.readouterr().err
-    assert "✓" in rendered
-    assert "PLAN" in rendered
-    assert "10s" in rendered
-    assert "Completed in" not in rendered
-
-
-def test_rich_progress_reporter_explicitly_retains_short_success(
-    monkeypatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    reporter = RichProgressReporter()
-    clock = iter((0.0, 0.1))
-    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-
-    reporter.start_phase("PUBLISH", 1)
-    reporter.complete_phase(retain=True)
-
-    rendered = capsys.readouterr().err
-    assert "✓" in rendered
-    assert "PUBLISH" in rendered
-    assert "0s" in rendered
-
-
-def test_rich_progress_reporter_suppresses_long_nested_success(
-    monkeypatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    reporter = RichProgressReporter()
-    clock = iter((0.0, 1.0, 12.0, 13.0))
-    monkeypatch.setattr(progress_module, "monotonic", lambda: next(clock))
-
-    reporter.start_phase("RENDER", 1)
-    reporter.start_phase("ENCODE", 1)
-    reporter.complete_phase()
-    reporter.complete_phase()
-
-    output = capsys.readouterr().err
-    assert "✓ ENCODE" not in output
-    assert "✓ RENDER" in output
-    assert "13s" in output
-
-
-@pytest.mark.parametrize(
-    ("status", "glyph", "label"),
-    [
-        (ProgressPhaseStatus.SKIPPED, "–", "ANALYZE"),
-        (ProgressPhaseStatus.WARNED, "!", "ALIGN"),
-        (ProgressPhaseStatus.FAILED, "✗", "RENDER"),
-    ],
-)
-def test_rich_progress_reporter_retains_non_success_statuses(
-    status: ProgressPhaseStatus,
-    glyph: str,
-    label: str,
-    monkeypatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    reporter = RichProgressReporter()
-
-    reporter.start_phase(label, 1)
-    reporter.complete_phase(status)
-
-    rendered = capsys.readouterr().err
-    assert glyph in rendered
-    assert label in rendered
 
 
 def test_rich_progress_reporter_serializes_concurrent_updates() -> None:

@@ -48,9 +48,12 @@ def test_glyphs_for_console_uses_console_encoding() -> None:
         ascii_stream.close()
 
 
-def test_human_console_disables_highlight() -> None:
+def test_human_console_disables_highlight(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
     stream = io.StringIO()
-    human_console(file=stream, force_terminal=True, width=100).print("seed 20202020")
+    monkeypatch.setattr(stream, "isatty", lambda: True)
+    human_console(file=stream, width=100).print("seed 20202020")
     assert stream.getvalue() == "seed 20202020\n"
 
 

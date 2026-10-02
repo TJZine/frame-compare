@@ -4,7 +4,6 @@ import sys
 from dataclasses import dataclass
 from threading import RLock
 from time import monotonic
-from typing import TextIO
 
 import structlog
 from rich.console import RenderableType
@@ -209,8 +208,7 @@ class NullProgressReporter:
 class PlainProgressReporter:
     """Chronological ASCII progress for redirected human output."""
 
-    def __init__(self, stream: TextIO | None = None) -> None:
-        self._stream = stream
+    def __init__(self) -> None:
         self._task: _PlainTask | None = None
         self._task_stack: list[_PlainTask] = []
         self._lock = RLock()
@@ -255,8 +253,7 @@ class PlainProgressReporter:
                     else ""
                 )
                 line = f"{_DURABLE_STATUS_MARKERS[status]} {task.label}{detail}"
-                stream = self._stream if self._stream is not None else sys.stderr
-                print(line.encode("ascii", "backslashreplace").decode("ascii"), file=stream)
+                print(line.encode("ascii", "backslashreplace").decode("ascii"), file=sys.stderr)
             self._task = self._task_stack.pop() if self._task_stack else None
 
     def suspend(self) -> None:
@@ -305,11 +302,6 @@ class RichProgressReporter:
         self._task_started_at: dict[TaskID, float] = {}
         self._suspend_depth = 0
         self._lock = RLock()
-
-    @property
-    def no_color(self) -> bool:
-        """Return whether Rich rendering disables ANSI color."""
-        return self._progress.console.no_color
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start a new phase with a rich progress bar."""
