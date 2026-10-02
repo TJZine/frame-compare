@@ -1020,6 +1020,25 @@ Steps, in order:
 - sample the case-mapping tables and rewrite mutations;
 - run the full native gate.
 
+### Unit D repair: restore carrier assertions (`.handoff/T6R-codex-trim-repair.md`)
+
+Checkpoint D found that D2 trims removed assertions guarding user-visible values.
+The B2 trim annotations predate the flow rule and U2, and neither the trim-safety
+rule nor C5 could catch them.
+
+**The proven case:** after the B3a-150 trim, breaking the comparison-stream mapping
+in `phase_alignment.py` passes the whole native suite.
+
+**The repair,** per lane and serially:
+1. Enumerate the assertions removed in `53b60b4c..47a9ad4c`, other than D0, R1
+   tests and consolidated re-expressions.
+2. Classify each one as internal or carrier, under the flow rule.
+3. For each carrier group, prove it with a mutation, or restore the assertion
+   with its original expected value. A restored assertion must fail the
+   mutation.
+
+Unit E follows after the controller checks the repair.
+
 ### Unit E: pyright gate and rules (`.handoff/T7-codex-typing-rules.md`, after checkpoint D)
 
 - Type-check the files no lane owns: `tests/integration/**`, `tests/browser/**`,
@@ -1250,3 +1269,22 @@ Reverting one restores its tests and any seams it deleted.
     - The thread settings were reported as UNVERIFIED, because Codex exposes no
       runtime metadata. Every thread was dispatched explicitly with
       `gpt-6.1-sol` / `medium`.
+- 2026-10-02: unit D completed at `47a9ad4c`, from base `53b60b4c`.
+  - Test lines: 84,533 → 80,792. Native: 3,050 passed, 90 skipped. Last triggered
+    Docker run: 276 passed, 0 skipped. Lane pyright: zero errors in owned files;
+    35 remain in unowned files, for unit E.
+  - **Checkpoint D** (controller, 2026-10-02):
+    - Static gates are clean.
+    - Full `pytest`: one unidentified failure in six runs at HEAD. The other five
+      runs passed 3,050, so the failing test is flaky. Its name wasn't captured.
+    - Assertion lines in touched files: 8,106 → 6,747. Most of the drop is
+      consolidation and approved trims.
+    - **Finding:** the B3a-150 trim removed the only assertions that
+      `reference_stream` and `comparison_streams` reach the alignment request, and
+      a mutation of that mapping passes the whole suite.
+      - A keyword scan finds up to 311 removed config, path, stream and label
+        assertions that weren't re-added in the same file.
+      - The repair unit above was added. Unit E waits for it.
+  - The five unused video-wiring helpers deleted in lane 1a were a separate
+    maintainer amendment, relayed through the controller and recorded in
+    `1a.d.md`.
