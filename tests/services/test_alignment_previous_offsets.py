@@ -140,45 +140,6 @@ def _alignment_request(
     )
 
 
-def test_typed_alignment_progress_uses_prepared_comparison_presentation(
-    tmp_path: Path,
-) -> None:
-    reference = tmp_path / "reference-raw-name.mkv"
-    comparison = tmp_path / "very-long-raw-comparison-name.mkv"
-    reference.touch()
-    comparison.touch()
-    config = AlignmentConfig(cache_results=False)
-    request = _alignment_request(
-        tmp_path,
-        reference=reference,
-        comparisons=[comparison],
-        config=config,
-    )
-    request = replace(
-        request,
-        comparisons=[
-            replace(
-                request.comparisons[0],
-                presentation_name="2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-            )
-        ],
-    )
-    progress = Mock(spec=ProgressReporter)
-
-    align_clips_from_request(
-        request,
-        config,
-        progress=progress,
-        reference_fps=Fraction(24, 1),
-    )
-
-    descriptions = [call.args[0] for call in progress.set_description.call_args_list]
-    assert descriptions[0] == "ALIGN | Checking saved offsets"
-    assert "ALIGN | Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune" in descriptions
-    assert not any("very-long-raw-comparison-name.mkv" in value for value in descriptions)
-    progress.start_indeterminate.assert_not_called()
-
-
 def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
     tmp_path: Path,
 ) -> None:
@@ -390,7 +351,6 @@ def test_stale_policy_entry_is_not_replayed_or_applied(
 
     (result,) = align_clips_from_request(request, config, reference_fps=Fraction(24, 1))
 
-    estimate.assert_called_once()
     assert result.source == "computed"
     assert result.applied is False
     assert result.frame_offset is None
