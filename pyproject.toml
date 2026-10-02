@@ -65,6 +65,7 @@ docs = [
 docker-test = [
     "pytest==9.1.1",
     "pytest-mock==3.16.0",
+    "pytest-xdist==3.8.0",
 ]
 dev = [
     "anyio>=4.15.1",
@@ -79,6 +80,7 @@ dev = [
     "ruff>=0.16.8",
     "respx>=0.23.1",
     "pip-audit==2.10.1",
+    "pytest-xdist>=3.8.0",
 ]
 
 # ─── Pyright ───────────────────────────────────────────────────────────────────

@@ -413,9 +413,11 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
-    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # Keep absolute paths within the report width, including xdist's worker prefix.
+    tmp_path = tmp_path_factory.mktemp("fps")
     input_dir = tmp_path / "comparison_videos"
     internal_path = input_dir / "season" / "reference.mkv"
     external_path = tmp_path / "outside" / "comparison.mkv"

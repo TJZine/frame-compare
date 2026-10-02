@@ -33,6 +33,9 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.vs.types import TonemapSettings
 
+# Chrome launches share a profile; keep this module on one xdist worker.
+pytestmark = pytest.mark.xdist_group("browser")
+
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 )
