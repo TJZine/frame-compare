@@ -25,6 +25,7 @@ from frame_compare.services.alignment_audio import (
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.types import AlignmentRequest
 from tests.services.alignment_request_test_support import alignment_request
 
 _SAMPLE_RATE = 48000
@@ -36,8 +37,10 @@ _DELAY_SECONDS = 0.5
 _NONZERO_TRIM_FRAMES = 5
 
 
-def align_clips_from_request(*args: object, **kwargs: object):
-    return asyncio.run(_align_clips_from_request(*args, **kwargs))
+def align_clips_from_request(
+    request: AlignmentRequest, config: AlignmentConfig
+) -> list[AlignmentResult]:
+    return asyncio.run(_align_clips_from_request(request, config))
 
 
 def _run_ffmpeg(argv: list[str], *, timeout_seconds: int = 120) -> None:

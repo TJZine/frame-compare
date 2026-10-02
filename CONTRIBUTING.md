@@ -113,7 +113,7 @@ uv run --no-sync ruff format .
 uv run --no-sync pyright --warnings
 ```
 
-All production code must pass the configured strict Pyright policy.
+Pyright checks both `src/` and `tests/` under their configured typing policies.
 
 ## Tests and verification
 

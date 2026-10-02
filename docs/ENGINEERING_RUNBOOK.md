@@ -51,7 +51,7 @@ Bootstrap:
 uv sync --group dev --extra vsview --frozen
 ```
 
-Core local gates:
+Core local gates (Pyright checks both `src/` and `tests/`):
 
 ```bash
 uv run --no-sync pyright --warnings

@@ -1402,11 +1402,11 @@ def test_low_motion_insert_remains_a_provisional_hint(
     else:
         E = _DURATION * _FPS
         if seconds == 60:
-            B = 60 * _FPS
-            regions = (range(B, E), range(0, B), (range(0, B),))
+            boundary = 60 * _FPS
+            regions = (range(boundary, E), range(0, boundary), (range(0, boundary),))
         else:
-            B = 570 * _FPS
-            regions = (range(0, B), range(B, E), (range(568 * _FPS, E),))
+            boundary = 570 * _FPS
+            regions = (range(0, boundary), range(boundary, E), (range(568 * _FPS, E),))
         _assert_video(
             result,
             confirmed_offset=-96 if seconds == 60 else 0,

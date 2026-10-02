@@ -11,9 +11,10 @@ import pytest
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
-from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from tests.services.alignment_request_test_support import alignment_request
 
 vs_mod = pytest.importorskip("vapoursynth")
@@ -33,8 +34,10 @@ _FPS = 10
 _VIDEO_SIZE = "160x90"
 
 
-def align_clips_from_request(*args: object, **kwargs: object):
-    return asyncio.run(_align_clips_from_request(*args, **kwargs))
+def align_clips_from_request(
+    request: AlignmentRequest, config: AlignmentConfig, *, vs_loader: VSLoader | None = None
+) -> list[AlignmentResult]:
+    return asyncio.run(_align_clips_from_request(request, config, vs_loader=vs_loader))
 
 
 def _run_ffmpeg(argv: list[str], *, timeout_seconds: int = 120) -> None:
@@ -235,6 +238,7 @@ def test_delayed_comparison_is_confirmed(
 
     _assert_trusted(result, frame_offset=-2)
     assert result.audio_attempt is not None
+    assert result.audio_attempt.audio.subframe_estimate is not None
     assert abs(result.audio_attempt.audio.subframe_estimate - -2.0) < 0.25
 
 
