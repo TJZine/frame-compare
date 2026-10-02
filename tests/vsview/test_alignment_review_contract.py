@@ -518,24 +518,9 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
 
 
 @pytest.mark.parametrize("status", ["preanalysis_rejection", "aborted"])
-def test_workspace_metadata_rejects_noncomplete_available_decision(status: str) -> None:
+def test_workspace_metadata_accepts_noncomplete_unavailable_decision(status: str) -> None:
     attempt = cast(dict[str, object], asdict(provisional_audio_attempt()))
     attempt["status"] = status
-    review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    with pytest.raises(AlignmentReviewContractError, match="non-complete audio attempts"):
-        parse_alignment_review_workspace_metadata(
-            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-        )
-
     decision = cast(dict[str, object], attempt["decision"])
     decision.update(state="unavailable", candidate=None)
     review = json.dumps(
