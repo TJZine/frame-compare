@@ -10,7 +10,7 @@ Fails if any tests are skipped, xfailed, or xpassed (the “real deps work” ga
 
 Defaults:
   --service frame-compare-test
-  Runs: pytest -v --ignore=tests/integration/test_alignment_streaming_resources.py \
+  Runs: pytest -n 10 --dist loadgroup -v --ignore=tests/integration/test_alignment_streaming_resources.py \
     tests/e2e/ tests/integration/ tests/vs/
 
 Environment:
@@ -760,14 +760,14 @@ print("DOCKER_PROOF doctor_json=ok")
 print(f"DOCKER_PROOF generated_fixture_matrix=ok fixtures={';'.join(fixture_results)}")
 print("DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo")
 PY
-python -c "import pytest, pytest_mock" >/dev/null 2>&1 || {
-  echo "ERROR: pytest and pytest-mock are missing from the Docker runtime image" >&2
+python -c "import pytest, pytest_mock, xdist" >/dev/null 2>&1 || {
+  echo "ERROR: pytest, pytest-mock, or pytest-xdist is missing from the Docker runtime image" >&2
   exit 13
 }
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 EOF
 )
-container_cmd+=$'\n'"python -m pytest -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
+container_cmd+=$'\n'"python -m pytest -n 10 --dist loadgroup -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
 
 rm -rf -- generated/e2e
 

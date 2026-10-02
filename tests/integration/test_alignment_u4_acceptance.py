@@ -49,6 +49,9 @@ from tests.orchestration.preparation_test_support import (
 )
 from tests.services.alignment_request_test_support import alignment_request
 
+# Keep the session media generation on one worker.
+pytestmark = pytest.mark.xdist_group("alignment-u4")
+
 vs_mod = pytest.importorskip("vapoursynth")
 if isinstance(vs_mod, MagicMock):
     pytest.skip("vapoursynth is mocked", allow_module_level=True)
