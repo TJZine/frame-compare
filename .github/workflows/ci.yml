@@ -168,7 +168,7 @@ jobs:
         run: uv sync --group dev --frozen
 
       - name: Run pytest
-        run: uv run --no-sync pytest -q
+        run: uv run --no-sync pytest -q -n auto --dist loadgroup
 
   import-lints:
     name: Import Contracts
