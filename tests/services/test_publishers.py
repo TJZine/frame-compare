@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from http.cookies import SimpleCookie
 from pathlib import Path
+from typing import Literal
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
@@ -37,7 +38,7 @@ def _collection_metadata(
     title: str = "screenshots",
     *,
     tmdb_id: int | None = None,
-    tmdb_media_type: str | None = None,
+    tmdb_media_type: Literal["movie", "tv"] | None = None,
 ) -> SlowpicsCollectionMetadata:
     media_type = tmdb_media_type if tmdb_media_type in {"movie", "tv"} else None
     return SlowpicsCollectionMetadata(title=title, tmdb_id=tmdb_id, tmdb_media_type=media_type)
@@ -124,7 +125,7 @@ def _assert_generated_multipart_content_type(request: httpx.Request) -> None:
 
 def _request_cookie_value(request: httpx.Request, cookie_name: str) -> str:
     cookie_header = request.headers["Cookie"]
-    parsed = SimpleCookie[str]()
+    parsed = SimpleCookie()
     parsed.load(cookie_header)
     return parsed[cookie_name].value
 

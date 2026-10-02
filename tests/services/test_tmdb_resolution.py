@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
@@ -22,7 +22,7 @@ type AsyncClientFactory = Callable[
 @asynccontextmanager
 async def _client_for_transport(
     transport: httpx.MockTransport,
-) -> AsyncIterator[httpx.AsyncClient]:
+) -> AsyncGenerator[httpx.AsyncClient]:
     async with httpx.AsyncClient(transport=transport) as client:
         yield client
 

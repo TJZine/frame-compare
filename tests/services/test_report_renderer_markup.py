@@ -9,7 +9,13 @@ from typing import cast
 
 import pytest
 
-from frame_compare.services.report.payload import ReportPayload, ReportTonemapSettingsPayload
+from frame_compare.services.report.payload import (
+    ReportClipPayload,
+    ReportFramePayload,
+    ReportImagePayload,
+    ReportPayload,
+    ReportTonemapSettingsPayload,
+)
 from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_js
 from tests.services.report_viewer_contracts import (
@@ -158,7 +164,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         "grid": "Grid (G) — scan sources together",
     }
     for button in mode_buttons:
-        assert button.attrs["title"] == mode_purpose_titles[button.attrs["data-mode"]]
+        assert button.attrs["title"] == mode_purpose_titles[cast(str, button.attrs["data-mode"])]
     assert "rv-context-controls" in pair_controls.classes
     assert "rv-context-controls" in active_controls.classes
     assert pair_controls in context_zone.children
@@ -205,7 +211,7 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
     report_payload: ReportPayload,
 ) -> None:
     long_label = "Reference candidate with a very long release label and source annotation "
-    clips = [
+    clips: list[ReportClipPayload] = [
         {
             **report_payload["clips"][0],
             "name": f"clip-{idx + 1}",
@@ -220,10 +226,14 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
         }
         for idx in range(12)
     ]
-    frames = [
+    frames: list[ReportFramePayload] = [
         {
             **report_payload["frames"][0],
-            "images": [{"clip": clip["name"], "src": f"{clip['name']}/10.png"} for clip in clips],
+            # Selector markup consumes only clip/src from this partial image fixture.
+            "images": cast(
+                list[ReportImagePayload],
+                [{"clip": clip["name"], "src": f"{clip['name']}/10.png"} for clip in clips],
+            ),
         }
     ]
     payload: ReportPayload = {
@@ -373,7 +383,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
     report_payload: ReportPayload,
 ) -> None:
-    settings = {
+    settings: ReportTonemapSettingsPayload = {
         "enabled": True,
         "preset": "reference",
         "tone_curve": "bt2390",
