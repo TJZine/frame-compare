@@ -271,187 +271,166 @@ def test_near_miss_or_duplicate_l5_metadata_falls_back_to_full_frame(
     )
 
 
-def test_dimension_detection_derives_centered_horizontal_crop() -> None:
+@pytest.mark.parametrize(
+    ("width", "height", "expected"),
+    [
+        pytest.param(
+            1440,
+            1080,
+            [
+                ClipActiveRect(240, 0, 1440, 1080, "dimension-derived", "dimension"),
+                ClipActiveRect(0, 0, 1440, 1080, "dimension-derived", "dimension"),
+            ],
+            id="horizontal",
+        ),
+        pytest.param(
+            1920,
+            800,
+            [
+                ClipActiveRect(0, 140, 1920, 800, "dimension-derived", "dimension"),
+                ClipActiveRect(0, 0, 1920, 800, "dimension-derived", "dimension"),
+            ],
+            id="vertical",
+        ),
+        pytest.param(
+            1440,
+            800,
+            [
+                ClipActiveRect(0, 0, 1920, 1080, "full-frame", "dimension"),
+                ClipActiveRect(0, 0, 1440, 800, "full-frame", "dimension"),
+            ],
+            id="no-matching-axis",
+        ),
+    ],
+)
+def test_dimension_detection(width: int, height: int, expected: list[ClipActiveRect]) -> None:
     resolved = _resolve(
-        [_clip("ref.mkv", width=1920, height=1080), _clip("enc.mkv", width=1440, height=1080)],
+        [_clip("ref.mkv", width=1920, height=1080), _clip("enc.mkv", width=width, height=height)],
         detection=ScreenshotActiveRectDetection.DIMENSION,
     )
-
-    assert [clip.active_rect for clip in resolved] == [
-        ClipActiveRect(240, 0, 1440, 1080, "dimension-derived", "dimension"),
-        ClipActiveRect(0, 0, 1440, 1080, "dimension-derived", "dimension"),
-    ]
+    assert [clip.active_rect for clip in resolved] == expected
 
 
-def test_dimension_detection_derives_centered_vertical_crop() -> None:
-    resolved = _resolve(
-        [_clip("ref.mkv", width=1920, height=1080), _clip("enc.mkv", width=1920, height=800)],
-        detection=ScreenshotActiveRectDetection.DIMENSION,
-    )
-
-    assert [clip.active_rect for clip in resolved] == [
-        ClipActiveRect(0, 140, 1920, 800, "dimension-derived", "dimension"),
-        ClipActiveRect(0, 0, 1920, 800, "dimension-derived", "dimension"),
-    ]
-
-
-def test_dimension_detection_does_nothing_when_no_axis_matches() -> None:
-    resolved = _resolve(
-        [_clip("ref.mkv", width=1920, height=1080), _clip("enc.mkv", width=1440, height=800)],
-        detection=ScreenshotActiveRectDetection.DIMENSION,
-    )
-
-    assert [clip.active_rect for clip in resolved] == [
-        ClipActiveRect(0, 0, 1920, 1080, "full-frame", "dimension"),
-        ClipActiveRect(0, 0, 1440, 800, "full-frame", "dimension"),
-    ]
-
-
-def test_aspect_ratio_detection_crops_letterboxed_source_with_two_source_evidence() -> None:
-    resolved = _resolve(
-        [
-            _clip("ref.mkv", width=3840, height=2160),
-            _clip("enc-a.mkv", width=1920, height=800),
-            _clip("enc-b.mkv", width=1920, height=800),
-        ]
-    )
-
-    assert resolved[0].active_rect == ClipActiveRect(
-        0,
-        280,
-        3840,
-        1600,
-        "aspect-ratio-derived",
-        "aspect_ratio",
-    )
-
-
-def test_auto_static_resolution_preserves_aspect_ratio_behavior_before_content_refinement() -> None:
-    resolved = _resolve(
-        [
-            _clip("ref.mkv", width=3840, height=2160),
-            _clip("enc-a.mkv", width=1920, height=800),
-            _clip("enc-b.mkv", width=1920, height=800),
-        ],
-        detection=ScreenshotActiveRectDetection.AUTO,
-    )
-
-    assert resolved[0].active_rect == ClipActiveRect(
-        0,
-        280,
-        3840,
-        1600,
-        "aspect-ratio-derived",
-        "auto",
-    )
-
-
-def test_aspect_ratio_detection_uses_one_explicit_source_as_evidence() -> None:
-    ref = _clip("ref.mkv", width=3840, height=2160)
-    enc = _clip("enc.mkv", width=1920, height=1080)
-    override = SourceOverrideConfig.model_validate(
-        {"active_rect": {"x": 0, "y": 140, "width": 1920, "height": 800}}
-    )
-
-    resolved = _resolve([ref, enc], overrides_by_path={enc.path: override})
-
-    assert resolved[0].active_rect == ClipActiveRect(
-        0,
-        280,
-        3840,
-        1600,
-        "aspect-ratio-derived",
-        "aspect_ratio",
-    )
-
-
-def test_aspect_ratio_detection_uses_one_metadata_source_as_evidence() -> None:
-    ref = _clip("ref.mkv", width=3840, height=2160)
-    enc = _clip(
-        "enc.mkv",
-        width=1920,
-        height=1080,
-        props={
-            "DolbyVision_L5_Left": 0,
-            "DolbyVision_L5_Right": 0,
-            "DolbyVision_L5_Top": 140,
-            "DolbyVision_L5_Bottom": 140,
-        },
-    )
-
-    resolved = _resolve([ref, enc])
-
-    assert resolved[0].active_rect == ClipActiveRect(
-        0,
-        280,
-        3840,
-        1600,
-        "aspect-ratio-derived",
-        "aspect_ratio",
-    )
-
-
-def test_aspect_ratio_detection_does_not_crop_single_source_or_large_removal() -> None:
-    single = _resolve([_clip("single.mkv", width=3840, height=2160)])
-    assert single[0].active_rect == ClipActiveRect(
-        0,
-        0,
-        3840,
-        2160,
-        "full-frame",
-        "aspect_ratio",
-    )
-
-    extreme = _resolve(
-        [
-            _clip("ref.mkv", width=3840, height=2160),
-            _clip("wide-a.mkv", width=1920, height=400),
-            _clip("wide-b.mkv", width=1920, height=400),
-        ]
-    )
-    assert extreme[0].active_rect == ClipActiveRect(
-        0,
-        0,
-        3840,
-        2160,
-        "full-frame",
-        "aspect_ratio",
-    )
-
-
-def test_aspect_ratio_candidate_tie_is_reference_biased_and_identity_is_stable() -> None:
-    resolved = _resolve(
-        [
-            _clip("ref.mkv", width=2400, height=1000),
-            _clip("near-ref.mkv", width=1200, height=500),
-            _clip("other-a.mkv", width=1920, height=800),
-            _clip("other-b.mkv", width=1920, height=800),
-        ]
-    )
-
-    assert resolved[0].active_rect == ClipActiveRect(
-        0,
-        0,
-        2400,
-        1000,
-        "full-frame",
-        "aspect_ratio",
-    )
+@pytest.mark.parametrize(
+    ("clips", "detection", "overrides", "expected", "check_identity"),
+    [
+        pytest.param(
+            [
+                _clip("ref.mkv", width=3840, height=2160),
+                _clip("enc-a.mkv", width=1920, height=800),
+                _clip("enc-b.mkv", width=1920, height=800),
+            ],
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+            {},
+            ClipActiveRect(0, 280, 3840, 1600, "aspect-ratio-derived", "aspect_ratio"),
+            False,
+            id="aspect_ratio_detection_crops_letterboxed_source_with_two_source_evidence-resolved",
+        ),
+        pytest.param(
+            [
+                _clip("ref.mkv", width=3840, height=2160),
+                _clip("enc-a.mkv", width=1920, height=800),
+                _clip("enc-b.mkv", width=1920, height=800),
+            ],
+            ScreenshotActiveRectDetection.AUTO,
+            {},
+            ClipActiveRect(0, 280, 3840, 1600, "aspect-ratio-derived", "auto"),
+            False,
+            id="auto_static_resolution_preserves_aspect_ratio_behavior_before_content_refinement-resolved",
+        ),
+        pytest.param(
+            [_clip("ref.mkv", width=3840, height=2160), _clip("enc.mkv", width=1920, height=1080)],
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+            {
+                _clip("enc.mkv", width=1920, height=1080).path: SourceOverrideConfig.model_validate(
+                    {"active_rect": {"x": 0, "y": 140, "width": 1920, "height": 800}}
+                )
+            },
+            ClipActiveRect(0, 280, 3840, 1600, "aspect-ratio-derived", "aspect_ratio"),
+            False,
+            id="aspect_ratio_detection_uses_one_explicit_source_as_evidence-resolved",
+        ),
+        pytest.param(
+            [
+                _clip("ref.mkv", width=3840, height=2160),
+                _clip(
+                    "enc.mkv",
+                    width=1920,
+                    height=1080,
+                    props={
+                        "DolbyVision_L5_Left": 0,
+                        "DolbyVision_L5_Right": 0,
+                        "DolbyVision_L5_Top": 140,
+                        "DolbyVision_L5_Bottom": 140,
+                    },
+                ),
+            ],
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+            {},
+            ClipActiveRect(0, 280, 3840, 1600, "aspect-ratio-derived", "aspect_ratio"),
+            False,
+            id="aspect_ratio_detection_uses_one_metadata_source_as_evidence-resolved",
+        ),
+        pytest.param(
+            [_clip("single.mkv", width=3840, height=2160)],
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+            {},
+            ClipActiveRect(0, 0, 3840, 2160, "full-frame", "aspect_ratio"),
+            False,
+            id="aspect_ratio_detection_does_not_crop_single_source_or_large_removal-single",
+        ),
+        pytest.param(
+            [
+                _clip("ref.mkv", width=3840, height=2160),
+                _clip("wide-a.mkv", width=1920, height=400),
+                _clip("wide-b.mkv", width=1920, height=400),
+            ],
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+            {},
+            ClipActiveRect(0, 0, 3840, 2160, "full-frame", "aspect_ratio"),
+            False,
+            id="aspect_ratio_detection_does_not_crop_single_source_or_large_removal-extreme",
+        ),
+        pytest.param(
+            [
+                _clip("ref.mkv", width=2400, height=1000),
+                _clip("near-ref.mkv", width=1200, height=500),
+                _clip("other-a.mkv", width=1920, height=800),
+                _clip("other-b.mkv", width=1920, height=800),
+            ],
+            ScreenshotActiveRectDetection.ASPECT_RATIO,
+            {},
+            ClipActiveRect(0, 0, 2400, 1000, "full-frame", "aspect_ratio"),
+            True,
+            id="aspect_ratio_candidate_tie_is_reference_biased_and_identity_is_stable-resolved",
+        ),
+    ],
+)
+def test_aspect_ratio_detection(
+    clips: list[ClipState],
+    detection: ScreenshotActiveRectDetection,
+    overrides: dict[Path, SourceOverrideConfig],
+    expected: ClipActiveRect,
+    check_identity: bool,
+) -> None:
+    resolved = _resolve(clips, detection=detection, overrides_by_path=overrides)
     rect = resolved[0].active_rect
-    assert rect is not None
-    assert active_rect_identity(rect) == {
-        "x": 0,
-        "y": 0,
-        "width": 2400,
-        "height": 1000,
-        "source": "full-frame",
-        "detection_mode": "aspect_ratio",
-        "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
-    }
-    assert active_rect_policy_identity(ScreenshotActiveRectDetection.ASPECT_RATIO) == {
-        "detection_mode": "aspect_ratio",
-        "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
-    }
+    assert rect == expected
+    if check_identity:
+        assert rect is not None
+        assert active_rect_identity(rect) == {
+            "x": 0,
+            "y": 0,
+            "width": 2400,
+            "height": 1000,
+            "source": "full-frame",
+            "detection_mode": "aspect_ratio",
+            "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
+        }
+        assert active_rect_policy_identity(ScreenshotActiveRectDetection.ASPECT_RATIO) == {
+            "detection_mode": "aspect_ratio",
+            "algorithm_id": ACTIVE_RECT_RESOLUTION_ALGORITHM,
+        }
 
 
 def test_post_refinement_ratio_requires_supported_content_evidence() -> None:

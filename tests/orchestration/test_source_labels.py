@@ -3,6 +3,7 @@
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -73,16 +74,30 @@ def test_explicit_override_wins_and_controls_are_normalized_for_derived_text() -
     assert details[comparison].explicit
 
 
-def test_derived_collisions_are_qualified_while_explicit_label_is_preserved() -> None:
-    paths = [Path("a.mkv"), Path("b.mkv"), Path("Same.mkv")]
-    overrides = {paths[0]: SourceOverrideConfig(label="Same")}
-    details = resolve_source_label_details(
-        ordered_paths=paths, overrides_by_path=overrides, label_mode="stem", label_parser="auto"
-    )
-    assert [details[path].value for path in paths] == ["Same", "b", "Same [Same]"]
-
-
-def test_derived_collision_qualification_is_stable_by_source_order(
+@pytest.mark.parametrize(
+    ("paths", "overrides", "mode", "expected"),
+    [
+        pytest.param(
+            [Path("a.mkv"), Path("b.mkv"), Path("Same.mkv")],
+            {Path("a.mkv"): SourceOverrideConfig(label="Same")},
+            "stem",
+            ["Same", "b", "Same [Same]"],
+            id="explicit-preserved",
+        ),
+        pytest.param(
+            [Path("one.mkv"), Path("two.mkv")],
+            {},
+            "parsed",
+            ["Same [one]", "Same [two]"],
+            id="source-order",
+        ),
+    ],
+)
+def test_derived_label_collisions(
+    paths: list[Path],
+    overrides: dict[Path, SourceOverrideConfig],
+    mode: Literal["stem", "parsed"],
+    expected: list[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from frame_compare.services.types import ParsedMetadata
@@ -91,11 +106,10 @@ def test_derived_collision_qualification_is_stable_by_source_order(
         "frame_compare.orchestration.source_labels.parse_filename",
         lambda *_args, **_kwargs: ParsedMetadata(title="Same"),
     )
-    paths = [Path("one.mkv"), Path("two.mkv")]
     details = resolve_source_label_details(
-        ordered_paths=paths, overrides_by_path={}, label_mode="parsed", label_parser="auto"
+        ordered_paths=paths, overrides_by_path=overrides, label_mode=mode, label_parser="auto"
     )
-    assert [details[path].value for path in paths] == ["Same [one]", "Same [two]"]
+    assert [details[path].value for path in paths] == expected
 
 
 def test_display_labels_do_not_change_analysis_cache_identity() -> None:

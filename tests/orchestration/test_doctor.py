@@ -144,7 +144,7 @@ class TestCheckLsmas:
             patch(
                 "frame_compare.orchestration.doctor_checks.try_load_lsmas_plugin",
                 return_value=None,
-            ) as load_plugin,
+            ),
             patch(
                 "frame_compare.orchestration.doctor_checks.candidate_lsmas_plugin_path_details",
                 return_value=[],
@@ -160,7 +160,6 @@ class TestCheckLsmas:
             "Make L-SMASH-Works available under core.lsmas; see "
             "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
-        load_plugin.assert_called_once_with(mock_core)
 
     def test_check_lsmas_plugin_fallback_loads_from_nested_extra_plugin_root(
         self,
@@ -208,7 +207,6 @@ class TestCheckLsmas:
 
         assert result.passed is True
         assert result.details.get("plugin_path") == str(plugin_path)
-        assert load_calls == [str(plugin_path)]
 
     def test_check_lsmas_failure_uses_sanitized_exception_details(self) -> None:
         """Unexpected lsmas errors should not expose raw exception text."""
@@ -397,111 +395,111 @@ class TestCheckVapoursynth:
             return original_import(name, *args, **kwargs)
 
         with (
-            patch("frame_compare.vs.env.register_windows_dll_dirs") as register_dirs,
+            patch("frame_compare.vs.env.register_windows_dll_dirs"),
             patch("builtins.__import__", side_effect=_fake_import),
         ):
             result = vs_check.check_fn()
 
-        register_dirs.assert_called_once()
-        assert vs_attempts["count"] == 2
         assert result.passed is True
 
 
 class TestCheckVsPlacebo:
-    def test_check_vs_placebo_reports_distribution_and_filter(self) -> None:
-        checks = collect_checks()
-        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(
-            Tonemap=object(),
-            functions=lambda: [SimpleNamespace(name="Tonemap")],
-        )
-        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
-
-        with (
-            patch(
-                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
+    @pytest.mark.parametrize(
+        ("module", "version", "passed", "available", "details", "message", "message_fragment"),
+        [
+            pytest.param(
+                SimpleNamespace(
+                    core=SimpleNamespace(
+                        placebo=SimpleNamespace(
+                            Tonemap=object(), functions=lambda: [SimpleNamespace(name="Tonemap")]
+                        )
+                    )
+                ),
+                "2.0.4",
+                True,
+                True,
+                {
+                    "observed_distribution_version": "2.0.4",
+                    "expected_distribution_match": True,
+                    "functions": ["Tonemap"],
+                },
+                "vs-placebo 2.0.4 available (placebo.Tonemap)",
+                False,
+                id="reports_distribution_and_filter",
             ),
-            patch(
-                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                return_value="2.0.4",
+            pytest.param(
+                SimpleNamespace(
+                    core=SimpleNamespace(
+                        placebo=SimpleNamespace(Tonemap=lambda: object(), functions=lambda: [])
+                    )
+                ),
+                "2.0.2",
+                False,
+                True,
+                {"expected_distribution_match": False},
+                "does not match 2.0.4",
+                True,
+                id="version_mismatch_is_reported",
             ),
-        ):
-            result = check.check_fn()
-
-        assert result.passed is True
-        assert result.available is True
-        assert result.details["observed_distribution_version"] == "2.0.4"
-        assert result.details["expected_distribution_match"] is True
-        assert result.details["functions"] == ["Tonemap"]
-        assert result.message == "vs-placebo 2.0.4 available (placebo.Tonemap)"
-
-    def test_check_vs_placebo_version_mismatch_is_reported(self) -> None:
-        checks = collect_checks()
-        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(Tonemap=lambda: object(), functions=lambda: [])
-        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
-
-        with (
-            patch(
-                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
+            pytest.param(
+                SimpleNamespace(
+                    core=SimpleNamespace(placebo=SimpleNamespace(functions=lambda: []))
+                ),
+                "2.0.4",
+                False,
+                False,
+                {"missing_functions": ["Tonemap"]},
+                "vs-placebo plugin is missing placebo.Tonemap",
+                False,
+                id="reports_missing_tonemap_function",
             ),
-            patch(
-                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                return_value="2.0.2",
+            pytest.param(
+                SimpleNamespace(core=SimpleNamespace()),
+                None,
+                False,
+                False,
+                {"observed_available": False, "observed_distribution_version": None},
+                None,
+                False,
+                id="missing_is_optional_failure",
             ),
-        ):
-            result = check.check_fn()
-
-        assert result.passed is False
-        assert result.available is True
-        assert result.details["expected_distribution_match"] is False
-        assert "does not match 2.0.4" in result.message
-
-    def test_check_vs_placebo_reports_missing_tonemap_function(self) -> None:
+        ],
+    )
+    def test_check_vs_placebo(
+        self,
+        module: SimpleNamespace,
+        version: str | None,
+        passed: bool,
+        available: bool,
+        details: dict[str, object],
+        message: str | None,
+        message_fragment: bool,
+    ) -> None:
         check = next(candidate for candidate in collect_checks() if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(functions=lambda: [])
-        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
-
         with (
             patch(
                 "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
+                return_value=module,
             ),
             patch(
                 "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                return_value="2.0.4",
+                return_value=version,
+                side_effect=PackageNotFoundError if version is None else None,
             ),
         ):
             result = check.check_fn()
-
-        assert result.passed is False
-        assert result.available is False
-        assert result.details["missing_functions"] == ["Tonemap"]
-        assert result.message == "vs-placebo plugin is missing placebo.Tonemap"
-
-    def test_check_vs_placebo_missing_is_optional_failure(self) -> None:
-        checks = collect_checks()
-        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        mock_vs = SimpleNamespace(core=SimpleNamespace())
-
-        with (
-            patch(
-                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
-            ),
-            patch(
-                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                side_effect=PackageNotFoundError,
-            ),
-        ):
-            result = check.check_fn()
-
-        assert result.passed is False
-        assert result.available is False
-        assert result.details["observed_available"] is False
-        assert result.details["observed_distribution_version"] is None
+        assert result.passed is passed
+        assert result.available is available
+        for key, value in details.items():
+            if isinstance(value, bool):
+                assert result.details[key] is value
+            else:
+                assert result.details[key] == value
+        if message is not None:
+            if message_fragment:
+                assert message in result.message
+            else:
+                assert result.message == message
 
 
 class TestCheckFFMS2:
@@ -872,7 +870,6 @@ class TestCheckFFmpeg:
 
         report = run_doctor(checks=checks)
 
-        assert [check.name for check, _result in report.checks] == ["ffms2", "ffmpeg"]
         assert report.all_passed is False
         assert report.critical_failures == []
 

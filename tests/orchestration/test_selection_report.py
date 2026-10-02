@@ -13,49 +13,60 @@ from frame_compare.orchestration.selection_report import (
 )
 
 
-def test_build_final_selection_report_compacts_ranges_in_category_order() -> None:
-    breakdown = SelectionBreakdown(
-        user=[5, 2, 3, 4],
-        quantile_dark=[21, 20],
-        quantile_bright=[40],
-        motion=[72, 70, 71],
-        random=[90, 92],
-    )
-
-    report = build_final_selection_report(
-        selected_frames=[0, 1, 2],
-        breakdown=breakdown,
-    )
-
-    assert report == FinalSelectionReport(
-        final_count=3,
-        categories=(
-            SelectionCategoryReport("User", 4, "2-5"),
-            SelectionCategoryReport("Dark", 2, "20-21"),
-            SelectionCategoryReport("Bright", 1, "40"),
-            SelectionCategoryReport("Motion", 3, "70-72"),
-            SelectionCategoryReport("Random", 2, "90, 92"),
+@pytest.mark.parametrize(
+    ("selected_frames", "breakdown", "expected"),
+    [
+        pytest.param(
+            [0, 1, 2],
+            SelectionBreakdown(
+                user=[5, 2, 3, 4],
+                quantile_dark=[21, 20],
+                quantile_bright=[40],
+                motion=[72, 70, 71],
+                random=[90, 92],
+            ),
+            FinalSelectionReport(
+                final_count=3,
+                categories=(
+                    SelectionCategoryReport("User", 4, "2-5"),
+                    SelectionCategoryReport("Dark", 2, "20-21"),
+                    SelectionCategoryReport("Bright", 1, "40"),
+                    SelectionCategoryReport("Motion", 3, "70-72"),
+                    SelectionCategoryReport("Random", 2, "90, 92"),
+                ),
+                breakdown_available=True,
+            ),
+            id="category-order",
         ),
-        breakdown_available=True,
+        pytest.param(
+            [0],
+            SelectionBreakdown(random=[1, 1, 2]),
+            FinalSelectionReport(
+                final_count=1,
+                categories=(SelectionCategoryReport("Random", 3, "1, 1-2"),),
+                breakdown_available=True,
+            ),
+            id="duplicate-sequence",
+        ),
+        pytest.param(
+            [0, 4],
+            SelectionBreakdown(user=[105, 100]),
+            FinalSelectionReport(
+                final_count=2,
+                categories=(SelectionCategoryReport("User", 2, "100, 105"),),
+                breakdown_available=True,
+            ),
+            id="user-only",
+        ),
+    ],
+)
+def test_build_final_selection_report(
+    selected_frames: list[int], breakdown: SelectionBreakdown, expected: FinalSelectionReport
+) -> None:
+    assert (
+        build_final_selection_report(selected_frames=selected_frames, breakdown=breakdown)
+        == expected
     )
-
-
-def test_build_final_selection_report_preserves_existing_sequence_count() -> None:
-    report = build_final_selection_report(
-        selected_frames=[0],
-        breakdown=SelectionBreakdown(random=[1, 1, 2]),
-    )
-
-    assert report.categories == (SelectionCategoryReport("Random", 3, "1, 1-2"),)
-
-
-def test_build_final_selection_report_user_only_omits_empty_categories() -> None:
-    report = build_final_selection_report(
-        selected_frames=[0, 4],
-        breakdown=SelectionBreakdown(user=[105, 100]),
-    )
-
-    assert report.categories == (SelectionCategoryReport("User", 2, "100, 105"),)
 
 
 def test_build_final_selection_report_marks_empty_breakdown_available() -> None:
@@ -71,52 +82,52 @@ def test_build_final_selection_report_marks_empty_breakdown_available() -> None:
     )
 
 
-def test_emit_final_selection_report_renders_verbose_human_summary_to_stderr(
+@pytest.mark.parametrize(
+    ("selected_frames", "breakdown", "present", "absent"),
+    [
+        pytest.param(
+            [0, 1, 2],
+            SelectionBreakdown(user=[10, 11], random=[30]),
+            [
+                "Final Selection",
+                "After Alignment",
+                "3 aligned frames",
+                "User",
+                "2 source frames",
+                "10-11",
+                "Random",
+                "1 source frame",
+                "30",
+            ],
+            ["Dark", "Bright", "Motion", "\x1b["],
+            id="available",
+        ),
+        pytest.param(
+            [7], None, ["1 aligned frame", "breakdown", "unavailable"], [], id="unavailable"
+        ),
+    ],
+)
+def test_emit_final_selection_report_verbose_human_summary(
+    selected_frames: list[int],
+    breakdown: SelectionBreakdown | None,
+    present: list[str],
+    absent: list[str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     emit_final_selection_report(
-        selected_frames=[0, 1, 2],
-        breakdown=SelectionBreakdown(user=[10, 11], random=[30]),
+        selected_frames=selected_frames,
+        breakdown=breakdown,
         verbose=True,
         json_output=False,
         quiet=False,
         no_color=True,
     )
-
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Final Selection" in captured.err
-    assert "After Alignment" in captured.err
-    assert "3 aligned frames" in captured.err
-    assert "User" in captured.err
-    assert "2 source frames" in captured.err
-    assert "10-11" in captured.err
-    assert "Random" in captured.err
-    assert "1 source frame" in captured.err
-    assert "30" in captured.err
-    assert "Dark" not in captured.err
-    assert "Bright" not in captured.err
-    assert "Motion" not in captured.err
-    assert "\x1b[" not in captured.err
-
-
-def test_emit_final_selection_report_renders_unavailable_breakdown(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    emit_final_selection_report(
-        selected_frames=[7],
-        breakdown=None,
-        verbose=True,
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "1 aligned frame" in captured.err
-    assert "breakdown" in captured.err
-    assert "unavailable" in captured.err
+    for text in present:
+        assert text in captured.err
+    for text in absent:
+        assert text not in captured.err
 
 
 @pytest.mark.parametrize(

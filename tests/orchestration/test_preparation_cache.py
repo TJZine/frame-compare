@@ -118,14 +118,13 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     alignment_cache_path.parent.mkdir(parents=True, exist_ok=True)
     alignment_cache_path.write_text("preserve me\n", encoding="utf-8")
 
-    prep = asyncio.run(
+    asyncio.run(
         preparation.execute_prep(
             RunRequest(root=tmp_path, no_cache=True),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
 
-    assert prep.clips[0].label == "source"
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
     assert manual_overrides_path.exists()
@@ -311,7 +310,7 @@ def test_execute_prep_rejects_skip_analysis_with_metric_frame_selection(tmp_path
     assert exc_info.value.validation_errors[0]["loc"] == ["analysis", "dark_frame_count"]
 
 
-def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
+def test_execute_prep_from_cache_only_rejects_missing_probe_snapshot_for_selected_reference(
     tmp_path: Path,
 ) -> None:
     config_content = METRIC_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'

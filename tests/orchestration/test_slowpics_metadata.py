@@ -27,85 +27,110 @@ def _resolve(
     )
 
 
-def test_literal_template_and_suffix_paths_share_exact_final_title() -> None:
-    assert _resolve(SlowpicsConfig(title="Literal", title_suffix="[X]")).metadata.title == (
-        "Literal [X]"
-    )
-    result = _resolve(
-        SlowpicsConfig(
-            title_template="${Title} (${Year}) - ${Filename} - ${FileName} - ${Label} $$",
-            title_suffix="[X]",
-        )
-    )
-    assert result.metadata.title == (
-        "Parsed Title (2020) - Reference.Source - Reference.Source.mkv - Reference Label $ [X]"
-    )
-
-
-def test_automatic_title_precedence_tmdb_parsed_stem_and_final_fallback() -> None:
-    tmdb = TmdbMetadata(1, "TMDB Title", "Original", 2024, "movie")
-    assert _resolve(tmdb=tmdb).metadata.title == "TMDB Title (2024)"
-    assert _resolve(parsed=ParsedMetadata(title="Parsed", year=2021)).metadata.title == (
-        "Parsed (2021)"
-    )
-    assert _resolve(parsed=ParsedMetadata(title=""), path=Path("Reference.mkv")).metadata.title == (
-        "Reference"
-    )
-    assert _resolve(parsed=ParsedMetadata(title=""), path=Path("")).metadata.title == (
-        "Frame Comparison"
-    )
-
-
 @pytest.mark.parametrize(
-    ("parsed", "tmdb", "path", "expected"),
+    ("config", "parsed", "tmdb", "path", "expected"),
     [
-        (
+        pytest.param(
+            SlowpicsConfig(title="Literal", title_suffix="[X]"),
+            None,
+            None,
+            Path("Reference.Source.mkv"),
+            "Literal [X]",
+            id="literal_template_and_suffix_paths_share_exact_final_title-0",
+        ),
+        pytest.param(
+            SlowpicsConfig(
+                title_template="${Title} (${Year}) - ${Filename} - ${FileName} - ${Label} $$",
+                title_suffix="[X]",
+            ),
+            None,
+            None,
+            Path("Reference.Source.mkv"),
+            "Parsed Title (2020) - Reference.Source - Reference.Source.mkv - Reference Label $ [X]",
+            id="literal_template_and_suffix_paths_share_exact_final_title-1",
+        ),
+        pytest.param(
+            None,
+            None,
+            TmdbMetadata(1, "TMDB Title", "Original", 2024, "movie"),
+            Path("Reference.Source.mkv"),
+            "TMDB Title (2024)",
+            id="automatic_title_precedence_tmdb_parsed_stem_and_final_fallback-0",
+        ),
+        pytest.param(
+            None,
+            ParsedMetadata(title="Parsed", year=2021),
+            None,
+            Path("Reference.Source.mkv"),
+            "Parsed (2021)",
+            id="automatic_title_precedence_tmdb_parsed_stem_and_final_fallback-1",
+        ),
+        pytest.param(
+            None,
+            ParsedMetadata(title=""),
+            None,
+            Path("Reference.mkv"),
+            "Reference",
+            id="automatic_title_precedence_tmdb_parsed_stem_and_final_fallback-2",
+        ),
+        pytest.param(
+            None,
+            ParsedMetadata(title=""),
+            None,
+            Path(""),
+            "Frame Comparison",
+            id="automatic_title_precedence_tmdb_parsed_stem_and_final_fallback-3",
+        ),
+        pytest.param(
+            SlowpicsConfig(title_suffix="[X]"),
             ParsedMetadata(title="Parsed", year=2021),
             TmdbMetadata(1, "TMDB Title", "Original", 2024, "movie"),
             Path("Reference.mkv"),
             "TMDB Title (2024) [X]",
+            id="suffix-0",
         ),
-        (
+        pytest.param(
+            SlowpicsConfig(title_suffix="[X]"),
             ParsedMetadata(title="Parsed", year=2021),
             None,
             Path("Reference.mkv"),
             "Parsed (2021) [X]",
+            id="suffix-1",
         ),
-        (
+        pytest.param(
+            SlowpicsConfig(title_suffix="[X]"),
             ParsedMetadata(title=""),
             None,
             Path("Reference.mkv"),
             "Reference [X]",
+            id="suffix-2",
         ),
-        (
+        pytest.param(
+            SlowpicsConfig(title_suffix="[X]"),
             ParsedMetadata(title=""),
             None,
             Path(""),
             "Frame Comparison [X]",
+            id="suffix-3",
+        ),
+        pytest.param(
+            SlowpicsConfig(title_template="${OriginalLanguage}"),
+            None,
+            TmdbMetadata(1, "TMDB Title", "Original", 0, "tv"),
+            Path("Reference.Source.mkv"),
+            "TMDB Title",
+            id="zero_year_is_omitted_and_blank_template_continues_to_automatic_fallback-0",
         ),
     ],
 )
-def test_suffix_is_applied_to_every_automatic_title_path(
-    parsed: ParsedMetadata,
+def test_resolved_collection_title(
+    config: SlowpicsConfig | None,
+    parsed: ParsedMetadata | None,
     tmdb: TmdbMetadata | None,
     path: Path,
     expected: str,
 ) -> None:
-    result = _resolve(
-        SlowpicsConfig(title_suffix="[X]"),
-        parsed=parsed,
-        tmdb=tmdb,
-        path=path,
-    )
-
-    assert result.metadata.title == expected
-
-
-def test_zero_year_is_omitted_and_blank_template_continues_to_automatic_fallback() -> None:
-    tmdb = TmdbMetadata(1, "TMDB Title", "Original", 0, "tv")
-    assert _resolve(
-        SlowpicsConfig(title_template="${OriginalLanguage}"), tmdb=tmdb
-    ).metadata.title == ("TMDB Title")
+    assert _resolve(config, parsed=parsed, tmdb=tmdb, path=path).metadata.title == expected
 
 
 def test_auto_and_explicit_tmdb_association_are_typed() -> None:

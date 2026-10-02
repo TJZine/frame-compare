@@ -1,5 +1,7 @@
 """Tests for probe prop key selection and preservation helpers."""
 
+import pytest
+
 from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
@@ -58,16 +60,14 @@ class TestComputeTonemapPropKeys:
         # Result is a tuple (immutable)
         assert isinstance(result, tuple)
 
-    def test_compute_tonemap_prop_keys_empty_input(self) -> None:
-        """Verify empty input returns empty tuple."""
-        assert compute_tonemap_prop_keys({}) == ()
-
-    def test_compute_tonemap_prop_keys_no_matches(self) -> None:
-        """Verify no matching keys returns empty tuple."""
-        frame_props = {
-            "SomeOtherProp": "value",
-            "FrameType": "I",
-        }
+    @pytest.mark.parametrize(
+        "frame_props",
+        [{}, {"SomeOtherProp": "value", "FrameType": "I"}],
+        ids=["empty", "nonmatching"],
+    )
+    def test_compute_tonemap_prop_keys_without_matches(
+        self, frame_props: dict[str, object]
+    ) -> None:
         assert compute_tonemap_prop_keys(frame_props) == ()
 
 

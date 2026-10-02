@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import tomli_w
 
 from frame_compare.orchestration.probing.probe_cache import (
@@ -10,20 +11,15 @@ from frame_compare.orchestration.probing.probe_cache import (
 )
 
 
-def test_load_clip_probe_cache_returns_empty_dict_on_missing_file(tmp_path: Path):
-    """Missing file -> empty dict."""
-    cache = load_clip_probe_cache(tmp_path / "missing.toml")
-    assert cache == {}
-
-
-def test_load_clip_probe_cache_returns_empty_dict_on_version_mismatch(tmp_path: Path):
-    """Wrong version -> empty dict."""
-    f = tmp_path / "version.toml"
-    with f.open("wb") as out:
-        tomli_w.dump({"version": "2", "foo": {}}, out)
-
-    cache = load_clip_probe_cache(f)
-    assert cache == {}
+@pytest.mark.parametrize(
+    "content", [None, {"version": "2", "foo": {}}], ids=["missing-file", "version-mismatch"]
+)
+def test_load_clip_probe_cache_miss(tmp_path: Path, content: dict[str, object] | None) -> None:
+    path = tmp_path / ("missing.toml" if content is None else "version.toml")
+    if content is not None:
+        with path.open("wb") as output:
+            tomli_w.dump(content, output)
+    assert load_clip_probe_cache(path) == {}
 
 
 def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(tmp_path: Path):

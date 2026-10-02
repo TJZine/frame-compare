@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -51,41 +52,28 @@ def _create_video_files(input_dir: Path, *filenames: str) -> None:
 class TestResolveWorkspace:
     """Tests for resolve_workspace function."""
 
-    def test_resolve_workspace_explicit_root(self, tmp_path: Path) -> None:
-        """Given explicit root=tmp_path → returns tmp_path."""
-        result = resolve_workspace(tmp_path)
-        assert result == tmp_path.resolve()
-
-    def test_resolve_workspace_cwd_with_config(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("explicit", "has_config", "subdirectory"),
+        [(True, False, False), (False, True, False), (False, True, True), (False, False, False)],
+        ids=["explicit-root", "cwd-config", "upward-config", "cwd-fallback"],
+    )
+    def test_resolve_workspace(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        explicit: bool,
+        has_config: bool,
+        subdirectory: bool,
     ) -> None:
-        """Given tmp_path/config/config.toml exists and cwd=tmp_path → returns tmp_path."""
-        _create_config(tmp_path)
-        monkeypatch.chdir(tmp_path)
-
-        result = resolve_workspace(None)
-        assert result == tmp_path
-
-    def test_resolve_workspace_searches_upward(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Given tmp_path/config/config.toml exists and cwd is subdir → returns tmp_path."""
-        _create_config(tmp_path)
-        subdir = tmp_path / "subdir"
-        subdir.mkdir()
-        monkeypatch.chdir(subdir)
-
-        result = resolve_workspace(None)
-        assert result == tmp_path
-
-    def test_resolve_workspace_fallback_cwd(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Given no config found and cwd=tmp_path → returns tmp_path."""
-        monkeypatch.chdir(tmp_path)
-
-        result = resolve_workspace(None)
-        assert result == tmp_path
+        if has_config:
+            _create_config(tmp_path)
+        cwd = tmp_path / "subdir" if subdirectory else tmp_path
+        if subdirectory:
+            cwd.mkdir()
+        if not explicit:
+            monkeypatch.chdir(cwd)
+        result = resolve_workspace(tmp_path if explicit else None)
+        assert result == (tmp_path.resolve() if explicit else tmp_path)
 
 
 class TestResolvePaths:
@@ -177,234 +165,190 @@ class TestResolvePaths:
             "root": str(root.resolve()),
         }
 
-    def test_resolve_paths_allows_absolute_external_input(self, tmp_path: Path) -> None:
-        root = tmp_path / "workspace"
-        external_input = tmp_path / "media"
-        root.mkdir()
-        external_input.mkdir()
-        config = ConfigSchema(
-            paths=PathsConfig(input_dir=str(external_input)),
-        )
-
-        result = resolve_paths(config, root)
-
-        assert result.input_dir == external_input.resolve()
-        assert result.generated_root.is_relative_to(root.resolve())
-
-    def test_resolve_paths_allows_absolute_external_generated_root(self, tmp_path: Path) -> None:
-        root = tmp_path / "workspace"
-        external_generated = tmp_path / "generated-on-external-volume"
-        root.mkdir()
-        external_generated.mkdir()
-        config = ConfigSchema(paths=PathsConfig(generated_dir=str(external_generated)))
-
-        result = resolve_paths(config, root)
-
-        assert result.generated_root == external_generated.resolve()
-        assert result.generated_dir == external_generated.resolve()
-        assert not (root / "generated").exists()
-
-    def test_resolve_paths_expands_absolute_generated_root_environment_value(
+    @pytest.mark.parametrize(
+        ("field", "external_name", "link_name", "environment"),
+        [
+            pytest.param("input_dir", "media", None, False, id="absolute-input"),
+            pytest.param(
+                "generated_dir",
+                "generated-on-external-volume",
+                None,
+                False,
+                id="absolute-generated",
+            ),
+            pytest.param(
+                "generated_dir", "generated-from-env", None, True, id="environment-generated"
+            ),
+            pytest.param(
+                "generated_dir",
+                "external-generated",
+                "generated-link",
+                False,
+                id="symlink-generated",
+            ),
+            pytest.param("input_dir", "media", "linked-media", False, id="symlink-input"),
+        ],
+    )
+    def test_resolve_paths_external_directories(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        field: Literal["input_dir", "generated_dir"],
+        external_name: str,
+        link_name: str | None,
+        environment: bool,
     ) -> None:
         root = tmp_path / "workspace"
-        external_generated = tmp_path / "generated-from-env"
+        external = tmp_path / external_name
         root.mkdir()
-        external_generated.mkdir()
-        monkeypatch.setenv("FRAME_COMPARE_GENERATED_ROOT", str(external_generated))
-        config = ConfigSchema(paths=PathsConfig(generated_dir="$FRAME_COMPARE_GENERATED_ROOT"))
-
+        external.mkdir()
+        value = str(external)
+        if link_name is not None:
+            link = root / link_name
+            link.symlink_to(external, target_is_directory=True)
+            value = str(link) if field == "generated_dir" else link_name
+        if environment:
+            monkeypatch.setenv("FRAME_COMPARE_GENERATED_ROOT", str(external))
+            value = "$FRAME_COMPARE_GENERATED_ROOT"
+        config = ConfigSchema(paths=PathsConfig.model_validate({field: value}))
         result = resolve_paths(config, root)
+        if field == "input_dir":
+            assert result.input_dir == external.resolve()
+            if link_name is None:
+                assert result.generated_root.is_relative_to(root.resolve())
+        else:
+            assert result.generated_root == external.resolve()
+            if link_name is None and not environment:
+                assert result.generated_dir == external.resolve()
+                assert not (root / "generated").exists()
 
-        assert result.generated_root == external_generated.resolve()
-        assert config.paths.generated_dir == "$FRAME_COMPARE_GENERATED_ROOT"
-
-    def test_resolve_paths_allows_generated_root_reached_through_symlink(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        root = tmp_path / "workspace"
-        external_generated = tmp_path / "external-generated"
-        root.mkdir()
-        external_generated.mkdir()
-        link = root / "generated-link"
-        link.symlink_to(external_generated, target_is_directory=True)
-        config = ConfigSchema(paths=PathsConfig(generated_dir=str(link)))
-
-        result = resolve_paths(config, root)
-
-        assert result.generated_root == external_generated.resolve()
-
-    def test_resolve_paths_maps_generated_root_resolve_failure(
+    @pytest.mark.parametrize(
+        ("generated_dir", "descendant", "error", "expected_message"),
+        [
+            pytest.param(
+                "generated-loop",
+                "",
+                RuntimeError("symlink loop"),
+                "generated-loop",
+                id="generated-root",
+            ),
+            pytest.param(
+                "generated",
+                "cache/analysis",
+                OSError("managed path unavailable"),
+                "managed path unavailable",
+                id="managed-cache",
+            ),
+        ],
+    )
+    def test_resolve_paths_maps_resolution_failure(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        generated_dir: str,
+        descendant: str,
+        error: Exception,
+        expected_message: str,
     ) -> None:
         root = tmp_path / "workspace"
         root.mkdir()
-        generated_loop = root / "generated-loop"
-        config = ConfigSchema(paths=PathsConfig(generated_dir="generated-loop"))
+        failing_path = root / generated_dir / descendant
+        config = ConfigSchema(paths=PathsConfig(generated_dir=generated_dir))
         original_resolve = Path.resolve
 
-        def _fail_generated_resolve(path: Path, *args: object, **kwargs: object) -> Path:
-            if path == generated_loop:
-                raise RuntimeError("symlink loop")
+        def fail_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+            if path == failing_path:
+                raise error
             return original_resolve(path, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "resolve", _fail_generated_resolve)
-
+        monkeypatch.setattr(Path, "resolve", fail_resolve)
         with pytest.raises(ConfigValidationError) as exc_info:
             resolve_paths(config, root)
-
         assert exc_info.value.code == "FC-1003"
-        assert "generated-loop" in str(exc_info.value)
+        assert expected_message in str(exc_info.value)
         assert "Reconnect" in (exc_info.value.hint or "")
-        assert not generated_loop.exists()
+        assert not failing_path.exists()
 
-    def test_resolve_paths_maps_managed_cache_resolve_failure(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        root = tmp_path / "workspace"
-        root.mkdir()
-        generated_root = root / "generated"
-        managed_loop = generated_root / "cache" / "analysis"
-        config = ConfigSchema(paths=PathsConfig(generated_dir="generated"))
-        original_resolve = Path.resolve
-
-        def _fail_managed_resolve(path: Path, *args: object, **kwargs: object) -> Path:
-            if path == managed_loop:
-                raise OSError("managed path unavailable")
-            return original_resolve(path, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "resolve", _fail_managed_resolve)
-
-        with pytest.raises(ConfigValidationError) as exc_info:
-            resolve_paths(config, root)
-
-        assert exc_info.value.code == "FC-1003"
-        assert "managed path unavailable" in str(exc_info.value)
-        assert "Reconnect" in (exc_info.value.hint or "")
-        assert not managed_loop.exists()
-
-    def test_resolve_paths_rejects_shared_analysis_cache_symlink_escape(
-        self,
-        tmp_path: Path,
+    @pytest.mark.parametrize(
+        ("name", "is_directory"),
+        [("analysis", True), ("tmdb.toml", False)],
+        ids=["analysis", "tmdb"],
+    )
+    def test_resolve_paths_rejects_shared_cache_symlink_escape(
+        self, tmp_path: Path, name: str, is_directory: bool
     ) -> None:
         root = tmp_path / "workspace"
         generated_root = root / "generated"
         external_cache = tmp_path / "external-cache"
         (generated_root / "cache").mkdir(parents=True)
         external_cache.mkdir()
-        (generated_root / "cache" / "analysis").symlink_to(
-            external_cache,
-            target_is_directory=True,
+        external_path = external_cache if is_directory else external_cache / name
+        (generated_root / "cache" / name).symlink_to(
+            external_path, target_is_directory=is_directory
         )
         config = ConfigSchema(paths=PathsConfig(generated_dir="generated"))
-
         with pytest.raises(PathEscapesRootError) as exc_info:
             resolve_paths(config, root)
-
         assert exc_info.value.context.details == {
-            "path": str(external_cache.resolve()),
+            "path": str(external_path.resolve()),
             "root": str(generated_root.resolve()),
         }
 
-    def test_resolve_paths_rejects_shared_tmdb_cache_symlink_escape(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        root = tmp_path / "workspace"
-        generated_root = root / "generated"
-        external_cache = tmp_path / "external-cache"
-        (generated_root / "cache").mkdir(parents=True)
-        external_cache.mkdir()
-        (generated_root / "cache" / "tmdb.toml").symlink_to(external_cache / "tmdb.toml")
-        config = ConfigSchema(paths=PathsConfig(generated_dir="generated"))
-
-        with pytest.raises(PathEscapesRootError) as exc_info:
-            resolve_paths(config, root)
-
-        assert exc_info.value.context.details == {
-            "path": str((external_cache / "tmdb.toml").resolve()),
-            "root": str(generated_root.resolve()),
-        }
-
-    @pytest.mark.parametrize("generated_dir", ["", " ", "\t\n"])
-    def test_resolve_paths_rejects_empty_generated_directory(
-        self,
-        tmp_path: Path,
-        generated_dir: str,
-    ) -> None:
-        root = tmp_path / "workspace"
-        root.mkdir()
-        config = ConfigSchema(paths=PathsConfig(generated_dir=generated_dir))
-
-        with pytest.raises(ConfigValidationError) as exc_info:
-            resolve_paths(config, root)
-
-        assert exc_info.value.context.details is not None
-        assert exc_info.value.context.details["validation_errors"]
-        assert "non-empty" in (exc_info.value.hint or "")
-
-    def test_resolve_paths_rejects_environment_value_expanding_to_empty(
+    @pytest.mark.parametrize(
+        (
+            "generated_dir",
+            "environment",
+            "symlink",
+            "validation",
+            "nonempty_hint",
+            "absent_generated",
+        ),
+        [
+            pytest.param("", False, False, True, True, False, id="blank"),
+            pytest.param(" ", False, False, True, True, False, id="space"),
+            pytest.param("\t\n", False, False, True, True, False, id="whitespace"),
+            pytest.param(
+                "$FRAME_COMPARE_EMPTY_GENERATED_ROOT",
+                True,
+                False,
+                False,
+                False,
+                False,
+                id="environment-empty",
+            ),
+            pytest.param("/", False, False, True, False, True, id="posix-root"),
+            pytest.param("C:\\", False, False, True, False, True, id="windows-root"),
+            pytest.param("\\\\server\\share", False, False, True, False, True, id="unc-root"),
+            pytest.param("root-link", False, True, False, False, False, id="symlink-root"),
+        ],
+    )
+    def test_resolve_paths_rejects_invalid_generated_directory(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        root = tmp_path / "workspace"
-        root.mkdir()
-        monkeypatch.setenv("FRAME_COMPARE_EMPTY_GENERATED_ROOT", "")
-        config = ConfigSchema(
-            paths=PathsConfig(generated_dir="$FRAME_COMPARE_EMPTY_GENERATED_ROOT")
-        )
-
-        with pytest.raises(ConfigValidationError):
-            resolve_paths(config, root)
-
-    @pytest.mark.parametrize("generated_dir", ["/", "C:\\", "\\\\server\\share"])
-    def test_resolve_paths_rejects_filesystem_root_generated_directory(
-        self,
-        tmp_path: Path,
         generated_dir: str,
+        environment: bool,
+        symlink: bool,
+        validation: bool,
+        nonempty_hint: bool,
+        absent_generated: bool,
     ) -> None:
         root = tmp_path / "workspace"
         root.mkdir()
+        if environment:
+            monkeypatch.setenv("FRAME_COMPARE_EMPTY_GENERATED_ROOT", "")
+        if symlink:
+            (root / "root-link").symlink_to(Path("/"), target_is_directory=True)
         config = ConfigSchema(paths=PathsConfig(generated_dir=generated_dir))
-
         with pytest.raises(ConfigValidationError) as exc_info:
             resolve_paths(config, root)
-
-        assert exc_info.value.context.details is not None
-        assert exc_info.value.context.details["validation_errors"]
-        assert not (root / "generated").exists()
-
-    def test_resolve_paths_rejects_generated_root_symlink_to_filesystem_root(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        root = tmp_path / "workspace"
-        root.mkdir()
-        (root / "root-link").symlink_to(Path("/"), target_is_directory=True)
-        config = ConfigSchema(paths=PathsConfig(generated_dir="root-link"))
-
-        with pytest.raises(ConfigValidationError):
-            resolve_paths(config, root)
-
-    def test_resolve_paths_allows_symlinked_external_input(self, tmp_path: Path) -> None:
-        root = tmp_path / "workspace"
-        external_input = tmp_path / "media"
-        root.mkdir()
-        external_input.mkdir()
-        (root / "linked-media").symlink_to(external_input, target_is_directory=True)
-        config = ConfigSchema(paths=PathsConfig(input_dir="linked-media"))
-
-        result = resolve_paths(config, root)
-
-        assert result.input_dir == external_input.resolve()
+        if validation:
+            assert exc_info.value.context.details is not None
+            assert exc_info.value.context.details["validation_errors"]
+        if nonempty_hint:
+            assert "non-empty" in (exc_info.value.hint or "")
+        if absent_generated:
+            assert not (root / "generated").exists()
 
     def test_resolve_contained_path_expands_environment_variables(
         self,
@@ -482,55 +426,46 @@ class TestResolvePaths:
 class TestDiscoverInputs:
     """Tests for discover_inputs helper (determinism)."""
 
-    def test_discover_inputs_sorted_case_insensitive(self, tmp_path: Path) -> None:
-        """Given files b.mkv and A.mkv → discovered list is [A.mkv, b.mkv]."""
-        _create_video_files(tmp_path, "b.mkv", "A.mkv")
-
+    @pytest.mark.parametrize(
+        ("names", "expected"),
+        [(["b.mkv", "A.mkv"], ["A.mkv", "b.mkv"]), (["VIDEO.MKV"], ["VIDEO.MKV"])],
+        ids=["casefold-order", "extension-case"],
+    )
+    def test_discover_inputs_case_insensitive(
+        self, tmp_path: Path, names: list[str], expected: list[str]
+    ) -> None:
+        _create_video_files(tmp_path, *names)
         result = discover_inputs(tmp_path, ["*.mkv"])
+        assert [path.name for path in result] == expected
 
-        # Assert exact ordering: case-insensitive sort means A.mkv < b.mkv
-        assert len(result) == 2
-        assert result[0].name == "A.mkv"
-        assert result[1].name == "b.mkv"
-
-    def test_discover_inputs_uses_exact_name_to_break_casefold_ties(
+    @pytest.mark.parametrize(
+        ("names", "pattern", "expected"),
+        [
+            (["a.mkv", "A.mkv"], "*.mkv", ["A.mkv", "a.mkv"]),
+            (
+                ["z/same.mkv", "a/same.mkv", "A/same.mkv"],
+                "**/*.mkv",
+                ["A/same.mkv", "a/same.mkv", "z/same.mkv"],
+            ),
+        ],
+        ids=["exact-name", "recursive-relative-path"],
+    )
+    def test_discover_inputs_breaks_casefold_ties(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        names: list[str],
+        pattern: str,
+        expected: list[str],
     ) -> None:
-        candidates = [tmp_path / "a.mkv", tmp_path / "A.mkv"]
-        monkeypatch.setattr(Path, "iterdir", lambda _path: iter(candidates))
+        candidates = [tmp_path / name for name in names]
+        if pattern == "**/*.mkv":
+            monkeypatch.setattr(Path, "rglob", lambda _path, _pattern: iter(candidates))
+        else:
+            monkeypatch.setattr(Path, "iterdir", lambda _path: iter(candidates))
         monkeypatch.setattr(Path, "is_file", lambda path: path in candidates)
-
-        result = discover_inputs(tmp_path, ["*.mkv"])
-
-        assert [path.name for path in result] == ["A.mkv", "a.mkv"]
-
-    def test_discover_inputs_uses_relative_path_to_break_recursive_basename_ties(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        candidates = [
-            tmp_path / "z" / "same.mkv",
-            tmp_path / "a" / "same.mkv",
-            tmp_path / "A" / "same.mkv",
-        ]
-        monkeypatch.setattr(Path, "rglob", lambda _path, _pattern: iter(candidates))
-        monkeypatch.setattr(Path, "is_file", lambda path: path in candidates)
-
-        result = discover_inputs(tmp_path, ["**/*.mkv"])
-
-        assert [path.relative_to(tmp_path).as_posix() for path in result] == [
-            "A/same.mkv",
-            "a/same.mkv",
-            "z/same.mkv",
-        ]
-
-    def test_discover_inputs_matches_extensions_case_insensitive(self, tmp_path: Path) -> None:
-        _create_video_files(tmp_path, "VIDEO.MKV")
-        result = discover_inputs(tmp_path, ["*.mkv"])
-        assert [p.name for p in result] == ["VIDEO.MKV"]
+        result = discover_inputs(tmp_path, [pattern])
+        assert [path.relative_to(tmp_path).as_posix() for path in result] == expected
 
     def test_discover_inputs_empty_raises_no_videos_found_error_preserves_patterns(
         self, tmp_path: Path
@@ -576,35 +511,36 @@ class TestPreparePreflight:
         assert result.workspace.root == tmp_path.resolve()
         assert result.workspace.input_dir == input_dir.resolve()
 
-    def test_prepare_preflight_config_not_found(self, tmp_path: Path) -> None:
-        """Given missing config/config.toml → raises ConfigNotFoundError."""
-        with pytest.raises(ConfigNotFoundError):
-            prepare_preflight(root=tmp_path)
-
-    def test_prepare_preflight_missing_input_dir_raises_directory_not_found(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("has_config", "has_input_dir", "error_type"),
+        [
+            (False, False, ConfigNotFoundError),
+            (True, False, DirectoryNotFoundError),
+            (True, True, NoVideosFoundError),
+        ],
+        ids=["missing-config", "missing-input", "empty-input"],
+    )
+    def test_prepare_preflight_missing_inputs(
+        self,
+        tmp_path: Path,
+        has_config: bool,
+        has_input_dir: bool,
+        error_type: type[ConfigNotFoundError]
+        | type[DirectoryNotFoundError]
+        | type[NoVideosFoundError],
     ) -> None:
-        """Given missing input dir → raises DirectoryNotFoundError."""
-        _create_config(tmp_path)
-        # Don't create the comparison_videos directory
-
-        with pytest.raises(DirectoryNotFoundError):
-            prepare_preflight(root=tmp_path)
-
-    def test_prepare_preflight_empty_input_dir(self, tmp_path: Path) -> None:
-        """Given empty input dir → raises NoVideosFoundError."""
-        _create_config(tmp_path)
+        if has_config:
+            _create_config(tmp_path)
         input_dir = tmp_path / "comparison_videos"
-        input_dir.mkdir(parents=True)
-        # Don't create any video files
-
-        with pytest.raises(NoVideosFoundError) as exc_info:
+        if has_input_dir:
+            input_dir.mkdir(parents=True)
+        with pytest.raises(error_type) as exc_info:
             prepare_preflight(root=tmp_path)
-
-        # Verify error has path and patterns attributes
-        error = exc_info.value
-        assert error.path == input_dir.resolve()
-        assert "*.mkv" in error.patterns
+        if has_input_dir:
+            error = exc_info.value
+            assert isinstance(error, NoVideosFoundError)
+            assert error.path == input_dir.resolve()
+            assert "*.mkv" in error.patterns
 
     def test_prepare_preflight_with_explicit_config_path(self, tmp_path: Path) -> None:
         """Given explicit config_path → loads that config file."""

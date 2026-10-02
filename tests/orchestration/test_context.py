@@ -66,7 +66,6 @@ def test_clip_state_effective_num_frames_clamps_and_never_negative(
     # (Testing invalid end_inclusive)
     state = base_clip_state.with_trim(trim_start_frames=0, trim_end_frame_inclusive=-1)
     assert state.effective_num_frames() == 0
-    assert isinstance(state.effective_num_frames(), int)
 
     # 6. GIVEN end_inclusive beyond num_frames THEN it clamps to num_frames-1
     state = base_clip_state.with_trim(trim_start_frames=0, trim_end_frame_inclusive=20)

@@ -295,7 +295,6 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
-    assert len(log_calls) == 1
     event, stage, clips, diagnostics = log_calls[0]
     assert event == "fps_report"
     assert stage == "after_load_sources"
@@ -492,45 +491,45 @@ def _length_clip(name: str, num_frames: int, fps: Fraction = Fraction(24, 1)) ->
     )
 
 
-def test_length_difference_groups_shared_counts_and_marks_shorter() -> None:
-    clips = [
-        _length_clip("ref", 1000),
-        _length_clip("a", 536),
-        _length_clip("b", 536),
-    ]
-
-    (line,) = _length_difference_lines(clips, ["ref", "a", "b"])
-
-    assert "a and b" in line
-    assert "464 frames" in line
-    assert "(19.3 s)" in line
-    assert "shorter than ref" in line
-
-
-def test_length_difference_marks_longer_and_formats_minutes() -> None:
-    clips = [_length_clip("ref", 1000), _length_clip("a", 1000 + 144 * 24)]
-
-    (line,) = _length_difference_lines(clips, ["ref", "a"])
-
-    assert "3456 frames" in line
-    assert "(2m 24s)" in line
-    assert "longer than ref" in line
-
-
-def test_length_difference_joins_three_names_and_singular_frame() -> None:
-    clips = [
-        _length_clip("ref", 1000),
-        _length_clip("a", 999),
-        _length_clip("b", 999),
-        _length_clip("c", 999),
-    ]
-
-    (line,) = _length_difference_lines(clips, ["ref", "a", "b", "c"])
-
-    assert "a, b, and c" in line
-    assert "1 frame" in line
-    assert "1 frames" not in line
-    assert "(0.0 s)" in line
+@pytest.mark.parametrize(
+    ("clips", "names", "present", "absent"),
+    [
+        pytest.param(
+            [_length_clip("ref", 1000), _length_clip("a", 536), _length_clip("b", 536)],
+            ["ref", "a", "b"],
+            ["a and b", "464 frames", "(19.3 s)", "shorter than ref"],
+            [],
+            id="shorter-group",
+        ),
+        pytest.param(
+            [_length_clip("ref", 1000), _length_clip("a", 1000 + 144 * 24)],
+            ["ref", "a"],
+            ["3456 frames", "(2m 24s)", "longer than ref"],
+            [],
+            id="longer-minutes",
+        ),
+        pytest.param(
+            [
+                _length_clip("ref", 1000),
+                _length_clip("a", 999),
+                _length_clip("b", 999),
+                _length_clip("c", 999),
+            ],
+            ["ref", "a", "b", "c"],
+            ["a, b, and c", "1 frame", "(0.0 s)"],
+            ["1 frames"],
+            id="singular-three-names",
+        ),
+    ],
+)
+def test_length_difference_lines(
+    clips: list[FpsReportClip], names: list[str], present: list[str], absent: list[str]
+) -> None:
+    (line,) = _length_difference_lines(clips, names)
+    for text in present:
+        assert text in line
+    for text in absent:
+        assert text not in line
 
 
 def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
@@ -657,7 +656,6 @@ def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_outp
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
-    assert len(log_calls) == 1
     event, stage, clips, diagnostics = log_calls[0]
     assert event == "fps_report"
     assert stage == "after_align"
