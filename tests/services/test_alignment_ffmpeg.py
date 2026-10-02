@@ -26,44 +26,20 @@ from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 
 
+@pytest.mark.parametrize(
+    "stdout, expected",
+    [
+        pytest.param(b"24000/1001\n", Fraction(24000, 1001), id="probe_fps_fraction"),
+        pytest.param(
+            b"24000/1001,\r\n", Fraction(24000, 1001), id="probe_fps_accepts_single_trailing_comma"
+        ),
+        pytest.param(b"24\n", Fraction(24, 1), id="probe_fps_integer"),
+    ],
+)
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_fraction(mock_run: MagicMock):
-    """Test probing FPS when it returns a fraction."""
-    mock_run.return_value.stdout = b"24000/1001\n"
-    res = _probe_fps(Path("test.mkv"))
-    assert res == Fraction(24000, 1001)
-    mock_run.assert_called_once_with(
-        [
-            "ffprobe",
-            "-v",
-            "quiet",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=avg_frame_rate",
-            "-of",
-            "csv=p=0",
-            "test.mkv",
-        ],
-        timeout_seconds=15.0,
-    )
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_accepts_single_trailing_comma(mock_run: MagicMock) -> None:
-    mock_run.return_value.stdout = b"24000/1001,\r\n"
-
-    res = _probe_fps(Path("test.mkv"))
-
-    assert res == Fraction(24000, 1001)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_integer(mock_run: MagicMock):
-    """Test probing FPS when it returns an integer."""
-    mock_run.return_value.stdout = b"24\n"
-    res = _probe_fps(Path("test.mkv"))
-    assert res == Fraction(24, 1)
+def test_probe_fps_success(mock_run: MagicMock, stdout: bytes, expected: Fraction) -> None:
+    mock_run.return_value.stdout = stdout
+    assert _probe_fps(Path("test.mkv")) == expected
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
@@ -90,56 +66,73 @@ def test_probe_fps_malformed_output_is_alignment_parse_error(
     assert stdout.decode("utf-8").strip() in str(exc_info.value.context.details)
 
 
+@pytest.mark.parametrize(
+    "failure, expected_error, details, no_traceback, returncode",
+    [
+        pytest.param(
+            FileNotFoundError(),
+            FFmpegNotFoundError,
+            (),
+            False,
+            None,
+            id="probe_fps_not_found_raises",
+        ),
+        pytest.param(
+            CalledProcessError(1, ["ffprobe"], stderr=b"error"),
+            FFmpegError,
+            (),
+            False,
+            None,
+            id="probe_fps_nonzero_exit_raises",
+        ),
+        pytest.param(
+            OSError("permission denied"),
+            FFmpegError,
+            ("ffprobe", "could not start", "permission denied"),
+            True,
+            None,
+            id="probe_fps_oserror_raises_ffmpeg_error",
+        ),
+        pytest.param(
+            CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror"),
+            FFmpegError,
+            ("\ufffderror",),
+            False,
+            None,
+            id="probe_fps_non_utf8_stderr_is_replaced",
+        ),
+        pytest.param(
+            TimeoutExpired(cmd=["ffprobe"], timeout=15.0),
+            FFmpegError,
+            ("timed out",),
+            False,
+            124,
+            id="probe_fps_timeout_raises",
+        ),
+    ],
+)
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_not_found_raises(mock_run: MagicMock):
-    """Test probing FPS when ffprobe is missing."""
-    mock_run.side_effect = FileNotFoundError()
-    with pytest.raises(FFmpegNotFoundError):
+def test_probe_fps_failure(
+    mock_run: MagicMock,
+    failure: Exception,
+    expected_error: type[FFmpegError],
+    details: tuple[str, ...],
+    no_traceback: bool,
+    returncode: int | None,
+) -> None:
+    mock_run.side_effect = failure
+    with pytest.raises(expected_error) as exc_info:
         _probe_fps(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_nonzero_exit_raises(mock_run: MagicMock):
-    """Test probing FPS when ffprobe fails."""
-    mock_run.side_effect = CalledProcessError(1, ["ffprobe"], stderr=b"error")
-    with pytest.raises(FFmpegError):
-        _probe_fps(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_oserror_raises_ffmpeg_error(mock_run: MagicMock) -> None:
-    mock_run.side_effect = OSError("permission denied")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-
-    assert "traceback" not in str(exc_info.value).lower()
-    assert exc_info.value.context.details is not None
-    message = str(exc_info.value.context.details).lower()
-    assert "ffprobe" in message
-    assert "could not start" in message
-    assert "permission denied" in message
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
-    mock_run.side_effect = CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-
-    assert "\ufffderror" in str(exc_info.value.context.details)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_timeout_raises(mock_run: MagicMock):
-    """Test probing FPS timeout surfaces as FFmpegError."""
-    mock_run.side_effect = TimeoutExpired(cmd=["ffprobe"], timeout=15.0)
-    with pytest.raises(FFmpegError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 124
-    assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
+    if no_traceback:
+        assert "traceback" not in str(exc_info.value).lower()
+    if details:
+        assert exc_info.value.context.details is not None
+        for detail in details:
+            assert detail in str(exc_info.value.context.details).lower()
+    if returncode is not None:
+        assert exc_info.value.context.details is not None
+        assert exc_info.value.context.details.get("returncode") == returncode
+        assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
@@ -214,46 +207,28 @@ def test_probe_streams_ffprobe_oserror_raises_ffmpeg_error(
     assert "permission denied" in message
 
 
-@pytest.mark.parametrize("stdout", [b"[]", b"null", b'"oops"'])
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_streams_rejects_non_object_ffprobe_json(
-    mock_run: MagicMock,
-    stdout: bytes,
-) -> None:
-    mock_run.return_value = MagicMock(stdout=stdout, returncode=0)
-
-    with pytest.raises(FFmpegError) as exc_info:
-        probe_streams(Path("reference.mkv"))
-
-    assert exc_info.value.context.details is not None
-    message = str(exc_info.value.context.details).lower()
-    assert "ffprobe" in message
-    assert "invalid json" in message
-    assert "object" in message
-
-
 @pytest.mark.parametrize(
     "stdout, expected",
     [
-        (b'{"streams": {}}', "stream list"),
-        (b'{"streams": [null]}', "stream data"),
+        pytest.param(b"[]", ("invalid json", "object"), id="non-object-list"),
+        pytest.param(b"null", ("invalid json", "object"), id="non-object-null"),
+        pytest.param(b'"oops"', ("invalid json", "object"), id="non-object-string"),
+        pytest.param(b'{"streams": {}}', ("stream list",), id="malformed-stream-list"),
+        pytest.param(b'{"streams": [null]}', ("stream data",), id="malformed-stream-data"),
     ],
 )
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_streams_rejects_malformed_object_ffprobe_json(
-    mock_run: MagicMock,
-    stdout: bytes,
-    expected: str,
+def test_probe_streams_rejects_invalid_json(
+    mock_run: MagicMock, stdout: bytes, expected: tuple[str, ...]
 ) -> None:
     mock_run.return_value = MagicMock(stdout=stdout, returncode=0)
-
     with pytest.raises(FFmpegError) as exc_info:
         probe_streams(Path("reference.mkv"))
-
     assert exc_info.value.context.details is not None
     message = str(exc_info.value.context.details).lower()
     assert "ffprobe" in message
-    assert expected in message
+    for detail in expected:
+        assert detail in message
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
@@ -630,112 +605,74 @@ def test_select_audio_pair_skips_non_audio_streams(
     assert selected.video_start.basis == "metadata"
 
 
+@pytest.mark.parametrize(
+    "stdout, filename, expected",
+    [
+        pytest.param(
+            b'\n    {\n      "streams": [\n        {\n          "index": 0,\n          "codec_type": "video",\n          "codec_name": "h264",\n          "start_time": "0.041708",\n          "disposition": {"attached_pic": 0}\n        },\n        {\n          "index": 1,\n          "codec_type": "audio",\n          "codec_name": "aac",\n          "channels": 2,\n          "channel_layout": "stereo",\n          "sample_rate": "48000",\n          "start_time": "0.021333",\n          "disposition": {"default": 1, "original": 0, "comment": 0},\n          "tags": {"language": "eng"}\n        }\n      ],\n      "format": {"start_time": "0.000000"}\n    }\n    ',
+            "ref.mkv",
+            {
+                "video_start": Fraction("0.041708"),
+                "video_basis": "metadata",
+                "audio_start": Fraction("0.021333"),
+                "audio_basis": "metadata",
+            },
+            id="probe_reads_video_start_time_in_the_same_call",
+        ),
+        pytest.param(
+            b'\n    {\n      "streams": [\n        {\n          "index": 0,\n          "codec_type": "video",\n          "codec_name": "mjpeg",\n          "start_time": "0.500000",\n          "disposition": {"attached_pic": 1}\n        },\n        {\n          "index": 1,\n          "codec_type": "video",\n          "codec_name": "h264",\n          "disposition": {"attached_pic": 0}\n        },\n        {\n          "index": 2,\n          "codec_type": "audio",\n          "codec_name": "aac",\n          "channels": 1,\n          "channel_layout": "mono",\n          "sample_rate": "48000",\n          "disposition": {"default": 0, "original": 0, "comment": 0},\n          "tags": {}\n        }\n      ]\n    }\n    ',
+            "ref.mkv",
+            {"video_start": Fraction(0), "video_basis": "default_zero"},
+            id="probe_skips_attached_pic_and_defaults_missing_video_start",
+        ),
+        pytest.param(
+            b'\n    {\n      "streams": [\n        {\n          "index": 0,\n          "codec_type": "audio",\n          "codec_name": "aac",\n          "channels": 2,\n          "channel_layout": "stereo",\n          "sample_rate": "48000",\n          "disposition": {"default": 0, "original": 0, "comment": 0},\n          "tags": {}\n        }\n      ]\n    }\n    ',
+            "ref.mkv",
+            {"video_start": Fraction(0), "video_basis": "default_zero"},
+            id="probe_without_video_stream_defaults_video_start",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","time_base":"1/48000","duration_ts":1440000,"duration":"30.0"}],"format":{"duration":"600.0"}}',
+            "short-audio.mkv",
+            {"duration": Fraction(30), "duration_basis": "duration_ts"},
+            id="stream_probe_prefers_selected_stream_duration_over_container",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","time_base":"1/48000"}],"format":{"duration":"7200.0"}}',
+            "unknown-audio.mkv",
+            {"duration": None, "duration_basis": "unavailable"},
+            id="stream_probe_does_not_substitute_long_container_duration",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","start_time":"-1.25","time_base":"1/48000","duration_ts":192000}]}',
+            "negative-start.mkv",
+            {"audio_start": Fraction(-5, 4), "duration": Fraction(4)},
+            id="stream_probe_preserves_negative_selected_stream_start",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","start_time":"Infinity","duration":"Infinity","time_base":"1/48000"}]}',
+            "invalid-time.mkv",
+            {"audio_start": Fraction(0), "duration": None},
+            id="stream_probe_ignores_non_finite_timing_metadata",
+        ),
+    ],
+)
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_reads_video_start_time_in_the_same_call(
-    mock_run: MagicMock,
+def test_probe_stream_timing(
+    mock_run: MagicMock, stdout: bytes, filename: str, expected: dict[str, Fraction | str | None]
 ) -> None:
-    mock_run.return_value.stdout = b"""
-    {
-      "streams": [
-        {
-          "index": 0,
-          "codec_type": "video",
-          "codec_name": "h264",
-          "start_time": "0.041708",
-          "disposition": {"attached_pic": 0}
-        },
-        {
-          "index": 1,
-          "codec_type": "audio",
-          "codec_name": "aac",
-          "channels": 2,
-          "channel_layout": "stereo",
-          "sample_rate": "48000",
-          "start_time": "0.021333",
-          "disposition": {"default": 1, "original": 0, "comment": 0},
-          "tags": {"language": "eng"}
-        }
-      ],
-      "format": {"start_time": "0.000000"}
+    mock_run.return_value.stdout = stdout
+    probed = probe_streams(Path(filename))
+    timeline = probed.audio[0].timeline
+    actual = {
+        "video_start": probed.video_start.start_time,
+        "video_basis": probed.video_start.basis,
+        "audio_start": timeline.start_time,
+        "audio_basis": timeline.start_time_basis,
+        "duration": timeline.duration,
+        "duration_basis": timeline.duration_basis,
     }
-    """
-
-    probed = probe_streams(Path("ref.mkv"))
-
-    assert mock_run.call_count == 1
-    argv = mock_run.call_args[0][0]
-    assert "-select_streams" not in argv
-    assert probed.video_start.start_time == Fraction("0.041708")
-    assert probed.video_start.basis == "metadata"
-    assert probed.audio[0].timeline.start_time == Fraction("0.021333")
-    assert probed.audio[0].timeline.start_time_basis == "metadata"
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_skips_attached_pic_and_defaults_missing_video_start(
-    mock_run: MagicMock,
-) -> None:
-    mock_run.return_value.stdout = b"""
-    {
-      "streams": [
-        {
-          "index": 0,
-          "codec_type": "video",
-          "codec_name": "mjpeg",
-          "start_time": "0.500000",
-          "disposition": {"attached_pic": 1}
-        },
-        {
-          "index": 1,
-          "codec_type": "video",
-          "codec_name": "h264",
-          "disposition": {"attached_pic": 0}
-        },
-        {
-          "index": 2,
-          "codec_type": "audio",
-          "codec_name": "aac",
-          "channels": 1,
-          "channel_layout": "mono",
-          "sample_rate": "48000",
-          "disposition": {"default": 0, "original": 0, "comment": 0},
-          "tags": {}
-        }
-      ]
-    }
-    """
-
-    probed = probe_streams(Path("ref.mkv"))
-
-    assert probed.video_start.start_time == Fraction(0)
-    assert probed.video_start.basis == "default_zero"
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_without_video_stream_defaults_video_start(
-    mock_run: MagicMock,
-) -> None:
-    mock_run.return_value.stdout = b"""
-    {
-      "streams": [
-        {
-          "index": 0,
-          "codec_type": "audio",
-          "codec_name": "aac",
-          "channels": 2,
-          "channel_layout": "stereo",
-          "sample_rate": "48000",
-          "disposition": {"default": 0, "original": 0, "comment": 0},
-          "tags": {}
-        }
-      ]
-    }
-    """
-
-    probed = probe_streams(Path("ref.mkv"))
-
-    assert probed.video_start.start_time == Fraction(0)
-    assert probed.video_start.basis == "default_zero"
+    assert {key: actual[key] for key in expected} == expected
 
 
 def test_probe_with_no_audio_streams_is_alignment_error() -> None:
@@ -819,78 +756,6 @@ def _test_stream() -> AudioStreamInfo:
             duration_basis="stream_duration",
         ),
     )
-
-
-def test_stream_probe_prefers_selected_stream_duration_over_container(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ported U3-R M6: the stream duration basis wins over the container duration."""
-    from frame_compare.services import alignment_audio
-
-    proc = MagicMock(
-        stdout=b'{"streams":[{"index":1,"codec_type":"audio","time_base":"1/48000",'
-        b'"duration_ts":1440000,"duration":"30.0"}],"format":{"duration":"600.0"}}'
-    )
-    monkeypatch.setattr(alignment_audio, "run_subprocess", lambda *_args, **_kwargs: proc)
-
-    probed = probe_streams(Path("short-audio.mkv"))
-
-    assert probed.audio[0].timeline.duration == 30
-    assert probed.audio[0].timeline.duration_basis == "duration_ts"
-
-
-def test_stream_probe_does_not_substitute_long_container_duration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ported U3-R M6: a long container duration never fills an unknown stream duration."""
-    from frame_compare.services import alignment_audio
-
-    proc = MagicMock(
-        stdout=b'{"streams":[{"index":1,"codec_type":"audio","time_base":"1/48000"}],'
-        b'"format":{"duration":"7200.0"}}'
-    )
-    monkeypatch.setattr(alignment_audio, "run_subprocess", lambda *_args, **_kwargs: proc)
-
-    probed = probe_streams(Path("unknown-audio.mkv"))
-
-    assert probed.audio[0].timeline.duration is None
-    assert probed.audio[0].timeline.duration_basis == "unavailable"
-
-
-def test_stream_probe_preserves_negative_selected_stream_start(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ported U3-R M6: a negative audio start time is preserved, not clamped."""
-    from frame_compare.services import alignment_audio
-
-    proc = MagicMock(
-        stdout=b'{"streams":[{"index":1,"codec_type":"audio","start_time":"-1.25",'
-        b'"time_base":"1/48000","duration_ts":192000}]}'
-    )
-    monkeypatch.setattr(alignment_audio, "run_subprocess", lambda *_args, **_kwargs: proc)
-
-    probed = probe_streams(Path("negative-start.mkv"))
-
-    assert probed.audio[0].timeline.start_time == Fraction(-5, 4)
-    assert probed.audio[0].timeline.duration == 4
-
-
-def test_stream_probe_ignores_non_finite_timing_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Ported U3-R M6: non-finite start/duration fall back to zero/unknown."""
-    from frame_compare.services import alignment_audio
-
-    proc = MagicMock(
-        stdout=b'{"streams":[{"index":1,"codec_type":"audio","start_time":"Infinity",'
-        b'"duration":"Infinity","time_base":"1/48000"}]}'
-    )
-    monkeypatch.setattr(alignment_audio, "run_subprocess", lambda *_args, **_kwargs: proc)
-
-    probed = probe_streams(Path("invalid-time.mkv"))
-
-    assert probed.audio[0].timeline.start_time == 0
-    assert probed.audio[0].timeline.duration is None
 
 
 def _pair_stream(

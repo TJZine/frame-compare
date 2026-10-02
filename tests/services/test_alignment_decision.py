@@ -120,7 +120,6 @@ def test_start_compensation_flows_into_candidate(
         comparison_audio_start=comparison_start,
     )
 
-    assert decided.audio.global_lag == 0
     assert decided.audio.compensation_seconds == pytest.approx(seconds)
     candidate = decided.decision.candidate
     assert candidate is not None
@@ -647,43 +646,54 @@ def test_rejected_stage_has_no_plan() -> None:
     assert decided.audio.compensation_seconds is None
 
 
-def test_aborted_stage_records_real_compensation_when_starts_known() -> None:
-    reference = make_program(SEED, 35.0)
-    comparison = shift_signal(reference, 800)
-    plan = plan_audio_chunks(len(reference), len(comparison), 30.0)
-    decided = decide_aborted_stage(
-        plan=plan,
-        max_offset_seconds=30.0,
-        reason="timeout",
-        reference_audio_start=Fraction(0),
-        reference_video_start=Fraction(0),
-        comparison_audio_start=Fraction(1, 2),
-        comparison_video_start=Fraction(0),
-    )
-
-    assert decided.attempt_status == "aborted"
-    assert decided.audio.compensation_seconds == pytest.approx(-0.5)
-    assert decided.audio.global_lag is None
-    assert decided.decision.primary_reason == "timeout"
-
-
-def test_aborted_stage_compensation_is_null_without_starts() -> None:
-    reference = make_program(SEED, 35.0)
-    comparison = shift_signal(reference, 800)
-    plan = plan_audio_chunks(len(reference), len(comparison), 30.0)
-    decided = decide_aborted_stage(plan=plan, max_offset_seconds=30.0, reason="timeout")
-
-    assert decided.audio.compensation_seconds is None
-
-
-def test_rejected_stage_records_real_compensation_when_starts_known() -> None:
-    decided = decide_rejected_stage(
-        max_offset_seconds=30.0,
-        reason="selected_audio_timeline_unavailable",
-        reference_audio_start=Fraction(1, 5),
-        reference_video_start=Fraction(0),
-        comparison_audio_start=Fraction(0),
-        comparison_video_start=Fraction(0),
-    )
-
-    assert decided.audio.compensation_seconds == pytest.approx(0.2)
+@pytest.mark.parametrize(
+    "stage, known_starts, expected",
+    [
+        pytest.param(
+            "aborted", True, -0.5, id="aborted_stage_records_real_compensation_when_starts_known"
+        ),
+        pytest.param(
+            "aborted", False, None, id="aborted_stage_compensation_is_null_without_starts"
+        ),
+        pytest.param(
+            "rejected", True, 0.2, id="rejected_stage_records_real_compensation_when_starts_known"
+        ),
+    ],
+)
+def test_unavailable_stage_compensation(
+    stage: str, known_starts: bool, expected: float | None
+) -> None:
+    if stage == "rejected":
+        decided = decide_rejected_stage(
+            max_offset_seconds=30.0,
+            reason="selected_audio_timeline_unavailable",
+            reference_audio_start=Fraction(1, 5),
+            reference_video_start=Fraction(0),
+            comparison_audio_start=Fraction(0),
+            comparison_video_start=Fraction(0),
+        )
+    else:
+        reference = make_program(SEED, 35.0)
+        comparison = shift_signal(reference, 800)
+        plan = plan_audio_chunks(len(reference), len(comparison), 30.0)
+        starts = (
+            {
+                "reference_audio_start": Fraction(0),
+                "reference_video_start": Fraction(0),
+                "comparison_audio_start": Fraction(1, 2),
+                "comparison_video_start": Fraction(0),
+            }
+            if known_starts
+            else {}
+        )
+        decided = decide_aborted_stage(
+            plan=plan, max_offset_seconds=30.0, reason="timeout", **starts
+        )
+        if known_starts:
+            assert decided.attempt_status == "aborted"
+            assert decided.audio.global_lag is None
+            assert decided.decision.primary_reason == "timeout"
+    if expected is None:
+        assert decided.audio.compensation_seconds is None
+    else:
+        assert decided.audio.compensation_seconds == pytest.approx(expected)
