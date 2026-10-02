@@ -12,8 +12,8 @@ A version shown here is supported only as part of the complete profile described
 | VapourSynth | R79 | **R80**, commit `732845793a1caf5838d4f7b94f6ce668a19c908e` | 2026-09-16 | Formal stable release | Latest non-prerelease release. It still supplies CPython 3.12 ABI3 wheels that serve CPython 3.13, reports core API R4.3, and adds upstream Vulkan 1.4 GPU-frame support that Frame Compare does not enable. Required by BestSource R22. |
 | VSView | 0.10.3 | **0.11.0** | 2026-09-05 | Stable Python release | Maintained native viewer. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
 | PySide6 | Previous Qt binding | **6.11.2** | Resolved 2026-08-30 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
-| VSJetEngine | 1.2.0 | **1.7.0** | 2026-08-21 | Stable Python release | Current locked VSView dependency resolution. |
-| VSView support graph | BestSource 21.0 | **jetpytools 3.1.1; vsjetengine 1.7.0; BestSource 22 (tag `R22`, commit `a0fab5708b28920957679825797692f6e4a23674`); vspackrgb 1.4.0** | BestSource 2026-09-16 | Locked Python resolution | Accepted base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. BestSource 22 requires VapourSynth R80. |
+| VSJetEngine | 1.7.0 | **1.8.0** | 2026-09-25 | Stable Python release | Current locked VSView dependency resolution; 1.8.0 fixes frame-index tagging during out-of-order rendering and thread-safety races. |
+| VSView support graph | BestSource 21.0 | **jetpytools 3.1.1; vsjetengine 1.8.0; BestSource 22 (tag `R22`, commit `a0fab5708b28920957679825797692f6e4a23674`); vspackrgb 1.4.0** | BestSource 2026-09-16 | Locked Python resolution | Accepted base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. BestSource 22 requires VapourSynth R80. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
 | Windows L-SMASH-Works package | 1296.0.0.1 | **vapoursynth-lsmas 1310.0.0.0** | 2026-08-23 | Non-yanked official PyPI wheel | Official wheel for the 1310 native lineage. Its plugin DLL imports only Windows/UCRT system libraries; unlike the release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. |
 | L-SMASH | commit `84740c5d960ab622f4c08b971dc59192bc27ef74` | commit **`d186eb95388710a7a91f6fd353169b457ebbb9db`** | 2026-07-28 | Pinned maintainer-fork commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1310. No newer appropriate formal stable tag supersedes it. |
@@ -172,7 +172,7 @@ fingerprints for:
 | --- | --- | --- |
 | `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
 | `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo |
-| `alignment` | Profile-specific standalone FFmpeg lineage | VapourSynth and tone mapping |
+| `alignment` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo and tone mapping |
 | `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, Docker OBUParse, and index policy | standalone FFmpeg and tone mapping |
 | `full` | Complete supported deployment profile | None |
 
@@ -181,10 +181,9 @@ does not discard metric arrays; a standalone FFmpeg update invalidates alignment
 without discarding L-SMASH-Works indexes.
 
 The R80 refresh changes the VapourSynth decoder identity for every profile, so
-`analysis`, `probe`, `index`, and `full` fingerprints change everywhere. The
-Windows portable `alignment` fingerprint also changes because the retained BtbN
-FFmpeg artifact moved to the August 2026 build; Debian and unmanaged `alignment`
-fingerprints are unchanged. Existing entries and indexes under the previous
+`analysis`, `probe`, `alignment`, `index`, and `full` fingerprints change everywhere.
+The Windows portable `alignment` fingerprint also changes because the retained BtbN
+FFmpeg artifact moved to the August 2026 build. Existing entries and indexes under the previous
 fingerprints miss and rebuild under the normal cache policy; there is no migration.
 
 The shared alignment reuse cache is schema v2 after the viewer migration. It stores

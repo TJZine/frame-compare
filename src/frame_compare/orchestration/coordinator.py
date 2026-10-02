@@ -45,7 +45,6 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.loader import DefaultVSLoader
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
 
@@ -109,9 +108,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
     if request.json_output or request.quiet or request.from_cache_only or request.skip_analysis:
         local_deps.confirm_full_window_retry = None
-
-    if local_deps.vs_loader is None:
-        local_deps.vs_loader = DefaultVSLoader()
 
     if local_deps.progress is None:
         local_deps.progress = select_reporter(

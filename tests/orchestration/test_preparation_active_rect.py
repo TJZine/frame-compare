@@ -94,8 +94,7 @@ def test_execute_prep_resolves_dimension_active_rects_during_preparation(
     tmp_path: Path,
 ) -> None:
     config_content = MINIMAL_CONFIG.replace(
-        "[screenshots]\nuse_ffmpeg = true",
-        '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "dimension"',
+        'active_rect_detection = "aspect_ratio"', 'active_rect_detection = "dimension"'
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"

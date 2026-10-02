@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Generator
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,6 +22,16 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
 from vsengine.loops import get_loop, set_loop  # noqa: E402
 from vsview.vsenv import QtEventLoop  # noqa: E402
 
+from frame_compare.services.alignment import _build_audio_review_map  # noqa: E402
+from frame_compare.services.alignment_keys import alignment_key  # noqa: E402
+from frame_compare.services.types import AlignmentProvenance, AlignmentResult  # noqa: E402
+from frame_compare.utils.alignment_evidence import (  # noqa: E402
+    AudioAlignmentAttempt,
+    evidence_from_payload,
+)
+from frame_compare.utils.alignment_review_projection import (  # noqa: E402
+    build_audio_review_presentation,
+)
 from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
@@ -37,87 +47,84 @@ from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
-from tests.services.test_alignment_diagnostics import audio_attempt  # noqa: E402
+from tests.alignment_review_test_support import (  # noqa: E402
+    audio_review as _audio_review,
+)
+from tests.alignment_review_test_support import (
+    provisional_audio_attempt,
+    trusted_audio_attempt,
+    unavailable_audio_attempt,
+)
+from tests.services.test_alignment_evidence import retimed_comparison_stream, stream
+from tests.services.test_alignment_frozen_strings import (
+    _audio_failed_video_confirmed_attempt,
+    _boundary_video_inconclusive_attempt,
+    _multi_context_attempt,
+    _producer_count_attempt,
+    _producer_run_context_attempt,
+    _producer_target_context_attempt,
+    _production_nested_targets_attempt,
+    _review_attempt,
+    _singleton_chunk_target_attempt,
+)
 
 _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
 
 
-def _audio_review(suggestion: int | None) -> str:
+def _attempt_audio_review(attempt: AudioAlignmentAttempt, *, applied: bool = False) -> str:
     return json.dumps(
         {
             "current_authority": {
-                "origin": "shared_computed_offsets" if suggestion is not None else "none",
-                "frame_offset": suggestion,
+                "origin": "computed_this_run" if applied else "none",
+                "frame_offset": 0 if applied else None,
             },
-            "evidence_availability": (
-                "historical_details_unavailable" if suggestion is not None else "not_computed"
-            ),
-            "audio_attempt": None,
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
         },
         sort_keys=True,
         separators=(",", ":"),
     )
 
 
-def _provisional_audio_review(ordinal: int = 1) -> str:
-    attempt = asdict(audio_attempt())
-    attempt["comparison_ordinal"] = ordinal
+def _provisional_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": attempt,
+            "audio_attempt": asdict(
+                provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
+            ),
         },
         sort_keys=True,
         separators=(",", ":"),
     )
 
 
-def _accepted_audio_review(ordinal: int = 1) -> str:
-    payload = cast(dict[str, Any], json.loads(_provisional_audio_review(ordinal)))
-    payload["current_authority"] = {"origin": "computed_this_run", "frame_offset": 0}
-    attempt = cast(dict[str, Any], payload["audio_attempt"])
-    attempt["consensus_minimum_ratio"] = 0.8
-    decision = cast(dict[str, Any], attempt["decision"])
-    decision.update(
-        state="trusted_automatic",
-        primary_reason="accepted",
-        failed_gates=[],
+def _accepted_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
+    return json.dumps(
+        {
+            "current_authority": {"origin": "computed_this_run", "frame_offset": frame_offset},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(
+                trusted_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
+            ),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _unavailable_audio_review(ordinal: int = 1) -> str:
-    payload = cast(dict[str, Any], json.loads(_provisional_audio_review(ordinal)))
-    attempt = cast(dict[str, Any], payload["audio_attempt"])
-    windows = cast(list[dict[str, Any]], attempt["windows"])
-    for window in windows:
-        window.update(
-            requested_sample_lag=None,
-            requested_frame_candidate=None,
-            requested_score=None,
-            peak_ratio=None,
-            peak_rate=None,
-            review_qualified=False,
-            configured_quality=False,
-            vote_disposition="failed",
-            terminal_stage="signal_validation",
-            terminal_category="insufficient_signal",
-        )
-    decision = cast(dict[str, Any], attempt["decision"])
-    decision.update(
-        state="unavailable",
-        candidate=None,
-        primary_reason="insufficient_signal",
-        raw_correlated_windows=0,
-        consensus_windows=0,
-        consensus_ratio=None,
-        aggregate_score=None,
-        minimum_peak_ratio=None,
-        failed_gates=["insufficient_signal"],
+    return json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(unavailable_audio_attempt(ordinal=ordinal)),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
 def _manual_audio_review(offset: int = 0) -> str:
@@ -388,7 +395,7 @@ def test_metadata_v1_session_requires_regeneration(tmp_path: Path) -> None:
     message = panel.error_label.text()
     assert "newly generated session" in message
     assert "metadata v1" in message
-    assert "requires v4" in message
+    assert "requires v5" in message
     assert "Inactive" in panel.progress_label.text()
     assert not panel.keep_button.isEnabled()
 
@@ -473,6 +480,276 @@ def test_evidence_details_toggle_works_from_keyboard_and_stays_collapsed_by_defa
     assert not detail_label.isHidden()
 
 
+def test_panel_summary_keeps_singleton_chunk_reason_target(
+    tmp_path: Path,
+) -> None:
+    attempt = _singleton_chunk_target_attempt()
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=audio_review)
+
+    assert (
+        "Audio in 1:00–1:30 points to +246f, and the video could not rule that out."
+        in panel.audio_summary_labels[0].text()
+    )
+
+
+def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_copy(
+    tmp_path: Path,
+) -> None:
+    attempt = _production_nested_targets_attempt()
+    reference = Path("reference.mkv")
+    comparison = Path("comparison.mkv")
+    key = alignment_key(reference, comparison)
+    result = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic=attempt.decision.primary_reason,
+        stability=attempt.stability,
+        audio_attempt=attempt,
+    )
+    native_review = _build_audio_review_map(
+        reference=reference,
+        comparisons=[comparison],
+        results_map={key: result},
+        provenances={
+            key: AlignmentProvenance(
+                result=result,
+                comparison_cache_key="key",
+                provenance="computed_this_run",
+                evidence_availability="current_attempt",
+            )
+        },
+    )[key]
+    full_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    native_attempt = json.loads(native_review)["audio_attempt"]
+    assert native_attempt["chunks"]["rows_omitted"] is True
+    assert all(
+        native_attempt["chunks"][name] == []
+        for name in ("starts", "counts", "active", "lags", "psrs", "credible", "agrees")
+    )
+    assert native_attempt["chunks"]["total_samples"] == attempt.chunks.total_samples
+    parsed_native = evidence_from_payload(AudioAlignmentAttempt, native_attempt)
+    action = "Align manually or keep the current alignment."
+    assert build_audio_review_presentation(attempt).normal_review_rows(
+        panel=False, action_line=action
+    ) == build_audio_review_presentation(parsed_native).normal_review_rows(
+        panel=False, action_line=action
+    )
+
+    summaries = []
+    details = []
+    for label, audio_review in (("full", full_review), ("native", native_review)):
+        panel_dir = tmp_path / label
+        panel_dir.mkdir()
+        panel, _api, _script = _panel(panel_dir, suggestion=None, audio_review=audio_review)
+        summaries.append(panel.audio_summary_labels[0].text())
+        group = panel.audio_detail_groups[0]
+        group.setChecked(True)
+        details.append(cast(QLabel, group.findChild(QLabel)).text())
+
+    assert summaries[0] == summaries[1]
+    assert details[0] == details[1]
+    summary = summaries[1]
+    assert (
+        "Audio in 0:00–1:00 points to +250f, and the video could not settle which offset is right there."
+        in summary
+    )
+    assert "Audio in 1:00–1:30 points to +246f, and the video could not rule that out." in summary
+    assert "+250f  0:00–1:00  not settled" in summary
+    assert "+246f  1:00–1:30  not settled" in summary
+    assert "+250f  1:30–2:00  confirmed by video" in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert not panel.use_positions_button.isEnabled()
+
+
+@pytest.mark.parametrize(
+    ("credible", "resolution", "expected_state", "expected_noted"),
+    [
+        (True, "unresolved", "provisional", None),
+        (
+            True,
+            "resolved",
+            "trusted_automatic",
+            "Noted: audio differed in 1 section (1:00–1:30); the video confirmed +0f there.",
+        ),
+        (False, "resolved", "trusted_automatic", None),
+        (
+            False,
+            "unresolved",
+            "trusted_automatic",
+            (
+                "Noted: weak audio in 1:00–1:30 pointed elsewhere; the video could not "
+                "settle it, so it was not counted."
+            ),
+        ),
+        (True, "unexamined", "provisional", None),
+        (False, "unexamined", "trusted_automatic", None),
+        (True, "alternative_confirmed", "provisional", None),
+        (False, "alternative_confirmed", "provisional", None),
+    ],
+)
+def test_panel_target_context_semantic_matrix(
+    tmp_path: Path,
+    credible: bool,
+    resolution: str,
+    expected_state: str,
+    expected_noted: str | None,
+) -> None:
+    attempt = _producer_target_context_attempt(credible=credible, resolution=resolution)
+    assert attempt.decision.state == expected_state
+    applied = expected_state == "trusted_automatic"
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=0 if applied else None,
+        audio_review=_attempt_audio_review(attempt, applied=applied),
+    )
+    summary = panel.audio_summary_labels[0].text()
+    detail_group = panel.audio_detail_groups[0]
+    detail_group.setChecked(True)
+    detail_text = cast(QLabel, detail_group.findChild(QLabel)).text()
+    assert "Picture differs" not in summary
+    assert "the picture differs" not in summary
+    if expected_noted is None:
+        assert "Noted:" not in summary
+    else:
+        assert expected_noted in summary
+
+    expected_details = build_audio_review_presentation(attempt).verbose_lines(panel=True)
+    expected_offset = 0 if resolution == "resolved" else 2
+    expected_status = {
+        "resolved": "confirmed by video",
+        "alternative_confirmed": "confirmed by video",
+        "unresolved": "not settled",
+        "unexamined": "not checked",
+    }[resolution]
+    expected_region = f"{expected_offset:+d}f  1:00–1:30  {expected_status}"
+    assert any(expected_region in line for line in expected_details)
+    expected_check_offset = 0 if resolution in {"resolved", "unexamined"} else 2
+    expected_check = (
+        "1:15 — reference 1,800 ↔ comparison "
+        f"{1_800 - expected_check_offset:,} ({expected_check_offset:+d}f)"
+        if resolution != "unexamined"
+        else "0:50 — reference 1,200 ↔ comparison 1,200 (+0f)"
+    )
+    assert any(expected_check in line for line in expected_details)
+    if resolution == "resolved":
+        assert all("+2f  1:00–1:30  confirmed by video" not in line for line in expected_details)
+        assert all("comparison 1,798 (+2f)" not in line for line in expected_details)
+    assert all(line in detail_text for line in expected_details)
+    assert "Picture differs" not in detail_text
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert not panel.use_positions_button.isEnabled()
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected_noted", "expected_context"),
+    [
+        (
+            "run",
+            "Noted: audio differed in 2 sections (1:00–2:00); the video confirmed +0f there.",
+            ("Context: Audio differed in 1:00–2:00; the video confirmed the offset there.",),
+        ),
+        (
+            "run_and_chunk",
+            "Noted: audio differed in 3 sections (1:00–2:00, 3:30–4:00); the video confirmed +0f there.",
+            (
+                "Context: Audio differed in 1:00–2:00; the video confirmed the offset there.",
+                "         Audio differed in 3:30–4:00; the video confirmed the offset there.",
+            ),
+        ),
+        (
+            "two_runs",
+            "Noted: audio differed in 4 sections (1:00–2:00, 5:00–6:00); the video confirmed +0f there.",
+            (
+                "Context: Audio differed in 1:00–2:00; the video confirmed the offset there.",
+                "         Audio differed in 5:00–6:00; the video confirmed the offset there.",
+            ),
+        ),
+    ],
+)
+def test_panel_resolved_run_context_matrix(
+    tmp_path: Path,
+    shape: str,
+    expected_noted: str,
+    expected_context: tuple[str, ...],
+) -> None:
+    resolutions = ("resolved",) if shape == "run" else ("resolved", "resolved")
+    attempt = _producer_run_context_attempt(shape=shape, resolutions=resolutions)
+    panel, _api, _script = _panel(
+        tmp_path, suggestion=0, audio_review=_attempt_audio_review(attempt, applied=True)
+    )
+    detail_group = panel.audio_detail_groups[0]
+    detail_group.setChecked(True)
+    details = cast(QLabel, detail_group.findChild(QLabel)).text()
+    assert expected_noted in panel.audio_summary_labels[0].text()
+    for line in expected_context:
+        assert line in details
+
+
+@pytest.mark.parametrize(
+    ("planned", "active", "credible", "agreeing", "expected"),
+    [
+        (4, 4, 3, 3, "(0 differ; 1 weak, 0 quiet not counted)."),
+        (4, 3, 3, 3, "(0 differ; 0 weak, 1 quiet not counted)."),
+        (5, 4, 3, 3, "(0 differ; 1 weak, 1 quiet not counted)."),
+        (4, 0, 0, 0, "(0 differ; 0 weak, 4 quiet not counted)."),
+    ],
+)
+def test_panel_established_counts_matrix(
+    tmp_path: Path,
+    planned: int,
+    active: int,
+    credible: int,
+    agreeing: int,
+    expected: str,
+) -> None:
+    attempt = _producer_count_attempt(
+        planned=planned,
+        active=active,
+        credible=credible,
+        agreeing=agreeing,
+    )
+    expected_line = f"Audio: {agreeing} of {credible} clear sections agree on +0f {expected}"
+    panel, _api, _script = _panel(
+        tmp_path, suggestion=None, audio_review=_attempt_audio_review(attempt)
+    )
+    summary = panel.audio_summary_labels[0].text()
+    group = panel.audio_detail_groups[0]
+    group.setChecked(True)
+    details = cast(QLabel, group.findChild(QLabel)).text()
+    if active:
+        assert summary.startswith("Provisional audio candidate: +0f — NOT APPLIED")
+    else:
+        assert summary.startswith("No usable audio candidate")
+    assert f"Established: {expected_line}" in details
+    assert " quiet)." not in details
+
+
 def test_growing_body_scrolls_while_whole_set_actions_stay_reachable(
     tmp_path: Path,
 ) -> None:
@@ -501,8 +778,8 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
     panel, _api, script = _panel(tmp_path, suggestion=None, comparison_count=2)
 
     assert [label.text() for label in panel.source_outcome_labels[1:]] == [
-        "Unresolved comparison — no usable audio candidate",
-        "Unresolved comparison — no usable audio candidate",
+        "No usable audio candidate (no usable audio signal) — NOT APPLIED",
+        "No usable audio candidate (no usable audio signal) — NOT APPLIED",
     ]
     assert "remain unresolved" in panel.keep_help_label.text()
     assert panel.keep_button.isEnabled()
@@ -554,7 +831,8 @@ def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) ->
 
     assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
     assert api.timeline.added == []
-    assert "marker omitted" in panel.audio_detail_groups[0].findChild(QLabel).text().lower()
+    details_label = cast(QLabel, panel.audio_detail_groups[0].findChild(QLabel))
+    assert "marker omitted" in details_label.text().lower()
 
 
 def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: Path) -> None:
@@ -603,7 +881,7 @@ def test_mixed_states_keep_separate_authority_and_saved_labels(tmp_path: Path) -
     assert [label.text().splitlines()[0] for label in panel.audio_summary_labels] == [
         "Accepted audio alignment: +0f — APPLIED",
         "Provisional audio candidate: +0f — NOT APPLIED",
-        "Unresolved comparison — no usable audio candidate",
+        "No usable audio candidate (no single offset across the track) — NOT APPLIED",
         "Manually confirmed alignment: +0f — APPLIED",
     ]
     original_details = [
@@ -1026,3 +1304,185 @@ def test_deactivation_clears_only_owned_marker_group(tmp_path: Path, next_worksp
         "frame_compare_alignment_review"
     }
     assert "Inactive" in panel.progress_label.text()
+
+
+def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
+    tmp_path: Path,
+) -> None:
+    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=audio_review,
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert "Provisional audio candidate: +146f — NOT APPLIED" in summary
+    assert "The video confirms +243f in 1:00–2:00" in summary
+    assert "Check 1:01:01 — reference 13,123 ↔ comparison 12,880 (+243f)" in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.offset_inputs] == [""]
+    assert panel.progress_label.text() == "0/2 positions captured"
+    assert not panel.use_positions_button.isEnabled()
+
+    details = panel.audio_detail_groups[0]
+    details.setChecked(True)
+    detail_text = cast(QLabel, details.findChild(QLabel)).text()
+    assert "Established:" in detail_text
+    assert "             Video: confirmed +146f" in detail_text
+    assert "Check points: 1:01:01 — reference 13,123 ↔ comparison 12,880 (+243f)" in detail_text
+    assert ": Video: confirmed" not in detail_text
+    assert ": +243f" not in detail_text
+    assert "Check points: Check" not in detail_text
+    assert "Decision: state=provisional; reason=competing_offset_confirmed_by_video" in detail_text
+    assert "Runtime/policy:" in detail_text
+    selectable = (
+        Qt.TextInteractionFlag.TextSelectableByMouse
+        | Qt.TextInteractionFlag.TextSelectableByKeyboard
+    )
+    assert panel.audio_summary_labels[0].textInteractionFlags() & selectable == selectable
+    assert cast(QLabel, details.findChild(QLabel)).textInteractionFlags() & selectable == selectable
+
+
+def test_p4a_panel_shows_boundary_video_hint_as_provisional(
+    tmp_path: Path,
+) -> None:
+    attempt = _boundary_video_inconclusive_attempt()
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=audio_review,
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert (
+        "The audio points to +146f, but the pictures line up at +148f at the checked points."
+    ) in summary
+    assert "confirmed +148f" not in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert not panel.use_positions_button.isEnabled()
+
+
+def test_p4a_panel_context_rows_use_one_key_and_continuations(tmp_path: Path) -> None:
+    attempt = _multi_context_attempt()
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=audio_review)
+
+    details = panel.audio_detail_groups[0]
+    details.setChecked(True)
+    detail_text = cast(QLabel, details.findChild(QLabel)).text()
+    assert (
+        "Context: Audio (raw): 2 of 4 sections agree; 2 more are within the same frame"
+        in detail_text
+    )
+    assert (
+        "         2 sections differ by less than a frame (sub-frame); not a disagreement."
+        in detail_text
+    )
+    assert detail_text.count("Context:") == 1
+    assert ": 2 sections differ by less than a frame" not in detail_text
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        (
+            "competing_offset_confirmed_by_video",
+            "The video confirms +243f in 1:00–2:00, so the sources likely differ by an edit there.",
+        ),
+        (
+            "competing_offset",
+            "Audio in 1:00–2:00 points to +243f, and the video could not settle which offset is right there.",
+        ),
+        (
+            "unresolved_audio_disagreement",
+            "Audio in 1:00–2:00 points to +243f, and the video could not rule that out.",
+        ),
+        (
+            "video_check_inconclusive",
+            "The audio points to +146f, but the video could not confirm the exact frame",
+        ),
+        (
+            "video_check_unavailable",
+            "The audio points to +146f, but the video could not be read to confirm the exact frame.",
+        ),
+        (
+            "no_single_offset",
+            "The audio does not agree on one offset across the track; the video suggests +146f",
+        ),
+    ],
+)
+def test_p4a_panel_covers_each_non_applied_reason(
+    tmp_path: Path, reason: str, expected: str
+) -> None:
+    attempt = (
+        _audio_failed_video_confirmed_attempt()
+        if reason == "no_single_offset"
+        else _review_attempt(reason)
+    )
+    audio_review = json.dumps(
+        {
+            "current_authority": {"origin": "none", "frame_offset": None},
+            "evidence_availability": "current_attempt",
+            "audio_attempt": asdict(attempt),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=None,
+        audio_review=audio_review,
+    )
+
+    summary = panel.audio_summary_labels[0].text()
+    assert "NOT APPLIED" in summary
+    assert expected in summary
+    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert not panel.use_positions_button.isEnabled()
+
+
+def test_panel_details_show_retimed_context(tmp_path: Path) -> None:
+    base = _producer_target_context_attempt(credible=False, resolution="unexamined")
+    assert base.decision.state == "trusted_automatic"
+    attempt = replace(
+        base,
+        selected_streams=(stream("reference"), retimed_comparison_stream()),
+    )
+    panel, _api, _script = _panel(
+        tmp_path,
+        suggestion=0,
+        audio_review=_attempt_audio_review(attempt, applied=True),
+    )
+
+    detail_group = panel.audio_detail_groups[0]
+    detail_group.setChecked(True)
+    detail_text = cast(QLabel, detail_group.findChild(QLabel)).text()
+    assert "Context: Comparison audio retimed x1.0417 to its effective frame rate." in detail_text

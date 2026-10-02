@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,14 +14,18 @@ import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request
-from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_vsview import (
     AlignmentVSViewOutcome,
     maybe_launch_alignment_vsview,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
+from frame_compare.services.types import AlignmentConfig, AlignmentResult, AlignmentReviewSummary
+from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
+    AudioAlignmentAttempt,
+    evidence_from_payload,
+)
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -49,6 +54,8 @@ def _clip(path: Path, *, frame_count: int = 200) -> AlignmentClipRequest:
         trim_end_frame_inclusive=None,
         effective_fps_num=24,
         effective_fps_den=1,
+        source_fps_num=24,
+        source_fps_den=1,
         source_frame_count=frame_count,
         presentation_name=path.stem.title(),
     )
@@ -79,7 +86,9 @@ def _call(
 ) -> AlignmentVSViewOutcome:
     reference = _clip(tmp_path / "ref.mkv")
     resolved_comparisons = comparisons or [_clip(tmp_path / "comparison.mkv", frame_count=150)]
-    offsets = {f"ref:{comparison.path.stem}": 3 for comparison in resolved_comparisons}
+    offsets: dict[str, int | None] = {
+        f"ref:{comparison.path.stem}": 3 for comparison in resolved_comparisons
+    }
     return maybe_launch_alignment_vsview(
         reference=reference,
         comparisons=resolved_comparisons,
@@ -104,6 +113,42 @@ def _call(
         progress=None,
         review_summary=review_summary,
     )
+
+
+def test_audio_review_envelope_carries_a_parseable_v4_attempt() -> None:
+    """The VSView audio-review envelope embeds the v4 attempt validated by one parser."""
+    attempt = audio_attempt()
+    envelope = {
+        "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+        "evidence_availability": "current_attempt",
+        "audio_attempt": asdict(attempt),
+    }
+    encoded = json.dumps(envelope, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    assert len(encoded.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
+
+    decoded = json.loads(encoded)
+    assert set(decoded) == {"current_authority", "evidence_availability", "audio_attempt"}
+    parsed = evidence_from_payload(AudioAlignmentAttempt, decoded["audio_attempt"])
+    assert parsed == attempt
+    assert parsed.comparison_ordinal == 1
+    assert parsed.decision.state == "provisional"
+    assert parsed.decision.candidate is not None
+    assert parsed.decision.candidate.frame_offset == 0
+
+    historical = json.loads(
+        json.dumps(
+            {
+                "current_authority": {
+                    "origin": "shared_computed_offsets",
+                    "frame_offset": 3,
+                },
+                "evidence_availability": "historical_details_unavailable",
+                "audio_attempt": None,
+            }
+        )
+    )
+    assert set(historical) == {"current_authority", "evidence_availability", "audio_attempt"}
+    assert historical["audio_attempt"] is None
 
 
 def test_disabled_review_has_no_runtime_side_effects(
@@ -279,22 +324,22 @@ def test_pending_review_without_launch_marks_review_unresolved(
         lambda: SimpleNamespace(stdin=False, stdout=True, stderr=False),
     )
     attempt = audio_attempt()
-    consensus = AlignmentConsensus(
-        None,
-        0.99,
-        False,
-        "insufficient_consensus",
-        5,
-        4,
-        0.8,
-        2.0,
-        window_records=attempt.windows,
-        decision=attempt.decision,
+    unapplied = AlignmentResult(
+        reference_clip="reference.mkv",
+        comparison_clip="comparison.mkv",
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+        diagnostic="audio_only",
+        stability=attempt.stability,
         audio_attempt=attempt,
     )
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
-        lambda *_args, **_kwargs: consensus,
+        lambda *_args, **_kwargs: unapplied,
     )
     config = AlignmentConfig(cache_results=False, no_color=True, use_vsview=True)
     reference = tmp_path / "reference.mkv"

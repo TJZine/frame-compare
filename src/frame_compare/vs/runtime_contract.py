@@ -299,7 +299,10 @@ def _scope_components(
             "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         }
     if scope == "alignment":
-        return {"standalone_ffmpeg": _standalone_ffmpeg_identity(profile)}
+        return {
+            "decoder": _decoder_identity(profile),
+            "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
+        }
     if scope == "index":
         return {
             "decoder": _decoder_identity(profile),

@@ -8,12 +8,14 @@ import pytest
 import tomli_w
 from pydantic import BaseModel, ValidationError
 
-from frame_compare.config.loader import get_default_config
+from frame_compare.config.errors import ConfigValidationError
+from frame_compare.config.loader import get_default_config, load_config_from_env
 from frame_compare.config.schema import (
     AnalysisConfig,
     ColorConfig,
     ConfigSchema,
     ReportConfig,
+    RuntimeConfig,
 )
 from frame_compare.config.schema_enums import (
     AnalysisPerformanceMode,
@@ -155,28 +157,20 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert analysis.random_seed == 42
     assert analysis.dark_quantile == 0.05
     assert analysis.bright_quantile == 0.95
-    assert audio.sample_rate == 8000
+    assert audio.enable is True
     assert audio.max_offset_seconds == 30.0
+    assert audio.use_vsview is False
     assert audio.force_interactive is False
+    assert audio.cache_results is True
     assert audio.previous_offsets == "disabled"
-    assert audio.correlation_mode == "raw_fft"
-    assert audio.preprocessing_mode == "none"
     assert audio.channel_strategy == "mono_downmix"
-    assert audio.confidence_threshold == 0.0
-    assert audio.ambiguity_peak_ratio == 1.0
-    assert audio.window_length_seconds == 0.0
-    assert audio.window_stride_seconds == 0.0
-    assert audio.minimum_valid_windows == 1
-    assert audio.consensus_minimum_ratio == 1.0
-    assert audio.refinement_mode == "disabled"
-    assert audio.refinement_sample_rate is None
     assert audio.reference_stream is None
     assert audio.comparison_streams == {}
     assert screenshots.overlay_mode == OverlayMode.STANDARD
     assert screenshots.png_compression == 6
     assert screenshots.ffmpeg_timeout_seconds == 30.0
     assert screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
-    assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
+    assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.AUTO
     assert screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
     assert screenshots.aligned_target_width is None
     assert screenshots.aligned_target_height is None
@@ -572,62 +566,69 @@ def test_slowpics_confirm_upload_after_report_accepts_explicit_bool() -> None:
 def test_audio_alignment_new_config_controls_validate_and_reject_unknown_values() -> None:
     audio = AudioAlignmentConfig.model_validate(
         {
-            "correlation_mode": "gcc_phat",
-            "preprocessing_mode": "standard",
-            "channel_strategy": "best_channel",
-            "confidence_threshold": 0.25,
-            "ambiguity_peak_ratio": 1.5,
-            "window_length_seconds": 10.0,
-            "window_stride_seconds": 2.5,
-            "minimum_valid_windows": 2,
-            "consensus_minimum_ratio": 0.75,
-            "refinement_mode": "local",
-            "refinement_sample_rate": 16000,
-            "reference_stream": 1,
+            "enable": False,
+            "max_offset_seconds": 10.0,
+            "use_vsview": True,
+            "force_interactive": True,
+            "cache_results": False,
             "previous_offsets": "always",
+            "channel_strategy": "best_channel",
+            "reference_stream": 1,
             "comparison_streams": {"encode": 2},
         }
     )
 
-    assert audio.correlation_mode == "gcc_phat"
-    assert audio.preprocessing_mode == "standard"
-    assert audio.channel_strategy == "best_channel"
-    assert audio.confidence_threshold == 0.25
-    assert audio.ambiguity_peak_ratio == 1.5
-    assert audio.window_length_seconds == 10.0
-    assert audio.window_stride_seconds == 2.5
-    assert audio.minimum_valid_windows == 2
-    assert audio.consensus_minimum_ratio == 0.75
-    assert audio.refinement_mode == "local"
-    assert audio.refinement_sample_rate == 16000
-    assert audio.reference_stream == 1
+    assert audio.enable is False
+    assert audio.max_offset_seconds == 10.0
+    assert audio.use_vsview is True
+    assert audio.force_interactive is True
+    assert audio.cache_results is False
     assert audio.previous_offsets == "always"
+    assert audio.channel_strategy == "best_channel"
+    assert audio.reference_stream == 1
     assert audio.comparison_streams == {"encode": 2}
 
     for invalid in (
-        {"correlation_mode": "normalized"},
-        {"preprocessing_mode": "aggressive"},
         {"channel_strategy": "first_channel"},
-        {"confidence_threshold": -0.1},
-        {"confidence_threshold": 1.1},
-        {"ambiguity_peak_ratio": 0.99},
-        {"window_length_seconds": -1.0},
-        {"window_stride_seconds": -1.0},
         {"max_offset_seconds": float("inf")},
-        {"window_length_seconds": float("inf")},
-        {"window_stride_seconds": float("inf")},
-        {"minimum_valid_windows": 0},
-        {"consensus_minimum_ratio": -0.1},
-        {"consensus_minimum_ratio": 1.1},
-        {"refinement_mode": "global"},
-        {"refinement_sample_rate": 3999},
-        {"refinement_sample_rate": 48001},
+        {"max_offset_seconds": 0.5},
         {"reference_stream": -1},
         {"previous_offsets": "reuse"},
         {"comparison_streams": {"encode": -1}},
     ):
         with pytest.raises(ValidationError):
             AudioAlignmentConfig.model_validate(invalid)
+
+
+@pytest.mark.parametrize(
+    "removed_key",
+    [
+        "sample_rate",
+        "correlation_mode",
+        "preprocessing_mode",
+        "confidence_threshold",
+        "ambiguity_peak_ratio",
+        "window_length_seconds",
+        "window_stride_seconds",
+        "minimum_valid_windows",
+        "consensus_minimum_ratio",
+        "refinement_mode",
+        "refinement_sample_rate",
+    ],
+)
+def test_audio_alignment_removed_tuning_keys_are_rejected(removed_key: str) -> None:
+    """U3 whole-track replacement rejects retired estimator tuning keys."""
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AudioAlignmentConfig.model_validate({removed_key: 1})
+
+
+def test_audio_alignment_removed_tuning_key_via_env_fails_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retired estimator key through the environment source fails validation."""
+    monkeypatch.setenv("FRAME_COMPARE_AUDIO_ALIGNMENT__SAMPLE_RATE", "1")
+    with pytest.raises(ConfigValidationError):
+        load_config_from_env()
 
 
 @pytest.mark.parametrize("year_tolerance", [0, 5])
@@ -680,3 +681,20 @@ def test_toml_settings_source_accepts_utf8_bom_directly(tmp_path: Path) -> None:
         "analysis": {"random_frame_count": 24},
         "logging": {"level": "DEBUG"},
     }
+
+
+def test_runtime_memory_limit_defaults_and_integer_boundaries() -> None:
+    assert get_default_config().runtime.memory_limit_mb is None
+    for value in (None, 512, 1024, 4096):
+        assert RuntimeConfig(memory_limit_mb=value).memory_limit_mb == value
+
+
+@pytest.mark.parametrize("value", [511, 0, -1, 512.0, 512.5, "512", True, False])
+def test_runtime_memory_limit_rejects_invalid_values(value: object) -> None:
+    with pytest.raises(ValidationError):
+        RuntimeConfig.model_validate({"memory_limit_mb": value})
+
+
+def test_runtime_rejects_unknown_keys() -> None:
+    with pytest.raises(ValidationError):
+        ConfigSchema(runtime={"unknown": 1024})

@@ -47,6 +47,14 @@ class PathsConfig(BaseModel):
     config_dir: str = "config"
 
 
+class RuntimeConfig(BaseModel):
+    """VapourSynth frame-cache settings, not total process memory limits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_limit_mb: int | None = Field(default=None, ge=512, strict=True)
+
+
 class AnalysisConfig(BaseModel):
     """Frame selection and analysis settings."""
 
@@ -94,23 +102,12 @@ class AudioAlignmentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enable: bool = True
-    sample_rate: int = Field(default=8000, ge=4000, le=48000)
     max_offset_seconds: float = Field(default=30.0, ge=1.0, allow_inf_nan=False)
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
     previous_offsets: Literal["disabled", "prompt", "always"] = "disabled"
-    correlation_mode: Literal["raw_fft", "gcc_phat"] = "raw_fft"
-    preprocessing_mode: Literal["none", "standard"] = "none"
     channel_strategy: Literal["mono_downmix", "best_channel"] = "mono_downmix"
-    confidence_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
-    ambiguity_peak_ratio: float = Field(default=1.0, ge=1.0)
-    window_length_seconds: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
-    window_stride_seconds: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
-    minimum_valid_windows: int = Field(default=1, ge=1)
-    consensus_minimum_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
-    refinement_mode: Literal["disabled", "local"] = "disabled"
-    refinement_sample_rate: int | None = Field(default=None, ge=4000, le=48000)
     reference_stream: int | None = Field(default=None, ge=0)
     comparison_streams: dict[str, Annotated[int, Field(ge=0)]] = Field(default_factory=dict)
 
@@ -198,9 +195,7 @@ class ScreenshotsConfig(BaseModel):
     png_compression: int = Field(default=6, ge=0, le=9)
     ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0)
     geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
-    active_rect_detection: ScreenshotActiveRectDetection = (
-        ScreenshotActiveRectDetection.ASPECT_RATIO
-    )
+    active_rect_detection: ScreenshotActiveRectDetection = ScreenshotActiveRectDetection.AUTO
     aligned_scale_policy: ScreenshotAlignedScalePolicy = ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
     aligned_target_width: int | None = None
     aligned_target_height: int | None = None

@@ -23,6 +23,7 @@ on:
       - src/frame_compare/orchestration/context.py
       - src/frame_compare/utils/subproc.py
       - src/frame_compare/utils/types.py
+      - src/frame_compare/utils/alignment_evidence.py
       - tests/services/test_alignment*.py
       - tests/services/alignment_request_test_support.py
       - tests/orchestration/test_phase_alignment*.py

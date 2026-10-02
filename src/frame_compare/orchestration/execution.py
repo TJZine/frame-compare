@@ -188,6 +188,7 @@ def build_phases_before_align(
             partial(
                 run_align_phase,
                 selected_frames=state.selected_frames,
+                vs_loader=vs_loader,
                 verbose=request.verbose,
                 quiet=request.quiet,
                 json_output=request.json_output,

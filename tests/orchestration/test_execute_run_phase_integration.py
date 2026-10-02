@@ -82,10 +82,12 @@ enable = false
         quiet=False,
         json_output=False,
         review_summary: AlignmentReviewSummary | None = None,
+        vs_loader=None,
     ):
         assert verbose is False
         assert quiet is False
         assert json_output is False
+        assert vs_loader is deps.vs_loader
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path
         assert [comparison.identity.path for comparison in request.comparisons] == [

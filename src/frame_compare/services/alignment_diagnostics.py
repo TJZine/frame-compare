@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
 from frame_compare.errors import PathEscapesRootError
-from frame_compare.services.types import AlignmentResult, AudioAlignmentAttempt
+from frame_compare.services.types import AlignmentResult
+from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
+    AudioAlignmentAttempt,
+    audio_attempt_payload,
+)
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 
-_SCHEMA_VERSION = 3
-_MAX_ARTIFACT_BYTES = 128 * 1024
+_SCHEMA_VERSION = 4
 
 type AlignmentReviewOutcome = Literal[
     "pending",
@@ -31,7 +34,7 @@ def _bounded_label(value: str) -> str:
 
 
 def _attempt_payload(attempt: AudioAlignmentAttempt | None) -> dict[str, object] | None:
-    return asdict(attempt) if attempt is not None else None
+    return audio_attempt_payload(attempt) if attempt is not None else None
 
 
 def canonical_attempt_bytes(attempt: AudioAlignmentAttempt) -> bytes:
@@ -64,6 +67,11 @@ def diagnostic_path(
     run_dir = require_managed_immediate_child(generated_root, diagnostics_dir.parent)
     resolved_dir = require_managed_immediate_child(run_dir, diagnostics_dir)
     path = resolved_dir / f"comparison-{comparison_ordinal}.json"
+    # Best-effort guard against a persistent link at the artifact path. It is
+    # intentionally not a security barrier: swapping a link in after this
+    # check requires write access to the managed diagnostics directory, which
+    # already grants equivalent capability. The atomic writer still replaces
+    # (never follows) the destination.
     if path.exists() and (path.is_symlink() or path.is_junction() or not path.is_file()):
         raise PathEscapesRootError(path.resolve(), resolved_dir)
     return require_managed_immediate_child(resolved_dir, path)
@@ -116,19 +124,16 @@ def write_alignment_diagnostic(
             ),
         },
     }
-    content = (
-        json.dumps(
-            payload,
-            indent=2,
-            sort_keys=True,
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        + "\n"
+    content = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
     )
     size = len(content.encode("utf-8"))
-    if size > _MAX_ARTIFACT_BYTES:
-        raise ValueError(f"audio alignment diagnostic exceeds {_MAX_ARTIFACT_BYTES} bytes: {size}")
+    if size > MAX_ALIGNMENT_EVIDENCE_BYTES:
+        raise ValueError(f"audio alignment diagnostic exceeds the 2 MiB limit: {size} bytes")
     write_text_atomic(path, content, encoding="utf-8")
     return path, digest, size
 

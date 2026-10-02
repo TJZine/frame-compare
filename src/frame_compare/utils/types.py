@@ -4,8 +4,9 @@ This module contains cross-cutting type definitions used by multiple layers.
 """
 
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from frame_compare.utils.paths import (
     require_managed_descendant,
@@ -161,16 +162,50 @@ class AlignmentClipRequest:
     trim_end_frame_inclusive: int | None
     effective_fps_num: int
     effective_fps_den: int
+    source_fps_num: int
+    source_fps_den: int
     source_frame_count: int
     selected_audio_stream: int | None = None
+    active_rect_x: int | None = None
+    active_rect_y: int | None = None
+    active_rect_width: int | None = None
+    active_rect_height: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
     compact_name: str | None = None
     short_name: str | None = None
 
     def __post_init__(self) -> None:
+        if not _is_positive_int(self.source_fps_num):
+            raise ValueError("source_fps_num must be a positive integer")
+        if not _is_positive_int(self.source_fps_den):
+            raise ValueError("source_fps_den must be a positive integer")
         if not _is_positive_int(self.source_frame_count):
             raise ValueError("source_frame_count must be a positive integer")
+        active_rect = (
+            self.active_rect_x,
+            self.active_rect_y,
+            self.active_rect_width,
+            self.active_rect_height,
+        )
+        if any(value is None for value in active_rect):
+            if any(value is not None for value in active_rect):
+                raise ValueError("active rectangle fields must be all present or all absent")
+        elif not all(isinstance(value, int) for value in active_rect):
+            raise ValueError("active rectangle fields must be integers")
+        else:
+            x, y, width, height = cast(tuple[int, int, int, int], active_rect)
+            if x < 0 or y < 0 or width <= 0 or height <= 0:
+                raise ValueError(
+                    "active rectangle fields must describe a positive source rectangle"
+                )
+
+    @property
+    def timeline_scale(self) -> Fraction:
+        """Native-to-analysis time factor: source fps over effective fps (1 when not retimed)."""
+        return Fraction(self.source_fps_num, self.source_fps_den) / Fraction(
+            self.effective_fps_num, self.effective_fps_den
+        )
 
 
 def _is_positive_int(value: object) -> bool:
@@ -181,19 +216,8 @@ def _is_positive_int(value: object) -> bool:
 class AlignmentCacheSettings:
     """Alignment settings that participate in shared cache identity."""
 
-    sample_rate: int
     max_offset_seconds: float
-    correlation_mode: str
-    preprocessing_mode: str
     channel_strategy: str
-    confidence_threshold: float
-    ambiguity_peak_ratio: float
-    window_length_seconds: float
-    window_stride_seconds: float
-    minimum_valid_windows: int
-    consensus_minimum_ratio: float
-    refinement_mode: str
-    refinement_sample_rate: int | None
 
 
 @dataclass(frozen=True, slots=True)

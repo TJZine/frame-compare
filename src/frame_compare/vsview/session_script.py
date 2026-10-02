@@ -37,6 +37,7 @@ def write_vsview_session_script(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
     short_names_by_stem: dict[str, str] | None = None,
+    memory_limit_mb: int | None = None,
 ) -> Path:
     """Generate and write a self-contained VSView script.
 
@@ -60,6 +61,7 @@ def write_vsview_session_script(
         frame_props_by_stem=frame_props_by_stem,
         presentation_names_by_stem=presentation_names_by_stem,
         short_names_by_stem=short_names_by_stem,
+        memory_limit_mb=memory_limit_mb,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -115,6 +117,8 @@ import json
 import os
 import sys
 from pathlib import Path
+
+from frame_compare.utils.alignment_evidence import AudioAlignmentDecision, evidence_from_payload
 
 logging.getLogger("vsview.app.workspace.loader").addFilter(
     lambda record: not (
@@ -553,14 +557,36 @@ def main():
         suggested_offset = target["suggested_offset"]
         audio_review = json.loads(target["audio_review"])
         audio_attempt = audio_review["audio_attempt"]
-        audio_decision = None if audio_attempt is None else audio_attempt["decision"]
+        raw_decision = (
+            audio_attempt.get("decision") if isinstance(audio_attempt, dict) else None
+        )
+        try:
+            audio_decision = (
+                None
+                if raw_decision is None
+                else evidence_from_payload(AudioAlignmentDecision, raw_decision)
+            )
+        except ValueError:
+            audio_decision = None
+        candidate_offset = (
+            None
+            if audio_decision is None or audio_decision.candidate is None
+            else audio_decision.candidate.frame_offset
+        )
+        audio_attempt_unusable = audio_attempt is not None and (
+            audio_decision is None or candidate_offset is None
+        )
         authority = audio_review["current_authority"]
-        if audio_decision is not None and audio_decision["state"] == "provisional":
-            provisional_offset = audio_decision["candidate"]["frame_offset"]
-            audio_hint = f"Provisional {provisional_offset:+d}f - NOT APPLIED"
+        if (
+            audio_decision is not None
+            and audio_decision.state == "provisional"
+            and candidate_offset is not None
+        ):
+            audio_hint = f"Provisional {candidate_offset:+d}f - NOT APPLIED"
             hint_pair = "Verify manually; this candidate is not a confirmed alignment"
-            trim_hint = f"Reason: {audio_decision['primary_reason']}"
-        elif audio_decision is not None and audio_decision["state"] == "trusted_automatic":
+            trim_hint = f"Reason: {audio_decision.primary_reason}"
+        elif audio_decision is not None and audio_decision.state == "trusted_automatic":
+            # U4 video-confirm seam: U3 decisions never reach trusted_automatic.
             audio_hint = f"Audio alignment accepted: {suggested_offset:+d}f"
             hint_pair = (
                 "No relative audio correction required"
@@ -577,13 +603,13 @@ def main():
             audio_hint = f"Current alignment: {suggested_offset:+d}f — manually confirmed"
             hint_pair = "Historical audio details unavailable"
             trim_hint = "Manual authority is separate from audio evidence"
-        elif suggested_offset is None:
+        elif audio_attempt_unusable or suggested_offset is None:
             audio_hint = "No usable audio candidate"
             hint_pair = "No automatic correction applied"
             trim_hint = "Enter known offsets or align the sources manually"
         else:
             audio_hint = f"Reused accepted audio alignment: {suggested_offset:+d}f"
-            hint_pair = "Historical window and selected-stream details unavailable"
+            hint_pair = "Historical chunk and selected-stream details unavailable"
             trim_hint = "No audio analysis ran this time"
 
         ready_hints.append((label, audio_hint))
@@ -670,6 +696,7 @@ def _build_script_content(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
     short_names_by_stem: dict[str, str] | None = None,
+    memory_limit_mb: int | None = None,
 ) -> str:
     """Build the script content for VSView.
 
@@ -687,5 +714,10 @@ def _build_script_content(
         short_names_by_stem,
     )
     main_execution = _build_main_execution_section()
+    if memory_limit_mb is not None:
+        main_execution = main_execution.replace(
+            "    core = vs.core\n",
+            f"    core = vs.core\n    core.max_cache_size = {memory_limit_mb}\n",
+        )
 
     return f"{header}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"

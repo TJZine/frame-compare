@@ -1,34 +1,42 @@
-"""Audio alignment service using cross-correlation."""
+"""Whole-track audio alignment service."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
-import sys
+import math
 import threading
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import asdict, replace
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import structlog
-from rich.markup import escape
-from rich.padding import Padding
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 
-from frame_compare.services import alignment_audio, alignment_consensus, alignment_math
-from frame_compare.services.alignment_correlation import ALIGNMENT_ESTIMATOR_POLICY
+from frame_compare.services import alignment_audio, alignment_decision, alignment_video
+from frame_compare.services.alignment_correlation import (
+    ChunkedAudioEstimate,
+    ChunkedCorrelation,
+    ChunkPlan,
+    plan_audio_chunks,
+)
+from frame_compare.services.alignment_decision import (
+    ALIGNMENT_ESTIMATOR_POLICY,
+    DecidedAudioStage,
+)
 from frame_compare.services.alignment_diagnostics import (
     AlignmentReviewOutcome,
     write_alignment_diagnostic,
 )
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
-from frame_compare.services.alignment_math import calculate_alignment_trims
+from frame_compare.services.alignment_presentation import (
+    present_alignment_evidence,
+    print_pre_review_summary,
+)
 from frame_compare.services.alignment_previous_offsets import (
     apply_shared_reuse,
     prompt_for_previous_alignment_offset_reuse,
@@ -36,8 +44,18 @@ from frame_compare.services.alignment_previous_offsets import (
     validate_previous_offsets_policy,
 )
 from frame_compare.services.alignment_reuse_cache import comparison_cache_key, save_reusable_offsets
+from frame_compare.services.alignment_streaming import (
+    CollectionCleanup,
+    CollectionFacts,
+    PairedAudioCollection,
+    PairedAudioCollectionFailure,
+    collect_paired_audio_chunks,
+    paired_collection_timeout_seconds,
+    paired_output_limit_samples,
+)
 from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
 from frame_compare.services.errors import (
+    AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
     AudioAlignmentError,
     raise_if_alignment_cancelled,
@@ -47,41 +65,35 @@ from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
     AlignmentReviewSummary,
+)
+from frame_compare.utils.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
     AudioAlignmentAttempt,
+    AudioCollectionFacts,
+    AudioCollectionFailure,
+    AudioCollectionObservation,
+    AudioPairSide,
+    VideoCheckObservation,
+    analysis_stream_start,
+    audio_attempt_payload,
 )
-from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
-from frame_compare.utils.terminal_theme import (
-    ACCENT,
-    BORDER_NEUTRAL,
-    BORDER_PENDING,
-    MUTED,
-    OK,
-    VALUE,
-    WARN,
-    glyphs_for_console,
-    human_console,
-)
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 log = structlog.get_logger()
 
 _DIAGNOSTIC_POLICY = "retained-audio-evidence-v1"
-_CHANNEL_FALLBACK_ACTIVITY = (
-    "Checking individual audio channels for a review hint. Any hint will need visual confirmation."
-)
 
 __all__ = [
     "align_clips_from_request",
-    "calculate_alignment_trims",
     "format_rejected_alignment_warning",
     "prompt_for_previous_alignment_offset_reuse",
 ]
-
-
-def _alignment_key(reference: Path, comparison: Path) -> str:
-    return alignment_key(reference, comparison)
 
 
 def _safe_alignment_diagnostic(diagnostic: str | None) -> str:
@@ -118,10 +130,30 @@ def _build_offsets_map(
     """Build stable `{reference:comparison -> frame_offset}` map for VSView."""
     offsets_by_key: dict[str, int | None] = {}
     for comp in comparisons:
-        key = _alignment_key(reference, comp)
+        key = alignment_key(reference, comp)
         res = results_map.get(key)
         offsets_by_key[key] = res.frame_offset if res is not None and res.applied else None
     return offsets_by_key
+
+
+def _project_audio_attempt_for_review(attempt: AudioAlignmentAttempt) -> AudioAlignmentAttempt:
+    """Embed the attempt without per-chunk rows in native review metadata."""
+    if attempt.chunks.rows_omitted:
+        return attempt
+    return replace(
+        attempt,
+        chunks=replace(
+            attempt.chunks,
+            starts=(),
+            counts=(),
+            active=(),
+            lags=(),
+            psrs=(),
+            credible=(),
+            agrees=(),
+            rows_omitted=True,
+        ),
+    )
 
 
 def _build_audio_review_map(
@@ -133,7 +165,7 @@ def _build_audio_review_map(
 ) -> dict[str, str]:
     payloads: dict[str, str] = {}
     for comparison in comparisons:
-        key = _alignment_key(reference, comparison)
+        key = alignment_key(reference, comparison)
         result = results_map[key]
         provenance = provenances[key]
         payload = {
@@ -142,9 +174,11 @@ def _build_audio_review_map(
                 "frame_offset": result.frame_offset if result.applied else None,
             },
             "evidence_availability": provenance.evidence_availability,
-            "audio_attempt": asdict(result.audio_attempt)
-            if result.audio_attempt is not None
-            else None,
+            "audio_attempt": (
+                audio_attempt_payload(_project_audio_attempt_for_review(result.audio_attempt))
+                if result.audio_attempt is not None
+                else None
+            ),
         }
         encoded = json.dumps(
             payload,
@@ -153,8 +187,8 @@ def _build_audio_review_map(
             ensure_ascii=False,
             allow_nan=False,
         )
-        if len(encoded.encode("utf-8")) > 128 * 1024:
-            raise AudioAlignmentError("Native alignment-review audio evidence exceeds 128 KiB.")
+        if len(encoded.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
+            raise AudioAlignmentError("Native alignment-review audio evidence exceeds 2 MiB.")
         payloads[key] = encoded
     return payloads
 
@@ -175,7 +209,7 @@ def _apply_confirmed_vsview_offsets(
         resolved_fps_reference = alignment_audio.probe_fps(reference)
 
     for comp in comparisons:
-        key = _alignment_key(reference, comp)
+        key = alignment_key(reference, comp)
         if key not in confirmed_offsets_by_key:
             continue
         frame_offset = int(confirmed_offsets_by_key[key])
@@ -224,7 +258,7 @@ def _apply_manual_overrides_with_provenance(
     manual_overrides = load_manual_overrides(cache_dir)
 
     for comp in comparisons:
-        key = _alignment_key(reference, comp.path)
+        key = alignment_key(reference, comp.path)
         if key not in manual_overrides:
             continue
         override = manual_overrides[key]
@@ -270,160 +304,552 @@ def _request_identity_matches(path: Path, request: AlignmentClipRequest) -> bool
         return False
 
 
+def _computed_result(
+    *,
+    reference: Path,
+    comparison: Path,
+    decided: DecidedAudioStage,
+    attempt: AudioAlignmentAttempt | None,
+) -> AlignmentResult:
+    """Build the computed result, applying only trusted automatic evidence."""
+    candidate = decided.decision.candidate
+    applied = decided.decision.state == "trusted_automatic"
+    if applied and candidate is None:
+        raise AudioAlignmentError("trusted automatic alignment is missing its candidate")
+    return AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=candidate.frame_offset if applied and candidate is not None else None,
+        time_offset_seconds=(
+            candidate.time_offset_seconds if applied and candidate is not None else None
+        ),
+        correlation_score=decided.correlation_score,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=applied,
+        diagnostic=decided.decision.primary_reason,
+        stability=decided.stability,
+        audio_attempt=attempt,
+    )
+
+
+def _evidence_collection_facts(
+    result: PairedAudioCollection | PairedAudioCollectionFailure,
+) -> tuple[tuple[AudioCollectionFacts, AudioCollectionFacts], AudioCollectionFailure | None]:
+    """Project U2 transport facts into evidence (no PCM, no stderr text).
+
+    The failure category and side live once at pair level (m14), not per side.
+    """
+    failure = result if isinstance(result, PairedAudioCollectionFailure) else None
+
+    def one(
+        facts: CollectionFacts,
+        cleanup: CollectionCleanup,
+        role: AudioPairSide,
+    ) -> AudioCollectionFacts:
+        eof_sample = facts.emitted_sample_count if facts.returncode == 0 else None
+        return AudioCollectionFacts(
+            role=role,
+            emitted_samples=facts.emitted_sample_count,
+            eof_sample=eof_sample,
+            elapsed_seconds=facts.elapsed_seconds,
+            returncode=facts.returncode,
+            stderr_bytes=facts.stderr_byte_count,
+            stderr_truncated=facts.stderr_truncated,
+            cleanup_completed=cleanup.completed,
+        )
+
+    pair_failure = (
+        None
+        if failure is None
+        else AudioCollectionFailure(category=failure.category, side=failure.side)
+    )
+    return (
+        (
+            one(result.reference_facts, result.reference_cleanup, "reference"),
+            one(result.comparison_facts, result.comparison_cleanup, "comparison"),
+        ),
+        pair_failure,
+    )
+
+
+def _selection_start_facts(
+    selection: alignment_audio.AudioStreamSelection,
+    *,
+    timeline_scale: Fraction,
+) -> tuple[Fraction, Fraction]:
+    """Return the (audio start, video start) A5 facts for one selection."""
+    return (
+        analysis_stream_start(selection.stream.timeline.start_time, timeline_scale),
+        analysis_stream_start(selection.video_start.start_time, timeline_scale),
+    )
+
+
 def _build_audio_attempt(
     *,
     reference: AlignmentClipRequest,
     comparison: AlignmentClipRequest,
     comparison_ordinal: int,
-    reference_stream: alignment_audio.AudioStreamInfo,
-    comparison_stream: alignment_audio.AudioStreamInfo,
-    plan: alignment_audio.AudioAnalysisPlan | alignment_audio.AudioAnalysisBudgetExceeded,
-    consensus: alignment_consensus.AlignmentConsensus,
+    reference_selection: alignment_audio.AudioStreamSelection,
+    comparison_selection: alignment_audio.AudioStreamSelection,
+    decided: DecidedAudioStage,
     config: AlignmentConfig,
     fps_reference: Fraction,
+    collection: tuple[AudioCollectionFacts, ...],
+    collection_observation: AudioCollectionObservation,
+    collection_failure: AudioCollectionFailure | None = None,
 ) -> AudioAlignmentAttempt:
-    if consensus.decision is None:
-        raise ValueError("audio consensus is missing its diagnostic decision")
-    planned = plan if isinstance(plan, alignment_audio.AudioAnalysisPlan) else None
-    window_records = consensus.window_records
     return AudioAlignmentAttempt(
         reference_identity_digest=_clip_identity_digest(reference),
         comparison_identity_digest=_clip_identity_digest(comparison),
         comparison_ordinal=comparison_ordinal,
-        status="complete" if planned is not None else "preanalysis_rejection",
+        status=decided.attempt_status,
         estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
         diagnostic_policy=_DIAGNOSTIC_POLICY,
         media_runtime_fingerprint=media_runtime_fingerprint("alignment"),
         ffmpeg_version="not_observed",
         ffprobe_version="not_observed",
         extraction_recipe=alignment_audio.normalized_extraction_recipe(),
-        sample_rate=config.sample_rate,
         fps_num=fps_reference.numerator,
         fps_den=fps_reference.denominator,
-        confidence_threshold=config.confidence_threshold,
-        ambiguity_peak_ratio=config.ambiguity_peak_ratio,
-        minimum_valid_windows=config.minimum_valid_windows,
-        consensus_minimum_ratio=config.consensus_minimum_ratio,
         selected_streams=(
             alignment_audio.selected_stream_evidence(
-                reference_stream,
+                reference_selection.stream,
                 role="reference",
                 source_identity_digest=_clip_identity_digest(reference),
                 explicit_override=config.reference_stream is not None,
+                video_start=reference_selection.video_start,
+                timeline_scale=reference.timeline_scale,
             ),
             alignment_audio.selected_stream_evidence(
-                comparison_stream,
+                comparison_selection.stream,
                 role="comparison",
                 source_identity_digest=_clip_identity_digest(comparison),
                 explicit_override=config.comparison_streams.get(comparison.path.stem) is not None,
-                reference_stream=reference_stream,
+                video_start=comparison_selection.video_start,
+                timeline_scale=comparison.timeline_scale,
+                reference_stream=reference_selection.stream,
             ),
         ),
-        analysis_rate=planned.sample_rate if planned is not None else None,
-        planned_window_count=len(planned.windows) if planned is not None else 0,
-        peak_fft_points=planned.peak_fft_points if planned is not None else None,
-        total_fft_points=planned.total_fft_points if planned is not None else None,
-        planning_reason=plan.reason
-        if isinstance(plan, alignment_audio.AudioAnalysisBudgetExceeded)
-        else None,
-        windows=window_records,
-        decision=consensus.decision,
-        stability=consensus.stability,
-        collection_observation="observed" if consensus.collection_summaries else "not_observed",
-        collection_summaries=consensus.collection_summaries,
-        channel_corroboration=consensus.channel_corroboration,
+        analysis=decided.analysis,
+        chunks=decided.chunks,
+        runs=decided.runs,
+        audio=decided.audio,
+        collection_observation=collection_observation,
+        collection=collection,
+        collection_failure=collection_failure,
+        video_check=decided.video_check
+        or VideoCheckObservation(
+            observation="not_observed",
+            scored_offsets=(),
+            confirmed_offset=None,
+            index_build_seconds=None,
+            positions=(),
+        ),
+        decision=decided.decision,
+        stability=decided.stability,
+        authority_recount=decided.authority_recount,
     )
 
 
-def _compute_missing_alignments(
+def _video_clip_request(clip: AlignmentClipRequest) -> alignment_video.VideoClipRequest:
+    values = (
+        clip.active_rect_x,
+        clip.active_rect_y,
+        clip.active_rect_width,
+        clip.active_rect_height,
+    )
+    active_rect = (
+        cast(alignment_video.ActiveRect, values) if clip.active_rect_x is not None else None
+    )
+    return alignment_video.VideoClipRequest(
+        path=clip.path,
+        identity=clip.identity,
+        active_rect=active_rect,
+    )
+
+
+def _rejected_result(
     *,
-    reference: AlignmentClipRequest,
-    requested_comparisons: list[AlignmentClipRequest],
+    reference: Path,
+    comparison: Path,
     config: AlignmentConfig,
-    results_map: dict[str, AlignmentResult],
+    reason: str,
+    reference_request: AlignmentClipRequest,
+    comparison_request: AlignmentClipRequest,
+    comparison_ordinal: int,
     fps_reference: Fraction,
-    progress: ProgressReporter | None,
-    progress_descriptions: dict[Path, str] | None = None,
-    comparison_ordinals: dict[Path, int] | None = None,
-    on_comparison_started: Callable[[AlignmentClipRequest], None] | None = None,
-    on_channel_fallback_started: Callable[[AlignmentClipRequest], None] | None = None,
-    cancellation: threading.Event | None = None,
+    reference_selection: alignment_audio.AudioStreamSelection | None = None,
+    comparison_selection: alignment_audio.AudioStreamSelection | None = None,
+) -> AlignmentResult:
+    """Build a preanalysis rejection, with an attempt when streams were selected."""
+    if reference_selection is not None and comparison_selection is not None:
+        reference_audio_start, reference_video_start = _selection_start_facts(
+            reference_selection, timeline_scale=reference_request.timeline_scale
+        )
+        comparison_audio_start, comparison_video_start = _selection_start_facts(
+            comparison_selection, timeline_scale=comparison_request.timeline_scale
+        )
+    else:
+        reference_audio_start = reference_video_start = None
+        comparison_audio_start = comparison_video_start = None
+    decided = alignment_decision.decide_rejected_stage(
+        max_offset_seconds=config.max_offset_seconds,
+        reason=reason,
+        reference_audio_start=reference_audio_start,
+        reference_video_start=reference_video_start,
+        comparison_audio_start=comparison_audio_start,
+        comparison_video_start=comparison_video_start,
+    )
+    attempt: AudioAlignmentAttempt | None = None
+    if reference_selection is not None and comparison_selection is not None:
+        attempt = _build_audio_attempt(
+            reference=reference_request,
+            comparison=comparison_request,
+            comparison_ordinal=comparison_ordinal,
+            reference_selection=reference_selection,
+            comparison_selection=comparison_selection,
+            decided=decided,
+            config=config,
+            fps_reference=fps_reference,
+            collection=(),
+            collection_observation="not_observed",
+        )
+    return _computed_result(
+        reference=reference,
+        comparison=comparison,
+        decided=decided,
+        attempt=attempt,
+    )
+
+
+@dataclass(frozen=True)
+class _PlannedAudioPair:
+    """Pre-decode selection and plan for one comparison; collection has not run."""
+
+    reference_selection: alignment_audio.AudioStreamSelection
+    comparison_selection: alignment_audio.AudioStreamSelection
+    plan: ChunkPlan
+    frozen_identities: tuple[tuple[int, int], tuple[int, int]]
+    total_timeout_seconds: float
+    reference_limit_samples: int
+    comparison_limit_samples: int
+
+
+def _check_pair_identities(
+    reference: Path,
+    comparison: Path,
+    frozen_identities: tuple[tuple[int, int], tuple[int, int]],
 ) -> None:
-    """Extract audio, perform cross-correlation, and populate results map."""
-    descriptions = progress_descriptions or {}
-    selected_reference_stream: alignment_audio.AudioStreamInfo | None = None
+    """Raise AudioAlignmentError when either source changed since planning."""
+    try:
+        current_identities = (_source_identity(reference), _source_identity(comparison))
+    except OSError as exc:
+        raise AudioAlignmentError(
+            "source identity changed during paired audio collection",
+            category="source_identity_changed",
+            stage="collection",
+        ) from exc
+    if frozen_identities != current_identities:
+        raise AudioAlignmentError(
+            "source identity changed during paired audio collection",
+            category="source_identity_changed",
+            stage="collection",
+        )
 
-    def load_reference_stream() -> alignment_audio.AudioStreamInfo:
-        nonlocal selected_reference_stream
-        if selected_reference_stream is None:
-            selected_reference_stream = alignment_audio.select_reference_audio_stream(
-                reference.path,
-                stream_override=config.reference_stream,
+
+def _plan_audio_pair(
+    reference: Path,
+    comparison: Path,
+    *,
+    config: AlignmentConfig,
+    fps_reference: Fraction,
+    reference_probe_loader: Callable[[], alignment_audio.ProbedStreams] | None,
+    reference_request: AlignmentClipRequest,
+    comparison_request: AlignmentClipRequest,
+    comparison_ordinal: int,
+    cancellation: threading.Event | None,
+) -> AlignmentResult | _PlannedAudioPair:
+    """Select streams and plan chunks; return a rejection result or a plan."""
+    raise_if_alignment_cancelled(cancellation)
+    frozen_identities: tuple[tuple[int, int], tuple[int, int]] | None = None
+    try:
+        if _request_identity_matches(reference, reference_request) and _request_identity_matches(
+            comparison, comparison_request
+        ):
+            frozen_identities = (_source_identity(reference), _source_identity(comparison))
+    except OSError:
+        frozen_identities = None
+    if frozen_identities is None:
+        decided = alignment_decision.decide_rejected_stage(
+            max_offset_seconds=config.max_offset_seconds,
+            reason="source_identity_changed",
+        )
+        return _computed_result(
+            reference=reference,
+            comparison=comparison,
+            decided=decided,
+            attempt=None,
+        )
+    reference_probe = (
+        reference_probe_loader()
+        if reference_probe_loader is not None
+        else alignment_audio.probe_streams(reference)
+    )
+    comparison_probe = alignment_audio.probe_streams(comparison)
+    reference_selection, comparison_selection = alignment_audio.select_audio_pair(
+        reference_probe,
+        comparison_probe,
+        reference_path=reference,
+        comparison_path=comparison,
+        reference_override=config.reference_stream,
+        comparison_override=config.comparison_streams.get(comparison.stem),
+    )
+    reference_duration = reference_selection.stream.timeline.duration
+    comparison_duration = comparison_selection.stream.timeline.duration
+    if reference_duration is None or comparison_duration is None:
+        return _rejected_result(
+            reference=reference,
+            comparison=comparison,
+            config=config,
+            reason="selected_audio_timeline_unavailable",
+            reference_request=reference_request,
+            comparison_request=comparison_request,
+            comparison_ordinal=comparison_ordinal,
+            fps_reference=fps_reference,
+            reference_selection=reference_selection,
+            comparison_selection=comparison_selection,
+        )
+    reference_scale = reference_request.timeline_scale
+    comparison_scale = comparison_request.timeline_scale
+    reference_duration = reference_duration * reference_scale
+    comparison_duration = comparison_duration * comparison_scale
+    reference_samples = math.floor(reference_duration * AUDIO_ANALYSIS_SAMPLE_RATE)
+    comparison_samples = math.floor(comparison_duration * AUDIO_ANALYSIS_SAMPLE_RATE)
+    try:
+        alignment_audio.retime_rates(reference_scale)
+        alignment_audio.retime_rates(comparison_scale)
+        plan = plan_audio_chunks(
+            reference_samples,
+            comparison_samples,
+            config.max_offset_seconds,
+        )
+    except AudioAlignmentError as exc:
+        return _rejected_result(
+            reference=reference,
+            comparison=comparison,
+            config=config,
+            reason=exc.category,
+            reference_request=reference_request,
+            comparison_request=comparison_request,
+            comparison_ordinal=comparison_ordinal,
+            fps_reference=fps_reference,
+            reference_selection=reference_selection,
+            comparison_selection=comparison_selection,
+        )
+    total_timeout = paired_collection_timeout_seconds(
+        float(reference_duration), float(comparison_duration)
+    )
+    reference_limit = paired_output_limit_samples(
+        float(reference_duration), AUDIO_ANALYSIS_SAMPLE_RATE
+    )
+    comparison_limit = paired_output_limit_samples(
+        float(comparison_duration), AUDIO_ANALYSIS_SAMPLE_RATE
+    )
+    if total_timeout is None or reference_limit is None or comparison_limit is None:
+        return _rejected_result(
+            reference=reference,
+            comparison=comparison,
+            config=config,
+            reason="selected_audio_timeline_unavailable",
+            reference_request=reference_request,
+            comparison_request=comparison_request,
+            comparison_ordinal=comparison_ordinal,
+            fps_reference=fps_reference,
+            reference_selection=reference_selection,
+            comparison_selection=comparison_selection,
+        )
+    return _PlannedAudioPair(
+        reference_selection=reference_selection,
+        comparison_selection=comparison_selection,
+        plan=plan,
+        frozen_identities=frozen_identities,
+        total_timeout_seconds=total_timeout,
+        reference_limit_samples=reference_limit,
+        comparison_limit_samples=comparison_limit,
+    )
+
+
+def _collect_and_decide_audio_pair(
+    reference: Path,
+    comparison: Path,
+    *,
+    config: AlignmentConfig,
+    fps_reference: Fraction,
+    planned: _PlannedAudioPair,
+    reference_request: AlignmentClipRequest,
+    comparison_request: AlignmentClipRequest,
+    comparison_ordinal: int,
+    cancellation: threading.Event | None,
+    vs_loader: VSLoader | None,
+) -> AlignmentResult:
+    """Collect paired audio and map the outcome; raises on cancel/failed cleanup."""
+    reference_selection = planned.reference_selection
+    comparison_selection = planned.comparison_selection
+    plan = planned.plan
+
+    reference_audio_start, reference_video_start = _selection_start_facts(
+        reference_selection, timeline_scale=reference_request.timeline_scale
+    )
+    comparison_audio_start, comparison_video_start = _selection_start_facts(
+        comparison_selection, timeline_scale=comparison_request.timeline_scale
+    )
+
+    def finish(
+        decided: DecidedAudioStage,
+        collection_observation: AudioCollectionObservation,
+        collection_facts: tuple[AudioCollectionFacts, ...],
+        collection_failure: AudioCollectionFailure | None = None,
+        estimate: ChunkedAudioEstimate | None = None,
+    ) -> AlignmentResult:
+        attempt = _build_audio_attempt(
+            reference=reference_request,
+            comparison=comparison_request,
+            comparison_ordinal=comparison_ordinal,
+            reference_selection=reference_selection,
+            comparison_selection=comparison_selection,
+            decided=decided,
+            config=config,
+            fps_reference=fps_reference,
+            collection=collection_facts,
+            collection_observation=collection_observation,
+            collection_failure=collection_failure,
+        )
+        if estimate is not None and attempt.audio.global_lag is not None:
+            video_observation = alignment_video.check_video_alignment(
+                reference=_video_clip_request(reference_request),
+                comparison=_video_clip_request(comparison_request),
+                attempt=attempt,
+                fps_reference=fps_reference,
+                loader=vs_loader,
+                cancellation=cancellation,
             )
-        return selected_reference_stream
-
-    for fallback_ordinal, comp in enumerate(requested_comparisons, start=1):
-        raise_if_alignment_cancelled(cancellation)
-        comparison_ordinal = (comparison_ordinals or {}).get(comp.path, fallback_ordinal)
-        if progress:
-            progress.set_description(descriptions.get(comp.path, f"ALIGN | {comp.path.name}"))
-        if on_comparison_started is not None:
-            on_comparison_started(comp)
-
-        def report_channel_fallback_started(
-            comparison: AlignmentClipRequest = comp,
-        ) -> None:
-            if on_channel_fallback_started is not None:
-                on_channel_fallback_started(comparison)
-
-        estimate = alignment_consensus.hold_automatic_consensus(
-            _estimate_audio_pair(
-                reference.path,
-                comp.path,
+            decided = alignment_decision.decide_after_video(
+                stage=decided,
+                estimate=estimate,
+                plan=plan,
+                video=video_observation,
+                fps_reference=fps_reference,
+            )
+            attempt = _build_audio_attempt(
+                reference=reference_request,
+                comparison=comparison_request,
+                comparison_ordinal=comparison_ordinal,
+                reference_selection=reference_selection,
+                comparison_selection=comparison_selection,
+                decided=decided,
                 config=config,
                 fps_reference=fps_reference,
-                reference_stream_loader=load_reference_stream,
-                reference_request=reference,
-                comparison_request=comp,
-                comparison_ordinal=comparison_ordinal,
-                cancellation=cancellation,
-                on_channel_fallback_started=(
-                    report_channel_fallback_started
-                    if on_channel_fallback_started is not None
-                    else None
-                ),
+                collection=collection_facts,
+                collection_observation=collection_observation,
+                collection_failure=collection_failure,
             )
-        )
-        raise_if_alignment_cancelled(cancellation)
-        frame_offset = (
-            alignment_math.samples_to_frames(
-                estimate.sample_offset, config.sample_rate, fps_reference
-            )
-            if estimate.sample_offset is not None
-            else None
-        )
-        time_offset = (
-            estimate.sample_offset / config.sample_rate
-            if estimate.sample_offset is not None
-            else None
+        return _computed_result(
+            reference=reference,
+            comparison=comparison,
+            decided=decided,
+            attempt=attempt,
         )
 
-        res = AlignmentResult(
-            reference_clip=reference.path.name,
-            comparison_clip=comp.path.name,
-            frame_offset=frame_offset,
-            time_offset_seconds=time_offset,
-            correlation_score=estimate.score,
-            algorithm="cross_correlation",
-            source="computed",
-            applied=estimate.applied,
-            diagnostic=estimate.diagnostic,
-            stability=estimate.stability,
-            audio_attempt=estimate.audio_attempt,
+    def aborted_for_identity_change(
+        collection_observation: AudioCollectionObservation,
+        collection_facts: tuple[AudioCollectionFacts, ...],
+        collection_failure: AudioCollectionFailure | None = None,
+    ) -> AlignmentResult:
+        decided = alignment_decision.decide_aborted_stage(
+            plan=plan,
+            max_offset_seconds=config.max_offset_seconds,
+            reason="source_identity_changed",
+            reference_audio_start=reference_audio_start,
+            reference_video_start=reference_video_start,
+            comparison_audio_start=comparison_audio_start,
+            comparison_video_start=comparison_video_start,
         )
-        results_map[_alignment_key(reference.path, comp.path)] = res
-        if progress:
-            progress.advance(1)
+        return finish(decided, collection_observation, collection_facts, collection_failure)
+
+    try:
+        _check_pair_identities(reference, comparison, planned.frozen_identities)
+    except AudioAlignmentError:
+        return aborted_for_identity_change("not_observed", ())
+    accumulator = ChunkedCorrelation(plan)
+    collection = collect_paired_audio_chunks(
+        alignment_audio.collection_argv(
+            reference,
+            reference_selection.stream,
+            channel_strategy=config.channel_strategy,
+            timeline_scale=reference_request.timeline_scale,
+        ),
+        alignment_audio.collection_argv(
+            comparison,
+            comparison_selection.stream,
+            channel_strategy=config.channel_strategy,
+            timeline_scale=comparison_request.timeline_scale,
+        ),
+        chunks=plan.chunks,
+        lag_samples=plan.lag_samples,
+        consumer=accumulator.add,
+        reference_limit_samples=planned.reference_limit_samples,
+        comparison_limit_samples=planned.comparison_limit_samples,
+        total_timeout_seconds=planned.total_timeout_seconds,
+        cancellation=cancellation,
+    )
+    if isinstance(collection, PairedAudioCollectionFailure):
+        if not (collection.reference_cleanup.completed and collection.comparison_cleanup.completed):
+            raise AudioAlignmentCleanupError(
+                "paired audio collection cleanup did not complete",
+                category=collection.category,
+                stage="collection",
+            )
+        if collection.category == "cancelled":
+            raise AudioAlignmentCancellationError(
+                "audio alignment was cancelled",
+                category="cancelled",
+                stage="collection",
+            )
+        try:
+            _check_pair_identities(reference, comparison, planned.frozen_identities)
+        except AudioAlignmentError:
+            facts, pair_failure = _evidence_collection_facts(collection)
+            return aborted_for_identity_change("observed", facts, pair_failure)
+        decided = alignment_decision.decide_aborted_stage(
+            plan=plan,
+            max_offset_seconds=config.max_offset_seconds,
+            reason=collection.category,
+            reference_audio_start=reference_audio_start,
+            reference_video_start=reference_video_start,
+            comparison_audio_start=comparison_audio_start,
+            comparison_video_start=comparison_video_start,
+        )
+        facts, pair_failure = _evidence_collection_facts(collection)
+        return finish(decided, "observed", facts, pair_failure)
+    try:
+        _check_pair_identities(reference, comparison, planned.frozen_identities)
+    except AudioAlignmentError:
+        facts, pair_failure = _evidence_collection_facts(collection)
+        return aborted_for_identity_change("observed", facts, pair_failure)
+    estimate = accumulator.finish()
+    decided = alignment_decision.decide_completed_stage(
+        estimate=estimate,
+        plan=plan,
+        max_offset_seconds=config.max_offset_seconds,
+        reference_audio_start=reference_audio_start,
+        reference_video_start=reference_video_start,
+        comparison_audio_start=comparison_audio_start,
+        comparison_video_start=comparison_video_start,
+        fps_reference=fps_reference,
+    )
+    facts, pair_failure = _evidence_collection_facts(collection)
+    return finish(decided, "observed", facts, pair_failure, estimate=estimate)
 
 
 def _estimate_audio_pair(
@@ -432,239 +858,39 @@ def _estimate_audio_pair(
     *,
     config: AlignmentConfig,
     fps_reference: Fraction,
-    reference_stream_loader: Callable[[], alignment_audio.AudioStreamInfo] | None = None,
-    reference_request: AlignmentClipRequest | None = None,
-    comparison_request: AlignmentClipRequest | None = None,
+    reference_probe_loader: Callable[[], alignment_audio.ProbedStreams] | None = None,
+    reference_request: AlignmentClipRequest,
+    comparison_request: AlignmentClipRequest,
     comparison_ordinal: int = 1,
-    on_channel_fallback_started: Callable[[], None] | None = None,
     cancellation: threading.Event | None = None,
-) -> alignment_consensus.AlignmentConsensus:
-    raise_if_alignment_cancelled(cancellation)
-    if (
-        reference_request is not None
-        and not _request_identity_matches(reference, reference_request)
-    ) or (
-        comparison_request is not None
-        and not _request_identity_matches(comparison, comparison_request)
-    ):
-        return alignment_consensus.rejected_analysis(
-            "source_identity_changed",
-            config=config,
-            fps=fps_reference,
-        )
-    frozen_identities = (_source_identity(reference), _source_identity(comparison))
-
-    def check_identities() -> None:
-        try:
-            current_identities = (_source_identity(reference), _source_identity(comparison))
-        except OSError as exc:
-            raise AudioAlignmentError(
-                "source identity changed during staged audio collection",
-                category="source_identity_changed",
-                stage="collection",
-            ) from exc
-        if frozen_identities != current_identities:
-            raise AudioAlignmentError(
-                "source identity changed during staged audio collection",
-                category="source_identity_changed",
-                stage="collection",
-            )
-
-    reference_stream = (
-        reference_stream_loader()
-        if reference_stream_loader is not None
-        else alignment_audio.select_reference_audio_stream(
-            reference,
-            stream_override=config.reference_stream,
-        )
-    )
-    comparison_stream = alignment_audio.select_matching_audio_stream(
+    vs_loader: VSLoader | None = None,
+) -> AlignmentResult:
+    """Estimate one pair: pre-decode planning, then collection plus decision."""
+    planned = _plan_audio_pair(
+        reference,
         comparison,
-        reference_stream=reference_stream,
-        stream_override=config.comparison_streams.get(comparison.stem),
-    )
-    plan = alignment_audio.plan_audio_analysis(
-        reference_stream,
-        comparison_stream,
         config=config,
-    )
-    if isinstance(plan, alignment_audio.AudioAnalysisBudgetExceeded):
-        if plan.reason.startswith("selected_audio_timeline_"):
-            consensus = alignment_consensus.rejected_analysis(
-                plan.reason,
-                config=config,
-                fps=fps_reference,
-            )
-        else:
-            consensus = alignment_consensus.analysis_budget_exceeded(
-                config=config,
-                fps=fps_reference,
-            )
-    else:
-
-        def load_discovery() -> alignment_audio.CollectedAudioPhase:
-            check_identities()
-            phase = alignment_audio.collect_discovery_phase(
-                reference,
-                comparison,
-                reference_stream,
-                comparison_stream,
-                plan,
-                channel_strategy=config.channel_strategy,
-                cancellation=cancellation,
-            )
-            try:
-                check_identities()
-            except AudioAlignmentError as exc:
-                exc.collection_summaries = phase.summaries
-                raise
-            return phase
-
-        def build_verification_specs(
-            offsets: tuple[tuple[int, Fraction], ...],
-        ) -> tuple[alignment_audio.AudioVerificationSpec, ...]:
-            return alignment_audio.verification_specs(
-                plan,
-                offsets,
-                reference_stream=reference_stream,
-                comparison_stream=comparison_stream,
-                max_offset_seconds=config.max_offset_seconds,
-            )
-
-        def load_verification(
-            specs: tuple[alignment_audio.AudioVerificationSpec, ...],
-        ) -> alignment_audio.CollectedAudioPhase:
-            check_identities()
-            phase = alignment_audio.collect_verification_phase(
-                reference,
-                comparison,
-                reference_stream,
-                comparison_stream,
-                plan,
-                specs,
-                channel_strategy=config.channel_strategy,
-                cancellation=cancellation,
-            )
-            try:
-                check_identities()
-            except AudioAlignmentError as exc:
-                exc.collection_summaries = phase.summaries
-                raise
-            return phase
-
-        consensus = alignment_consensus.estimate_staged_consensus_offset(
-            plan=plan,
-            config=config,
-            fps=fps_reference,
-            discovery_phase_loader=load_discovery,
-            verification_phase_loader=load_verification,
-            verification_spec_builder=build_verification_specs,
-            cancellation=cancellation,
-        )
-        eligible_indices = alignment_consensus.channel_corroboration_window_indices(consensus)
-        views = (
-            alignment_audio.common_named_channel_views(reference_stream, comparison_stream)
-            if config.channel_strategy == "mono_downmix"
-            else ()
-        )
-        channel_plan = alignment_audio.plan_channel_view_corroboration(
-            plan,
-            eligible_indices,
-            views=views,
-        )
-        if isinstance(channel_plan, alignment_audio.AudioChannelViewPlan):
-            if on_channel_fallback_started is not None:
-                on_channel_fallback_started()
-
-            def load_channel_view(
-                view: alignment_audio.AudioChannelView,
-            ) -> alignment_audio.CollectedAudioPhase:
-                check_identities()
-                phase = alignment_audio.collect_channel_view_phase(
-                    reference,
-                    comparison,
-                    reference_stream,
-                    comparison_stream,
-                    channel_plan,
-                    view,
-                    sample_rate=config.sample_rate,
-                    cancellation=cancellation,
-                )
-                try:
-                    check_identities()
-                except AudioAlignmentError as exc:
-                    exc.collection_summaries = phase.summaries
-                    raise
-                return phase
-
-            consensus = alignment_consensus.corroborate_channel_views(
-                consensus,
-                plan=plan,
-                channel_plan=channel_plan,
-                config=config,
-                fps=fps_reference,
-                phase_loader=load_channel_view,
-                cancellation=cancellation,
-            )
-    consensus = alignment_consensus.hold_automatic_consensus(consensus)
-    if reference_request is None or comparison_request is None:
-        return consensus
-    attempt = _build_audio_attempt(
-        reference=reference_request,
-        comparison=comparison_request,
+        fps_reference=fps_reference,
+        reference_probe_loader=reference_probe_loader,
+        reference_request=reference_request,
+        comparison_request=comparison_request,
         comparison_ordinal=comparison_ordinal,
-        reference_stream=reference_stream,
-        comparison_stream=comparison_stream,
-        plan=plan,
-        consensus=consensus,
-        config=config,
-        fps_reference=fps_reference,
-    )
-    return replace(consensus, audio_attempt=attempt)
-
-
-def _compute_missing_alignments_with_provenance(
-    *,
-    reference: AlignmentClipRequest,
-    requested_comparisons: list[AlignmentClipRequest],
-    config: AlignmentConfig,
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
-    fps_reference: Fraction,
-    progress: ProgressReporter | None,
-    progress_descriptions: dict[Path, str],
-    comparison_ordinals: dict[Path, int],
-    on_comparison_started: Callable[[AlignmentClipRequest], None] | None = None,
-    on_channel_fallback_started: Callable[[AlignmentClipRequest], None] | None = None,
-    cancellation: threading.Event | None = None,
-) -> None:
-    _compute_missing_alignments(
-        reference=reference,
-        requested_comparisons=requested_comparisons,
-        config=config,
-        results_map=results_map,
-        fps_reference=fps_reference,
-        progress=progress,
-        progress_descriptions=progress_descriptions,
-        comparison_ordinals=comparison_ordinals,
-        on_comparison_started=on_comparison_started,
-        on_channel_fallback_started=on_channel_fallback_started,
         cancellation=cancellation,
     )
-    raise_if_alignment_cancelled(cancellation)
-    for comparison in requested_comparisons:
-        key = _alignment_key(reference.path, comparison.path)
-        result = results_map[key]
-        provenances[key] = AlignmentProvenance(
-            result=result,
-            comparison_cache_key=comparison_cache_key(comparison),
-            provenance="computed_this_run",
-            evidence_availability=(
-                "current_attempt"
-                if result.audio_attempt is not None
-                else "historical_details_unavailable"
-            ),
-        )
+    if isinstance(planned, AlignmentResult):
+        return planned
+    return _collect_and_decide_audio_pair(
+        reference,
+        comparison,
+        config=config,
+        fps_reference=fps_reference,
+        planned=planned,
+        reference_request=reference_request,
+        comparison_request=comparison_request,
+        comparison_ordinal=comparison_ordinal,
+        cancellation=cancellation,
+        vs_loader=vs_loader,
+    )
 
 
 def _compute_requested_alignments(
@@ -676,29 +902,56 @@ def _compute_requested_alignments(
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
     on_comparison_started: Callable[[AlignmentClipRequest], None] | None,
-    on_channel_fallback_started: Callable[[AlignmentClipRequest], None] | None,
     cancellation: threading.Event,
+    vs_loader: VSLoader | None,
 ) -> Fraction:
     """Run only blocking probe, collection, and numeric work in the owned worker."""
     raise_if_alignment_cancelled(cancellation)
     resolved_fps = fps_reference or alignment_audio.probe_fps(request.reference.path)
-    _compute_missing_alignments_with_provenance(
-        reference=request.reference,
-        requested_comparisons=requested_comparisons,
-        config=config,
-        results_map=results_map,
-        provenances=provenances,
-        fps_reference=resolved_fps,
-        progress=None,
-        progress_descriptions={},
-        comparison_ordinals={
-            comparison.path: ordinal
-            for ordinal, comparison in enumerate(request.comparisons, start=1)
-        },
-        on_comparison_started=on_comparison_started,
-        on_channel_fallback_started=on_channel_fallback_started,
-        cancellation=cancellation,
-    )
+    reference = request.reference
+    comparison_ordinals = {
+        comparison.path: ordinal for ordinal, comparison in enumerate(request.comparisons, start=1)
+    }
+    selected_reference_probe: alignment_audio.ProbedStreams | None = None
+
+    def load_reference_probe() -> alignment_audio.ProbedStreams:
+        nonlocal selected_reference_probe
+        if selected_reference_probe is None:
+            selected_reference_probe = alignment_audio.probe_streams(reference.path)
+        return selected_reference_probe
+
+    for fallback_ordinal, comp in enumerate(requested_comparisons, start=1):
+        raise_if_alignment_cancelled(cancellation)
+        if on_comparison_started is not None:
+            on_comparison_started(comp)
+        res = _estimate_audio_pair(
+            reference.path,
+            comp.path,
+            config=config,
+            fps_reference=resolved_fps,
+            reference_probe_loader=load_reference_probe,
+            reference_request=reference,
+            comparison_request=comp,
+            comparison_ordinal=comparison_ordinals.get(comp.path, fallback_ordinal),
+            cancellation=cancellation,
+            vs_loader=vs_loader,
+        )
+        raise_if_alignment_cancelled(cancellation)
+        results_map[alignment_key(reference.path, comp.path)] = res
+    raise_if_alignment_cancelled(cancellation)
+    for comparison in requested_comparisons:
+        key = alignment_key(reference.path, comparison.path)
+        result = results_map[key]
+        provenances[key] = AlignmentProvenance(
+            result=result,
+            comparison_cache_key=comparison_cache_key(comparison),
+            provenance="computed_this_run",
+            evidence_availability=(
+                "current_attempt"
+                if result.audio_attempt is not None
+                else "historical_details_unavailable"
+            ),
+        )
     raise_if_alignment_cancelled(cancellation)
     return resolved_fps
 
@@ -712,8 +965,7 @@ async def _await_audio_computation(
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
     progress: ProgressReporter | None,
-    quiet: bool,
-    json_output: bool,
+    vs_loader: VSLoader | None,
 ) -> Fraction:
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
@@ -726,14 +978,6 @@ async def _await_audio_computation(
                 analysis_descriptions[comparison.path],
             )
 
-    def report_channel_fallback_started(comparison: AlignmentClipRequest) -> None:
-        if progress is not None and not quiet and not json_output:
-            loop.call_soon_threadsafe(
-                progress.set_description,
-                f"{_request_progress_descriptions(request)[comparison.path]} | "
-                f"{_CHANNEL_FALLBACK_ACTIVITY}",
-            )
-
     worker = asyncio.create_task(
         asyncio.to_thread(
             _compute_requested_alignments,
@@ -744,12 +988,8 @@ async def _await_audio_computation(
             provenances=provenances,
             fps_reference=fps_reference,
             on_comparison_started=report_comparison_started,
-            on_channel_fallback_started=(
-                report_channel_fallback_started
-                if progress is not None and not quiet and not json_output
-                else None
-            ),
             cancellation=cancellation,
+            vs_loader=vs_loader,
         ),
         name="alignment-audio-computation",
     )
@@ -792,7 +1032,7 @@ def _record_resolved_alignment_progress(
     progress_descriptions: dict[Path, str] | None = None,
 ) -> None:
     for comp in comparisons:
-        result = results_map.get(_alignment_key(reference, comp))
+        result = results_map.get(alignment_key(reference, comp))
         if result is not None:
             _record_alignment_progress(
                 progress=progress,
@@ -817,14 +1057,14 @@ def _record_resolved_alignment_request_progress(
             for comparison in request.comparisons
             if (
                 provenance := provenances.get(
-                    _alignment_key(request.reference.path, comparison.path)
+                    alignment_key(request.reference.path, comparison.path)
                 )
             )
             is not None
             and provenance.provenance == "shared_computed_offsets"
         ]
     for comparison in request.comparisons:
-        key = _alignment_key(request.reference.path, comparison.path)
+        key = alignment_key(request.reference.path, comparison.path)
         provenance = provenances.get(key)
         if provenance is not None and provenance.provenance == "shared_computed_offsets":
             progress_descriptions[comparison.path] = progress_descriptions[comparison.path].replace(
@@ -865,7 +1105,7 @@ def _record_interactive_provenance(
     if not confirmed_offsets_by_key:
         return
     for comparison in request.comparisons:
-        key = _alignment_key(request.reference.path, comparison.path)
+        key = alignment_key(request.reference.path, comparison.path)
         if key not in confirmed_offsets_by_key:
             continue
         result = results_map[key]
@@ -892,456 +1132,6 @@ def _record_interactive_provenance(
         )
 
 
-def _format_stream_summary(attempt: AudioAlignmentAttempt) -> str:
-    reference, comparison = attempt.selected_streams
-    reference_method = (
-        "explicit override"
-        if reference.selection_method == "explicit_override"
-        else "automatic metadata selection"
-    )
-    comparison_method = (
-        "explicit override"
-        if comparison.selection_method == "explicit_override"
-        else "automatic metadata selection"
-    )
-    methods = (
-        reference_method
-        if reference_method == comparison_method
-        else f"Reference {reference_method}; Comparison {comparison_method}"
-    )
-    return (
-        f"Streams: Reference a:{reference.audio_stream_index} -> "
-        f"Comparison a:{comparison.audio_stream_index} ({methods})."
-    )
-
-
-def _normal_evidence_lines(
-    *, ordinal: int, result: AlignmentResult, provenance: AlignmentProvenance
-) -> list[str]:
-    prefix = f"Comparison {ordinal} - "
-    offset = result.frame_offset
-    if result.applied and offset is not None:
-        if provenance.provenance == "shared_computed_offsets":
-            heading = "Accepted audio alignment reused"
-            detail = (
-                "Historical window and selected-stream details are unavailable; "
-                "no audio analysis ran this time."
-            )
-        elif provenance.provenance == "shared_previous_offsets":
-            heading = "Manually confirmed alignment reused"
-            detail = (
-                "Historical audio details are unavailable."
-                if result.audio_attempt is None
-                else None
-            )
-        elif result.source == "manual" or provenance.provenance in {
-            "interactive_confirmed_this_run",
-            "preexisting_manual_override",
-        }:
-            heading = "Manually confirmed alignment"
-            detail = (
-                "Historical audio details are unavailable."
-                if result.audio_attempt is None
-                else None
-            )
-        else:
-            heading = "Audio alignment accepted"
-            detail = None
-        lines = [
-            f"{prefix}{heading}: {offset:+d}f - APPLIED",
-            "No additional confirmation needed.",
-        ]
-        if detail is not None:
-            lines.append(detail)
-        return lines
-
-    attempt = result.audio_attempt
-    decision = attempt.decision if attempt is not None else None
-    candidate = decision.candidate if decision is not None else None
-    if (
-        attempt is not None
-        and decision is not None
-        and decision.state == "provisional"
-        and candidate is not None
-    ):
-        lines = [
-            f"{prefix}Provisional audio candidate: {candidate.frame_offset:+d}f - NOT APPLIED",
-            "Visual confirmation required to use this hint. Align manually or keep the current alignment.",
-        ]
-        if decision.primary_reason == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON:
-            lines[0:0] = [
-                "Audio alignment automatic application is temporarily disabled.",
-                "Audio evidence is available for manual review; no computed correction was applied.",
-            ]
-            stability_scope = _stability_scope_line(attempt)
-            if stability_scope is not None:
-                lines.append(stability_scope)
-        return lines
-
-    lines = [
-        f"{prefix}No usable audio candidate - NOT APPLIED",
-        "Align manually or keep the current alignment.",
-    ]
-    if (
-        attempt is not None
-        and decision is not None
-        and decision.primary_reason == alignment_consensus.AUTOMATIC_AUTHORITY_HOLD_REASON
-    ):
-        lines[0:0] = [
-            "Audio alignment automatic application is temporarily disabled.",
-            "Audio evidence is available for manual review; no computed correction was applied.",
-        ]
-        stability_scope = _stability_scope_line(attempt)
-        if stability_scope is not None:
-            lines.append(stability_scope)
-    return lines
-
-
-def _original_audio_attempt_line(attempt: AudioAlignmentAttempt) -> str:
-    decision = attempt.decision
-    candidate = decision.candidate
-    if decision.state == "trusted_automatic" and candidate is not None:
-        return f"Original audio attempt: Audio alignment accepted: {candidate.frame_offset:+d}f - APPLIED"
-    if decision.state == "provisional" and candidate is not None:
-        return f"Original audio attempt: Provisional audio candidate: {candidate.frame_offset:+d}f - NOT APPLIED"
-    return "Original audio attempt: No usable audio candidate - NOT APPLIED"
-
-
-def _stability_scope_line(attempt: AudioAlignmentAttempt) -> str | None:
-    stability = attempt.stability
-    if stability is None:
-        return None
-    scope = f"{stability.valid_windows}/{attempt.planned_window_count} qualified observed windows"
-    if stability.valid_windows < attempt.planned_window_count:
-        scope += "; rejected or unobserved planned intervals remain unassessed"
-    return (
-        f"Stability: {stability.classification.replace('_', ' ')}; "
-        f"scoped to {scope} (diagnostic only)."
-    )
-
-
-def _alignment_evidence_row(line: str, *, waiting_glyph: str = "›") -> tuple[str, str, str]:
-    """Return the key, value, and style for one interactive evidence row."""
-    stripped = line.strip()
-    if stripped.startswith("Comparison ") and " - " in stripped:
-        _comparison, value = stripped.split(" - ", 1)
-        if "not applied" in value.lower():
-            return "  status", value, WARN
-        if "applied" in value.lower():
-            return "  status", value, OK
-        return "  status", value, VALUE
-    prefixes = {
-        "Reason: ": "  reason",
-        "Streams: ": "  streams",
-        "Runtime/policy: ": "  runtime",
-        "Thresholds: ": "  thresholds",
-        "Decision: ": "  decision",
-        "Evidence: ": "  evidence",
-        "Work: ": "  work",
-    }
-    for prefix, key in prefixes.items():
-        if stripped.startswith(prefix):
-            return key, stripped.removeprefix(prefix), VALUE
-    if stripped.startswith("Audio alignment automatic application"):
-        return "  authority", stripped, WARN
-    if stripped.startswith(("Audio evidence", "Continuing without")):
-        return "  outcome", stripped, WARN
-    if "correlated windows agree" in stripped or "windows planned" in stripped:
-        return "  evidence", stripped, VALUE
-    if stripped.startswith("Opening VSView"):
-        return "  review", f"{waiting_glyph} {stripped}", ACCENT
-    if stripped.startswith("Audio diagnostics: "):
-        return "diagnostics", stripped.removeprefix("Audio diagnostics: "), VALUE
-    if "warning" in stripped.lower() or "not applied" in stripped.lower():
-        return "  warning", stripped, WARN
-    return "  detail", stripped, MUTED
-
-
-def _render_alignment_evidence_panel(
-    *,
-    entries: list[tuple[str, list[str], list[str], list[str]]],
-    diagnostics_written: bool,
-    no_color: bool,
-    actionable: bool,
-    needs_review_count: int = 0,
-) -> None:
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=True,
-    )
-    table.add_column("key", style="dim", no_wrap=True, min_width=14, overflow="fold")
-    table.add_column("value", overflow="fold")
-    console = human_console(stderr=True, no_color=no_color, height=1000)
-    waiting_glyph = glyphs_for_console(console).waiting
-    for index, (comparison_name, lines, verbose_lines, review_lines) in enumerate(entries):
-        if index:
-            table.add_row("", "")
-        table.add_row("", f"[bold]{escape(comparison_name)}[/]")
-        for line in lines:
-            _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
-            if style:
-                table.add_row("", f"[{style}]{escape(value)}[/]")
-            else:
-                table.add_row("", escape(value))
-        for line in verbose_lines:
-            key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
-            if style:
-                table.add_row(key, f"[{style}]{escape(value)}[/]")
-            else:
-                table.add_row(key, escape(value))
-        for line in review_lines:
-            _key, value, style = _alignment_evidence_row(line, waiting_glyph=waiting_glyph)
-            if style:
-                glyph, _, text = value.partition(" ")
-                table.add_row("", f"[{style}]{escape(glyph)}[/] [{style}]{escape(text)}[/]")
-            else:
-                table.add_row("", escape(value))
-    if diagnostics_written:
-        table.add_row("", "")
-        table.add_row("diagnostics", "alignment_diagnostics/")
-
-    title = f"[bold {ACCENT} not dim]Audio alignment[/]"
-    if actionable:
-        title += f" [dim]· {needs_review_count} needs review[/]"
-    console.print(
-        Padding(
-            Panel(
-                table,
-                title=title,
-                title_align="left",
-                border_style=BORDER_PENDING if actionable else BORDER_NEUTRAL,
-            ),
-            (0, 0, 0, 2),
-        ),
-        crop=False,
-    )
-
-
-def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
-    decision = attempt.decision
-    lines = [
-        _original_audio_attempt_line(attempt),
-        f"  Runtime/policy: {attempt.media_runtime_fingerprint}; {attempt.estimator_policy}; "
-        f"diagnostic={attempt.diagnostic_policy}",
-        f"  Thresholds: score={attempt.confidence_threshold}; peak={attempt.ambiguity_peak_ratio}; "
-        f"minimum windows={attempt.minimum_valid_windows}; consensus={attempt.consensus_minimum_ratio}",
-        f"  Decision: state={decision.state}; reason={decision.primary_reason}; "
-        f"failed={','.join(decision.failed_gates) or 'none'}; "
-        f"unassessed={','.join(decision.unassessed_gates) or 'none'}",
-        f"  Evidence: raw={decision.raw_correlated_windows}; credible={decision.credible_windows}; "
-        f"voting={decision.voting_windows}; winning={decision.winning_windows}; "
-        f"independent={decision.independent_windows}; ratio={decision.consensus_ratio}; "
-        f"score={decision.aggregate_score}; peak={decision.minimum_peak_ratio}",
-        f"  Work: planned={attempt.planned_window_count}; analysis rate={attempt.analysis_rate}; "
-        f"FFT peak/total={attempt.peak_fft_points}/{attempt.total_fft_points}; "
-        f"planning={attempt.planning_reason or 'complete'}",
-    ]
-    stability_scope = _stability_scope_line(attempt)
-    if stability_scope is not None:
-        lines.append(stability_scope)
-    lines.extend(
-        [
-            _format_stream_summary(attempt),
-            "  Audio details:",
-        ]
-    )
-    for stream in attempt.selected_streams:
-        lines.append(
-            f"    {stream.role}: a:{stream.audio_stream_index} (absolute {stream.absolute_stream_index}), "
-            f"codec={stream.codec_name or 'unknown'}, language={stream.language or 'unknown'}, "
-            f"channels={stream.channels or 'unknown'}/{stream.channel_layout or 'unknown'}, "
-            f"rate={stream.sample_rate or 'unknown'}, selection={stream.selection_method}, "
-            f"rank={stream.selection_rank}, start={stream.stream_start_num}/{stream.stream_start_den} "
-            f"({stream.stream_start_basis}), input={stream.input_start_num}/{stream.input_start_den} "
-            f"({stream.input_start_basis}), duration={stream.duration_num}/{stream.duration_den} "
-            f"({stream.duration_basis}), language-match={stream.language_match}, "
-            f"commentary-match={stream.commentary_match}"
-        )
-    for window in attempt.windows:
-        peak = window.peak_ratio if window.peak_ratio is not None else "unknown"
-        lines.append(
-            f"    {window.logical_id}: ref={window.planned_reference_start}+{window.planned_reference_count}, "
-            f"cmp={window.planned_comparison_start}+{window.planned_comparison_count}, "
-            f"actual={window.actual_reference_count}/{window.actual_comparison_count}, "
-            f"scoring={window.scoring_reference_count}/{window.scoring_comparison_count}, "
-            f"overlap={window.effective_aligned_overlap}, origin={window.origin_basis}, "
-            f"rates={window.analysis_rate}/{window.requested_rate}, "
-            f"lag={window.local_lag}/{window.global_analysis_lag}/{window.requested_sample_lag}, "
-            f"frame={window.requested_frame_candidate}, score={window.requested_score} "
-            f"({window.score_stage}), peak={peak} ({window.peak_stage}@{window.peak_rate}), "
-            f"quality={window.configured_quality}, vote={window.vote_disposition}, "
-            f"review={window.review_qualified}, result={window.terminal_stage}/"
-            f"{window.terminal_category}, relation={window.purpose}/"
-            f"{window.parent_id or 'root'}"
-        )
-    _reference, comparison = attempt.selected_streams
-    mismatches: list[str] = []
-    if comparison.language_match == "mismatch":
-        mismatches.append("language")
-    if comparison.commentary_match == "mismatch":
-        mismatches.append("commentary")
-    if mismatches:
-        lines.append(
-            f"Selected audio metadata differs ({'/'.join(mismatches)}); "
-            "matching content is not established."
-        )
-    channel = attempt.channel_corroboration
-    if channel is not None:
-        lines.append(
-            f"  Channel-view evidence: status={channel.status}; reason={channel.reason}; "
-            f"independent={channel.independent_windows}; collections={len(channel.collections)}"
-        )
-        for window in channel.windows:
-            lines.append(
-                f"    {window.logical_id}/channel: corroborated={window.corroborated}; "
-                f"representative={window.representative_sample_lag}/"
-                f"{window.representative_frame_candidate}; agreeing={window.agreeing_views}; "
-                f"score={window.minimum_credible_score}; peak={window.minimum_peak_ratio}; "
-                f"contradiction={window.contradiction}; reason={window.reason}"
-            )
-    return lines
-
-
-def _print_pre_review_summary(
-    *,
-    request: AlignmentRequest,
-    results_map: dict[str, AlignmentResult],
-    progress: ProgressReporter | None,
-    no_color: bool,
-) -> None:
-    """Print the Rich-only Align summary line before native review."""
-    if not isinstance(progress, RichProgressReporter):
-        return
-    states: list[tuple[str, bool]] = []
-    for comparison in request.comparisons:
-        key = _alignment_key(request.reference.path, comparison.path)
-        result = results_map[key]
-        short = comparison.short_name or comparison.label or comparison.path.name
-        states.append((short, result.applied))
-    actionable = any(not applied for _, applied in states)
-    console = human_console(stderr=True, no_color=no_color)
-    glyphs = glyphs_for_console(console)
-    if actionable:
-        glyph, style = glyphs.warning, WARN
-    else:
-        glyph, style = glyphs.ok, OK
-    line = Text.assemble((glyph, style), f" {'Align':<9} ")
-    for index, (short, applied) in enumerate(states):
-        if index:
-            line.append(" · ", style="dim")
-        if applied:
-            line.append(f"{short} audio applied")
-        else:
-            line.append(f"{short} needs visual confirmation", style=WARN)
-    progress.suspend()
-    try:
-        console.print(line)
-    finally:
-        progress.resume()
-
-
-def _present_alignment_evidence(
-    *,
-    request: AlignmentRequest,
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
-    config: AlignmentConfig,
-    progress: ProgressReporter | None,
-    verbose: bool,
-    quiet: bool,
-    json_output: bool,
-    diagnostics_written: bool,
-) -> None:
-    lines: list[str] = []
-    entries: list[tuple[str, list[str], list[str], list[str]]] = []
-    has_actionable_result = False
-    needs_review_count = 0
-    for ordinal, comparison in enumerate(request.comparisons, start=1):
-        key = _alignment_key(request.reference.path, comparison.path)
-        result = results_map[key]
-        provenance = provenances[key]
-        decision = result.audio_attempt.decision if result.audio_attempt is not None else None
-        human_actionable = not result.applied
-        json_actionable = human_actionable or (
-            decision is not None and decision.state != "trusted_automatic"
-        )
-        has_actionable_result = has_actionable_result or human_actionable
-        if json_output:
-            if json_actionable:
-                log.warning(
-                    "audio_alignment_requires_review",
-                    comparison_ordinal=ordinal,
-                    decision_state=decision.state if decision is not None else "unavailable",
-                    candidate_frame=(
-                        decision.candidate.frame_offset
-                        if decision is not None and decision.candidate is not None
-                        else None
-                    ),
-                    reason=(decision.primary_reason if decision is not None else result.diagnostic),
-                )
-            continue
-        if quiet and not human_actionable:
-            continue
-        normal_lines = _normal_evidence_lines(
-            ordinal=ordinal,
-            result=result,
-            provenance=provenance,
-        )
-        verbose_lines: list[str] = []
-        if verbose and not quiet and result.audio_attempt is not None:
-            verbose_lines = _verbose_evidence_lines(result.audio_attempt)
-        review_lines: list[str] = []
-        if human_actionable and (config.use_vsview or config.force_interactive):
-            if decision is not None and decision.candidate is not None:
-                review_lines.append(
-                    "Opening VSView for manual review. The candidate is a hint, not a "
-                    "confirmed alignment."
-                )
-            else:
-                review_lines.append(
-                    "Opening VSView for manual review. No automatic candidate is available; "
-                    "align the sources manually."
-                )
-        comparison_lines = [*normal_lines, *verbose_lines, *review_lines]
-        lines.extend(comparison_lines)
-        if human_actionable:
-            needs_review_count += 1
-        entries.append(
-            (
-                comparison.compact_name
-                or comparison.presentation_name
-                or comparison.label
-                or comparison.path.name,
-                normal_lines,
-                verbose_lines,
-                review_lines,
-            )
-        )
-    if diagnostics_written and not quiet and not json_output:
-        lines.append("Audio diagnostics: alignment_diagnostics/.")
-    if not lines:
-        return
-    if progress is not None:
-        progress.suspend()
-    try:
-        if isinstance(progress, RichProgressReporter):
-            _render_alignment_evidence_panel(
-                entries=entries,
-                diagnostics_written=diagnostics_written,
-                no_color=config.no_color,
-                actionable=has_actionable_result,
-                needs_review_count=needs_review_count,
-            )
-        else:
-            print("\n".join(lines), file=sys.stderr)
-    finally:
-        if progress is not None:
-            progress.resume()
-
-
 def _write_run_diagnostics(
     *,
     request: AlignmentRequest,
@@ -1362,7 +1152,7 @@ def _write_run_diagnostics(
         for key, reference_frame, comparison_frame in confirmed_frame_pairs
     }
     for ordinal, comparison in enumerate(request.comparisons, start=1):
-        key = _alignment_key(request.reference.path, comparison.path)
+        key = alignment_key(request.reference.path, comparison.path)
         if only_keys is not None and key not in only_keys:
             continue
         result = results_map[key]
@@ -1404,6 +1194,7 @@ async def align_clips_from_request(
     quiet: bool = False,
     json_output: bool = False,
     review_summary: AlignmentReviewSummary | None = None,
+    vs_loader: VSLoader | None = None,
 ) -> list[AlignmentResult]:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     reference = request.reference.path
@@ -1429,7 +1220,7 @@ async def align_clips_from_request(
     unresolved_comparisons = [
         comparison
         for comparison in request.comparisons
-        if _alignment_key(reference, comparison.path) not in results_map
+        if alignment_key(reference, comparison.path) not in results_map
     ]
 
     completed_confirmed_reuse = apply_shared_reuse(
@@ -1445,7 +1236,7 @@ async def align_clips_from_request(
     requested_comparisons = [
         comparison
         for comparison in request.comparisons
-        if _alignment_key(reference, comparison.path) not in results_map
+        if alignment_key(reference, comparison.path) not in results_map
     ]
     if requested_comparisons:
         _record_resolved_alignment_request_progress(
@@ -1462,14 +1253,13 @@ async def align_clips_from_request(
             provenances=provenances,
             fps_reference=fps_reference,
             progress=progress,
-            quiet=quiet,
-            json_output=json_output,
+            vs_loader=vs_loader,
         )
         descriptions = _request_progress_descriptions(request)
         for comparison in requested_comparisons:
             _record_alignment_progress(
                 progress=progress,
-                result=results_map[_alignment_key(reference, comparison.path)],
+                result=results_map[alignment_key(reference, comparison.path)],
                 description=descriptions[comparison.path],
             )
     else:
@@ -1494,13 +1284,13 @@ async def align_clips_from_request(
         emit_success_log=json_output,
     )
     if initial_outcome == "pending" and not quiet and not json_output:
-        _print_pre_review_summary(
+        print_pre_review_summary(
             request=request,
             results_map=results_map,
             progress=progress,
             no_color=config.no_color,
         )
-    _present_alignment_evidence(
+    present_alignment_evidence(
         request=request,
         results_map=results_map,
         provenances=provenances,
@@ -1513,7 +1303,7 @@ async def align_clips_from_request(
     )
     if completed_confirmed_reuse and not requested_comparisons:
         return [
-            results_map[_alignment_key(reference, comparison.path)]
+            results_map[alignment_key(reference, comparison.path)]
             for comparison in request.comparisons
         ]
 
@@ -1575,6 +1365,5 @@ async def align_clips_from_request(
         save_reusable_offsets(request, list(provenances.values()))
 
     return [
-        results_map[_alignment_key(reference, comparison.path)]
-        for comparison in request.comparisons
+        results_map[alignment_key(reference, comparison.path)] for comparison in request.comparisons
     ]

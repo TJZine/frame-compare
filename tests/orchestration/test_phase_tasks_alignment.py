@@ -16,7 +16,8 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
 from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentResult, AlignmentStabilitySummary
+from frame_compare.services.types import AlignmentResult
+from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -78,21 +79,11 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
         "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
         "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
     }
-    assert captured["config"].sample_rate == 12000
+    assert captured["config"].enable is True
     assert captured["config"].max_offset_seconds == 4.5
     assert captured["config"].use_vsview is True
     assert captured["config"].cache_results is False
-    assert captured["config"].correlation_mode == "gcc_phat"
-    assert captured["config"].preprocessing_mode == "standard"
     assert captured["config"].channel_strategy == "best_channel"
-    assert captured["config"].confidence_threshold == 0.25
-    assert captured["config"].ambiguity_peak_ratio == 1.5
-    assert captured["config"].window_length_seconds == 8.0
-    assert captured["config"].window_stride_seconds == 2.0
-    assert captured["config"].minimum_valid_windows == 2
-    assert captured["config"].consensus_minimum_ratio == 0.75
-    assert captured["config"].refinement_mode == "local"
-    assert captured["config"].refinement_sample_rate == 16000
     assert captured["config"].reference_stream == 1
     assert captured["config"].comparison_streams == {"encode": 2}
     assert captured["config"].previous_offsets == "disabled"
@@ -136,10 +127,8 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert alignment_request.alignment_diagnostics_root == ctx.workspace.generated_root
     assert alignment_request.selected_reference_relationship == "auto"
     assert alignment_request.previous_offsets == "disabled"
-    assert alignment_request.settings.sample_rate == 12000
     assert alignment_request.settings.max_offset_seconds == 4.5
-    assert alignment_request.settings.correlation_mode == "gcc_phat"
-    assert alignment_request.settings.refinement_sample_rate == 16000
+    assert alignment_request.settings.channel_strategy == "best_channel"
     assert output.reference.trim.trim_start_frames == 2
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].alignment is not None
@@ -152,7 +141,7 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert output.selection_details_by_source_frame is None
 
 
-def test_run_align_phase_warns_without_changing_material_variable_alignment(
+def test_run_align_phase_retains_material_variable_alignment_without_phase_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
@@ -189,10 +178,9 @@ def test_run_align_phase_warns_without_changing_material_variable_alignment(
     assert output.comparisons[0].alignment is not None
     assert output.comparisons[0].alignment.relative_offset_frames == 2
     assert output.comparisons[0].alignment.stability == summary
-    assert output.warnings == [
-        "align: Encode 1 alignment varies across qualified observed windows. "
-        "The applied constant offset was retained and should be verified."
-    ]
+    # U3 surfaces variability in the Frame Alignment report stability row,
+    # not as a phase warning; the applied constant offset is retained as-is.
+    assert output.warnings == []
 
 
 def test_alignment_request_records_configured_reference_relationship(tmp_path: Path) -> None:
@@ -870,7 +858,6 @@ def test_run_align_phase_preserves_mixed_authority_with_unequal_base_trims(
                 algorithm="cross_correlation",
                 source="computed",
                 applied=False,
-                diagnostic="channel_corroboration_provisional",
             ),
             AlignmentResult(
                 reference_clip="reference.mkv",

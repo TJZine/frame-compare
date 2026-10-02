@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.services.types import (
-    AlignmentSource,
+from frame_compare.services.types import AlignmentSource
+from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
 )

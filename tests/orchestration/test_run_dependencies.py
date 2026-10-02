@@ -70,7 +70,7 @@ def test_execute_run_initializes_local_dependencies_without_mutating_injected_de
         nonlocal captured_local_deps, prep_completed
         captured_local_deps = local_deps
         assert local_deps is not deps
-        assert local_deps.vs_loader is not None
+        assert local_deps.vs_loader is None
         assert local_deps.ffmpeg_runner is None
         assert local_deps.progress is not None
         assert local_deps.http_client is not None

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -32,9 +33,9 @@ from frame_compare.orchestration.phase_selection import (
 from frame_compare.orchestration.presentation import clip_role
 from frame_compare.services.alignment import (
     align_clips_from_request,
-    calculate_alignment_trims,
     format_rejected_alignment_warning,
 )
+from frame_compare.services.alignment_math import calculate_alignment_trims
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.release_identity import (
     ShortNameSource,
@@ -60,11 +61,15 @@ from frame_compare.utils.types import (
 
 log = structlog.get_logger()
 
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
+
 
 async def run_align_phase(
     ctx: RunContext,
     *,
     selected_frames: list[int],
+    vs_loader: VSLoader | None = None,
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
@@ -77,22 +82,12 @@ async def run_align_phase(
         )
     alignment_config = AlignmentConfig(
         enable=ctx.config.audio_alignment.enable,
-        sample_rate=ctx.config.audio_alignment.sample_rate,
+        memory_limit_mb=ctx.config.runtime.memory_limit_mb,
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
         use_vsview=ctx.config.audio_alignment.use_vsview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
-        correlation_mode=ctx.config.audio_alignment.correlation_mode,
-        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
         channel_strategy=ctx.config.audio_alignment.channel_strategy,
-        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
-        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
-        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
-        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
-        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
-        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
-        refinement_mode=ctx.config.audio_alignment.refinement_mode,
-        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
         reference_stream=ctx.config.audio_alignment.reference_stream,
         comparison_streams=dict(ctx.config.audio_alignment.comparison_streams),
         previous_offsets=ctx.config.audio_alignment.previous_offsets,
@@ -117,6 +112,7 @@ async def run_align_phase(
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
+        vs_loader=vs_loader,
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
@@ -137,32 +133,6 @@ async def run_align_phase(
                 source=result.source,
                 stability=result.stability,
             )
-            if result.stability is not None and result.stability.classification in {
-                "possible_drift",
-                "possible_discontinuity",
-                "variable",
-            }:
-                detail = {
-                    "possible_drift": "may drift across qualified observed windows",
-                    "possible_discontinuity": (
-                        "varies across qualified observed windows; possible edit discontinuity"
-                    ),
-                    "variable": "varies across qualified observed windows",
-                }[result.stability.classification]
-                position = result.stability.change_position_seconds
-                if (
-                    position is not None
-                    and result.stability.classification == "possible_discontinuity"
-                ):
-                    seconds = round(position)
-                    detail += (
-                        " approximately between observations around "
-                        f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
-                    )
-                warnings.append(
-                    f"align: {comparison.label} alignment {detail}. "
-                    "The applied constant offset was retained and should be verified."
-                )
         else:
             warnings.append(
                 format_rejected_alignment_warning(
@@ -346,19 +316,8 @@ def _request_short_name(comparison: AlignmentClipRequest) -> str:
 
 def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
     settings = AlignmentCacheSettings(
-        sample_rate=ctx.config.audio_alignment.sample_rate,
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
-        correlation_mode=ctx.config.audio_alignment.correlation_mode,
-        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
         channel_strategy=ctx.config.audio_alignment.channel_strategy,
-        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
-        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
-        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
-        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
-        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
-        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
-        refinement_mode=ctx.config.audio_alignment.refinement_mode,
-        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
     )
     clips = [ctx.reference, *ctx.comparisons]
     identities = [clip.release_identity for clip in clips]
@@ -466,8 +425,14 @@ def _alignment_clip_request(
         trim_end_frame_inclusive=clip.trim.trim_end_frame_inclusive,
         effective_fps_num=clip.effective_fps.numerator,
         effective_fps_den=clip.effective_fps.denominator,
+        source_fps_num=clip.source_fps.numerator,
+        source_fps_den=clip.source_fps.denominator,
         source_frame_count=clip.probe.num_frames,
         selected_audio_stream=selected_audio_stream,
+        active_rect_x=None if clip.active_rect is None else clip.active_rect.x,
+        active_rect_y=None if clip.active_rect is None else clip.active_rect.y,
+        active_rect_width=None if clip.active_rect is None else clip.active_rect.width,
+        active_rect_height=None if clip.active_rect is None else clip.active_rect.height,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
         presentation_name=presentation_name,
         compact_name=compact_name,

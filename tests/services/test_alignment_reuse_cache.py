@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import os
 import tomllib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -14,7 +14,6 @@ import pytest
 import tomli_w
 
 import frame_compare.services.alignment_reuse_cache as reuse_cache
-from frame_compare.services import alignment_consensus
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
@@ -26,6 +25,8 @@ from frame_compare.services.alignment_reuse_cache import (
 from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
+)
+from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
 )
 from frame_compare.utils.file_lock import FileLockTimeoutError
@@ -35,15 +36,7 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
-
-
-@pytest.fixture(autouse=True)
-def automatic_authority_is_disabled_for_cache_serialization(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep schema round-trip tests independent from the shipped authority latch."""
-    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
-
+from tests.alignment_review_test_support import trusted_audio_attempt
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
     "insufficient_evidence", 0, None, None, None, None, None, None
@@ -69,6 +62,8 @@ def _clip(path: Path, *, label: str, stream: int | None = None) -> AlignmentClip
         trim_end_frame_inclusive=None,
         effective_fps_num=24000,
         effective_fps_den=1001,
+        source_fps_num=24000,
+        source_fps_den=1001,
         source_frame_count=100,
         selected_audio_stream=stream,
     )
@@ -76,19 +71,8 @@ def _clip(path: Path, *, label: str, stream: int | None = None) -> AlignmentClip
 
 def _settings() -> AlignmentCacheSettings:
     return AlignmentCacheSettings(
-        sample_rate=8000,
         max_offset_seconds=30.0,
-        correlation_mode="raw_fft",
-        preprocessing_mode="none",
         channel_strategy="mono_downmix",
-        confidence_threshold=0.25,
-        ambiguity_peak_ratio=1.5,
-        window_length_seconds=8.0,
-        window_stride_seconds=2.0,
-        minimum_valid_windows=2,
-        consensus_minimum_ratio=0.75,
-        refinement_mode="local",
-        refinement_sample_rate=16000,
     )
 
 
@@ -126,6 +110,9 @@ def _result(
         algorithm="cross_correlation",
         source=source,  # type: ignore[arg-type]
         stability=_DEFAULT_STABILITY,
+        audio_attempt=trusted_audio_attempt(frame_offset=frame_offset)
+        if source == "computed"
+        else None,
     )
 
 
@@ -219,6 +206,7 @@ def test_computed_cache_evidence_without_stability_warns_and_misses(
             algorithm=None,
             source="manual",
             stability=None,
+            audio_attempt=None,
         )
         provenance = _provenance(
             request,
@@ -266,6 +254,7 @@ def test_negative_largest_adjacent_jump_warns_and_misses(
             algorithm=None,
             source="manual",
             stability=None,
+            audio_attempt=None,
         )
         provenance = _provenance(
             request,
@@ -302,6 +291,58 @@ def test_shared_reuse_cache_does_not_write_computed_entry_without_stability(
 ) -> None:
     request = _request(tmp_path)
     result = replace(_result(request), stability=None)
+
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+
+    assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
+
+
+def test_computed_this_run_provisional_result_is_not_write_eligible(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+    attempt = trusted_audio_attempt(frame_offset=42)
+    provisional = replace(
+        attempt,
+        decision=replace(
+            attempt.decision,
+            state="provisional",
+            primary_reason="audio_only",
+        ),
+    )
+    result = replace(
+        _result(request),
+        frame_offset=None,
+        time_offset_seconds=None,
+        applied=False,
+        diagnostic="audio_only",
+        audio_attempt=provisional,
+    )
+
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+
+    assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
+
+
+def test_applied_result_cannot_carry_provisional_evidence(tmp_path: Path) -> None:
+    """First layer: the result type refuses applied-with-untrusted-evidence."""
+    request = _request(tmp_path)
+    attempt = trusted_audio_attempt(frame_offset=42)
+    provisional = replace(
+        attempt,
+        decision=replace(attempt.decision, state="provisional", primary_reason="audio_only"),
+    )
+    with pytest.raises(ValueError, match="untrusted audio evidence"):
+        replace(_result(request), audio_attempt=provisional)
+
+
+def test_computed_this_run_without_trusted_attempt_is_not_write_eligible(
+    tmp_path: Path,
+) -> None:
+    """Second layer: an applied same-run result still needs trusted evidence to be written."""
+    request = _request(tmp_path)
+    result = replace(_result(request), audio_attempt=None)
+    assert result.applied and result.frame_offset is not None
 
     save_reusable_offsets(request, [_provenance(request, result=result)])
 
@@ -417,6 +458,26 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     assert f'estimator_policy = "{reuse_cache.ALIGNMENT_ESTIMATOR_POLICY}"' in content
 
 
+def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
+    tmp_path: Path,
+) -> None:
+    """The settings key is exactly the estimator policy plus probe/recipe facts."""
+    request = _request(tmp_path)
+    _write_computed(request)
+
+    data = _cache_data(request)
+    settings = _first_entry(data)["settings"]
+    assert isinstance(settings, dict)
+    assert settings == {
+        "estimator_policy": "whole-track-chunked-phat-video-check-motion-20260929",
+        "max_offset_seconds": 30.0,
+        "channel_strategy": "mono_downmix",
+    }
+    comparison = _first_entry(data)["comparison"]
+    assert isinstance(comparison, dict)
+    assert comparison["selected_audio_stream"] == 1
+
+
 def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(
     tmp_path: Path,
 ) -> None:
@@ -426,7 +487,7 @@ def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(
         [
             _provenance(
                 request,
-                result=_result(request, correlation_score=0.876),
+                result=replace(_result(request, correlation_score=0.876), audio_attempt=None),
                 provenance="shared_computed_offsets",
             )
         ],
@@ -440,6 +501,56 @@ def test_shared_reuse_cache_writes_shared_computed_provenance_as_computed(
     assert entry.origin == "computed"
     assert entry.result.source == "cached"
     assert entry.result.correlation_score == pytest.approx(0.876)
+
+
+def test_shared_cache_persists_confirmed_entry_while_shared_computed_stays_computed(
+    tmp_path: Path,
+) -> None:
+    """A is shared-computed, B is confirmed in VSView: both persist with their origins."""
+    request = _request(tmp_path)
+    second = _clip(_touch_clip(tmp_path / "comp_b.mkv", b"second"), label="Encode 2", stream=2)
+    complete_request = replace(request, comparisons=[request.comparisons[0], second])
+    shared = replace(
+        _result(complete_request, comparison_index=0, correlation_score=0.876),
+        audio_attempt=None,
+    )
+    confirmed = AlignmentResult(
+        reference_clip=complete_request.reference.path.name,
+        comparison_clip=second.path.name,
+        frame_offset=47,
+        time_offset_seconds=1.96,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+    )
+    save_reusable_offsets(
+        complete_request,
+        [
+            _provenance(
+                complete_request,
+                comparison_index=0,
+                result=shared,
+                provenance="shared_computed_offsets",
+            ),
+            _provenance(
+                complete_request,
+                comparison_index=1,
+                result=confirmed,
+                provenance="interactive_confirmed_this_run",
+            ),
+        ],
+        accepted_at="2026-06-06T12:00:00Z",
+    )
+
+    entries = load_reusable_offset_entries(complete_request)
+
+    assert entries is not None
+    shared_entry = entries[comparison_cache_key(complete_request.comparisons[0])]
+    confirmed_entry = entries[comparison_cache_key(complete_request.comparisons[1])]
+    assert shared_entry.origin == "computed"
+    assert shared_entry.result.frame_offset == 42
+    assert confirmed_entry.origin == "interactive_confirmed"
+    assert confirmed_entry.result.frame_offset == 47
 
 
 def test_shared_reuse_cache_round_trips_interactive_confirmed_entry_with_score_one(
@@ -601,11 +712,11 @@ def test_shared_reuse_cache_can_load_requested_subset_from_full_source_set(
         ),
         lambda request, _path: replace(
             request,
-            settings=replace(request.settings, sample_rate=16000),
+            settings=replace(request.settings, max_offset_seconds=60.0),
         ),
         lambda request, _path: replace(
             request,
-            settings=replace(request.settings, correlation_mode="gcc_phat"),
+            settings=replace(request.settings, channel_strategy="best_channel"),
         ),
     ],
 )
@@ -626,7 +737,7 @@ def test_shared_reuse_cache_identity_drift_is_miss(
         ("default", "comparison", "trim_end_frame_inclusive", 95),
         ("no_streams", "reference", "selected_audio_stream", 0),
         ("no_streams", "comparison", "selected_audio_stream", 1),
-        ("no_refinement", "settings", "refinement_sample_rate", 16000),
+        ("default", "settings", "unrecognized_future_setting", "reserved"),
     ],
 )
 def test_shared_reuse_cache_optional_fields_present_in_cache_but_absent_in_request_miss(
@@ -642,11 +753,6 @@ def test_shared_reuse_cache_optional_fields_present_in_cache_but_absent_in_reque
             base_request,
             reference=replace(base_request.reference, selected_audio_stream=None),
             comparisons=[replace(base_request.comparisons[0], selected_audio_stream=None)],
-        )
-    elif request_variant == "no_refinement":
-        base_request = replace(
-            base_request,
-            settings=replace(base_request.settings, refinement_sample_rate=None),
         )
 
     _write_computed(base_request)
@@ -667,7 +773,6 @@ def test_shared_reuse_cache_optional_fields_present_in_cache_but_absent_in_reque
         ("trim_end_present", "comparison", "trim_end_frame_inclusive"),
         ("default", "reference", "selected_audio_stream"),
         ("default", "comparison", "selected_audio_stream"),
-        ("default", "settings", "refinement_sample_rate"),
     ],
 )
 def test_shared_reuse_cache_optional_fields_present_in_request_but_absent_in_cache_miss(
@@ -902,7 +1007,7 @@ def test_shared_reuse_cache_locks_entire_read_modify_write(
     events: list[str] = []
 
     @contextmanager
-    def _fake_lock(path: Path) -> Iterator[None]:
+    def _fake_lock(path: Path) -> Generator[None]:
         assert path == cache_file.with_name(f"{cache_file.name}.lock")
         events.append("lock_enter")
         try:
@@ -1059,6 +1164,7 @@ def test_shared_reuse_cache_invalid_float_fields_warn_and_miss(
             correlation_score=1.0,
             algorithm=None,
             source="manual",
+            audio_attempt=None,
         )
         provenance = _provenance(
             request,
@@ -1112,13 +1218,10 @@ def test_shared_reuse_cache_invalid_float_fields_warn_and_miss(
             True,
         ),
         (
-            lambda request: replace(
-                request,
-                settings=replace(request.settings, window_length_seconds=0.0),
-            ),
+            lambda request: request,
             "settings",
-            "window_length_seconds",
-            False,
+            "max_offset_seconds",
+            True,
         ),
     ],
 )

@@ -1,65 +1,31 @@
-"""FFmpeg and ffprobe helpers for audio alignment."""
+"""ffprobe stream probing and FFmpeg recipes for whole-track audio alignment."""
 
 from __future__ import annotations
 
 import json
-import math
-import threading
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
-from typing import Literal, cast
+from typing import cast
 
-import numpy as np
-
-from frame_compare.services.alignment_streaming import (
-    AudioSampleInterval,
-    ContinuousAudioCollection,
-    ContinuousAudioCollectionFailure,
-    collect_continuous_audio,
-)
-from frame_compare.services.errors import (
-    AudioAlignmentCancellationError,
-    AudioAlignmentCleanupError,
-    AudioAlignmentError,
-    raise_if_alignment_cancelled,
-)
-from frame_compare.services.types import (
-    AlignmentChannelStrategy,
-    AlignmentConfig,
-    AudioAlignmentCollectionRecord,
-    AudioChannelView,
+from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.types import AlignmentChannelStrategy
+from frame_compare.utils.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    AudioDurationBasis,
     AudioMetadataMatch,
+    AudioPairSide,
+    AudioStartBasis,
     SelectedAudioStreamEvidence,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
-_FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
-_FLOAT32_BYTES = np.dtype(np.float32).itemsize
-_DEFAULT_WINDOW_SECONDS = 30
-_DEFAULT_DISTRIBUTED_WINDOWS = 5
-_MIN_ANALYSIS_SAMPLE_RATE = 4000
-_MAX_ANALYSIS_SAMPLE_RATE = 8000
-_MAX_ANALYSIS_WINDOWS = 16
-_MAX_FFT_POINTS = 1 << 21
-_FFT_WORK_BUDGET = 1 << 24
-_MAX_SCORING_PAIR_SAMPLES = 3_000_000
-_SCORING_SAMPLE_WORK_BUDGET = 15_000_000
-_MAX_DISCOVERY_RETAINED_SAMPLES = _FFT_WORK_BUDGET + _MAX_ANALYSIS_WINDOWS
-_MAX_SCORE_EVALUATIONS_PER_WINDOW = 512
-_MAX_SCORED_POSITIONS = 536_870_912
-_MAX_SCORE_POSITIONS_PER_EVALUATION = 65_536
 
-TimelineDurationBasis = Literal[
-    "duration_ts",
-    "stream_duration",
-    "stream_tag",
-    "unavailable",
-]
+MAX_RETIME_RATE = 384_000
 
 
 @dataclass(frozen=True)
@@ -69,10 +35,10 @@ class AudioStreamTimeline:
     start_time: Fraction
     duration: Fraction | None
     time_base: Fraction | None
-    duration_basis: TimelineDurationBasis
+    duration_basis: AudioDurationBasis
     input_start_time: Fraction = Fraction(0)
-    start_time_basis: Literal["metadata", "default_zero"] = "default_zero"
-    input_start_time_basis: Literal["metadata", "default_zero"] = "default_zero"
+    start_time_basis: AudioStartBasis = "default_zero"
+    input_start_time_basis: AudioStartBasis = "default_zero"
 
 
 @dataclass(frozen=True)
@@ -100,78 +66,25 @@ class AudioStreamInfo:
 
 
 @dataclass(frozen=True)
-class AudioWindowSpec:
-    """One bounded reference window and its comparison search interval."""
+class VideoStreamStart:
+    """Start time of the first non-attached-pic video stream (A5 compensation)."""
 
-    reference_start_sample: int
-    reference_sample_count: int
-    comparison_start_sample: int
-    comparison_sample_count: int
+    start_time: Fraction
+    basis: AudioStartBasis
 
 
 @dataclass(frozen=True)
-class AudioAnalysisPlan:
-    """Bounded work selected for one reference/comparison stream pair."""
+class AudioStreamSelection:
+    """Resolved audio stream plus the companion video start for A5 compensation."""
 
-    sample_rate: int
-    requested_sample_rate: int
-    windows: tuple[AudioWindowSpec, ...]
-    peak_fft_points: int
-    total_fft_points: int
-    discovery_retained_samples: int = 0
-    verification_reserved_samples: int = 0
-    score_evaluations_per_window: int = 0
-    scored_positions: int = 0
-    reference_duration_samples: int = 0
-    comparison_duration_samples: int = 0
+    stream: AudioStreamInfo
+    video_start: VideoStreamStart
 
 
 @dataclass(frozen=True)
-class AudioAnalysisBudgetExceeded:
-    """A schema-valid request that cannot fit the fixed analysis budget."""
-
-    reason: str
-
-
-@dataclass(frozen=True)
-class AudioWindow:
-    """Decoded signals plus their origins on each selected stream timeline."""
-
-    reference: np.ndarray
-    comparison: np.ndarray
-    reference_start_sample: int
-    comparison_start_sample: int
-
-
-@dataclass(frozen=True)
-class AudioVerificationSpec:
-    """One frozen requested-rate pair and its admitted global hypotheses."""
-
-    window_index: int
-    reference_start_sample: int
-    reference_sample_count: int
-    comparison_start_sample: int
-    comparison_sample_count: int
-    global_lower_offset: int
-    global_upper_offset: int
-
-
-@dataclass(frozen=True)
-class CollectedAudioPhase:
-    """One phase's read-only logical windows and bounded scalar summaries."""
-
-    windows: tuple[AudioWindow, ...]
-    summaries: tuple[AudioAlignmentCollectionRecord, ...]
-
-
-@dataclass(frozen=True)
-class AudioChannelViewPlan:
-    """Admitted requested-rate intervals for fixed named-channel corroboration."""
-
-    views: tuple[AudioChannelView, ...]
-    window_indices: tuple[int, ...]
-    windows: tuple[AudioWindowSpec, ...]
-    retained_samples_per_view: int
+class ProbedStreams:
+    audio: tuple[AudioStreamInfo, ...]
+    video_start: VideoStreamStart
 
 
 def _decode_stderr(stderr: bytes) -> str:
@@ -327,7 +240,7 @@ def _parse_audio_stream(
     audio_stream_index: int,
     video_path: Path,
     input_start_time: Fraction,
-    input_start_time_basis: Literal["metadata", "default_zero"],
+    input_start_time_basis: AudioStartBasis,
 ) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
         raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
@@ -350,7 +263,7 @@ def _parse_audio_stream(
     time_base = _parse_time_base(stream.get("time_base"))
     duration_ts = _parse_optional_int(stream.get("duration_ts"))
     duration: Fraction | None = None
-    duration_basis: TimelineDurationBasis = "unavailable"
+    duration_basis: AudioDurationBasis = "unavailable"
     if duration_ts is not None and duration_ts > 0 and time_base is not None:
         duration = duration_ts * time_base
         duration_basis = "duration_ts"
@@ -391,19 +304,34 @@ def _parse_audio_stream(
     )
 
 
-def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
+def _parse_video_start(stream: dict[str, object]) -> VideoStreamStart | None:
+    """Return the start of the first non-attached-pic video stream, if present."""
+    if stream.get("codec_type") != "video":
+        return None
+    disposition_obj = stream.get("disposition", {})
+    disposition_dict = (
+        cast(dict[str, object], disposition_obj) if isinstance(disposition_obj, dict) else {}
+    )
+    if _parse_flag(disposition_dict.get("attached_pic")):
+        return None
+    parsed_start_time = _parse_optional_fraction(stream.get("start_time"))
+    if parsed_start_time is None:
+        return VideoStreamStart(start_time=Fraction(0), basis="default_zero")
+    return VideoStreamStart(start_time=parsed_start_time, basis="metadata")
+
+
+def probe_streams(video_path: Path) -> ProbedStreams:
+    """Probe audio streams and the companion video start in one ffprobe call."""
     payload = _load_ffprobe_json(
         [
             "ffprobe",
             "-v",
             "error",
-            "-select_streams",
-            "a",
             "-show_entries",
             (
-                "stream=index,codec_name,channels,channel_layout,sample_rate,"
+                "stream=index,codec_type,codec_name,channels,channel_layout,sample_rate,"
                 "start_time,duration,duration_ts,time_base:"
-                "stream_disposition=default,original,comment:"
+                "stream_disposition=default,original,comment,attached_pic:"
                 "stream_tags=language,comment,DURATION:format=start_time"
             ),
             "-of",
@@ -424,21 +352,33 @@ def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
         parsed_input_start_time if parsed_input_start_time is not None else Fraction(0)
     )
 
-    streams = [
-        _parse_audio_stream(
-            stream_obj,
-            audio_stream_index=index,
-            video_path=video_path,
-            input_start_time=input_start_time,
-            input_start_time_basis=(
-                "metadata" if parsed_input_start_time is not None else "default_zero"
-            ),
-        )
-        for index, stream_obj in enumerate(stream_items)
-    ]
-    if not streams:
+    audio: list[AudioStreamInfo] = []
+    video_start = VideoStreamStart(start_time=Fraction(0), basis="default_zero")
+    video_found = False
+    for raw_item in stream_items:
+        if not isinstance(raw_item, dict):
+            raise FFmpegError(f"ffprobe returned invalid stream data for {video_path.name}", 0)
+        stream_item = cast(dict[str, object], raw_item)
+        if stream_item.get("codec_type") == "audio":
+            audio.append(
+                _parse_audio_stream(
+                    stream_item,
+                    audio_stream_index=len(audio),
+                    video_path=video_path,
+                    input_start_time=input_start_time,
+                    input_start_time_basis=(
+                        "metadata" if parsed_input_start_time is not None else "default_zero"
+                    ),
+                )
+            )
+        elif not video_found:
+            parsed = _parse_video_start(stream_item)
+            if parsed is not None:
+                video_start = parsed
+                video_found = True
+    if not audio:
         raise AudioAlignmentError(f"no audio streams found in {video_path.name}")
-    return streams
+    return ProbedStreams(audio=tuple(audio), video_start=video_start)
 
 
 def _reference_stream_sort_key(stream: AudioStreamInfo) -> tuple[int, int, int, int]:
@@ -505,7 +445,7 @@ def _comparison_stream_sort_key(
 
 
 def _select_audio_stream_override(
-    streams: list[AudioStreamInfo],
+    streams: tuple[AudioStreamInfo, ...],
     *,
     video_path: Path,
     stream_override: int,
@@ -521,39 +461,58 @@ def _select_audio_stream_override(
     )
 
 
-def select_reference_audio_stream(
-    video_path: Path,
+def select_audio_pair(
+    reference: ProbedStreams,
+    comparison: ProbedStreams,
     *,
-    stream_override: int | None = None,
-) -> AudioStreamInfo:
-    """Choose the reference anchor stream deterministically from ffprobe metadata."""
-    streams = _probe_audio_streams(video_path)
-    if stream_override is not None:
-        return _select_audio_stream_override(
-            streams,
-            video_path=video_path,
-            stream_override=stream_override,
+    reference_path: Path,
+    comparison_path: Path,
+    reference_override: int | None,
+    comparison_override: int | None,
+) -> tuple[AudioStreamSelection, AudioStreamSelection]:
+    """Choose the reference and comparison audio streams, preferring a shared language (M3)."""
+    fixed_comparison = (
+        _select_audio_stream_override(
+            comparison.audio,
+            video_path=comparison_path,
+            stream_override=comparison_override,
         )
-    return min(streams, key=_reference_stream_sort_key)
-
-
-def select_matching_audio_stream(
-    video_path: Path,
-    *,
-    reference_stream: AudioStreamInfo,
-    stream_override: int | None = None,
-) -> AudioStreamInfo:
-    """Choose the comparison stream that best matches the selected reference stream."""
-    streams = _probe_audio_streams(video_path)
-    if stream_override is not None:
-        return _select_audio_stream_override(
-            streams,
-            video_path=video_path,
-            stream_override=stream_override,
+        if comparison_override is not None
+        else None
+    )
+    if reference_override is not None:
+        reference_stream = _select_audio_stream_override(
+            reference.audio,
+            video_path=reference_path,
+            stream_override=reference_override,
         )
-    return min(
-        streams,
-        key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
+    else:
+        default = min(reference.audio, key=_reference_stream_sort_key)
+        comparison_languages = {
+            stream.language
+            for stream in (comparison.audio if fixed_comparison is None else (fixed_comparison,))
+            if not stream.is_commentary and stream.language is not None
+        }
+        if default.language is not None and default.language not in comparison_languages:
+            shared = [
+                stream
+                for stream in reference.audio
+                if not stream.is_commentary and stream.language in comparison_languages
+            ]
+            reference_stream = min(shared, key=_reference_stream_sort_key) if shared else default
+        else:
+            reference_stream = default
+    comparison_stream = (
+        fixed_comparison
+        if fixed_comparison is not None
+        else min(
+            comparison.audio,
+            key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
+        )
+    )
+    return (
+        AudioStreamSelection(stream=reference_stream, video_start=reference.video_start),
+        AudioStreamSelection(stream=comparison_stream, video_start=comparison.video_start),
     )
 
 
@@ -572,9 +531,11 @@ def _metadata_match(reference: object | None, comparison: object | None) -> Audi
 def selected_stream_evidence(
     stream: AudioStreamInfo,
     *,
-    role: Literal["reference", "comparison"],
+    role: AudioPairSide,
     source_identity_digest: str,
     explicit_override: bool,
+    video_start: VideoStreamStart,
+    timeline_scale: Fraction,
     reference_stream: AudioStreamInfo | None = None,
 ) -> SelectedAudioStreamEvidence:
     """Project the resolved choice into bounded, pathless diagnostic facts."""
@@ -630,6 +591,11 @@ def selected_stream_evidence(
         duration_num=duration.numerator if duration is not None else None,
         duration_den=duration.denominator if duration is not None else None,
         duration_basis=timeline.duration_basis,
+        video_start_num=video_start.start_time.numerator,
+        video_start_den=video_start.start_time.denominator,
+        video_start_basis=video_start.basis,
+        timeline_scale_num=timeline_scale.numerator,
+        timeline_scale_den=timeline_scale.denominator,
     )
 
 
@@ -637,7 +603,7 @@ def normalized_extraction_recipe() -> str:
     """Describe extraction without retaining media paths or a concrete command line."""
     return (
         "ffmpeg -i <role_input> -map 0:a:<selected_ordinal> -vn "
-        "[channel] -af <channel>,aresample=<rate>,atrim=end_sample=<horizon> -f f32le -"
+        "[channel] -af <channel>[,aresample=<r1>,asetrate=<r2>],aresample=8000 -f f32le -"
     )
 
 
@@ -657,291 +623,48 @@ def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
     return "pan=mono|c0=c0"
 
 
-_EXACT_LAYOUT_VIEWS: dict[str, tuple[AudioChannelView, ...]] = {
-    "stereo": ("FL", "FR"),
-    "2.0": ("FL", "FR"),
-    "3.0": ("FL", "FR", "FC"),
-    "4.0": ("FL", "FR", "FC"),
-    "5.0": ("FL", "FR", "FC"),
-    "5.0(side)": ("FL", "FR", "FC"),
-    "5.1": ("FL", "FR", "FC"),
-    "5.1(side)": ("FL", "FR", "FC"),
-    "6.1": ("FL", "FR", "FC"),
-    "7.1": ("FL", "FR", "FC"),
-    "7.1(wide)": ("FL", "FR", "FC"),
-}
+def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
+    """Exact resample/relabel rates that stretch audio time by ``timeline_scale``.
 
-
-def common_named_channel_views(
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-) -> tuple[AudioChannelView, ...]:
-    """Return only explicitly defined FL/FR/FC views shared by both layouts."""
-    reference = _EXACT_LAYOUT_VIEWS.get(reference_stream.channel_layout or "", ())
-    comparison = set(_EXACT_LAYOUT_VIEWS.get(comparison_stream.channel_layout or "", ()))
-    return tuple(view for view in reference if view in comparison)
-
-
-def _fft_size(sample_count: int) -> int:
-    return 1 << max(0, sample_count - 1).bit_length()
-
-
-def _distributed_indexes(count: int, selected: int) -> tuple[int, ...]:
-    if selected >= count:
-        return tuple(range(count))
-    if selected == 1:
-        return (count // 2,)
-    return tuple(
-        dict.fromkeys(round(index * (count - 1) / (selected - 1)) for index in range(selected))
-    )
-
-
-def _window_starts(
-    total_samples: int,
-    *,
-    window_samples: int,
-    stride_samples: int,
-    default_windows: int,
-    limit: int,
-) -> tuple[int, ...]:
-    available_start = max(0, total_samples - window_samples)
-    if available_start == 0:
-        return (0,)
-    if stride_samples <= 0:
-        selected = min(default_windows, limit)
-        return tuple(
-            dict.fromkeys(
-                round(index * available_start / (selected - 1)) for index in range(selected)
-            )
+    Returns ``None`` for a scale of 1. Raises ``AudioAlignmentError`` with
+    category ``selected_audio_timeline_unavailable`` when a rate would exceed
+    ``MAX_RETIME_RATE``.
+    """
+    if timeline_scale == 1:
+        return None
+    p, q = timeline_scale.numerator, timeline_scale.denominator
+    m = -(-AUDIO_ANALYSIS_SAMPLE_RATE // min(p, q))
+    if max(p, q) * m > MAX_RETIME_RATE:
+        raise AudioAlignmentError(
+            "retimed audio rate is not supported",
+            category="selected_audio_timeline_unavailable",
+            stage="planning",
         )
-
-    grid_count = available_start // stride_samples + 1
-    includes_final = (grid_count - 1) * stride_samples == available_start
-    count = grid_count if includes_final else grid_count + 1
-    indexes = _distributed_indexes(count, min(count, limit))
-    return tuple(
-        available_start if not includes_final and index == grid_count else index * stride_samples
-        for index in indexes
-    )
+    return p * m, q * m
 
 
-def plan_audio_analysis(
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-    *,
-    config: AlignmentConfig,
-) -> AudioAnalysisPlan | AudioAnalysisBudgetExceeded:
-    """Plan bounded, timeline-distributed work without changing config validation."""
-    if not all(
-        math.isfinite(value)
-        for value in (
-            config.max_offset_seconds,
-            config.window_length_seconds,
-            config.window_stride_seconds,
-        )
-    ):
-        return AudioAnalysisBudgetExceeded("non_finite_analysis_config")
-    reference_duration = reference_stream.timeline.duration
-    comparison_duration = comparison_stream.timeline.duration
-    if reference_duration is None or comparison_duration is None:
-        return AudioAnalysisBudgetExceeded("selected_audio_timeline_unavailable")
-
-    shared_duration = min(reference_duration, comparison_duration)
-    if shared_duration <= 0:
-        return AudioAnalysisBudgetExceeded("selected_audio_timeline_empty")
-
-    requested_window_seconds = (
-        Fraction(Decimal(str(config.window_length_seconds)))
-        if config.window_length_seconds > 0
-        else Fraction(_DEFAULT_WINDOW_SECONDS)
-    )
-    max_offset_seconds = Fraction(Decimal(str(config.max_offset_seconds)))
-
-    # Discovery is deliberately standardized at no more than 8 kHz. A single
-    # 4 kHz retry is admitted only when the first rate cannot fit the FFT bound.
-    rates = tuple(dict.fromkeys((min(config.sample_rate, _MAX_ANALYSIS_SAMPLE_RATE), 4000)))
-    for rate in rates:
-        candidate = _plan_at_discovery_rate(
-            reference_duration,
-            comparison_duration,
-            requested_window_seconds=requested_window_seconds,
-            max_offset_seconds=max_offset_seconds,
-            rate=rate,
-            config=config,
-        )
-        if isinstance(candidate, AudioAnalysisPlan):
-            return candidate
-        if candidate.reason != "window_or_offset_exceeds_peak_budget":
-            return candidate
-    return AudioAnalysisBudgetExceeded("window_or_offset_exceeds_peak_budget")
-
-
-def _plan_at_discovery_rate(
-    reference_duration: Fraction,
-    comparison_duration: Fraction,
-    *,
-    requested_window_seconds: Fraction,
-    max_offset_seconds: Fraction,
-    rate: int,
-    config: AlignmentConfig,
-) -> AudioAnalysisPlan | AudioAnalysisBudgetExceeded:
-    reference_total = max(1, math.floor(reference_duration * rate))
-    comparison_total = max(1, math.floor(comparison_duration * rate))
-    shared_total = min(reference_total, comparison_total)
-    default_shape = config.window_length_seconds <= 0
-    endpoint_counts: tuple[int, int] | None = None
-    if default_shape:
-        shared_seconds = min(reference_duration, comparison_duration)
-        if shared_seconds <= 30:
-            window_samples = shared_total
-        elif shared_seconds < 90:
-            window_samples = min(30 * rate, max(2, round(shared_seconds * rate / 2)))
-            if config.minimum_valid_windows <= 2 and shared_total <= 2 * 30 * rate:
-                midpoint = shared_total // 2
-                endpoint_counts = (midpoint, shared_total - midpoint)
-                window_samples = max(endpoint_counts)
-        else:
-            window_samples = min(shared_total, 30 * rate)
-    else:
-        window_samples = max(
-            2, round(min(reference_duration, comparison_duration, requested_window_seconds) * rate)
-        )
-    margin_samples = math.ceil(max_offset_seconds * rate)
-    conservative_fft = _fft_size(2 * window_samples + 2 * margin_samples - 1)
-    if conservative_fft > _MAX_FFT_POINTS:
-        return AudioAnalysisBudgetExceeded("window_or_offset_exceeds_peak_budget")
-
-    refinement_rate = config.refinement_sample_rate or rate
-    local_radius = min(
-        int(config.max_offset_seconds * rate),
-        max(1, int(round(rate * 0.005))),
-    )
-    local_evaluations = 0
-    if config.refinement_mode == "local":
-        local_evaluations = 2 * int(round(local_radius * max(1.0, refinement_rate / rate))) + 1
-    discovery_evaluations = 1 + local_evaluations
-    verification_evaluations = (
-        2 * math.ceil(config.sample_rate / rate) + 1 if rate != config.sample_rate else 0
-    )
-    evaluations = discovery_evaluations + verification_evaluations
-    if evaluations > _MAX_SCORE_EVALUATIONS_PER_WINDOW:
-        return AudioAnalysisBudgetExceeded("scoring_evaluations_exceed_window_budget")
-
-    window_capacity = min(_MAX_ANALYSIS_WINDOWS, _FFT_WORK_BUDGET // conservative_fft)
-    stride_samples = (
-        max(1, round(config.window_stride_seconds * rate))
-        if config.window_stride_seconds > 0
-        else (window_samples if config.window_length_seconds > 0 else 0)
-    )
-    if default_shape and min(reference_duration, comparison_duration) <= 30:
-        starts = (0,)
-    elif default_shape and min(reference_duration, comparison_duration) < 90:
-        if endpoint_counts is not None:
-            starts = (0, endpoint_counts[0])
-        elif config.minimum_valid_windows <= 2:
-            starts = (0, max(0, shared_total - window_samples))
-        else:
-            starts = _window_starts(
-                shared_total,
-                window_samples=window_samples,
-                stride_samples=0,
-                default_windows=config.minimum_valid_windows,
-                limit=window_capacity,
-            )
-    else:
-        starts = _window_starts(
-            shared_total,
-            window_samples=window_samples,
-            stride_samples=stride_samples,
-            default_windows=max(_DEFAULT_DISTRIBUTED_WINDOWS, config.minimum_valid_windows),
-            limit=window_capacity,
-        )
-
-    windows: list[AudioWindowSpec] = []
-    total_fft_points = 0
-    peak_fft_points = 0
-    retained_samples = 0
-    verification_samples = 0
-    scored_positions = 0
-    halo = math.ceil(config.sample_rate / rate)
-    for index, reference_start in enumerate(starts):
-        planned_reference_count = (
-            endpoint_counts[index] if endpoint_counts is not None else window_samples
-        )
-        reference_count = min(planned_reference_count, reference_total - reference_start)
-        comparison_start = max(0, reference_start - margin_samples)
-        comparison_end = min(
-            comparison_total,
-            reference_start + reference_count + margin_samples,
-        )
-        comparison_count = comparison_end - comparison_start
-        if reference_count < 2 or comparison_count < 2:
-            continue
-        fft_points = _fft_size(reference_count + comparison_count - 1)
-        total_fft_points += fft_points
-        peak_fft_points = max(peak_fft_points, fft_points)
-        retained_samples += reference_count + comparison_count
-        windows.append(
-            AudioWindowSpec(reference_start, reference_count, comparison_start, comparison_count)
-        )
-        if rate != config.sample_rate:
-            requested_count = round(
-                Fraction(reference_start + reference_count, rate) * config.sample_rate
-            ) - round(Fraction(reference_start, rate) * config.sample_rate)
-            pair_samples = 2 * requested_count + 2 * halo
-            if pair_samples > _MAX_SCORING_PAIR_SAMPLES:
-                return AudioAnalysisBudgetExceeded("requested_rate_scoring_exceeds_peak_budget")
-            verification_samples += pair_samples
-            scored_positions += verification_evaluations * min(
-                requested_count, _MAX_SCORE_POSITIONS_PER_EVALUATION
-            )
-        scored_positions += discovery_evaluations * min(
-            reference_count, comparison_count, _MAX_SCORE_POSITIONS_PER_EVALUATION
-        )
-
-    if config.minimum_valid_windows > len(windows):
-        return AudioAnalysisBudgetExceeded("minimum_valid_windows_exceeds_work_budget")
-    if total_fft_points > _FFT_WORK_BUDGET or retained_samples > _MAX_DISCOVERY_RETAINED_SAMPLES:
-        return AudioAnalysisBudgetExceeded("planned_windows_exceed_work_budget")
-    if verification_samples > _SCORING_SAMPLE_WORK_BUDGET:
-        return AudioAnalysisBudgetExceeded("requested_rate_scoring_exceeds_total_budget")
-    if scored_positions > _MAX_SCORED_POSITIONS:
-        return AudioAnalysisBudgetExceeded("scoring_positions_exceed_work_budget")
-    return AudioAnalysisPlan(
-        sample_rate=rate,
-        requested_sample_rate=config.sample_rate,
-        windows=tuple(windows),
-        peak_fft_points=peak_fft_points,
-        total_fft_points=total_fft_points,
-        discovery_retained_samples=retained_samples,
-        verification_reserved_samples=verification_samples,
-        score_evaluations_per_window=evaluations,
-        scored_positions=scored_positions,
-        reference_duration_samples=reference_total,
-        comparison_duration_samples=comparison_total,
-    )
-
-
-def continuous_collection_argv(
+def collection_argv(
     video_path: Path,
     stream: AudioStreamInfo,
     *,
-    sample_rate: int,
-    end_sample: int,
     channel_strategy: AlignmentChannelStrategy,
-    channel_view: AudioChannelView | None = None,
+    timeline_scale: Fraction,
 ) -> list[str]:
-    """Build the canonical origin-based, endpoint-limited FFmpeg recipe."""
+    """Build the canonical whole-track 8 kHz mono float32 FFmpeg recipe."""
     filters: list[str] = []
-    if channel_view is not None:
-        channel_args = []
-        filters.append(f"pan=mono|c0={channel_view}")
-    elif channel_strategy == "mono_downmix":
+    if channel_strategy == "mono_downmix":
         channel_args = ["-ac", "1"]
     else:
         channel_args = []
         filters.append(_best_channel_audio_filter(stream))
-    filters.extend((f"aresample={sample_rate}", f"atrim=end_sample={end_sample}"))
+    rates = retime_rates(timeline_scale)
+    if rates is None:
+        filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
+    else:
+        first_rate, second_rate = rates
+        filters.append(f"aresample={first_rate}")
+        filters.append(f"asetrate={second_rate}")
+        filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
     return [
         "ffmpeg",
         "-i",
@@ -956,384 +679,3 @@ def continuous_collection_argv(
         "f32le",
         "-",
     ]
-
-
-def _collection_record(
-    result: ContinuousAudioCollection | ContinuousAudioCollectionFailure,
-    *,
-    phase: Literal["discovery", "verification"],
-    role: Literal["reference", "comparison"],
-    output_rate: int,
-) -> AudioAlignmentCollectionRecord:
-    facts = result.facts
-    succeeded = isinstance(result, ContinuousAudioCollection)
-    return AudioAlignmentCollectionRecord(
-        phase=phase,
-        role=role,
-        output_rate=output_rate,
-        requested_horizon=facts.planned_end_sample,
-        emitted_sample_count=facts.emitted_sample_count,
-        emitted_byte_count=facts.emitted_byte_count,
-        retained_sample_count=facts.retained_sample_count,
-        retained_byte_count=facts.retained_sample_count * _FLOAT32_BYTES,
-        status="complete" if succeeded else "failed",
-        end_category=result.end if succeeded else "not_observed",
-        observed_eof_sample=result.observed_eof_sample if succeeded else None,
-        elapsed_seconds=facts.elapsed_seconds,
-        cleanup_failure_count=int(not result.cleanup.completed),
-        failure_count=0 if succeeded else 1,
-    )
-
-
-def _collect_role(
-    path: Path,
-    stream: AudioStreamInfo,
-    intervals: tuple[AudioSampleInterval, ...],
-    *,
-    phase: Literal["discovery", "verification"],
-    role: Literal["reference", "comparison"],
-    sample_rate: int,
-    channel_strategy: AlignmentChannelStrategy,
-    max_retained_samples: int,
-    cancellation: threading.Event | None,
-    channel_view: AudioChannelView | None = None,
-) -> tuple[ContinuousAudioCollection, AudioAlignmentCollectionRecord]:
-    raise_if_alignment_cancelled(cancellation)
-    horizon = max(interval.end_sample for interval in intervals)
-    result = collect_continuous_audio(
-        continuous_collection_argv(
-            path,
-            stream,
-            sample_rate=sample_rate,
-            end_sample=horizon,
-            channel_strategy=channel_strategy,
-            channel_view=channel_view,
-        ),
-        intervals,
-        planned_end_sample=horizon,
-        max_retained_samples=max_retained_samples,
-        timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS,
-        cancellation=cancellation,
-    )
-    summary = _collection_record(result, phase=phase, role=role, output_rate=sample_rate)
-    if isinstance(result, ContinuousAudioCollectionFailure):
-        error_type: type[AudioAlignmentError]
-        if not result.cleanup.completed:
-            error_type = AudioAlignmentCleanupError
-        elif result.category == "cancelled":
-            error_type = AudioAlignmentCancellationError
-        else:
-            error_type = AudioAlignmentError
-        raise error_type(
-            result.message,
-            category=result.category,
-            stage=phase,
-            role=role,
-            collection_summaries=(summary,),
-        )
-    return result, summary
-
-
-def collect_discovery_phase(
-    reference_path: Path,
-    comparison_path: Path,
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-    plan: AudioAnalysisPlan,
-    *,
-    channel_strategy: AlignmentChannelStrategy,
-    cancellation: threading.Event | None = None,
-) -> CollectedAudioPhase:
-    """Collect all planned discovery intervals with two sequential decodes."""
-    reference_intervals = tuple(
-        AudioSampleInterval(spec.reference_start_sample, spec.reference_sample_count)
-        for spec in plan.windows
-    )
-    comparison_intervals = tuple(
-        AudioSampleInterval(spec.comparison_start_sample, spec.comparison_sample_count)
-        for spec in plan.windows
-    )
-    reference_result, reference_summary = _collect_role(
-        reference_path,
-        reference_stream,
-        reference_intervals,
-        phase="discovery",
-        role="reference",
-        sample_rate=plan.sample_rate,
-        channel_strategy=channel_strategy,
-        max_retained_samples=plan.discovery_retained_samples,
-        cancellation=cancellation,
-    )
-    try:
-        comparison_result, comparison_summary = _collect_role(
-            comparison_path,
-            comparison_stream,
-            comparison_intervals,
-            phase="discovery",
-            role="comparison",
-            sample_rate=plan.sample_rate,
-            channel_strategy=channel_strategy,
-            max_retained_samples=plan.discovery_retained_samples,
-            cancellation=cancellation,
-        )
-    except AudioAlignmentError as exc:
-        exc.collection_summaries = (reference_summary, *exc.collection_summaries)
-        raise
-    return CollectedAudioPhase(
-        windows=tuple(
-            AudioWindow(
-                reference=reference_interval.samples,
-                comparison=comparison_interval.samples,
-                reference_start_sample=reference_interval.start_sample,
-                comparison_start_sample=comparison_interval.start_sample,
-            )
-            for reference_interval, comparison_interval in zip(
-                reference_result.intervals, comparison_result.intervals, strict=True
-            )
-        ),
-        summaries=(reference_summary, comparison_summary),
-    )
-
-
-def verification_specs(
-    plan: AudioAnalysisPlan,
-    coarse_offsets: tuple[tuple[int, Fraction], ...],
-    *,
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-    max_offset_seconds: float,
-) -> tuple[AudioVerificationSpec, ...]:
-    """Freeze requested-rate intervals and global hypotheses before verification I/O."""
-    rate = plan.requested_sample_rate
-    halo = math.ceil(rate / plan.sample_rate)
-    requested_limit = int(max_offset_seconds * rate)
-    reference_total = math.floor((reference_stream.timeline.duration or Fraction(0)) * rate)
-    comparison_total = math.floor((comparison_stream.timeline.duration or Fraction(0)) * rate)
-    frozen: list[AudioVerificationSpec] = []
-    for window_index, coarse_offset in coarse_offsets:
-        source = plan.windows[window_index]
-        reference_start = round(Fraction(source.reference_start_sample * rate, plan.sample_rate))
-        reference_end = round(
-            Fraction(
-                (source.reference_start_sample + source.reference_sample_count) * rate,
-                plan.sample_rate,
-            )
-        )
-        requested_offset = round(coarse_offset * rate / plan.sample_rate)
-        comparison_core_start = reference_start - requested_offset
-        comparison_start = max(0, comparison_core_start - halo)
-        comparison_end = min(
-            comparison_total, comparison_core_start + (reference_end - reference_start) + halo
-        )
-        reference_start = min(max(0, reference_start), reference_total)
-        reference_end = min(max(reference_start, reference_end), reference_total)
-        if reference_end <= reference_start or comparison_end <= comparison_start:
-            continue
-        frozen.append(
-            AudioVerificationSpec(
-                window_index=window_index,
-                reference_start_sample=reference_start,
-                reference_sample_count=reference_end - reference_start,
-                comparison_start_sample=comparison_start,
-                comparison_sample_count=comparison_end - comparison_start,
-                global_lower_offset=max(-requested_limit, requested_offset - halo),
-                global_upper_offset=min(requested_limit, requested_offset + halo),
-            )
-        )
-    return tuple(frozen)
-
-
-def collect_verification_phase(
-    reference_path: Path,
-    comparison_path: Path,
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-    plan: AudioAnalysisPlan,
-    specs: tuple[AudioVerificationSpec, ...],
-    *,
-    channel_strategy: AlignmentChannelStrategy,
-    cancellation: threading.Event | None = None,
-) -> CollectedAudioPhase:
-    """Collect one frozen requested-rate phase with two sequential decodes."""
-    reference_intervals = tuple(
-        AudioSampleInterval(spec.reference_start_sample, spec.reference_sample_count)
-        for spec in specs
-    )
-    comparison_intervals = tuple(
-        AudioSampleInterval(spec.comparison_start_sample, spec.comparison_sample_count)
-        for spec in specs
-    )
-    reference_result, reference_summary = _collect_role(
-        reference_path,
-        reference_stream,
-        reference_intervals,
-        phase="verification",
-        role="reference",
-        sample_rate=plan.requested_sample_rate,
-        channel_strategy=channel_strategy,
-        max_retained_samples=plan.verification_reserved_samples,
-        cancellation=cancellation,
-    )
-    try:
-        comparison_result, comparison_summary = _collect_role(
-            comparison_path,
-            comparison_stream,
-            comparison_intervals,
-            phase="verification",
-            role="comparison",
-            sample_rate=plan.requested_sample_rate,
-            channel_strategy=channel_strategy,
-            max_retained_samples=plan.verification_reserved_samples,
-            cancellation=cancellation,
-        )
-    except AudioAlignmentError as exc:
-        exc.collection_summaries = (reference_summary, *exc.collection_summaries)
-        raise
-    return CollectedAudioPhase(
-        windows=tuple(
-            AudioWindow(
-                reference=reference_interval.samples,
-                comparison=comparison_interval.samples,
-                reference_start_sample=reference_interval.start_sample,
-                comparison_start_sample=comparison_interval.start_sample,
-            )
-            for reference_interval, comparison_interval in zip(
-                reference_result.intervals, comparison_result.intervals, strict=True
-            )
-        ),
-        summaries=(reference_summary, comparison_summary),
-    )
-
-
-def plan_channel_view_corroboration(
-    plan: AudioAnalysisPlan,
-    window_indices: tuple[int, ...],
-    *,
-    views: tuple[AudioChannelView, ...],
-) -> AudioChannelViewPlan | AudioAnalysisBudgetExceeded:
-    """Admit fixed named-view work inside the existing production budgets."""
-    if len(views) < 2 or len(views) > 3 or not window_indices:
-        return AudioAnalysisBudgetExceeded("channel_views_unavailable")
-    rate = plan.requested_sample_rate
-    windows: list[AudioWindowSpec] = []
-    retained = 0
-    total_fft = 0
-    radius = max(1, round(rate * 0.005))
-    scored_positions = 0
-    for index in window_indices:
-        source = plan.windows[index]
-        reference_start = round(Fraction(source.reference_start_sample * rate, plan.sample_rate))
-        reference_end = round(
-            Fraction(
-                (source.reference_start_sample + source.reference_sample_count) * rate,
-                plan.sample_rate,
-            )
-        )
-        comparison_start = round(Fraction(source.comparison_start_sample * rate, plan.sample_rate))
-        comparison_end = round(
-            Fraction(
-                (source.comparison_start_sample + source.comparison_sample_count) * rate,
-                plan.sample_rate,
-            )
-        )
-        reference_count = reference_end - reference_start
-        comparison_count = comparison_end - comparison_start
-        pair_samples = reference_count + comparison_count
-        fft_points = _fft_size(pair_samples - 1)
-        if pair_samples > _MAX_SCORING_PAIR_SAMPLES or fft_points > _MAX_FFT_POINTS:
-            return AudioAnalysisBudgetExceeded("channel_view_scoring_exceeds_peak_budget")
-        retained += pair_samples
-        total_fft += fft_points * len(views)
-        scored_positions += (
-            len(views)
-            * (2 * radius + 2)
-            * min(reference_count, comparison_count, _MAX_SCORE_POSITIONS_PER_EVALUATION)
-        )
-        windows.append(
-            AudioWindowSpec(
-                reference_start,
-                reference_count,
-                comparison_start,
-                comparison_count,
-            )
-        )
-    if retained > _SCORING_SAMPLE_WORK_BUDGET:
-        return AudioAnalysisBudgetExceeded("channel_view_scoring_exceeds_total_budget")
-    if total_fft > _FFT_WORK_BUDGET:
-        return AudioAnalysisBudgetExceeded("channel_view_fft_exceeds_work_budget")
-    if scored_positions > _MAX_SCORED_POSITIONS:
-        return AudioAnalysisBudgetExceeded("channel_view_scoring_exceeds_work_budget")
-    return AudioChannelViewPlan(
-        views=views,
-        window_indices=window_indices,
-        windows=tuple(windows),
-        retained_samples_per_view=retained,
-    )
-
-
-def collect_channel_view_phase(
-    reference_path: Path,
-    comparison_path: Path,
-    reference_stream: AudioStreamInfo,
-    comparison_stream: AudioStreamInfo,
-    plan: AudioChannelViewPlan,
-    view: AudioChannelView,
-    *,
-    sample_rate: int,
-    cancellation: threading.Event | None = None,
-) -> CollectedAudioPhase:
-    """Collect one requested-rate named view with two sequential origin decodes."""
-    if view not in plan.views:
-        raise ValueError("channel view is outside the admitted plan")
-    reference_intervals = tuple(
-        AudioSampleInterval(spec.reference_start_sample, spec.reference_sample_count)
-        for spec in plan.windows
-    )
-    comparison_intervals = tuple(
-        AudioSampleInterval(spec.comparison_start_sample, spec.comparison_sample_count)
-        for spec in plan.windows
-    )
-    reference_result, reference_summary = _collect_role(
-        reference_path,
-        reference_stream,
-        reference_intervals,
-        phase="verification",
-        role="reference",
-        sample_rate=sample_rate,
-        channel_strategy="mono_downmix",
-        max_retained_samples=plan.retained_samples_per_view,
-        cancellation=cancellation,
-        channel_view=view,
-    )
-    try:
-        comparison_result, comparison_summary = _collect_role(
-            comparison_path,
-            comparison_stream,
-            comparison_intervals,
-            phase="verification",
-            role="comparison",
-            sample_rate=sample_rate,
-            channel_strategy="mono_downmix",
-            max_retained_samples=plan.retained_samples_per_view,
-            cancellation=cancellation,
-            channel_view=view,
-        )
-    except AudioAlignmentError as exc:
-        exc.collection_summaries = (reference_summary, *exc.collection_summaries)
-        raise
-    return CollectedAudioPhase(
-        windows=tuple(
-            AudioWindow(
-                reference=reference_interval.samples,
-                comparison=comparison_interval.samples,
-                reference_start_sample=reference_interval.start_sample,
-                comparison_start_sample=comparison_interval.start_sample,
-            )
-            for reference_interval, comparison_interval in zip(
-                reference_result.intervals,
-                comparison_result.intervals,
-                strict=True,
-            )
-        ),
-        summaries=(reference_summary, comparison_summary),
-    )

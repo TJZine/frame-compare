@@ -56,6 +56,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -149,6 +150,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -244,6 +246,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -286,6 +289,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -342,6 +346,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -394,6 +399,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -465,6 +471,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -523,6 +530,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -583,6 +591,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -639,6 +648,7 @@ enable = false
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false
@@ -713,6 +723,7 @@ enable = true
 
 [screenshots]
 use_ffmpeg = true
+active_rect_detection = "aspect_ratio"
 
 [report]
 enable = false

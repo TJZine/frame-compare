@@ -7,6 +7,56 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+### Added
+
+- Optional `[runtime].memory_limit_mb` (integer, minimum 512) caps the
+  VapourSynth frame cache for analysis, rendering, alignment video checks, and
+  the separate VSView session. Unset retains the native default; this is not
+  a hard limit on total process memory and does not affect audio buffers.
+
+### Changed
+
+- Select video-check positions by reference motion instead of even spacing: each
+  base and examined-target slot scores the candidate frame with the most luma
+  motion, while unexamined targets keep evenly spaced planned frames that are
+  never scored. Without stream overrides, the reference now switches to its
+  best-ranked stream in a language both sides share when its default language
+  is missing from the comparison, and `screenshots.active_rect_detection`
+  defaults to `auto`. Stale entries miss and recompute under the
+  `whole-track-chunked-phat-video-check-motion-20260929` policy.
+- Analyse retimed sources' audio on their effective timeline: when a source's
+  effective frame rate differs from its native rate (`match_fps` or a per-source
+  `effective_fps` override), alignment stretches its audio by the exact
+  source-over-effective ratio before chunking, so 24 fps releases of 23.976
+  content and PAL 25 fps releases hold a constant frame offset. Verbose output
+  and panel details note each retimed side, and stale entries miss and recompute
+  under the `whole-track-chunked-phat-video-check-motion-20260929` policy.
+- Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT
+  correlation plus container start compensation and bounded L-SMASH video
+  confirmation. Fresh results apply only when global audio authority, the exact-frame
+  video vote, and every frame-distinct credible disagreement gate pass; unresolved
+  runs/chunks and video-confirmed alternatives remain reviewable but unapplied.
+  Level, compression, downmix, stem, quiet, and locally inconclusive weak-audio
+  differences remain context rather than false vetoes; a video-confirmed alternative
+  still blocks at any target. Terminal and VSView review now share the same
+  bounded region/check-point projection, and only `trusted_automatic` results reach
+  trims or the computed cache. The removed `[audio_alignment]` tuning fields are
+  rejected as unknown keys, the diagnostic artifact moves to schema v4, VSView
+  session metadata moves
+  to v5 (both extended in place with explicit chunk/run/context records under one
+  shared 2 MiB per-comparison bound; native metadata omits per-chunk rows), and stale
+  computed or shared entries miss and recompute under the new
+  `whole-track-chunked-phat-video-check-motion-20260929` policy. Cache schema v2 and the
+  manual-override schema are unchanged.
+  Review regions now use reference-video time, retain the actual winning local
+  video offset, and report every applicable audio/video refusal reason.
+- **Upgrade note:** configs that still set any removed `[audio_alignment]` key
+  (`sample_rate`, `correlation_mode`, `preprocessing_mode`,
+  `confidence_threshold`, `ambiguity_peak_ratio`, `window_length_seconds`,
+  `window_stride_seconds`, `minimum_valid_windows`, `consensus_minimum_ratio`,
+  `refinement_mode`, `refinement_sample_rate`) now fail validation as unknown
+  keys; delete each such key.
+
 ## [0.6.0]
 
 ### Fixed

@@ -79,7 +79,7 @@ invocation.
 | `[paths]` | Input, config, and generated-data locations |
 | `[sources]` | Reference, analysis source, labels, FPS policy, and per-source overrides |
 | `[analysis]` | User/random/metric frame counts, mode, exclusions, and deterministic seed |
-| `[audio_alignment]` | Audio stream, correlation, consensus, reuse, and VSView behavior |
+| `[audio_alignment]` | Audio stream selection, whole-track chunked estimation, previous-offset reuse, and VSView behavior |
 | `[screenshots]` | Renderer, active-picture detection, geometry, overlays, PNG writer/compression, and timeouts |
 | `[color]` | HDR-to-SDR tonemapping preset, target luminance, tone curve, lift, and contrast recovery |
 | `[report]` | Static report generation, embedding, and auto-open behavior |
@@ -118,7 +118,7 @@ frames entered`, known-offset drafts say `{n}/{total} offsets entered`, and both
 alignment, unlink the playheads and position each source on the same visible moment. Or
 keep the current alignment.` Valid source-frame drafts use `Entered source frame: N`.
 Closing VSView without saving writes no result. Generated
-session metadata uses v4 while the typed sibling result sidecar remains v1; strict
+session metadata uses v5 while the typed sibling result sidecar remains v1; strict
 session/result validation and authoritative raw frame bounds remain unchanged.
 
 ## Environment variables and secrets
@@ -159,3 +159,19 @@ For unattended use:
 
 The behavioral contract is authoritative for the successful JSON schema, typed error
 payload, warning placement, exit codes, and interaction gating.
+
+## Limited memory
+
+Set an optional VapourSynth frame-cache cap in MiB:
+
+```toml
+[runtime]
+memory_limit_mb = 4096
+```
+
+The value must be an integer of at least 512. Omit it to retain the
+VapourSynth default. This caps the frame cache used during analysis, rendering,
+and alignment video checking; it is not a hard limit on total process memory.
+The separate VSView process receives the same cap. Audio alignment already has
+bounded buffers and does not use this setting. A smaller cache can increase
+decoding work.

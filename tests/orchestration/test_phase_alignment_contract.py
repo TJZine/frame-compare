@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -5,10 +7,11 @@ from typing import cast
 
 import pytest
 
+from frame_compare.analysis.window import SelectionWindow
+from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_alignment
+from frame_compare.orchestration.context import ClipState, RunContext
 from frame_compare.services import alignment as alignment_service
-from frame_compare.services import alignment_consensus
-from frame_compare.services.alignment_consensus import AlignmentConsensus
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentResult,
@@ -16,8 +19,62 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
-from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
-from tests.services.test_alignment_diagnostics import audio_attempt, maximum_audio_attempt
+from frame_compare.vs.loader import VSLoader
+from tests.alignment_review_test_support import (
+    provisional_audio_attempt,
+    unavailable_audio_attempt,
+)
+from tests.orchestration.phase_task_helpers import _clip, _run_align_phase, _workspace
+
+# U3 keeps only the C1 config surface; the shared helper config still lists the
+# removed C2 estimator keys, so this file builds its context from valid TOML.
+_VALID_MINIMAL_CONFIG = """\
+[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[analysis]
+random_frame_count = 3
+random_seed = 7
+
+[audio_alignment]
+enable = true
+max_offset_seconds = 4.5
+use_vsview = true
+force_interactive = false
+cache_results = false
+channel_strategy = "best_channel"
+reference_stream = 1
+comparison_streams = { encode = 2 }
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+
+
+def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> RunContext:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    config_path.write_text(_VALID_MINIMAL_CONFIG, encoding="utf-8")
+    config = load_config(config_path)
+    reference_path = tmp_path / "comparison_videos" / "reference.mkv"
+    reference_path.parent.mkdir(parents=True, exist_ok=True)
+    reference_path.write_bytes(b"reference")
+    reference = _clip(reference_path, label="Reference")
+    return RunContext(
+        config=config,
+        workspace=_workspace(tmp_path),
+        reference=reference,
+        comparisons=[] if comparisons is None else comparisons,
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        analysis_clip=reference,
+    )
 
 
 def test_alignment_request_uses_untrimmed_probe_frame_count(
@@ -69,6 +126,8 @@ def test_alignment_request_requires_positive_integer_source_frame_count(
             trim_end_frame_inclusive=None,
             effective_fps_num=24,
             effective_fps_den=1,
+            source_fps_num=24,
+            source_fps_den=1,
             source_frame_count=cast(int, value),
         )
 
@@ -79,7 +138,7 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
     ctx = _context(tmp_path, comparisons=[comparison])
-    attempt = audio_attempt()
+    attempt = unavailable_audio_attempt()
 
     monkeypatch.setattr(
         phase_alignment,
@@ -90,11 +149,11 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
                 comparison_clip=comparison.path.name,
                 frame_offset=None,
                 time_offset_seconds=None,
-                correlation_score=0.99,
+                correlation_score=0.0,
                 algorithm="cross_correlation",
                 source="computed",
                 applied=False,
-                diagnostic="insufficient_consensus",
+                diagnostic="no_single_offset",
                 audio_attempt=attempt,
             )
         ],
@@ -108,50 +167,13 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
     assert output.comparisons[0].trim.trim_start_frames == 0
 
 
-def test_channel_corroboration_cannot_reach_trim_authority_with_latch_disabled(
+def test_provisional_audio_candidate_cannot_reach_trim_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
     ctx = _context(tmp_path, comparisons=[comparison])
-    attempt = maximum_audio_attempt()
-    channel = attempt.channel_corroboration
-    assert channel is not None
-    assert channel.candidate is not None
-    windows = tuple(
-        replace(
-            window,
-            review_qualified=index < 2,
-            configured_quality=index < 2,
-            vote_disposition="voted" if index < 2 else "failed",
-        )
-        for index, window in enumerate(attempt.windows[:5])
-    )
-    channel_windows = channel.windows[2:5]
-    channel_candidate = replace(
-        channel.candidate,
-        supporting_window_ids=tuple(window.logical_id for window in channel_windows),
-    )
-    channel = replace(
-        channel,
-        candidate=channel_candidate,
-        windows=channel_windows,
-    )
-    attempt = replace(
-        attempt,
-        planned_window_count=5,
-        windows=windows,
-        decision=replace(
-            attempt.decision,
-            state="provisional",
-            candidate=channel_candidate,
-            primary_reason="channel_corroboration_provisional",
-            raw_correlated_windows=5,
-            failed_gates=("channel_corroboration_provisional",),
-        ),
-        channel_corroboration=channel,
-    )
-    monkeypatch.setattr(alignment_consensus, "_AUTOMATIC_AUTHORITY_HELD", False)
+    attempt = provisional_audio_attempt(frame_offset=12)
     monkeypatch.setattr(
         phase_alignment,
         "align_clips_from_request",
@@ -161,11 +183,11 @@ def test_channel_corroboration_cannot_reach_trim_authority_with_latch_disabled(
                 comparison_clip=comparison.path.name,
                 frame_offset=None,
                 time_offset_seconds=None,
-                correlation_score=channel_candidate.median_score,
+                correlation_score=1.0,
                 algorithm="cross_correlation",
                 source="computed",
                 applied=False,
-                diagnostic="channel_corroboration_provisional",
+                diagnostic="audio_only",
                 audio_attempt=attempt,
             )
         ],
@@ -178,7 +200,7 @@ def test_channel_corroboration_cannot_reach_trim_authority_with_latch_disabled(
         comp_num_frames: list[int],
     ) -> tuple[tuple[int, int], list[tuple[int, int]]]:
         if any(offset is not None for offset in comp_offsets):
-            pytest.fail("channel corroboration reached authoritative trim input")
+            pytest.fail("provisional audio candidate reached authoritative trim input")
         return real_calculate_trims(ref_num_frames, comp_offsets, comp_num_frames)
 
     monkeypatch.setattr(
@@ -187,7 +209,7 @@ def test_channel_corroboration_cannot_reach_trim_authority_with_latch_disabled(
     monkeypatch.setattr(
         phase_alignment,
         "ClipAlignmentState",
-        lambda **_kwargs: pytest.fail("channel corroboration reached alignment application"),
+        lambda **_kwargs: pytest.fail("provisional audio candidate reached alignment application"),
     )
 
     output = _run_align_phase(ctx, selected_frames=[0])
@@ -213,18 +235,17 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             "audio_alignment": ctx.config.audio_alignment.model_copy(update={"use_vsview": False})
         }
     )
-    attempt = audio_attempt()
-    provisional = AlignmentConsensus(
-        sample_offset=None,
-        score=0.99,
+    attempt = provisional_audio_attempt()
+    provisional = AlignmentResult(
+        reference_clip=ctx.reference.path.name,
+        comparison_clip=comparison.path.name,
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
         applied=False,
-        diagnostic="insufficient_consensus",
-        valid_windows=5,
-        consensus_windows=4,
-        consensus_ratio=0.8,
-        ambiguity_ratio=2.0,
-        window_records=attempt.windows,
-        decision=attempt.decision,
+        diagnostic="audio_only",
         audio_attempt=attempt,
     )
     monkeypatch.setattr(
@@ -246,6 +267,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         quiet: bool = False,
         json_output: bool = False,
         review_summary: AlignmentReviewSummary | None = None,
+        vs_loader: VSLoader | None = None,
     ) -> list[AlignmentResult]:
         results = await real_align(
             request,
@@ -257,6 +279,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             quiet=quiet,
             json_output=json_output,
             review_summary=review_summary,
+            vs_loader=vs_loader,
         )
         assert len(results) == 1
         assert results[0].audio_attempt == attempt

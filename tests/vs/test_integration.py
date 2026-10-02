@@ -20,6 +20,8 @@ from frame_compare.vs import (  # noqa: E402
     detect_plugins,
     is_vapoursynth_available,
 )
+from frame_compare.vs.env import ensure_vs_environment  # noqa: E402
+from frame_compare.vs.loader import DefaultVSLoader  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -162,3 +164,15 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         """
     )
     _assert_vs_process_ok(result)
+
+
+@pytest.mark.vs_required
+def test_real_loader_sets_cache_and_unset_loader_preserves_it() -> None:
+    core = ensure_vs_environment()
+    original = core.max_cache_size
+    try:
+        assert DefaultVSLoader(memory_limit_mb=1024).ensure_core().max_cache_size == 1024
+        core.max_cache_size = 1536
+        assert DefaultVSLoader().ensure_core().max_cache_size == 1536
+    finally:
+        core.max_cache_size = original

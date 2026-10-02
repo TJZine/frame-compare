@@ -767,7 +767,7 @@ $requiredVsViewDistributions = [ordered]@{
   "vspackrgb" = "1.4.0"
   "vsview" = "0.11.0"
   "vsview-cli" = "1.2.0"
-  "vsjetengine" = "1.7.0"
+  "vsjetengine" = "1.8.0"
 }
 $inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
   [System.StringComparer]::OrdinalIgnoreCase

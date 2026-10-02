@@ -321,6 +321,7 @@ def _run_analyze_phase_once(
             video_paths=input_videos,
             analysis_source_path=ctx.analysis_clip.path,
             config=ctx.config.analysis,
+            memory_limit_mb=ctx.config.runtime.memory_limit_mb,
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,

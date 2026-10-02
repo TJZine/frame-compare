@@ -23,6 +23,14 @@ from PySide6.QtWidgets import (
 )
 from vsview.api import PluginAPI, VideoOutputProxy, WidgetPluginBase, hookimpl, run_in_loop
 
+from frame_compare.utils.alignment_evidence import (
+    AudioAlignmentDecision,
+    audio_unavailable_phrase,
+)
+from frame_compare.utils.alignment_review_projection import (
+    audio_evidence_rows,
+    build_audio_review_presentation,
+)
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewComparisonMetadata,
     AlignmentReviewContractError,
@@ -61,6 +69,13 @@ _KEEP_HELP = (
     "comparisons remain unresolved."
 )
 _SAVED_GUIDANCE = "Close VSView to resume Frame Compare."
+
+
+def _suggested_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
+    attempt = comparison.audio_review.audio_attempt
+    if attempt is not None:
+        return build_audio_review_presentation(attempt).suggested_offset
+    return comparison.audio_review.current_authority.frame_offset
 
 
 @dataclass(slots=True)
@@ -343,6 +358,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         for comparison in self._workspace.comparisons:
             summary = QLabel(_audio_summary(comparison), self.audio_group)
             summary.setWordWrap(True)
+            summary.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
             summary.setAccessibleName(
                 f"Comparison {comparison.comparison_ordinal} audio evidence summary"
             )
@@ -362,6 +381,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 details,
             )
             detail_label.setWordWrap(True)
+            detail_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
             details_layout.addWidget(detail_label)
             detail_label.setVisible(False)
             details.toggled.connect(detail_label.setVisible)
@@ -795,30 +818,19 @@ def _suggested_pair(offset: int | None) -> tuple[int | None, int | None]:
     return _canonical_pair(offset)
 
 
-def _attempt(comparison: AlignmentReviewComparisonMetadata) -> dict[str, object] | None:
-    raw = comparison.audio_review.audio_attempt
-    return dict(raw) if raw is not None else None
-
-
-def _decision(comparison: AlignmentReviewComparisonMetadata) -> dict[str, object] | None:
-    attempt = _attempt(comparison)
-    return None if attempt is None else cast(dict[str, object], attempt["decision"])
-
-
 def _candidate_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
-    decision = _decision(comparison)
-    if decision is None or decision["candidate"] is None:
+    attempt = comparison.audio_review.audio_attempt
+    if attempt is None or attempt.decision.candidate is None:
         return None
-    candidate = cast(dict[str, object], decision["candidate"])
-    return cast(int, candidate["frame_offset"])
+    return attempt.decision.candidate.frame_offset
 
 
 def _marker_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
     if comparison.audio_review.current_authority.frame_offset is not None:
         return comparison.suggested_offset
-    decision = _decision(comparison)
-    if decision is not None and decision["state"] == "provisional":
-        return _candidate_offset(comparison)
+    attempt = comparison.audio_review.audio_attempt
+    if attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
+        return _suggested_offset(comparison)
     return comparison.suggested_offset
 
 
@@ -826,8 +838,8 @@ def _marker_color(comparison: AlignmentReviewComparisonMetadata, role: str) -> s
     origin = comparison.audio_review.current_authority.origin
     if origin in _MANUAL_AUTHORITY_ORIGINS:
         return "#8e6ccf"
-    decision = _decision(comparison)
-    if decision is not None and decision["state"] == "provisional":
+    attempt = comparison.audio_review.audio_attempt
+    if attempt is not None and attempt.decision.state == "provisional":
         return "#d79b35"
     return "#3daee9" if role == "reference" else "#d79b35"
 
@@ -836,10 +848,14 @@ def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role
     offset = _marker_offset(comparison)
     if offset is None:
         return ""
-    decision = _decision(comparison)
+    attempt = comparison.audio_review.audio_attempt
     if comparison.audio_review.current_authority.origin in _MANUAL_AUTHORITY_ORIGINS:
         prefix = "[MANUAL ALIGNMENT]"
-    elif decision is not None and decision["state"] == "provisional":
+    elif (
+        attempt is not None
+        and comparison.audio_review.current_authority.frame_offset is None
+        and _suggested_offset(comparison) is not None
+    ):
         prefix = "[PROVISIONAL — NOT APPLIED]"
     elif comparison.audio_review.evidence_availability == "historical_details_unavailable":
         prefix = "[REUSED ACCEPTED AUDIO]"
@@ -848,10 +864,16 @@ def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role
     return f"{prefix} {offset:+d}f — {role} frame {frame}"
 
 
+def _unavailable_summary_line(comparison: AlignmentReviewComparisonMetadata) -> str:
+    attempt = comparison.audio_review.audio_attempt
+    reason = attempt.decision.primary_reason if attempt is not None else "no_usable_audio"
+    return _unavailable_summary_line_for_reason(reason)
+
+
 def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
     authority = comparison.audio_review.current_authority
     lines: list[str] = []
-    decision = _decision(comparison)
+    attempt = comparison.audio_review.audio_attempt
     if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
         lines.extend(
             (
@@ -867,55 +889,62 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
             )
         )
     elif authority.origin == "computed_this_run" and authority.frame_offset is not None:
+        # U4 video-confirm seam: fresh computed results stay provisional in
+        # U3, so this branch only renders once the video check confirms.
         lines.extend(
             (
                 f"Accepted audio alignment: {authority.frame_offset:+d}f — APPLIED",
                 "No additional confirmation needed.",
             )
         )
-    elif decision is not None and decision["state"] == "provisional":
-        candidate = _candidate_offset(comparison)
+    elif attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
+        review = build_audio_review_presentation(attempt)
+        candidate = review.suggested_offset
         if candidate is not None:
+            lines.extend((f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",))
             lines.extend(
-                (
-                    f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",
-                    "Visual confirmation required to use this hint.",
+                row.value
+                for row in review.normal_review_rows(
+                    panel=True,
+                    action_line="Visual confirmation required to use this hint.",
                 )
             )
     if not lines:
-        lines.append("Unresolved comparison — no usable audio candidate")
+        lines.append(_unavailable_summary_line(comparison))
 
-    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and decision is not None:
-        original = _original_audio_summary(decision)
+    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and attempt is not None:
+        original = _original_audio_summary(attempt.decision)
         if original is not None:
             lines.append(f"Original evidence: {original}")
+    elif authority.origin == "computed_this_run" and attempt is not None:
+        noted = build_audio_review_presentation(attempt).noted_line(panel=True)
+        if noted is not None:
+            lines.append(noted)
     return "\n".join(lines)
 
 
-def _original_audio_summary(decision: dict[str, object]) -> str | None:
-    state = decision["state"]
-    candidate = _candidate_from_decision(decision)
+def _original_audio_summary(decision: AudioAlignmentDecision) -> str | None:
+    state = decision.state
+    candidate = decision.candidate.frame_offset if decision.candidate is not None else None
     if state == "trusted_automatic" and candidate is not None:
+        # U4 video-confirm seam: U3 decisions never reach trusted_automatic.
         return f"Accepted audio alignment: {candidate:+d}f — APPLIED"
     if state == "provisional" and candidate is not None:
         return f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED"
     if state == "unavailable":
-        return "Unresolved comparison — no usable audio candidate"
+        return _unavailable_summary_line_for_reason(decision.primary_reason)
     return None
 
 
-def _candidate_from_decision(decision: dict[str, object]) -> int | None:
-    candidate = decision["candidate"]
-    if candidate is None:
-        return None
-    return cast(int, cast(dict[str, object], candidate)["frame_offset"])
+def _unavailable_summary_line_for_reason(reason: str) -> str:
+    return f"No usable audio candidate ({audio_unavailable_phrase(reason)}) — NOT APPLIED"
 
 
 def _audio_details(
     comparison: AlignmentReviewComparisonMetadata,
     reference_source_frame_count: int,
 ) -> str:
-    attempt = _attempt(comparison)
+    attempt = comparison.audio_review.audio_attempt
     if attempt is None:
         lines = ["Historical audio details unavailable."]
         _append_marker_bounds_detail(
@@ -924,106 +953,8 @@ def _audio_details(
             reference_source_frame_count,
         )
         return "\n".join(lines)
-    decision = cast(dict[str, object], attempt["decision"])
-    lines = [
-        f"Runtime/policy: {attempt['media_runtime_fingerprint']}; {attempt['estimator_policy']}; "
-        f"diagnostic={attempt['diagnostic_policy']}",
-        f"Decision: {decision['state']}; reason={decision['primary_reason']}; "
-        f"failed={','.join(cast(list[str], decision['failed_gates'])) or 'none'}; "
-        f"unassessed={','.join(cast(list[str], decision['unassessed_gates'])) or 'none'}",
-        f"Evidence: raw={decision['raw_correlated_windows']}; "
-        f"credible={decision['credible_windows']}; voting={decision['voting_windows']}; "
-        f"winning={decision['winning_windows']}; independent={decision['independent_windows']}; "
-        f"consensus={decision['consensus_windows']}; ratio={decision['consensus_ratio']}; "
-        f"score={decision['aggregate_score']}; peak={decision['minimum_peak_ratio']}",
-        f"Thresholds: score={attempt['confidence_threshold']}; peak={attempt['ambiguity_peak_ratio']}; "
-        f"minimum windows={attempt['minimum_valid_windows']}; "
-        f"consensus={attempt['consensus_minimum_ratio']}",
-        f"Work: planned={attempt['planned_window_count']}; analysis rate={attempt['analysis_rate']}; "
-        f"FFT peak/total={attempt['peak_fft_points']}/{attempt['total_fft_points']}; "
-        f"planning={attempt['planning_reason'] or 'complete'}",
-        f"Collection: {attempt['collection_observation']}",
-    ]
-    for collection in cast(list[dict[str, object]], attempt["collection_summaries"]):
-        lines.append(
-            f"{collection['phase']}/{collection['role']}: rate={collection['output_rate']}; "
-            f"horizon={collection['requested_horizon']}; emitted="
-            f"{collection['emitted_sample_count']} samples/{collection['emitted_byte_count']} bytes; "
-            f"retained={collection['retained_sample_count']} samples/"
-            f"{collection['retained_byte_count']} bytes; "
-            f"status={collection['status']}/{collection['end_category']}; "
-            f"EOF={collection['observed_eof_sample']}; elapsed={collection['elapsed_seconds']}; "
-            f"cleanup_failures={collection['cleanup_failure_count']}; "
-            f"failures={collection['failure_count']}"
-        )
-    channel = attempt["channel_corroboration"]
-    if isinstance(channel, dict):
-        channel_data = cast(dict[str, object], channel)
-        lines.append(
-            "Channel-view evidence: "
-            f"status={channel_data['status']}; reason={channel_data['reason']}; "
-            f"independent temporal observations={channel_data['independent_windows']}"
-        )
-        for window in cast(list[dict[str, object]], channel_data["windows"]):
-            lines.append(
-                f"{window['logical_id']}/channel: corroborated={window['corroborated']}; "
-                f"representative={window['representative_sample_lag']}/"
-                f"{window['representative_frame_candidate']}; "
-                f"agreeing={window['agreeing_views']}; "
-                f"score={window['minimum_credible_score']}; "
-                f"peak={window['minimum_peak_ratio']}; "
-                f"contradiction={window['contradiction']}; reason={window['reason']}"
-            )
-    for stream in cast(list[dict[str, object]], attempt["selected_streams"]):
-        lines.append(
-            f"{stream['role']}: a:{stream['audio_stream_index']} (absolute {stream['absolute_stream_index']}), "
-            f"codec={stream['codec_name'] or 'unknown'}, language={stream['language'] or 'unknown'}, "
-            f"channels={stream['channels'] or 'unknown'}/{stream['channel_layout'] or 'unknown'}, "
-            f"rate={stream['sample_rate'] or 'unknown'}, selection={stream['selection_method']}, "
-            f"rank={stream['selection_rank']}, start={stream['stream_start_num']}/{stream['stream_start_den']} "
-            f"({stream['stream_start_basis']}), input={stream['input_start_num']}/{stream['input_start_den']} "
-            f"({stream['input_start_basis']}), duration={stream['duration_num']}/{stream['duration_den']} "
-            f"({stream['duration_basis']}), language-match={stream['language_match']}, "
-            f"commentary-match={stream['commentary_match']}"
-        )
-    stability = attempt["stability"]
-    if isinstance(stability, dict):
-        stability_data = cast(dict[str, object], stability)
-        valid_windows = cast(int, stability_data["valid_windows"])
-        planned_windows = cast(int, attempt["planned_window_count"])
-        scope = f"{valid_windows}/{planned_windows} qualified observed windows"
-        if valid_windows < planned_windows:
-            scope += "; rejected or unobserved planned intervals remain unassessed"
-        lines.append(
-            "Offset variation: "
-            f"{cast(str, stability_data['classification'])} "
-            f"(diagnostic only; scoped to {scope})"
-        )
-    for window in cast(list[dict[str, object]], attempt["windows"]):
-        lines.append(
-            f"{window['logical_id']}: ref={window['planned_reference_start']}+{window['planned_reference_count']}, "
-            f"cmp={window['planned_comparison_start']}+{window['planned_comparison_count']}, "
-            f"discovery={window['discovery_reference_count']}/"
-            f"{window['discovery_comparison_count']}, "
-            f"verification={window['verification_reference_count']}/"
-            f"{window['verification_comparison_count']}, "
-            f"overlap={window['effective_aligned_overlap']}, origin={window['origin_basis']}, "
-            f"continuous={window['continuous_sample_count']}@"
-            f"{window['continuous_sample_count_origin']}, "
-            f"useful={window['actual_useful_reference_start']}-"
-            f"{window['actual_useful_reference_end']}, "
-            f"expected_overlap={window['pre_eof_expected_overlap']}, "
-            f"coverage={window['actual_coverage']} ({window['coverage_state']}), "
-            f"rates={window['analysis_rate']}/{window['requested_rate']}, "
-            f"lag={window['local_lag']}/{window['global_analysis_lag']}/{window['requested_sample_lag']}, "
-            f"frame={window['requested_frame_candidate']}, score={window['requested_score']} "
-            f"({window['score_stage']}), peak={window['peak_ratio']} "
-            f"({window['peak_stage']}@{window['peak_rate']}), "
-            f"quality={window['quality_disposition']}/{window['configured_quality']}, "
-            f"vote={window['vote_disposition']}, review={window['review_qualified']}, "
-            f"result={window['terminal_stage']}/{window['terminal_category']}, "
-            f"relation={window['purpose']}/{window['parent_id'] or 'root'}"
-        )
+    lines = list(build_audio_review_presentation(attempt).verbose_lines(panel=True))
+    lines.extend(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt))
     _append_marker_bounds_detail(lines, comparison, reference_source_frame_count)
     return "\n".join(lines)
 
@@ -1042,13 +973,13 @@ def _append_marker_bounds_detail(
 
 def _keep_saved_text(comparison: AlignmentReviewComparisonMetadata) -> str:
     authority = comparison.audio_review.current_authority
-    decision = _decision(comparison)
+    attempt = comparison.audio_review.audio_attempt
     if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
         return f"Current alignment retained: {authority.frame_offset:+d}f — manually confirmed"
     if authority.frame_offset is not None:
         return f"Accepted alignment retained: {authority.frame_offset:+d}f"
     candidate = _candidate_offset(comparison)
-    if decision is not None and decision["state"] == "provisional" and candidate is not None:
+    if attempt is not None and attempt.decision.state == "provisional" and candidate is not None:
         return (
             f"Current alignment retained. Provisional candidate {candidate:+d}f not confirmed "
             "— NOT APPLIED. Comparison unresolved."
