@@ -11,7 +11,6 @@ from frame_compare.services.alignment_correlation import (
     ChunkedAudioEstimate,
     ChunkedCorrelation,
     _chunk_psr,
-    comparison_window,
     plan_audio_chunks,
 )
 from frame_compare.services.errors import AudioAlignmentError
@@ -48,8 +47,12 @@ def run_estimate(
     """Drive the accumulator the way streaming decode will: chunk by chunk."""
     plan = plan_audio_chunks(len(reference), len(comparison), max_offset_seconds)
     accumulator = ChunkedCorrelation(plan)
+    padded = np.pad(
+        comparison,
+        (plan.lag_samples, plan.lag_samples + max(0, len(reference) - len(comparison))),
+    )
     for index, (start, count) in enumerate(plan.chunks):
-        window = comparison_window(comparison, start, count, plan.lag_samples)
+        window = padded[start : start + count + 2 * plan.lag_samples]
         accumulator.add(index, reference[start : start + count], window)
     return accumulator.finish()
 
@@ -343,7 +346,7 @@ def test_add_contract_errors() -> None:
     start, count = plan.chunks[0]
     reference = make_program(SEED, 60.0)
     chunk = reference[start : start + count]
-    window = comparison_window(reference, start, count, plan.lag_samples)
+    window = np.concatenate((np.zeros(8000), reference[:168000]))
 
     accumulator = ChunkedCorrelation(plan)
     with pytest.raises(ValueError):

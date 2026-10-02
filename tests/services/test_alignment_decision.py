@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 
+import numpy as np
 import pytest
 
 from frame_compare.services.alignment_correlation import (
@@ -12,7 +13,6 @@ from frame_compare.services.alignment_correlation import (
     ChunkObservation,
     ChunkPlan,
     ChunkRun,
-    comparison_window,
     plan_audio_chunks,
 )
 from frame_compare.services.alignment_decision import (
@@ -48,8 +48,12 @@ FPS = Fraction(24000, 1001)
 def run_estimate(reference, comparison, max_offset_seconds: float = 30.0) -> ChunkedAudioEstimate:
     plan = plan_audio_chunks(len(reference), len(comparison), max_offset_seconds)
     accumulator = ChunkedCorrelation(plan)
+    padded = np.pad(
+        comparison,
+        (plan.lag_samples, plan.lag_samples + max(0, len(reference) - len(comparison))),
+    )
     for index, (start, count) in enumerate(plan.chunks):
-        window = comparison_window(comparison, start, count, plan.lag_samples)
+        window = padded[start : start + count + 2 * plan.lag_samples]
         accumulator.add(index, reference[start : start + count], window)
     return accumulator.finish()
 
@@ -66,8 +70,12 @@ def decide(
 ):
     plan = plan_audio_chunks(len(reference), len(comparison), max_offset_seconds)
     accumulator = ChunkedCorrelation(plan)
+    padded = np.pad(
+        comparison,
+        (plan.lag_samples, plan.lag_samples + max(0, len(reference) - len(comparison))),
+    )
     for index, (start, count) in enumerate(plan.chunks):
-        window = comparison_window(comparison, start, count, plan.lag_samples)
+        window = padded[start : start + count + 2 * plan.lag_samples]
         accumulator.add(index, reference[start : start + count], window)
     return decide_completed_stage(
         estimate=accumulator.finish(),

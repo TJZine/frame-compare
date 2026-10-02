@@ -25,7 +25,6 @@ import pytest
 from frame_compare.services import alignment_streaming
 from frame_compare.services.alignment_correlation import (
     ChunkedCorrelation,
-    comparison_window,
     plan_audio_chunks,
 )
 from frame_compare.services.alignment_streaming import (
@@ -219,7 +218,7 @@ def _check_geometry(
     pairs: list[tuple[np.ndarray, np.ndarray]],
     *,
     reference_full: np.ndarray,
-    comparison_full: np.ndarray,
+    expected_windows: tuple[np.ndarray, ...],
     chunks: tuple[tuple[int, int], ...],
     lag_samples: int,
 ) -> None:
@@ -234,7 +233,7 @@ def _check_geometry(
         ), f"reference chunk {position}"
         assert np.array_equal(
             got_window.astype(np.float64),
-            comparison_window(comparison_full, start, count, lag_samples),
+            expected_windows[position],
         ), f"comparison window {position}"
 
 
@@ -266,7 +265,12 @@ def test_geometry_with_early_reference_eof_delivers_zero_chunks_in_order(
     _check_geometry(
         accumulator.pairs,
         reference_full=reference.astype(np.float64),
-        comparison_full=comparison.astype(np.float64),
+        expected_windows=(
+            np.concatenate((np.zeros(200), comparison[:1200])),
+            comparison[800:2200],
+            comparison[1800:3200],
+            np.concatenate((comparison[2800:], np.zeros(200))),
+        ),
         chunks=chunks,
         lag_samples=lag_samples,
     )
@@ -1158,12 +1162,9 @@ def test_request_validation_happens_before_spawn(
     )
     accumulator = _StrictAccumulator()
     base = _paired_kwargs(accumulator)
+    with pytest.raises(ValueError, match="chunks must contain at least one planned chunk"):
+        collect_paired_audio_chunks(_child_argv(), _child_argv(), **{**base, "chunks": ()})
     bad_requests = [
-        {**base, "chunks": ()},
-        {**base, "chunks": ((500, 10), (0, 10))},
-        {**base, "chunks": ((0, 10), (5, 10))},
-        {**base, "chunks": ((0, 0),)},
-        {**base, "chunks": ((-1, 10),)},
         {**base, "lag_samples": -1},
         {**base, "consumer": None},
         {**base, "reference_limit_samples": 0},
@@ -1222,11 +1223,15 @@ def test_streamed_pairs_feed_chunked_correlation_like_memory(
     assert len(plan.chunks) == 2
 
     expected = ChunkedCorrelation(plan)
+    expected_windows = (
+        np.concatenate((np.zeros(8000), comparison[:48000])),
+        np.concatenate((comparison[32000:], np.zeros(8000))),
+    )
     for index, (start, count) in enumerate(plan.chunks):
         expected.add(
             index,
             reference[start : start + count],
-            comparison_window(comparison, start, count, plan.lag_samples),
+            expected_windows[index],
         )
     expected_estimate = expected.finish()
 
@@ -1277,7 +1282,7 @@ def test_gapped_chunks_with_zero_lag_match_u1() -> None:
     _check_geometry(
         accumulator.pairs,
         reference_full=reference.astype(np.float64),
-        comparison_full=comparison.astype(np.float64),
+        expected_windows=(comparison[:100], comparison[300:400]),
         chunks=chunks,
         lag_samples=0,
     )

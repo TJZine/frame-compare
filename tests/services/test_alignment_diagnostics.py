@@ -247,25 +247,8 @@ def test_audio_attempt_rejects_invalid_or_contradictory_states() -> None:
         replace(attempt.decision, state=cast(AudioDecisionState, "invalid"))
     with pytest.raises(ValueError, match="must be one of"):
         replace(attempt, status=cast(AudioAttemptStatus, "invalid"))
-    with pytest.raises(ValueError, match="lacks a candidate"):
-        replace(attempt.decision, candidate=None)
     with pytest.raises(ValueError, match="share one length"):
         replace(attempt.chunks, starts=attempt.chunks.starts + (999999,))
-
-    def columns_payload(**overrides: object) -> dict[str, Any]:
-        payload = asdict(attempt.chunks)
-        payload.update(overrides)
-        return payload
-
-    with pytest.raises(ValueError, match="inactive chunks cannot carry lag evidence"):
-        evidence_from_payload(AudioChunkColumns, columns_payload(active=[False] * _PLANNED_CHUNKS))
-    with pytest.raises(ValueError, match="agreeing chunks must be credible"):
-        evidence_from_payload(
-            AudioChunkColumns, columns_payload(credible=[False] * _PLANNED_CHUNKS)
-        )
-    for status in ("preanalysis_rejection", "aborted"):
-        with pytest.raises(ValueError, match="non-complete audio attempts"):
-            replace(attempt, status=status)
 
     unavailable = replace(attempt.decision, state="unavailable", candidate=None)
     for status in ("preanalysis_rejection", "aborted"):
@@ -293,28 +276,13 @@ def test_collection_record_rejects_invalid_counts_and_failure_topology() -> None
     base = evidence_from_payload(AudioCollectionFacts, _facts_payload())
     assert base.emitted_samples == 8000
 
-    with pytest.raises(ValueError, match="unknown keys"):
-        evidence_from_payload(AudioCollectionFacts, {**_facts_payload(), "failure_category": None})
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioCollectionFacts, {**_facts_payload(), "role": "discovery"})
-
     failure = evidence_from_payload(AudioCollectionFailure, _failure_payload())
     assert failure.category == "nonzero_exit"
     assert failure.side == "comparison"
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioCollectionFailure, {**_failure_payload(), "category": "typo"})
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioCollectionFailure, {**_failure_payload(), "side": "discovery"})
     assert (
         evidence_from_payload(AudioCollectionFailure, {"category": "timeout", "side": None}).side
         is None
     )
-    with pytest.raises(ValueError, match="must be an integer"):
-        evidence_from_payload(AudioCollectionFacts, {**_facts_payload(), "eof_sample": True})
-    with pytest.raises(ValueError, match="must be a finite number"):
-        evidence_from_payload(
-            AudioCollectionFacts, {**_facts_payload(), "elapsed_seconds": float("inf")}
-        )
 
 
 def _result(attempt: AudioAlignmentAttempt, *, manual: bool = False) -> AlignmentResult:

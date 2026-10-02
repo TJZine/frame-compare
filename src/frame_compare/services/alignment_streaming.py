@@ -737,9 +737,7 @@ class _ChildStream:
     def assemble_comparison_window(self, *, window_start: int, out: np.ndarray) -> None:
         """Copy stream ``[window_start, window_start + out.size)`` into zeroed ``out``.
 
-        Anything outside ``[0, emitted)`` stays zero, which matches U1's
-        ``comparison_window`` value for value once float32 samples are viewed as
-        float64 (an exact conversion).
+        Anything outside ``[0, emitted)`` stays zero.
         """
         store = self.samples
         source_start = max(window_start, store.front, 0)
@@ -951,8 +949,7 @@ def collect_paired_audio_chunks(
     samples over ``[start, start + count)`` (zero where the reference produced
     nothing) and ``count + 2 * lag_samples`` float32 comparison samples over
     ``[start - lag, start + count + lag)`` (zero outside the comparison stream),
-    equal to U1's ``comparison_window`` value for value. Reference output past
-    the last planned chunk is read, counted and limit-checked, then discarded.
+    with exact sample values. Reference output past the last planned chunk is read, counted and limit-checked, then discarded.
 
     Lockstep: the loop pulls from whichever side the current chunk still needs
     while the other side waits in its bounded queue. That cannot deadlock: each
