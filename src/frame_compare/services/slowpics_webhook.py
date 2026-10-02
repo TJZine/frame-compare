@@ -10,8 +10,10 @@ import socket
 import ssl
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from threading import Event
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -45,6 +47,10 @@ class _WebhookResponseSocket(Protocol):
 
 class WebhookDeliveryUncertainError(OSError):
     """The request may have reached the endpoint, so retrying could duplicate it."""
+
+
+class _WebhookDeliveryCancelled(Exception):
+    """Stop a synchronous webhook worker after its owning task is cancelled."""
 
 
 class WebhookFailureKind(StrEnum):
@@ -112,15 +118,69 @@ async def deliver_slowpics_webhook(
     """Deliver a slow.pics URL to a configured webhook with isolated HTTP state."""
     resolved_resolver = resolve_webhook_addresses if resolver is None else resolver
     resolved_connector = send_pinned_https_webhook_request if connector is None else connector
-    resolved_sleeper = time.sleep if sleeper is None else sleeper
-    return await asyncio.to_thread(
-        _deliver_slowpics_webhook_sync,
-        webhook_url=webhook_url,
-        slowpics_url=slowpics_url,
-        resolver=resolved_resolver,
-        connector=resolved_connector,
-        sleeper=resolved_sleeper,
+    cancellation_event = Event()
+    worker = asyncio.create_task(
+        _run_slowpics_webhook_worker(
+            webhook_url=webhook_url,
+            slowpics_url=slowpics_url,
+            resolver=resolved_resolver,
+            connector=resolved_connector,
+            sleeper=sleeper,
+            cancellation_event=cancellation_event,
+        )
     )
+    try:
+        # Shield the thread-backed task so cancellation is handled by the
+        # owner below rather than abandoning a worker that can still retry.
+        worker_result = await asyncio.shield(worker)
+        if isinstance(worker_result, Exception):
+            raise worker_result
+        return worker_result
+    except asyncio.CancelledError:
+        cancellation_event.set()
+        # A Python thread cannot be forcefully stopped.  Drain it before
+        # propagating cancellation; the worker cooperatively exits before
+        # another attempt and the default retry wait is interruptible.
+        while True:
+            # A second cancellation can interrupt this await. Keep draining
+            # until the thread-backed worker has actually completed.
+            with suppress(BaseException):
+                await asyncio.shield(worker)
+            if worker.done():
+                break
+        raise
+
+
+async def _run_slowpics_webhook_worker(
+    *,
+    webhook_url: str,
+    slowpics_url: str,
+    resolver: WebhookResolver,
+    connector: WebhookConnector,
+    sleeper: WebhookSleeper | None,
+    cancellation_event: Event,
+) -> SlowpicsWebhookResult | Exception:
+    """Run the thread-backed delivery while consuming its private stop signal."""
+    try:
+        return await asyncio.to_thread(
+            _deliver_slowpics_webhook_sync,
+            webhook_url=webhook_url,
+            slowpics_url=slowpics_url,
+            resolver=resolver,
+            connector=connector,
+            sleeper=sleeper,
+            cancellation_event=cancellation_event,
+        )
+    except _WebhookDeliveryCancelled:
+        # A shielded task that raises after its owner is cancelled is reported
+        # as an unhandled exception by newer asyncio versions.  The owning
+        # coroutine always re-raises cancellation, so this result is internal.
+        return SlowpicsWebhookResult(success=False)
+    except Exception as error:
+        # Keep the shielded task successful so repeated owner cancellation
+        # cannot make asyncio report a racing worker failure as unhandled.
+        # The normal owner path immediately re-raises the captured error.
+        return error
 
 
 def resolve_webhook_addresses(hostname: str, port: int) -> tuple[str, ...]:
@@ -188,8 +248,10 @@ def _deliver_slowpics_webhook_sync(
     slowpics_url: str,
     resolver: WebhookResolver,
     connector: WebhookConnector,
-    sleeper: WebhookSleeper,
+    sleeper: WebhookSleeper | None,
+    cancellation_event: Event,
 ) -> SlowpicsWebhookResult:
+    _raise_if_cancelled(cancellation_event)
     target = _validate_webhook_url(webhook_url, resolver)
     if target is None:
         return _failure_result(
@@ -206,6 +268,7 @@ def _deliver_slowpics_webhook_sync(
         ("Connection", "close"),
     )
     for attempt in range(1, WEBHOOK_ATTEMPTS + 1):
+        _raise_if_cancelled(cancellation_event)
         resolved_ip = target.resolved_ips[(attempt - 1) % len(target.resolved_ips)]
         request = WebhookDeliveryRequest(
             hostname=target.hostname,
@@ -219,6 +282,7 @@ def _deliver_slowpics_webhook_sync(
         )
         try:
             response = connector(request)
+            _raise_if_cancelled(cancellation_event)
         except WebhookDeliveryUncertainError:
             return _failure_result(WebhookFailureKind.DELIVERY_UNCERTAIN)
         except ssl.SSLCertVerificationError:
@@ -226,12 +290,20 @@ def _deliver_slowpics_webhook_sync(
         except TimeoutError:
             if attempt == WEBHOOK_ATTEMPTS:
                 return _failure_result(WebhookFailureKind.TIMEOUT)
-            sleeper(_retry_backoff_seconds(attempt))
+            _sleep_before_retry(
+                _retry_backoff_seconds(attempt),
+                cancellation_event,
+                sleeper,
+            )
             continue
         except (OSError, UnicodeError, ValueError):
             if attempt == WEBHOOK_ATTEMPTS:
                 return _failure_result(WebhookFailureKind.TRANSPORT)
-            sleeper(_retry_backoff_seconds(attempt))
+            _sleep_before_retry(
+                _retry_backoff_seconds(attempt),
+                cancellation_event,
+                sleeper,
+            )
             continue
 
         if 200 <= response.status_code <= 299:
@@ -243,14 +315,18 @@ def _deliver_slowpics_webhook_sync(
                 and retry_after is not None
                 and 0.0 <= retry_after <= WEBHOOK_MAX_RETRY_AFTER_SECONDS
             ):
-                sleeper(retry_after)
+                _sleep_before_retry(retry_after, cancellation_event, sleeper)
                 continue
             return _failure_result(
                 WebhookFailureKind.RATE_LIMITED,
                 status_code=response.status_code,
             )
         if 500 <= response.status_code <= 599 and attempt < WEBHOOK_ATTEMPTS:
-            sleeper(_retry_backoff_seconds(attempt))
+            _sleep_before_retry(
+                _retry_backoff_seconds(attempt),
+                cancellation_event,
+                sleeper,
+            )
             continue
         return _failure_result(
             WebhookFailureKind.HTTP_STATUS,
@@ -258,6 +334,26 @@ def _deliver_slowpics_webhook_sync(
         )
 
     raise AssertionError("Webhook retry loop exhausted without a terminal result")
+
+
+def _raise_if_cancelled(cancellation_event: Event) -> None:
+    if cancellation_event.is_set():
+        raise _WebhookDeliveryCancelled
+
+
+def _sleep_before_retry(
+    delay_seconds: float,
+    cancellation_event: Event,
+    sleeper: WebhookSleeper | None,
+) -> None:
+    """Wait for a retry without allowing cancellation to start another one."""
+    _raise_if_cancelled(cancellation_event)
+    if sleeper is None:
+        if cancellation_event.wait(delay_seconds):
+            raise _WebhookDeliveryCancelled
+    else:
+        sleeper(delay_seconds)
+        _raise_if_cancelled(cancellation_event)
 
 
 def _failure_result(

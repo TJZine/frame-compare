@@ -11,7 +11,7 @@ stat, and the task-owned diff. Preserve unrelated changes.
 Before claiming completion, confirm:
 
 - the requested outcome is present;
-- fresh verification passed and its output was read;
+- current risk-matched verification passed and its output was read;
 - authority docs changed when their contract changed;
 - no required runtime/platform proof is being overstated;
 - remaining risks or blockers are named.

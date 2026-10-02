@@ -118,7 +118,7 @@ Trigger architecture/deep review:
 
 Bootstrap:
 ```bash
-uv sync --group dev --frozen
+uv sync --group dev --extra vsview --frozen
 ```
 
 Fast/local sanity:

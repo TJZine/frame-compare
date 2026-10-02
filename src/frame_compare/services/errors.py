@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from threading import Event
 
 from frame_compare.errors import (
     ErrorContext,
@@ -82,7 +86,21 @@ class MetadataError(ProcessingError):
 class AudioAlignmentError(ProcessingError):
     """Audio sync calculation failure (FC-4005)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        category: str = "correlation_failed",
+        stage: str = "correlation",
+        role: str | None = None,
+        reference_sample_count: int | None = None,
+        comparison_sample_count: int | None = None,
+    ) -> None:
+        self.category = category
+        self.stage = stage
+        self.role = role
+        self.reference_sample_count = reference_sample_count
+        self.comparison_sample_count = comparison_sample_count
         super().__init__(
             ErrorContext(
                 code="FC-4005",
@@ -91,6 +109,24 @@ class AudioAlignmentError(ProcessingError):
                 hint="Ensure audio tracks exist and are similar",
                 details={"reason": reason},
             )
+        )
+
+
+class AudioAlignmentCancellationError(AudioAlignmentError):
+    """Internal cooperative cancellation raised by blocking alignment work."""
+
+
+class AudioAlignmentCleanupError(AudioAlignmentError):
+    """Fatal failure to release an alignment child, reader, pipe, or handle."""
+
+
+def raise_if_alignment_cancelled(cancellation: Event | None) -> None:
+    """Stop blocking alignment work at its next bounded cooperative boundary."""
+    if cancellation is not None and cancellation.is_set():
+        raise AudioAlignmentCancellationError(
+            "audio alignment was cancelled",
+            category="cancelled",
+            stage="cancellation",
         )
 
 

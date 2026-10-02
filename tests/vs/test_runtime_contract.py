@@ -219,11 +219,21 @@ def test_probe_fingerprint_tracks_standalone_ffmpeg_lineage(
     ) is analysis_changes
 
 
-def test_alignment_identity_is_owned_by_standalone_ffmpeg() -> None:
+def test_alignment_identity_includes_decoder_and_standalone_ffmpeg() -> None:
     identity = media_runtime_identity("alignment", profile="windows-x64")
 
-    assert set(identity["components"]) == {"standalone_ffmpeg"}
+    assert set(identity["components"]) == {"decoder", "standalone_ffmpeg"}
+    assert identity["components"]["decoder"]["vapoursynth"]["release"] == "R80"
+    assert "l_smash_works" in identity["components"]["decoder"]
     assert identity["components"]["standalone_ffmpeg"]["license_profile"] == "LGPL-only"
+
+
+def test_alignment_fingerprint_tracks_decoder_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = media_runtime_fingerprint("alignment", profile="windows-x64")
+    monkeypatch.setattr(runtime_contract, "VAPOURSYNTH_SOURCE_COMMIT", "f" * 40)
+    assert media_runtime_fingerprint("alignment", profile="windows-x64") != original
 
 
 def test_debian_ffmpeg_identity_records_gpl_enabled_license_profile() -> None:
@@ -315,7 +325,7 @@ def test_windows_ffmpeg_executable_token_matches_selected_artifact(repo_root: Pa
 def test_supported_report_contains_observable_component_contract() -> None:
     report = supported_media_runtime_report(profile="debian-trixie")
 
-    assert report["components"]["decoder"]["vapoursynth"]["release"] == "R79"
+    assert report["components"]["decoder"]["vapoursynth"]["release"] == "R80"
     assert report["components"]["decoder"]["l_smash_works"]["native_release"] == ("1310.0.0.0")
     assert report["components"]["decoder"]["obuparse"]["soname"] == "libobuparse.so.2"
     assert report["components"]["ffms2"]["included"] is True
@@ -423,9 +433,9 @@ def test_docker_provenance_derives_vapoursynth_release_from_build_arg(
 ) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "ARG VAPOURSYNTH_VERSION=79" in dockerfile
+    assert "ARG VAPOURSYNTH_VERSION=80" in dockerfile
     assert '\\"version\\":\\"R${VAPOURSYNTH_VERSION}\\"' in dockerfile
-    assert '\\"version\\":\\"R79\\"' not in dockerfile
+    assert '\\"version\\":\\"R80\\"' not in dockerfile
 
 
 def test_docker_lsmash_works_meson_rewrite_fails_closed(repo_root: Path, tmp_path: Path) -> None:
@@ -492,7 +502,7 @@ def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> No
 def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: Path) -> None:
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
-    assert "DOCKER_PROOF vapoursynth_import=ok version=R79 api=4.2" in script
+    assert "DOCKER_PROOF vapoursynth_import=ok version=R80 api=4.3" in script
 
 
 def test_docker_doctor_gate_preserves_missing_check_diagnostic_and_proof_marker(

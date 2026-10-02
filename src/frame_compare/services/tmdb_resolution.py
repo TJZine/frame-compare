@@ -27,7 +27,8 @@ type SearchEndpoint = Literal["movie", "tv", "multi"]
 type CandidateKey = tuple[MediaType, int]
 
 
-type _IndexedSearchResults = tuple[int, list[TmdbMetadata]]
+type _SearchFailure = TmdbError | TmdbRateLimitedError
+type _IndexedSearchResult = tuple[int, list[TmdbMetadata] | _SearchFailure]
 
 MAX_SEARCH_REQUESTS = 12
 MAX_CONCURRENT_SEARCH_REQUESTS = 4
@@ -268,9 +269,13 @@ async def _indexed_search_request(
     client: httpx.AsyncClient,
     semaphore: asyncio.Semaphore,
     cache: TmdbCache | None,
-) -> _IndexedSearchResults:
+) -> _IndexedSearchResult:
     async with semaphore:
-        return request_index, await _search_request(request, parsed, config, client, cache)
+        try:
+            results = await _search_request(request, parsed, config, client, cache)
+        except (TmdbError, TmdbRateLimitedError) as exc:
+            return request_index, exc
+        return request_index, results
 
 
 async def _collect_candidates(
@@ -298,7 +303,15 @@ async def _collect_candidates(
         )
     )
 
-    for request_index, results in search_results:
+    failures: list[tuple[int, _SearchFailure]] = []
+    successful_request_count = 0
+    for request_index, result_or_error in search_results:
+        if isinstance(result_or_error, TmdbError | TmdbRateLimitedError):
+            failures.append((request_index, result_or_error))
+            continue
+
+        successful_request_count += 1
+        results = result_or_error
         for result_index, candidate in enumerate(results):
             key: CandidateKey = (candidate.media_type, candidate.tmdb_id)
             aggregate = candidates.get(key)
@@ -309,6 +322,16 @@ async def _collect_candidates(
                     first_result_index=result_index,
                     aliases=[],
                 )
+
+    if failures and successful_request_count:
+        log.warning(
+            "tmdb_search_variants_degraded",
+            failed_request_count=len(failures),
+            total_request_count=len(plan),
+            error_types=sorted({type(error).__name__ for _, error in failures}),
+        )
+    elif failures:
+        raise failures[0][1]
 
     return candidates
 

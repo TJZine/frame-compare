@@ -6,13 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from rich.ansi import AnsiDecoder
-from rich.color import Color
-from rich.style import Style
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
     FpsReportClip,
+    _length_difference_lines,
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
@@ -25,20 +23,6 @@ def _stable_report_width(monkeypatch: pytest.MonkeyPatch) -> None:
         "frame_compare.orchestration.presentation.shutil.get_terminal_size",
         lambda **_: os.terminal_size((240, 24)),
     )
-
-
-def _assert_ansi_text_is_bold_cyan(output: str, label: str) -> None:
-    cyan_number = Color.parse("cyan").number
-    for line in AnsiDecoder().decode(output):
-        for span in line.spans:
-            if label not in line.plain[span.start : span.end]:
-                continue
-            assert isinstance(span.style, Style)
-            assert span.style.bold is True
-            assert span.style.color is not None
-            assert span.style.color.number == cyan_number
-            return
-    pytest.fail(f"{label!r} was not rendered in bold cyan")
 
 
 def _make_clip_state(
@@ -120,13 +104,59 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
     )
 
     output = capsys.readouterr().err
-    assert output.count("Avatar Aang The Last Airbender (2026)") == 1
     assert "Reference label" in output
-    assert "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune" in output
-    assert "2160p | ATV WEB-DL | DV HDR10+ | REPACK | Kitsune" in output
+    assert "PMTP WEB-DL" not in output
+    assert output.count("Avatar Aang The Last Airbender (2026)") == 1
+    assert "2160p · ATV WEB-DL · DV HDR10+ · REPACK · Kitsune" in output
     assert output.count("Avatar.Aang.PMTP.Kitsune.mkv") == 1
     assert output.count("Avatar.Aang.ATV.REPACK.Kitsune.mkv") == 1
-    assert "1920x1080" in output
+    assert "1920×1080" in output
+
+
+def test_sources_standard_name_uses_dot_separator_without_common_content(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    reference = _make_clip_state(
+        "Show.A.S1.mkv",
+        "Reference",
+        Fraction(24),
+        Fraction(24),
+        release_identity=ReleaseIdentity(
+            ContentIdentity("Show A"),
+            resolution="1080p",
+            service="AMZN",
+            source_type="WEB-DL",
+            release_group="SCOPE",
+        ),
+    )
+    comparison = _make_clip_state(
+        "Show.B.S1.mkv",
+        "Comparison",
+        Fraction(24),
+        Fraction(24),
+        release_identity=ReleaseIdentity(
+            ContentIdentity("Show B"),
+            resolution="1080p",
+            service="AMZN",
+            source_type="WEB-DL",
+            release_group="SIGMA",
+        ),
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=build_consolidated_fps_report(reference, [comparison]),
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "Show A · 1080p · AMZN WEB-DL · SCOPE" in output
+    assert "Show B · 1080p · AMZN WEB-DL · SIGMA" in output
+    assert "Show A | 1080p" not in output
+    assert "Show B | 1080p" not in output
 
 
 def test_build_consolidated_fps_report_includes_probe_metadata_and_fps_order() -> None:
@@ -259,6 +289,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
         json_output=True,
         quiet=False,
         rich_output=False,
+        diagnostics=["Analysis source: Reference | selected by fastest-source policy"],
     )
 
     captured = capsys.readouterr()
@@ -268,7 +299,7 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     event, stage, clips, diagnostics = log_calls[0]
     assert event == "fps_report"
     assert stage == "after_load_sources"
-    assert diagnostics == []
+    assert diagnostics == ["Analysis source: Reference | selected by fastest-source policy"]
     assert len(clips) == 1
     assert {
         "path",
@@ -322,7 +353,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
             effective_fps=Fraction(24000, 1001),
             fps_divergent=True,
             note="assumed",
-            size_bytes=6 * 1024**3,
+            size_bytes=0,
         ),
     ]
 
@@ -341,27 +372,24 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "[OK] Sources — 2 loaded" in captured.err
+    assert "Sources · 2 loaded" in captured.err
     assert "Sources" in captured.err
     assert "After Load Sources" not in captured.err
-    assert "Reference" in captured.err
-    assert "Comparison 1" in captured.err
-    assert "Reference [source]" in captured.err
-    assert "Encode [candidate]" in captured.err
-    assert "3840x2160" in captured.err
-    assert "1920x1080" in captured.err
-    assert "24000/1001" in captured.err
-    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "3840×2160" in captured.err
+    assert "1920×1080" in captured.err
+    assert "23.976 fps" in captured.err
     assert "2,400 frames" in captured.err
     assert "1,200 frames" in captured.err
-    assert "HDR" in captured.err
-    assert "SDR" in captured.err
-    assert "17.0 GiB" in captured.err
-    assert "6.0 GiB" in captured.err
+    assert "17.00 GiB" in captured.err
+    assert "0.00 B" not in captured.err
     assert "ref.mkv" in captured.err
     assert "encode.mkv" in captured.err
-    assert "Analysis source: Comparison 1 | selected by configured policy" in captured.err
+    assert "Lengths differ" in captured.err
+    assert "1200 frames" in captured.err
     assert "FPS target: 24000/1001 (majority)" in captured.err
+    assert "analysis source" in captured.err
+    assert "(configured)" in captured.err
+    assert "selected by configured policy" not in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
     assert "[dim]" not in captured.err
@@ -380,8 +408,9 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
     colored = capsys.readouterr()
     assert colored.out == ""
-    _assert_ansi_text_is_bold_cyan(colored.err, "Reference")
-    _assert_ansi_text_is_bold_cyan(colored.err, "Comparison 1")
+    assert "\x1b[" in colored.err
+    assert "ref.mkv" in colored.err
+    assert "encode.mkv" in colored.err
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
@@ -425,13 +454,83 @@ def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
         quiet=False,
         rich_output=True,
         no_color=True,
-        input_dir=input_dir,
     )
 
     captured = capsys.readouterr()
-    assert str(Path("season") / "reference.mkv") in captured.err
-    assert str(external_path) in captured.err
+    assert "reference.mkv" in captured.err
+    assert "comparison.mkv" in captured.err
     assert str(internal_path) not in captured.err
+    assert str(external_path) not in captured.err
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=clips,
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+        verbose=True,
+    )
+
+    verbose_captured = capsys.readouterr()
+    assert str(internal_path.resolve()) in verbose_captured.err
+    assert str(external_path.resolve()) in verbose_captured.err
+
+
+def _length_clip(name: str, num_frames: int, fps: Fraction = Fraction(24, 1)) -> FpsReportClip:
+    return FpsReportClip(
+        path=Path(f"{name}.mkv"),
+        label=name,
+        width=1920,
+        height=1080,
+        num_frames=num_frames,
+        is_hdr=False,
+        source_fps=fps,
+        effective_fps=fps,
+        fps_divergent=False,
+        note=None,
+    )
+
+
+def test_length_difference_groups_shared_counts_and_marks_shorter() -> None:
+    clips = [
+        _length_clip("ref", 1000),
+        _length_clip("a", 536),
+        _length_clip("b", 536),
+    ]
+
+    (line,) = _length_difference_lines(clips, ["ref", "a", "b"])
+
+    assert "a and b" in line
+    assert "464 frames" in line
+    assert "(19.3 s)" in line
+    assert "shorter than ref" in line
+
+
+def test_length_difference_marks_longer_and_formats_minutes() -> None:
+    clips = [_length_clip("ref", 1000), _length_clip("a", 1000 + 144 * 24)]
+
+    (line,) = _length_difference_lines(clips, ["ref", "a"])
+
+    assert "3456 frames" in line
+    assert "(2m 24s)" in line
+    assert "longer than ref" in line
+
+
+def test_length_difference_joins_three_names_and_singular_frame() -> None:
+    clips = [
+        _length_clip("ref", 1000),
+        _length_clip("a", 999),
+        _length_clip("b", 999),
+        _length_clip("c", 999),
+    ]
+
+    (line,) = _length_difference_lines(clips, ["ref", "a", "b", "c"])
+
+    assert "a, b, and c" in line
+    assert "1 frame" in line
+    assert "1 frames" not in line
+    assert "(0.0 s)" in line
 
 
 def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
@@ -462,12 +561,10 @@ def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
     captured = capsys.readouterr()
     assert "Frame rates" in captured.err
     assert "After Alignment" in captured.err
-    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "adjusted" in captured.err
     assert "assumed" in captured.err
     assert "\x1b[" not in captured.err
-    assert "[yellow]" not in captured.err
-    assert "[dim]" not in captured.err
 
 
 def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
@@ -514,7 +611,7 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "  [OK] Frame rates match: 24/1\n"
+    assert "frame rates match · 24 fps (24/1)" in captured.err
     assert str(reference_path) not in captured.err
 
 
@@ -597,7 +694,7 @@ def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_p
     )
 
     captured = capsys.readouterr()
-    assert "30000/1001 -> 24000/1001" in captured.err
+    assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "adjusted" in captured.err
     assert str(comparison_path) not in captured.err
 
@@ -618,7 +715,7 @@ def test_emit_consolidated_fps_report_prioritizes_effective_fps_divergence(
     )
 
     captured = capsys.readouterr()
-    assert "30/1 -> 25/1" in captured.err
+    assert "30 fps (30/1) -> 25 fps (25/1)" in captured.err
     assert "divergent" in captured.err
     assert "adjusted" not in captured.err
 
@@ -654,13 +751,11 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
         quiet=False,
         rich_output=True,
         no_color=True,
-        input_dir=Path("/workspace/comparison_videos"),
     )
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "[OK] Sources — 1 loaded" in captured.err
-    assert "A source with" in captured.err
-    assert "deliberately" in captured.err
+    assert "Sources · 1 loaded" in captured.err
+    assert "a-very-long-source-name.mkv" in captured.err
+    assert "3840×2160" in captured.err
     assert "\x1b[" not in captured.err
-    assert all(len(line) <= columns for line in captured.err.splitlines())

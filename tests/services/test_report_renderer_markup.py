@@ -5,6 +5,8 @@ from __future__ import annotations
 import html as html_module
 import re
 
+import pytest
+
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_js
@@ -54,16 +56,40 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
     assert no_upload_info_modal.general["slow.pics"] == "Not uploaded"
 
 
-def test_build_html_keeps_distinct_release_identity_in_info_clip_card(
+def test_build_html_emits_empty_report_information_containers_for_viewer_fill(
     report_payload: ReportPayload,
 ) -> None:
-    document = parse_elements(build_html(report_payload))
-    clips = find_all(document, tag="li", class_name="rv-clip-meta-item")
+    html = build_html(report_payload)
+    document = parse_elements(html)
 
-    assert [require_first(clip, class_name="rv-clip-meta-release").text for clip in clips] == [
-        "Reference release",
-        "Encode release",
-    ]
+    assert find_all(document, tag="li", class_name="rv-clip-meta-item") == []
+    assert "rv-clip-meta-release" not in html
+    clips_mount = require_first(document, tag="ol", attr_name="data-info-clips", attr_value=None)
+    assert clips_mount.children == []
+    empty_mount = require_first(document, tag="p", attr_name="data-info-clips-empty")
+    assert "hidden" in empty_mount.attrs
+    shared_mount = require_first(document, tag="p", attr_name="data-info-clips-shared")
+    assert shared_mount.text == ""
+    require_first(document, tag="dd", attr_name="data-info-opens-in")
+    require_first(document, tag="dd", attr_name="data-info-default-pair")
+
+
+@pytest.mark.parametrize(
+    ("frame_count", "expected"),
+    [
+        (1, "1 frame · 2 sources"),
+        (2, "2 frames · 2 sources"),
+    ],
+)
+def test_build_html_report_information_content_counts_frames(
+    report_payload: ReportPayload, frame_count: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "stats": {"frame_count": frame_count, "clip_count": 2},
+    }
+    html = build_html(payload)
+    assert parse_info_modal(html).general["Content"] == expected
 
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
@@ -122,6 +148,15 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         "blink",
         "grid",
     ]
+    mode_purpose_titles = {
+        "slider": "Slider (S) — reveal spatial differences",
+        "overlay": "Single clip view (O) — inspect one source",
+        "diff": "Difference (D) — locate changed pixels",
+        "blink": "Blink (B) — alternate the selected pair",
+        "grid": "Grid (G) — scan sources together",
+    }
+    for button in mode_buttons:
+        assert button.attrs["title"] == mode_purpose_titles[button.attrs["data-mode"]]
     assert "rv-context-controls" in pair_controls.classes
     assert "rv-context-controls" in active_controls.classes
     assert pair_controls in context_zone.children
@@ -232,13 +267,18 @@ def test_build_html_renders_frame_metadata_and_category_filters(
     assert scene_cut_filter.attrs["aria-pressed"] == "false"
     assert parser.selects["frame-select"].options[1].attrs["data-category"] == "scene-cut"
     assert "Source frame 10</span>" not in html
-    assert find_all(
+    item = require_first(
         document,
-        tag="span",
-        class_name="rv-filmstrip-accent",
+        tag="button",
+        class_name="rv-filmstrip-item",
         attr_name="data-category",
         attr_value="scene-cut",
     )
+    assert require_first(item, class_name="rv-filmstrip-number").text == "20"
+    assert require_first(item, class_name="rv-filmstrip-label").text == "Scene Cuts"
+    assert selected_filter.text == "Selected (1)"
+    assert scene_cut_filter.text == "Scene Cuts (1)"
+    assert not find_all(document, class_name="rv-filmstrip-accent")
 
 
 def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
@@ -253,6 +293,41 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
     assert html.count('id="report-data"') == 1
 
 
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-09-04T14:29:22.256990+00:00",
+        "2026-09-04T23:59:59.123456-04:00",
+        "2026-09-04T00:00:00Z",
+    ],
+)
+def test_build_html_emits_generated_time_element_and_preserves_exact_timestamp(
+    report_payload: ReportPayload, timestamp: str
+) -> None:
+    payload: ReportPayload = {**report_payload, "generated_at": timestamp}
+    html = build_html(payload)
+    metadata = require_first(parse_elements(html), class_name="rv-meta")
+    date = require_first(metadata, tag="time")
+
+    assert date.attrs["datetime"] == timestamp
+    assert date.attrs["title"] == timestamp
+    assert parse_info_modal(html).general["Generated"] == timestamp
+    assert script_payload(html)["generated_at"] == timestamp
+
+
+def test_build_html_falls_back_to_plain_span_for_unparseable_timestamp(
+    report_payload: ReportPayload,
+) -> None:
+    payload: ReportPayload = {**report_payload, "generated_at": 'unknown "<date>"'}
+    html = build_html(payload)
+    metadata = require_first(parse_elements(html), class_name="rv-meta")
+    date = require_first(metadata, tag="span")
+
+    assert date.text == 'unknown "<date>"'
+    assert date.attrs["title"] == 'unknown "<date>"'
+    assert script_payload(html)["generated_at"] == 'unknown "<date>"'
+
+
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
     tags = parse_start_tags(html)
@@ -261,14 +336,18 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     help_button = require_first(elements, tag="button", element_id="btn-help")
     info_button = require_first(elements, tag="button", element_id="btn-info")
     inspector_button = require_first(elements, tag="button", element_id="btn-inspector")
-    help_icon = require_first(help_button, tag="span", class_name="rv-btn-icon")
-    info_icon = require_first(info_button, tag="span", class_name="rv-btn-icon")
-    inspector_icon = require_first(inspector_button, tag="span", class_name="rv-btn-icon")
+    help_icon = require_first(help_button, tag="svg")
+    info_icon = require_first(info_button, tag="svg")
+    inspector_icon = require_first(inspector_button, tag="svg")
 
-    assert "Generated 2026-05-22T12:00:00+00:00 • 2 frames • 2 clips" in html
+    metadata = require_first(elements, class_name="rv-meta")
+    assert "• 2 frames • 2 clips" in metadata.text
+    generated = require_first(metadata, tag="time")
+    assert generated.attrs["datetime"] == "2026-05-22T12:00:00+00:00"
+    assert generated.attrs["title"] == "2026-05-22T12:00:00+00:00"
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
-    assert tags.by_id["btn-info"][1]["title"] == "Report Info"
+    assert tags.by_id["btn-info"][1]["title"] == "Report information"
     assert tags.by_id["btn-inspector"][0] == "button"
     assert tags.by_id["btn-inspector"][1]["class"] == "rv-header-inspector-btn"
     assert tags.by_id["btn-inspector"][1]["type"] == "button"
@@ -276,57 +355,27 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert tags.by_id["btn-inspector"][1]["aria-expanded"] == "false"
     assert tags.by_id["btn-inspector"][1]["aria-label"] == "Open Inspector"
     assert tags.by_id["btn-inspector"][1]["title"] == "Inspector (I)"
-    assert help_icon.text == "?"
-    assert info_icon.text == "ℹ"
-    assert inspector_icon.text == "☷"
+    for icon in (help_icon, info_icon, inspector_icon):
+        assert icon.attrs["aria-hidden"] == "true"
+        assert icon.attrs["focusable"] == "false"
+    assert inspector_button.text == "Inspector"
     assert info_modal.attrs["class"] == "rv-modal"
     assert info_modal.attrs["aria-hidden"] == "true"
     assert info_modal.attrs["role"] == "dialog"
-    assert info_modal.section_headings == ["General", "Clips", "Rendering"]
+    assert info_modal.section_headings == ["General", "Sources", "Rendering"]
     assert info_modal.general == {
         "Title": "Renderer Contract",
         "Report ID": "report_0123456789abcdef0123456789abcdef",
         "Generated": "2026-05-22T12:00:00+00:00",
-        "Frames": "2",
-        "Clips": "2",
-        "Default Mode": "slider",
-        "Default Pair": "Reference control vs Encode control",
+        "Content": "2 frames · 2 sources",
+        "Opens in": "",
+        "Default pair": "",
         "slow.pics": "https://slow.pics/c/abc?x=1&y=2",
         "Tonemap": "Not applied",
     }
-    assert [(clip.label, clip.dynamic_range, clip.fields) for clip in info_modal.clips] == [
-        (
-            "Reference primary <unsafe>",
-            "SDR",
-            {
-                "Filename": "reference exact <unsafe>.mkv",
-                "Resolution": "1920x1080",
-                "FPS": "24 fps",
-                "Frames": "100",
-            },
-        ),
-        (
-            'Encode primary "unsafe"',
-            "HDR",
-            {
-                "Filename": 'encode exact "unsafe".mkv',
-                "Resolution": "1920x1080",
-                "FPS": "24 fps",
-                "Frames": "100",
-            },
-        ),
-    ]
-
-
-def test_build_html_displays_overlay_default_mode_as_single(
-    report_payload: ReportPayload,
-) -> None:
-    payload: ReportPayload = {**report_payload, "default_mode": "overlay"}
-    html = build_html(payload)
-    info_modal = parse_info_modal(html)
-
-    assert script_payload(html)["default_mode"] == "overlay"
-    assert info_modal.general["Default Mode"] == "Single"
+    # Source cards, the shared fps line, Opens in, and Default pair are filled
+    # at startup by the viewer's Inspector clip-card builder; Python emits
+    # only the containers (covered in the Node inspector harness).
 
 
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
@@ -365,8 +414,71 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     pairs = parse_definition_pairs(details)
     assert pairs["Dynamic peak detection"] == "On"
     assert pairs["Gamma lift"] == "Off"
-    assert pairs["Source peak"] == "Auto"
+    assert pairs["Source peak"] == "Automatic"
+    assert pairs["Smoothing period"] == "45 frames"
+    assert pairs["Scene thresholds"] == "0.8 low · 2.4 high"
+    assert pairs["Gamut mapping"] == "Perceptual"
+    assert pairs["Metadata mode"] == "Automatic selection"
+    assert "Scene threshold low" not in pairs
+    assert "Scene threshold high" not in pairs
     assert pairs["Dolby Vision metadata use"] == "Off"
+
+
+@pytest.mark.parametrize(
+    ("gamut", "expected"),
+    [
+        (0, "Clip"),
+        (1, "Perceptual"),
+        (2, "Soft clip"),
+        (3, "Relative"),
+        (4, "Saturation"),
+        (5, "Absolute"),
+        (6, "Desaturate"),
+        (7, "Darken"),
+        (8, "Highlight"),
+        (9, "Linear"),
+        (42, "42"),
+    ],
+)
+def test_build_html_labels_gamut_mapping_values(
+    report_payload: ReportPayload, gamut: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": {"gamut_mapping": gamut}},
+        },
+    }
+    html = build_html(payload)
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert parse_definition_pairs(details)["Gamut mapping"] == expected
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (0, "Automatic selection"),
+        (1, "None"),
+        (2, "HDR10 (static)"),
+        (3, "HDR10+ (MaxRGB)"),
+        (4, "Luminance (CIE Y)"),
+        (9, "9"),
+    ],
+)
+def test_build_html_labels_metadata_modes(
+    report_payload: ReportPayload, metadata: int, expected: str
+) -> None:
+    payload: ReportPayload = {
+        **report_payload,
+        "rendering": {
+            **report_payload["rendering"],
+            "tonemap": {"applied": True, "settings": {"metadata": metadata}},
+        },
+    }
+    html = build_html(payload)
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    assert parse_definition_pairs(details)["Metadata mode"] == expected
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
@@ -446,6 +558,7 @@ def test_build_html_avoids_duplicate_category_labels_when_label_matches_category
     html = build_html(payload)
 
     document = parse_elements(html)
+    assert require_first(document, tag="span", class_name="rv-filmstrip-number").text == "10"
     assert require_first(document, tag="span", class_name="rv-filmstrip-label").text == "Motion"
     assert "Motion • Motion" not in html
 
@@ -484,13 +597,6 @@ def test_build_html_uses_internal_category_keys_for_reserved_category_text(
         document,
         tag="button",
         class_name="rv-filmstrip-item",
-        attr_name="data-category",
-        attr_value="__all__",
-    )
-    assert find_all(
-        document,
-        tag="span",
-        class_name="rv-filmstrip-accent",
         attr_name="data-category",
         attr_value="__all__",
     )
@@ -542,6 +648,7 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
     assert palette.attrs["role"] == "toolbar"
     assert palette.attrs["aria-label"] == "Viewport controls"
     assert palette.attrs["data-orientation"] == "horizontal"
+    assert palette.attrs["data-proximity"] == "near"
     assert controls.attrs["role"] == "toolbar"
     assert stage.attrs["aria-label"] == "Comparison viewer"
 
@@ -556,21 +663,38 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
         for child in group.children
         if child.tag == "button" and "data-fit" in child.attrs
     }
-    assert set(fit_buttons) == {"actual", "width", "height"}
+    # Fit width (data-fit="width") is a removed control: only actual size and fit
+    # height remain, and no orphan button/separator is left in its place.
+    assert set(fit_buttons) == {"actual", "height"}
     assert fit_buttons["actual"].attrs["aria-label"] == "Actual size"
-    assert fit_buttons["width"].attrs["aria-label"] == "Fit width"
     assert fit_buttons["height"].attrs["aria-label"] == "Fit height"
+    assert 'data-fit="width"' not in html
+    assert "Fit width" not in html
 
     tags = parse_start_tags(html)
-    assert tags.by_id["alignment-preset"][1]["aria-label"] == "Alignment preset"
-    assert tags.by_id["align-x"][1]["aria-label"] == "Manual horizontal alignment offset"
-    assert tags.by_id["align-y"][1]["aria-label"] == "Manual vertical alignment offset"
+    btn_align_toggle = tags.by_id["btn-align-toggle"][1]
+    assert btn_align_toggle["aria-label"] == "Image offset settings"
+    assert btn_align_toggle["title"] == "Spatial image offset settings"
+    assert tags.by_id["alignment-preset"][1]["aria-label"] == "Image offset preset"
+    assert tags.by_id["align-x"][1]["aria-label"] == "Manual horizontal image offset"
+    assert tags.by_id["align-y"][1]["aria-label"] == "Manual vertical image offset"
+    btn_alignment_reset = tags.by_id["btn-alignment-reset"][1]
+    assert btn_alignment_reset["aria-label"] == "Reset image offset"
+    assert btn_alignment_reset["title"] == "Reset image offset"
+    align_popover = require_first(palette, tag="div", element_id="align-popover")
+    offset_note = require_first(align_popover, tag="p", class_name="rv-inspector-note")
+    assert offset_note.text == "Spatial adjustment only; does not change source-frame timing."
     fullscreen_button = require_first(palette, tag="button", element_id="btn-fullscreen")
     assert fullscreen_button.attrs["aria-label"] == "Enter fullscreen"
     assert fullscreen_button.attrs["aria-pressed"] == "false"
     assert 'id="btn-focus-mode"' not in html
     overlays_button = require_first(palette, tag="button", element_id="btn-overlays")
-    assert overlays_button.attrs["aria-label"] == "Hide HUD"
+    assert overlays_button.attrs["aria-label"] == "Hide source labels"
+    assert overlays_button.attrs["title"] == "Hide source labels (H)"
+    assert overlays_button.text == "Source labels"
+    assert "HUD" not in html
+    lens_button = require_first(palette, tag="button", element_id="btn-lens")
+    assert lens_button.attrs["aria-label"] == "Turn lens on"
     blink_controls = require_first(
         palette, tag="div", attr_name="data-control-scope", attr_value="blink"
     )
@@ -604,17 +728,27 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     tab_names = [
         child.attrs.get("data-inspector-tab") for child in tablist.children if child.tag == "button"
     ]
-    assert tab_names == ["frame", "clips", "align", "review", "export"]
-    for tab in ("frame", "clips", "align", "review", "export"):
+    assert tab_names == ["frame", "clips", "align", "review"]
+    tab_labels = {
+        "frame": "Frame",
+        "clips": "Clips",
+        "align": "Image offset",
+        "review": "Review",
+    }
+    for tab in ("frame", "clips", "align", "review"):
         tab_button = require_first(
             tablist, tag="button", attr_name="data-inspector-tab", attr_value=tab
         )
         assert tab_button.attrs["tabindex"] == "-1"
+        assert tab_button.text == tab_labels[tab]
         panel = require_first(inspector, element_id=f"inspector-panel-{tab}")
         assert panel.attrs["tabindex"] == "-1"
 
-    assert "data-inspector-frame-label" in html
+    assert "data-inspector-frame-identity" in html
+    assert "data-inspector-frame-detail-row" in html
     assert "data-inspector-frame-position" in html
+    assert "data-inspector-source-frames" in html
+    assert "data-inspector-clips-shared" in html
     assert "data-inspector-clips" in html
     assert "data-inspector-align-pair" in html
     live = require_first(document, tag="div", element_id="viewer-live")
@@ -627,7 +761,13 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     ):
         button = require_first(inspector, tag="button", element_id=button_id)
         assert button.attrs["tabindex"] == "-1"
-    assert "data-inspector-export-summary" in html
+    assert "inspector-tab-export" not in html
+    assert "inspector-panel-export" not in html
+    assert "data-inspector-export-title" not in html
+    assert "data-inspector-export-id" not in html
+    assert "data-inspector-export-generated" not in html
+    assert "data-inspector-export-slowpics" not in html
+    assert "data-inspector-export-summary" not in html
     review_panel = require_first(inspector, element_id="inspector-panel-review")
     review_note = require_first(review_panel, tag="textarea", attr_name="data-review-note")
     review_note_count = require_first(review_panel, tag="span", attr_name="data-review-note-count")
@@ -640,6 +780,21 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     review_status = require_first(review_panel, attr_name="data-review-status")
     assert "role" not in review_status.attrs
     assert "aria-live" not in review_status.attrs
+    static_note = require_first(review_panel, tag="p", class_name="rv-inspector-note")
+    assert static_note.text == (
+        "Notes are not stored in the report file. Export review JSON to keep or transfer them."
+    )
+    export_button = require_first(review_panel, tag="button", attr_name="data-review-export")
+    assert export_button.text == "Export review JSON"
+    import_button = require_first(
+        review_panel, tag="button", attr_name="data-review-import-trigger"
+    )
+    assert import_button.text == "Import review JSON"
+    assert "Reset all image offsets</button>" in html
+    assert "Reset this pair&#x27;s offset</button>" in html or (
+        "Reset this pair's offset</button>" in html
+    )
+    assert html.count("Spatial adjustment only; does not change source-frame timing.") == 2
     assert html.count('id="viewer-live"') == 1
     assert "inspector-panel-pixel" not in html
     assert "Pixel value unavailable" not in html
@@ -665,8 +820,8 @@ def test_build_html_renders_lens_stage_controls(
     lens = require_first(stage, tag="aside", element_id="rv-lens")
     assert lens.attrs["aria-label"] == "Image magnification lens"
     assert lens.attrs["data-size"] == "medium"
-    assert lens.attrs["data-comparison"] == "false"
-    for image_role in ("active", "difference", "comparison"):
+    assert "data-comparison" not in lens.attrs
+    for image_role in ("active", "difference"):
         assert (
             len(
                 find_all(
@@ -678,20 +833,15 @@ def test_build_html_renders_lens_stage_controls(
             )
             == 1
         )
-    active_role = require_first(lens, tag="span", attr_name="data-lens-role", attr_value="active")
-    assert active_role.text == "ACTIVE"
+    assert find_all(lens, tag="img", attr_name="data-lens-image", attr_value="comparison") == []
+    assert find_all(lens, tag="span", attr_name="data-lens-role") == []
+    assert find_all(lens, tag="span", class_name="rv-lens-fixed-status") == []
+    assert "COMPARE" not in html
+    assert ">Fixed<" not in html
     assert require_first(lens, tag="span", attr_name="data-lens-status", attr_value="active")
     assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="active")
-    comparison_role = require_first(
-        lens, tag="span", attr_name="data-lens-role", attr_value="comparison"
-    )
-    assert comparison_role.text == "COMPARE"
-    comparison_status = require_first(
-        lens, tag="span", attr_name="data-lens-status", attr_value="comparison"
-    )
-    assert "hidden" in comparison_status.attrs
-    assert comparison_status.text == ""
-    assert require_first(lens, tag="span", attr_name="data-lens-identity", attr_value="comparison")
+    caption = require_first(lens, tag="div", class_name="rv-lens-caption")
+    assert "hidden" in caption.attrs
     grip = require_first(lens, tag="button", attr_name="data-lens-drag-handle")
     assert grip.attrs["aria-label"] == "Move lens window"
     assert not find_all(lens, tag="div", class_name="rv-lens-titlebar")
@@ -704,11 +854,27 @@ def test_build_html_renders_lens_stage_controls(
     assert settings_trigger.attrs["aria-controls"] == "lens-settings-popover"
     assert not find_all(palette, tag="div", element_id="lens-settings-popover")
     assert not find_all(lens, tag="div", element_id="lens-settings-popover")
-    assert require_first(settings, tag="input", element_id="lens-comparison-enabled")
-    assert require_first(settings, tag="button", attr_name="data-lens-marker", attr_value="off")
-    current_source = require_first(settings, tag="output", attr_name="data-lens-current-source")
-    assert current_source.text == "Lens is off."
-    assert current_source.attrs["aria-live"] == "off"
+    assert find_all(settings, tag="input", element_id="lens-comparison-enabled") == []
+    assert find_all(settings, attr_name="data-lens-current-source") == []
+    assert find_all(settings, attr_name="data-lens-comparison-settings") == []
+    assert (
+        require_first(
+            settings, tag="button", attr_name="data-lens-marker", attr_value="ring"
+        ).attrs["aria-checked"]
+        == "true"
+    )
+    assert (
+        require_first(
+            settings, tag="button", attr_name="data-lens-caption", attr_value="off"
+        ).attrs["aria-checked"]
+        == "true"
+    )
+    assert (
+        require_first(settings, tag="button", attr_name="data-lens-caption", attr_value="on").attrs[
+            "aria-checked"
+        ]
+        == "false"
+    )
     assert not find_all(stage, attr_name="data-lens-behavior")
     assert not find_all(lens, tag="canvas")
     assert 'id="btn-inspect"' not in html
@@ -730,6 +896,35 @@ def test_build_html_renders_keyboard_help_accessibility_hooks(
     shortcut_rows = find_all(modal, tag="div", class_name="rv-shortcut-row")
     assert len(shortcut_rows) >= 6
     assert "Toggle Focus" not in modal.text
+    assert "HUD" not in modal.text
+    shortcut_labels = {require_first(row, tag="span").text for row in shortcut_rows}
+    assert "Toggle source labels" in shortcut_labels
+
+    baked_text_note = require_first(modal, tag="p", class_name="rv-inspector-note")
+    assert baked_text_note.text == (
+        "Hiding source labels changes only this viewer; baked screenshot text is unaffected."
+    )
+
+    legend_grids = find_all(modal, tag="div", class_name="rv-legend-grid")
+    assert len(legend_grids) == 2
+    fit_legend_rows = find_all(legend_grids[0], tag="div", class_name="rv-legend-row")
+    assert [
+        (require_first(row, tag="span", class_name="rv-key").text, row.children[1].text)
+        for row in fit_legend_rows
+    ] == [("1:1", "Actual size"), ("↕", "Fit height")]
+    assert "Fit width" not in modal.text
+
+    mode_legend_rows = find_all(legend_grids[1], tag="div", class_name="rv-legend-row")
+    assert [
+        (require_first(row, tag="span", class_name="rv-key").text, row.children[1].text)
+        for row in mode_legend_rows
+    ] == [
+        ("Slider", "Reveal spatial differences"),
+        ("Single", "Inspect one source"),
+        ("Diff", "Locate changed pixels"),
+        ("Blink", "Alternate the selected pair"),
+        ("Grid", "Scan sources together"),
+    ]
 
 
 def test_build_html_embeds_json_without_raw_script_terminators(
@@ -767,12 +962,12 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     )
 
     assert visible_panel.attrs["data-filmstrip-enabled"] == "true"
-    assert visible_panel.attrs["aria-label"] == "Frame timeline"
+    assert visible_panel.attrs["aria-label"] == "Frame filmstrip"
     assert visible_filter_group.attrs["data-control-scope"] == "frame-filters"
     assert visible_filter_group.attrs["aria-label"] == "Frame category filters"
     assert visible_toggle.attrs["type"] == "button"
     assert visible_toggle.attrs["aria-expanded"] == "true"
-    assert visible_toggle.attrs["aria-label"] == "Collapse timeline controls"
+    assert visible_toggle.attrs["aria-label"] == "Collapse filmstrip controls"
 
     size_buttons = {
         child.attrs.get("data-filmstrip-size"): child
@@ -800,7 +995,7 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     hidden_toggle = require_first(hidden_panel, tag="button", element_id="btn-filmstrip-toggle")
 
     assert hidden_panel.attrs["data-filmstrip-enabled"] == "false"
-    assert hidden_panel.attrs["aria-label"] == "Frame timeline"
+    assert hidden_panel.attrs["aria-label"] == "Frame filmstrip"
     assert hidden_toggle.attrs["type"] == "button"
     assert hidden_toggle.attrs["aria-expanded"] == "false"
     assert hidden_toggle.attrs["aria-label"] == "Filmstrip disabled"

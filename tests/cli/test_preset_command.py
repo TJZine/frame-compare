@@ -11,6 +11,12 @@ from frame_compare.config.errors import ConfigNotFoundError
 from .cli_helpers import MINIMAL_CONFIG, _write_minimal_config, isolated_cli_filesystem, runner
 
 
+def _assert_ok_glyph_prefixed(output: str, fragment: str) -> None:
+    """Assert a confirmation line carries the S3 ok glyph for either encoding."""
+    line = next(line for line in output.splitlines() if fragment in line)
+    assert line[:2] in ("✓ ", "+ ")
+
+
 def test_preset_apply_missing_preset_exits_with_error_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -91,6 +97,7 @@ def test_preset_apply_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         assert result.exit_code == 0
         assert result.stdout == ""
         assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
+        _assert_ok_glyph_prefixed(result.stderr, "Applied preset 'boost'")
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["random_frame_count"] == 12
 
@@ -111,6 +118,7 @@ def test_preset_save_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         preset_path = root / "config" / "presets" / "demo.toml"
         assert preset_path.exists()
         assert f"Saved preset 'demo' to {preset_path.resolve()}" in result.stderr
+        _assert_ok_glyph_prefixed(result.stderr, "Saved preset 'demo'")
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])
@@ -419,6 +427,7 @@ def test_preset_save_respects_root_and_config_writes_secret_safe_preset(
         preset_path = root / "config" / "presets" / "sample.toml"
         assert preset_path.exists()
         assert f"Saved preset 'sample' to {preset_path.resolve()}" in result.stderr
+        _assert_ok_glyph_prefixed(result.stderr, "Saved preset 'sample'")
         preset_text = preset_path.read_text(encoding="utf-8")
         assert "webhook_url" not in preset_text
         assert "env-secret" not in preset_text
@@ -486,6 +495,7 @@ def test_preset_apply_updates_config_and_strips_webhook_secret(
         assert result.exit_code == 0
         assert result.stdout == ""
         assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
+        _assert_ok_glyph_prefixed(result.stderr, "Applied preset 'boost'")
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["random_frame_count"] == 22
         assert "webhook_url" not in data["slowpics"]

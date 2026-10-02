@@ -104,3 +104,6 @@ htmlcov/
 Thumbs.db
 .portable_cache/
 comparison_videos/**
+
+# Claude Code personal settings
+.claude/settings.local.json

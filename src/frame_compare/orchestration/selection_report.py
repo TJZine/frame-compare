@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.orchestration.presentation import report_console_width
+from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,29 +105,29 @@ def _render_human_selection_report(
         padding=(0, 2, 0, 0),
         expand=False,
     )
-    table.add_column("key", style="blue", no_wrap=True, min_width=12, overflow="fold")
+    table.add_column("key", style="dim", no_wrap=True, min_width=12, overflow="fold")
     table.add_column("value", overflow="fold")
     table.add_row(
         "final",
-        f"[bright_white]{escape(_format_count(report.final_count, domain='aligned'))}[/]",
+        f"{escape(_format_count(report.final_count, domain='aligned'))}",
     )
 
     for category in report.categories:
         count = _format_count(category.count, domain="source")
         table.add_row(
             category.label,
-            f"[bright_white]{escape(count)}[/] [dim]{escape(category.ranges)}[/]",
+            f"{escape(count)} [dim]{escape(category.ranges)}[/]",
         )
 
     if not report.breakdown_available:
         table.add_row("breakdown", "[dim]unavailable[/]")
 
-    console = Console(stderr=True, no_color=no_color, width=report_console_width(minimum=100))
+    console = human_console(stderr=True, no_color=no_color, width=report_console_width(minimum=100))
     console.print(
         Panel(
             table,
-            title="[bold cyan]Final Selection[/] [dim]After Alignment[/]",
-            border_style="cyan",
+            title=f"[bold {ACCENT} not dim]Final Selection[/] [dim]After Alignment[/]",
+            border_style=BORDER_NEUTRAL,
         )
     )
 

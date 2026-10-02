@@ -1,11 +1,11 @@
 # Windows portable
 
 The Windows portable bundle is the recommended Frame Compare distribution for Windows
-10/11 x64. It includes the supported Python and media runtime, VSView 0.10.3 with its
+10/11 x64. It includes the supported Python and media runtime, VSView 0.11.0 with its
 PySide6 backend and native Frame Compare alignment panel for review, the
 installer, and signed code-only update and rollback tooling.
 
-The portable graph pins the base `vsview==0.10.3` package and the Frame Compare panel
+The portable graph pins the base `vsview==0.11.0` package and the Frame Compare panel
 entry point; its upstream
 `recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
 VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
@@ -157,7 +157,7 @@ review checklist.
 
 ## Native VSView alignment review
 
-The portable bundle includes VSView 0.10.3, PySide6, and the packaged
+The portable bundle includes VSView 0.11.0, PySide6, and the packaged
 `frame-compare-alignment-review` panel entry point in one self-contained Python
 environment. Frame Compare launches VSView through that same environment; a
 PATH-only VSView executable or a separate Python installation is not supported.
@@ -175,12 +175,12 @@ and visit every output. Leave each source on the same visible moment. The live s
 lineup records the latest untrimmed source frame, reports `ready / total`, and previews
 the signed `reference - comparison` relationship and trim direction.
 
-Choose **Use these aligned positions** once every source is ready. It writes one
+Choose **Confirm these aligned positions** once every source is ready. It writes one
 typed, atomic sibling sidecar named `vsview_*.alignment-result.json` for the complete
 source set; there is no per-comparison confirmation or later completion step. **Keep
-audio-derived alignment** is the secondary whole-set action and retains the alignment
-Frame Compare entered with, including the no-change case when no trusted suggestion
-exists.
+current alignment** is the secondary whole-set action and retains each comparison's
+existing accepted or manually confirmed authority without confirming a provisional
+candidate.
 
 For known values, expand **Enter alignment manually...** and choose **Source frames** or
 **Known offsets**. Source frames accepts one non-negative untrimmed frame per source;
@@ -226,12 +226,24 @@ Apply a code-only update:
 frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
-The updater verifies the signature and every payload hash before replacement. It accepts
-only a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
+The updater bounds the archive and its two fixed authentication entries, then verifies
+the signature before parsing the manifest or inspecting and extracting payload entries.
+It verifies every payload hash before replacement. Unsigned packages have no interactive
+bypass. Archive compressed size, entry count, per-entry and total
+uncompressed size, and compression ratio are bounded before extraction. It accepts only
+a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
 pre-native-panel schema-2 bundles, as well as missing, malformed, or different
 media-runtime fingerprints, before applying any change. That refusal cannot be
 overridden safely because a code-only ZIP does not carry replacement native media
-components; install the complete portable ZIP instead.
+components. An unavailable installed app version also fails closed instead of skipping
+the signed source-version range; install the complete portable ZIP instead.
+
+Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
+`pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
+source selection. They also require the supplied complete bundle's application version
+and complete packaged `app/src/frame_compare` tree to match that committed source before
+borrowing its compatibility fingerprints. Commit the intended release source and rebuild
+the complete bundle before creating the matching update artifact.
 
 When the fingerprint differs, install the complete portable ZIP for that release. Keep
 **Generated data location** external when reports and reusable state must survive that
@@ -282,7 +294,7 @@ revisions in the build manifest and generated inventory remain authoritative.
 | Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
 | Doctor reports the alignment panel is missing | Reinstall the complete bundle or rebuild it; the VSView runtime and `frame-compare-alignment-review` entry point must come from the same environment |
 | Alignment panel is inactive | Open the Frame Compare-generated session; ordinary sessions and untrusted/mixed metadata intentionally remain inert |
-| Panel closes before saving | No result sidecar was written; reopen the generated session, visit every source, and choose **Use these aligned positions** or **Keep audio-derived alignment** |
+| Panel closes before saving | No result sidecar was written; reopen the generated session, visit every source, and choose **Confirm these aligned positions** or **Keep current alignment** |
 | Native review result is rejected | Generate a fresh session; Frame Compare rejects missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds sidecars |
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 

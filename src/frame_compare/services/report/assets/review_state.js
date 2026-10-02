@@ -10,7 +10,7 @@ const ReviewState = (() => {
     const MAX_RECORDS_LABEL = MAX_RECORDS.toLocaleString('en-US');
     const TAGS = new Set([null, 'artifact', 'detail', 'motion', 'color', 'other']);
     const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-    const PERSISTENCE_WARNING = 'Review changes will not persist in this browser; export to keep them.';
+    const PERSISTENCE_WARNING = 'Changes are kept only for this session. Export review JSON to keep them.';
     const REPORT_MISMATCH = 'This review belongs to a different report. No changes were made.';
     const encoder = new TextEncoder();
 
@@ -224,7 +224,7 @@ const ReviewState = (() => {
                 return true;
             } catch {
                 unsaved = true;
-                warning = 'Review changes could not be saved; export to keep them.';
+                warning = PERSISTENCE_WARNING;
                 return false;
             }
         }
@@ -373,7 +373,7 @@ const ReviewState = (() => {
             const status = model.status();
             const saved = status.unsaved
                 ? 'Unsaved changes.'
-                : `${status.count} review record${status.count === 1 ? '' : 's'} saved locally.`;
+                : `${status.count} review record${status.count === 1 ? '' : 's'} saved in this browser.`;
             showMessage(status.warning || saved, Boolean(status.warning), announce);
         }
 
@@ -397,7 +397,7 @@ const ReviewState = (() => {
         function populatePreferredOptions() {
             const options = [new Option('No preferred clip', '')];
             viewer.state.data.clips.forEach((clip, index) => {
-                options.push(new Option(viewer.clipDisplay(clip), `clip:${index}`));
+                options.push(new Option(ViewerFormat.clipDisplay(clip), `clip:${index}`));
             });
             viewer.dom.reviewPreferred.replaceChildren(...options);
         }

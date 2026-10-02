@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from http.cookies import SimpleCookie
+from io import StringIO
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
@@ -30,6 +31,7 @@ from frame_compare.services.slowpics_upload_plan import (
     SlowpicsUploadRow,
 )
 from frame_compare.services.types import SlowpicsCollectionMetadata
+from frame_compare.utils.progress import UPLOAD_PRESENTATION, PlainProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 
@@ -254,12 +256,36 @@ async def test_publish_to_slowpics_reports_progress_for_each_completed_image(
     progress.start_phase.assert_called_once_with(
         "Uploading My Comparison to slow.pics",
         total=4,
+        presentation=UPLOAD_PRESENTATION,
     )
     assert progress.advance.call_count == 4
     progress.complete_phase.assert_called_once_with(
         ProgressPhaseStatus.COMPLETED,
         retain=False,
     )
+
+
+@pytest.mark.anyio
+async def test_publish_to_slowpics_plain_reporter_keeps_upload_phase_name_on_failure(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    upload_plan = _plan(tmp_path, rows=1, cols=1)
+    respx_mock.get("https://slow.pics/comparison").mock(return_value=httpx.Response(200))
+    stream = StringIO()
+    progress = PlainProgressReporter(stream)
+
+    with pytest.raises(SlowpicsError, match="Missing slow.pics XSRF token"):
+        await publish_to_slowpics(
+            _collection_metadata("My Comparison"),
+            SlowpicsConfig(),
+            async_client,
+            progress=progress,
+            upload_plan=upload_plan,
+        )
+
+    assert stream.getvalue() == "[FAIL] Uploading My Comparison to slow.pics\n"
 
 
 @pytest.mark.anyio

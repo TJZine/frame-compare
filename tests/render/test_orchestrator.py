@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from concurrent.futures import CancelledError, Future
 from pathlib import Path
 from threading import Barrier, Event, Lock, Thread
 from unittest.mock import MagicMock, patch
@@ -129,6 +130,121 @@ def test_render_batch_fail_fast(mock_render_request):
         assert len(invoked_requests) < len(requests)
 
 
+def test_render_batch_parallel_prefers_real_failure_to_cancelled_sibling(
+    tmp_path: Path,
+) -> None:
+    class ControlledFuture(Future[list[RenderedFrameResult]]):
+        def cancel(self) -> bool:
+            cancelled = super().cancel()
+            if cancelled:
+                self.set_running_or_notify_cancel()
+            return cancelled
+
+    class ControlledExecutor:
+        def __init__(self, max_workers: int) -> None:
+            assert max_workers == 2
+            self.futures: list[ControlledFuture] = []
+            controlled_executors.append(self)
+
+        def __enter__(self) -> "ControlledExecutor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+            _ = wait, cancel_futures
+
+        def submit(
+            self, _function: object, *args: object, **kwargs: object
+        ) -> Future[list[RenderedFrameResult]]:
+            _ = kwargs
+            future = ControlledFuture()
+            self.futures.append(future)
+            if len(self.futures) == 1:
+                unit = args[0]
+                assert isinstance(unit, tuple)
+                future.set_result([_rendered(request) for request in unit])
+            elif len(self.futures) == 3:
+                future.set_exception(RuntimeError("real failure"))
+            return future
+
+    controlled_executors: list[ControlledExecutor] = []
+    requests = [
+        RenderRequest(
+            clip=tmp_path / f"clip_{index}.mkv",
+            diagnostic_source=tmp_path / f"clip_{index}.mkv",
+            frame_number=index,
+            output_path=tmp_path / f"out_{index}.jpg",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for index in range(3)
+    ]
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.ThreadPoolExecutor",
+            ControlledExecutor,
+        ),
+        pytest.raises(RuntimeError, match="real failure"),
+    ):
+        render_batch_detailed(
+            requests,
+            parallelism=2,
+            work_unit_ranges=[range(0, 1), range(1, 2), range(2, 3)],
+        )
+
+    assert len(controlled_executors) == 1
+    assert controlled_executors[0].futures[1].cancelled()
+
+
+def test_render_batch_parallel_propagates_worker_cancellation(tmp_path: Path) -> None:
+    cancelled = Future[list[RenderedFrameResult]]()
+    cancelled.set_exception(CancelledError("caller cancelled"))
+
+    class ControlledExecutor:
+        def __init__(self, max_workers: int) -> None:
+            _ = max_workers
+
+        def __enter__(self) -> "ControlledExecutor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+            _ = wait, cancel_futures
+
+        def submit(
+            self, _function: object, *args: object, **kwargs: object
+        ) -> Future[list[RenderedFrameResult]]:
+            _ = args, kwargs
+            return cancelled
+
+    request = RenderRequest(
+        clip=tmp_path / "clip.mkv",
+        diagnostic_source=tmp_path / "clip.mkv",
+        frame_number=0,
+        output_path=tmp_path / "out.jpg",
+        overlay=None,
+        encoder_settings=EncoderSettings(),
+    )
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.ThreadPoolExecutor",
+            ControlledExecutor,
+        ),
+        pytest.raises(CancelledError, match="caller cancelled"),
+    ):
+        render_batch_detailed(
+            [request],
+            parallelism=2,
+            work_unit_ranges=[range(0, 1)],
+        )
+
+
 @pytest.fixture
 def default_config() -> ConfigSchema:
     """Default config with tonemap disabled for isolated tests."""
@@ -236,6 +352,61 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
     assert len(render_exceptions) == 1
     assert isinstance(render_exceptions[0], RuntimeError)
     assert str(render_exceptions[0]) == "Failed immediately"
+
+
+def test_render_batch_parallel_reports_lowest_request_index_failure(
+    tmp_path: Path,
+) -> None:
+    frame_zero_started = Event()
+    frame_two_failed = Event()
+    release_frame_zero = Event()
+    exceptions: list[BaseException] = []
+    requests = [
+        RenderRequest(
+            clip=tmp_path / f"clip_{frame}.mkv",
+            diagnostic_source=tmp_path / f"clip_{frame}.mkv",
+            frame_number=frame,
+            output_path=tmp_path / f"out_{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for frame in range(3)
+    ]
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        if request.frame_number == 0:
+            frame_zero_started.set()
+            assert release_frame_zero.wait(timeout=2.0)
+            raise RuntimeError("error-0")
+        if request.frame_number == 2:
+            assert frame_zero_started.wait(timeout=2.0)
+            frame_two_failed.set()
+            raise RuntimeError("error-2")
+        return _rendered(request)
+
+    def run_render() -> None:
+        try:
+            render_batch_detailed(requests, parallelism=3)
+        except BaseException as exc:
+            exceptions.append(exc)
+
+    with patch(
+        "frame_compare.render.batch.orchestrator.render_frame_detailed",
+        side_effect=render_single,
+    ):
+        thread = Thread(target=run_render, daemon=True)
+        thread.start()
+        try:
+            assert frame_zero_started.wait(timeout=2.0)
+            assert frame_two_failed.wait(timeout=2.0)
+        finally:
+            release_frame_zero.set()
+            thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert len(exceptions) == 1
+    assert isinstance(exceptions[0], RuntimeError)
+    assert str(exceptions[0]) == "error-0"
 
 
 def test_render_batch_marks_progress_failed_on_exception(mock_render_request) -> None:

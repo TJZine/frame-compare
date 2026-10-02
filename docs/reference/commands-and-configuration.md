@@ -42,6 +42,16 @@ When `--config` is omitted, the normal default is `config/config.toml` beneath t
 selected root. The installed Windows shim can inject its documented bundle-local or
 AppData fallback configuration.
 
+After a successful save, or a no-op with nothing to change, `wizard` prints suggested
+next commands to stderr: `frame-compare doctor` (its actual supported surface has
+no `--root`/`--config`), a `run --dry-run` preview, and a plain `run`. Both `run`
+suggestions always carry the exact resolved `--root` and the exact selected
+`--config`, including the Windows fallback file when that exception applies, so a
+suggestion cannot silently target a different workspace. They are suggestions only,
+never executed by the wizard, and are quoted for the current shell platform (POSIX
+or PowerShell). See [Your First Comparison](../guides/first-comparison.md#repeat-comparisons)
+for the same commands organized by installation route.
+
 ## Important run modes
 
 | Option or mode | Use |
@@ -55,7 +65,12 @@ AppData fallback configuration.
 | `--overlay MODE` | Override the screenshot overlay for one run |
 | `--write-config` | Persist supported CLI-to-config overrides after validation |
 
-Always confirm the installed help text before scripting an option.
+Always confirm the installed help text before scripting an option. An invalid
+`--overlay`, `--tm-preset`, or `--tm-curve` value names the flag and lists its
+allowed choices (for example `Choose one of: minimal, standard, diagnostic,
+none.`) before any run starts; `run --help` lists the same choices and explains
+which options `--write-config` saves versus which stay run-only for this
+invocation.
 
 ## Configuration ownership
 
@@ -64,7 +79,7 @@ Always confirm the installed help text before scripting an option.
 | `[paths]` | Input, config, and generated-data locations |
 | `[sources]` | Reference, analysis source, labels, FPS policy, and per-source overrides |
 | `[analysis]` | User/random/metric frame counts, mode, exclusions, and deterministic seed |
-| `[audio_alignment]` | Audio stream, correlation, consensus, reuse, and VSView behavior |
+| `[audio_alignment]` | Audio stream selection, whole-track chunked estimation, previous-offset reuse, and VSView behavior |
 | `[screenshots]` | Renderer, active-picture detection, geometry, overlays, PNG writer/compression, and timeouts |
 | `[color]` | HDR-to-SDR tonemapping preset, target luminance, tone curve, lift, and contrast recovery |
 | `[report]` | Static report generation, embedding, and auto-open behavior |
@@ -84,21 +99,27 @@ For native VSView alignment review, set `audio_alignment.use_vsview = true` when
 the optional Frame Compare VSView panel is desired. Install `frame-compare[vsview]` in
 the same environment that runs Frame Compare; a PATH-only VSView executable is not a
 supported substitute. The `vsview` package is the supported base extra at version
-0.10.3; `recommended` and `full` extras are not part of Frame Compare's dependency
+0.11.0; `recommended` and `full` extras are not part of Frame Compare's dependency
 contract. `--force-interactive-alignment` enables the same route and makes readiness,
 process, cancellation, or invalid-result failure fatal. The generated session
 continues to use Frame Compare's L-SMASH-Works source/index path; VSView's BestSource
 workspace is UI-only. Open Frame Compare Alignment Review from VSView's Tool Panel,
-unlink the playheads, and, when using viewer positions, visit Reference and every
-Comparison N output on the same visible moment. The live source lineup records the untrimmed source frames and previews
-the signed reference-to-comparison trim. Selecting **Use these aligned positions** writes
-one complete ordered result for the whole source set. **Keep audio-derived alignment** is
-the secondary whole-set action and retains the alignment Frame Compare entered with,
-including the no-change case when no trusted suggestion exists. Expand Enter alignment
-manually for Source frames or Known offsets; both use the same whole-set action. Closing
-VSView without saving writes no result. The generated session metadata and typed sibling
-result sidecar both use schema v1; strict session/result validation
-and authoritative raw frame bounds remain unchanged.
+unlink the playheads, and, when using viewer positions, position Reference and every
+Comparison N output on the same visible moment. The panel distinguishes `Viewing: frame
+N` from `Captured position: frame N`; complete viewer drafts say `{n}/{total} positions
+captured — ready to confirm`, while incomplete drafts omit the readiness suffix. The
+live source lineup previews the signed reference-to-comparison trim. Selecting
+**Confirm these aligned positions** writes one complete ordered result for the whole
+source set. **Keep current alignment** is the secondary whole-set action and preserves
+existing authority without confirming an unapplied candidate. Expand Enter alignment
+manually for Source frames or Known offsets; source-frame drafts say `{n}/{total} source
+frames entered`, known-offset drafts say `{n}/{total} offsets entered`, and both add
+` — ready to confirm` only when valid and complete. Viewer guidance is `To confirm a new
+alignment, unlink the playheads and position each source on the same visible moment. Or
+keep the current alignment.` Valid source-frame drafts use `Entered source frame: N`.
+Closing VSView without saving writes no result. Generated
+session metadata uses v5 while the typed sibling result sidecar remains v1; strict
+session/result validation and authoritative raw frame bounds remain unchanged.
 
 ## Environment variables and secrets
 
@@ -138,3 +159,19 @@ For unattended use:
 
 The behavioral contract is authoritative for the successful JSON schema, typed error
 payload, warning placement, exit codes, and interaction gating.
+
+## Limited memory
+
+Set an optional VapourSynth frame-cache cap in MiB:
+
+```toml
+[runtime]
+memory_limit_mb = 4096
+```
+
+The value must be an integer of at least 512. Omit it to retain the
+VapourSynth default. This caps the frame cache used during analysis, rendering,
+and alignment video checking; it is not a hard limit on total process memory.
+The separate VSView process receives the same cap. Audio alignment already has
+bounded buffers and does not use this setting. A smaller cache can increase
+decoding work.

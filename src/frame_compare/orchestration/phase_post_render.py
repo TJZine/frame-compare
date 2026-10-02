@@ -188,10 +188,15 @@ async def run_publish_phase(
             collection_title=collection_resolution.metadata.title,
         )
     )
+    uploaded_count = len(result.uploaded_file_paths)
+    uploaded_unit = "screenshot" if uploaded_count == 1 else "screenshots"
     return PublishPhaseOutput(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
         post_upload_actions=post_upload_actions,
+        success_summary=(
+            f"{uploaded_count} {uploaded_unit} uploaded · {ctx.config.slowpics.visibility.value}"
+        ),
     )
 
 
@@ -275,14 +280,16 @@ def run_report_phase(
     roles = [clip_role(index) for index in range(len(clips))]
     protected = [clip.label_is_explicit for clip in clips]
     releases = [
-        format_release_descriptor(clip.release_identity) if clip.release_identity else ""
+        format_release_descriptor(clip.release_identity, separator=" · ")
+        if clip.release_identity
+        else ""
         for clip in clips
     ]
     primaries = unique_presentation_names(
         [
             clip.label
             if clip.label_is_explicit or clip.release_identity is None
-            else format_compact_identity(clip.release_identity) or clip.label
+            else format_compact_identity(clip.release_identity, separator=" · ") or clip.label
             for clip in clips
         ],
         roles=roles,
@@ -300,7 +307,11 @@ def run_report_phase(
         [
             clip.label
             if clip.label_is_explicit
-            else (format_micro_descriptor(clip.release_identity) if clip.release_identity else "")
+            else (
+                format_micro_descriptor(clip.release_identity, separator=" · ")
+                if clip.release_identity
+                else ""
+            )
             or controls[index]
             for index, clip in enumerate(clips)
         ],

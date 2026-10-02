@@ -30,7 +30,11 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.services.publishers import PublishResult
-from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
+from frame_compare.services.release_identity import (
+    ContentIdentity,
+    ReleaseIdentity,
+    format_micro_descriptor,
+)
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
@@ -69,7 +73,11 @@ class _RecordingProgressReporter:
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
+        presentation: str | None = None,
     ) -> None:
+        del summary, duration_text, presentation
         self.completions.append((status, retain))
 
     def suspend(self) -> None:
@@ -274,16 +282,16 @@ def test_run_report_phase_builds_report_data_and_records_path(
         "Encode 1"
     ]
     assert [clip.display.control for clip in report_data.clips] == [
-        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Reference | 2160p · ATV WEB-DL · DV HDR10+ · Kitsune",
+        "Comparison 1 | 2160p · ATV WEB-DL · DV HDR10+ · Kitsune",
         "My Explicit",
     ]
     assert [clip.display.micro for clip in report_data.clips] == [
-        "Reference | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Reference | ATV WEB-DL · DV HDR10+ · Kitsune",
+        "Comparison 1 | ATV WEB-DL · DV HDR10+ · Kitsune",
         "My Explicit",
     ]
-    assert report_data.clips[2].display.release == "2160p | ATV WEB-DL | DV HDR10+ | Kitsune"
+    assert report_data.clips[2].display.release == "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
     assert report_data.clips[2].display.filename == "explicit.mkv"
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert report_data.rendering.overlay_mode == ctx.config.screenshots.overlay_mode
@@ -294,6 +302,76 @@ def test_run_report_phase_builds_report_data_and_records_path(
         ("My Explicit", (1920, 1080), 24.0),
     ]
     assert captured["report_config"] == ctx.config.report
+
+
+def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B1 separator invariant for one shared fixture.
+
+    Report display profiles use " · ", while the default descriptor separator
+    and slow.pics image names keep " | ". Burned-in screenshot text is the
+    clip label and is unaffected; the terminal render-progress label moves to
+    " · " in B4.
+    """
+    identity = ReleaseIdentity(
+        ContentIdentity("Example", year=2026),
+        resolution="2160p",
+        service="ATV",
+        source_type="WEB-DL",
+        dynamic_range_claims=("DV", "HDR10+"),
+        release_group="Kitsune",
+    )
+    comparison = _clip(
+        tmp_path / "comparison_videos" / "encode.mkv",
+        label="Encode 1",
+        release_identity=identity,
+    )
+    ctx = _context(tmp_path, comparisons=[comparison])
+    ctx.reference = replace(ctx.reference, release_identity=identity)
+    render = _render_artifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
+            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
+        },
+        screenshot_dir=tmp_path / "screenshots",
+        source_frames_by_label={"Reference": [5], "Encode 1": [5]},
+    )
+    captured: dict[str, Any] = {}
+
+    def _fake_generate_report(
+        report_data: object, report_config: object, *, output_path: Path
+    ) -> Path:
+        captured["report_data"] = report_data
+        return tmp_path / "run" / "report.html"
+
+    monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
+    phase_post_render.run_report_phase(
+        ctx,
+        frames=[5],
+        render=render,
+        metadata=None,
+        slowpics_url=None,
+    )
+
+    report_data = captured["report_data"]
+    assert "2160p · ATV WEB-DL · DV HDR10+ · Kitsune" in report_data.clips[0].display.control
+    for clip in report_data.clips:
+        assert " · " in clip.display.primary
+        assert " · " in clip.display.control
+        assert " · " in clip.display.micro
+        assert "|" not in clip.display.release
+
+    default_separator = format_micro_descriptor(identity)
+    assert default_separator == "ATV WEB-DL | DV HDR10+ | Kitsune"
+
+    upload_clips = phase_post_render._slowpics_upload_clips(ctx)
+    assert [clip.image_name for clip in upload_clips] == [
+        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+    ]
+    for upload_clip in upload_clips:
+        assert " · " not in upload_clip.image_name
 
 
 def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path) -> None:

@@ -74,3 +74,9 @@ def test_viewer_css_keeps_report_information_wide_and_wrappable() -> None:
     assert "overflow-wrap: anywhere;" in clip_heading
     assert "white-space: nowrap;" not in clip_heading
     assert "text-overflow: ellipsis;" not in clip_heading
+
+
+def test_viewer_css_scopes_metadata_row_flattening_to_direct_children() -> None:
+    css = get_css()
+
+    assert ".rv-metadata-list div {" not in css

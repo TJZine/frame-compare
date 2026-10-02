@@ -75,7 +75,10 @@ def test_generate_path_sanitizes(tmp_path):
 
 
 def test_generate_path_bounds_long_browser_file_paths(tmp_path):
-    output_dir = tmp_path / ("nested-" * 15) / "screenshots"
+    # Fix the directory length so the filename budget does not depend on the temp root.
+    padding = "n" * (200 - len(os.path.abspath(tmp_path)) - len("/screenshots") - 1)
+    output_dir = tmp_path / padding / "screenshots"
+    assert len(os.path.abspath(output_dir)) == 200
     common_prefix = "Very.Long.Release.Name." * 8
 
     first = generate_screenshot_path(output_dir, f"{common_prefix}source-a", 42)

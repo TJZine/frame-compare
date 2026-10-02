@@ -7,14 +7,16 @@ description: Use when changing Frame Compare pytest coverage, fixtures, CLI test
 
 Protect stable behavior through the nearest public seam:
 
-- reproduce a real defect before adding a regression test; for refactors, prove the
-  invariant without mirroring implementation branches;
+- establish a defect through a failing regression test or the best available
+  observational proof; the test may itself be the reproduction. For refactors,
+  prove the invariant without mirroring implementation branches;
 - assert exported behavior, typed results, filesystem effects, CLI contracts, or
   integration-boundary requests rather than private fields and call order;
 - keep fixtures local and typed; use `tmp_path`, `monkeypatch`, and isolated
   environments so tests cannot share persisted or process state;
-- mock HTTP, subprocess, clock, browser, and heavy runtime boundaries—not the owned
-  collaborator whose behavior the test is meant to prove;
+- in isolated tests, mock HTTP, subprocess, clock, browser, and heavy runtime
+  boundaries, not the owned collaborator whose behavior is under test. Real
+  integration proof must exercise the changed external boundary;
 - cover malformed/partial external data, timeout/cancellation, cleanup, and expected
   error translation when those paths change;
 - give every direct `subprocess.run` or console-entrypoint invocation an explicit
@@ -30,6 +32,14 @@ Protect stable behavior through the nearest public seam:
 - avoid giant snapshots, private probes, test-only production hooks, and tests that
   simply restate implementation structure.
 
-Run the focused test first, then the runbook-required static and suite gates. Stop
-when the only testable seam is private; resolve the production owner instead of
-adding test-only access.
+Check what actually ran: `tests/conftest.py` supplies a VS mock when the runtime is
+absent, and native/browser/platform tests may skip. A passing Python suite does not
+establish those capabilities. Use the runbook's matching runtime, report-browser,
+distribution, or Windows proof and report relevant skips. Report state tests reuse
+the locked Node runtime through `tests/services/node_harness.py`.
+
+Use the runbook's applicable static and suite gates without repeating still-current
+checks. If the apparent test seam is private, investigate the nearest observable
+behavior and existing tests. Choose meaningful proof within the current owner;
+do not add a production abstraction solely for test access. Escalate only a
+consequential unresolved contract or scope decision.

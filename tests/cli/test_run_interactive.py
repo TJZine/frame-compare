@@ -226,17 +226,15 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
         "confirmed"
     )
     rendered = output.getvalue()
-    assert rendered.index("[WAIT] Publishing confirmation") < rendered.index(expected_prompt)
+    assert rendered.index("Publish to slow.pics?") < rendered.index(expected_prompt)
     assert rendered.endswith(f"{expected_prompt} yes\n\n")
-    panel_line = next(
-        line for line in rendered.splitlines() if "[WAIT] Publishing confirmation" in line
-    )
+    panel_line = next(line for line in rendered.splitlines() if "Publish to slow.pics?" in line)
     assert panel_line.startswith("  ")
     assert not panel_line.startswith("   ")
     output.write("  [OK] PUBLISH  Completed in 20s\n")
     transcript = output.getvalue()
     assert (
-        transcript.index("[WAIT] Publishing confirmation")
+        transcript.index("Publish to slow.pics?")
         < transcript.index(expected_prompt)
         < transcript.index("  [OK] PUBLISH")
     )
@@ -379,7 +377,7 @@ def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> N
         "declined"
     )
     rendered = output.getvalue()
-    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Publish to slow.pics?" in rendered
     assert "Visibility  Public" in rendered
     assert rendered.count("report.html") == 1
     assert "Report: report.html" not in rendered
@@ -406,7 +404,7 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
         "declined"
     )
     rendered = output.getvalue()
-    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Publish to slow.pics?" in rendered
     assert rendered.count("report.html") == 1
 
 
@@ -442,7 +440,7 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
         == "declined"
     )
     rendered = output.getvalue()
-    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Publish to slow.pics?" in rendered
     assert "Visibility  Unlisted" in rendered
     assert "\x1b[" not in rendered
     assert max(len(line) for line in rendered.splitlines()) <= width

@@ -13,8 +13,8 @@ criteria, verification, rollback, and stop conditions. Name likely files or an
 allowed write boundary; require exact file lists only when parallel writers or a
 sensitive shared surface need collision protection. Leave exact file discovery,
 helper names, local control flow, focused test organization, and routine failure
-diagnosis to implementation. Stop if ownership, product behavior, or proof depth
-remains unresolved.
+diagnosis to implementation. Investigate unresolved ownership, product behavior,
+or proof questions; escalate only consequential decisions outside the task.
 
 Describe implementation risk and constraints without permanently binding a durable
 plan to a model. At dispatch, use `worker_luna` for a bounded unit whose outcome,
@@ -23,7 +23,9 @@ repository comprehension or routine local coding judgment. Use `worker` when the
 same settled unit needs material local design judgment, cross-boundary
 comprehension, complex diagnosis, or proof interpretation. Return to planning when
 product intent, ownership, public contracts, architecture, or proof depth remains
-unresolved. The controller integrates the result and reruns the required proof.
+unresolved after investigation. The controller integrates the result and confirms
+current proof under the runbook, rerunning checks only when needed.
 
-Tracked plans begin with `Status: Active`, `Scope`, and `Owner`; mark them historical
-when complete.
+Tracked plans use the exact preamble and activation rules in the runbook's
+[Planning And Handoff](../../../docs/ENGINEERING_RUNBOOK.md#planning-and-handoff)
+section, including search-exclusion front matter. Mark them historical when complete.

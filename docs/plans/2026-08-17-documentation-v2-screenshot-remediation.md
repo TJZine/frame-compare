@@ -27,14 +27,17 @@ Repository:
 TJZine/frame-compare
 ```
 
-Required working branch:
+Working branch:
 
 ```text
-dev/v0.2.0
+dev/v0.6.0-review-remediation
 ```
 
-The branch is temporary and will later be proposed to `cleanup`. Fetch the actual current
-remote state before beginning; do not assume a SHA from this plan remains current.
+Planning baseline: `f0f8553e842a4ce2fb15401a005b396b56510e86`. At planning time the
+branch's open pull request (#98) targets `pre-release`. The baseline only records what
+this plan was checked against: the capture session must fetch, recheck the branch head
+and pull-request target, and capture from the verified current HEAD, recording that
+commit in `docs/images/README.md`.
 
 Do not:
 
@@ -44,6 +47,31 @@ Do not:
 - modify production Python, JavaScript, HTML generation, report styling, or packaging;
 - redesign the documentation navigation;
 - start the logo or accent-color pass.
+
+## Current status
+
+- The published `report-viewer-overview.webp`, `report-slider.webp`,
+  `report-grid.webp`, and `report-inspector.webp` were captured at
+  `ac9b2fa24c83558af28105b895c5893ae9f48a95` on `dev/v0.2.0`. They predate the CLI
+  and report UX changes in `e9958270` (Inspector export folded into Review, note-storage
+  text) and `1baf8100` (viewer labels clarified, Fit width removed).
+- `report-viewer-overview.webp` is still the `docs/index.md` hero, so the documentation
+  home currently shows a stale viewer. The slider, grid, and inspector assets have no
+  current-facing references; the README and report guide no longer embed the overview.
+- `report-diff.webp` is the retained controlled-pattern locator used by the report guide.
+- The previous report-viewer capture used VapourSynth R79 / API 4.2 and Windows FFmpeg
+  `n8.1.2-34-g9b6c8969e0`; the current bundle is newer (see
+  [Preconditions](#preconditions)).
+
+### Dependency
+
+Publication capture happens after the changes owned by the
+[CLI and report UX plan](2026-09-22-cli-and-report-ux-improvements.md) settle on this
+branch, so the images show the integrated viewer rather than an intermediate state. It
+is not tied to the physical-Windows W1 session of the
+[audio alignment remediation plan](2026-09-22-audio-alignment-post-activation-remediation-and-ux.md);
+only the deferred VSView alignment capture (asset 6) should reuse a native Windows
+session when practical.
 
 ## Goal
 
@@ -100,15 +128,16 @@ The normal expected changes are:
 - marking this plan historical after acceptance.
 
 Do not rename existing image files unless a broken contract makes replacement in place
-impossible. Reuse of `report-viewer-overview.webp` across the README, documentation
-home, and report guide must remain intact.
+impossible. `report-viewer-overview.webp` must remain the single overview asset for
+every page that shows it.
 
 ## Product and documentation invariants
 
 Preserve all of the following:
 
 - The README and site describe the same current product.
-- The report overview is one canonical asset reused in three locations.
+- The report overview is one canonical asset. It is currently referenced from
+  `docs/index.md`; restoring it to the README or report guide reuses the same file.
 - Slider, grid, inspector, and preferably diff come from the same generated report and
   selected frame.
 - The visible source order and labels remain consistent across the report and VSView
@@ -122,21 +151,26 @@ Preserve all of the following:
 - The normal report remains a portable folder unless image embedding is explicitly
   enabled.
 - No broken image links or placeholder file references are committed.
-- The current workflow strategy remains unchanged: the later PR to `cleanup` owns the
-  strict documentation workflow run.
+- The current workflow strategy remains unchanged: the branch's pull request runs the
+  Documentation workflow, which covers pull requests into `main`, `pre-release`, and
+  `staging`.
 
 ## Preconditions
 
 Before capturing:
 
-1. Confirm the current branch and clean worktree:
+1. Confirm the current branch, head, and clean worktree:
 
    ```powershell
    git fetch origin
-   git switch dev/v0.2.0
-   git pull --ff-only origin dev/v0.2.0
+   git switch dev/v0.6.0-review-remediation
+   git pull --ff-only origin dev/v0.6.0-review-remediation
+   git rev-parse HEAD
    git status --short
    ```
+
+   Compare the head with the planning baseline above and read the commits in between;
+   do not assume the baseline is still current.
 
 2. Read:
 
@@ -151,7 +185,11 @@ Before capturing:
    ```
 
 3. Confirm the physical Windows runtime to capture is the current supported bundle or a
-   source-built bundle from the same branch.
+   source-built bundle from the same branch. At the planning baseline that bundle is
+   VapourSynth R80 / API R4.3, BestSource R22, and Windows FFmpeg
+   `n8.1.2-50-g1a748fe2cd`, alongside L-SMASH-Works 1310, vs-placebo 2.0.4, and
+   VSView 0.11.0 (see [Windows media-runtime validation](../media-runtime-windows-validation.md)).
+   Record the versions `frame-compare doctor` actually reports rather than copying these.
 
 4. Run the current route's health check:
 
@@ -178,10 +216,14 @@ C:\FrameCompareDemo\
 │   └── config.toml
 ├── comparison_videos\
 │   ├── reference.mkv
-│   ├── itunes-webdl.mkv
-│   └── movies-anywhere-webdl.mkv
+│   ├── hlg10-encode.mkv
+│   └── pq10-encode.mkv
 └── generated\
 ```
+
+This is the EBU/DVB HEVC harbour set recorded in `docs/images/README.md` (CC BY 4.0,
+with the attribution recorded there). Reuse it unless the maintainer approves a
+different rights-cleared set.
 
 Use copies or safe links appropriate to the host. Do not use original release filenames
 as the visible physical filenames in the capture workspace.
@@ -191,28 +233,8 @@ download client, network share, or collection name.
 
 ### Display labels
 
-Use full human-readable provider names, not abbreviations such as `iT` or `MA`.
-
-Preferred labels when the report already shows the title elsewhere:
-
-```text
-UHD Blu-ray — Reference
-iTunes WEB-DL
-Movies Anywhere WEB-DL
-```
-
-When the report does not display the title separately, prefix the publication-safe title:
-
-```text
-<Title> — UHD Blu-ray — Reference
-<Title> — iTunes WEB-DL
-<Title> — Movies Anywhere WEB-DL
-```
-
-Replace `<Title>` with the actual approved title before running. Do not leave placeholders
-in captured UI.
-
-Use explicit source labels:
+Use full, readable labels that state each source's real role, not abbreviations. Use the
+labels recorded for this set:
 
 ```toml
 [sources]
@@ -221,17 +243,18 @@ analysis_source = "reference"
 label_mode = "stem"
 
 [sources.overrides."reference.mkv"]
-label = "UHD Blu-ray — Reference"
+label = "EBU DVB PQ10 — Reference"
 
-[sources.overrides."itunes-webdl.mkv"]
-label = "iTunes WEB-DL"
+[sources.overrides."hlg10-encode.mkv"]
+label = "EBU DVB HLG10 — Comparison"
 
-[sources.overrides."movies-anywhere-webdl.mkv"]
-label = "Movies Anywhere WEB-DL"
+[sources.overrides."pq10-encode.mkv"]
+label = "EBU DVB PQ10 — SDR Presentation"
 ```
 
-If the actual source types differ, use truthful full labels. Do not label a WEB-DL as a
-disc source or infer a provider that is not known.
+If a different approved set is used, give it truthful labels of the same kind: do not
+describe a derivative as an original, or infer a source or provider that is not known.
+Do not leave placeholders in captured UI.
 
 ### Suggested demonstration configuration
 
@@ -250,13 +273,13 @@ label_mode = "stem"
 match_fps = "disabled"
 
 [sources.overrides."reference.mkv"]
-label = "UHD Blu-ray — Reference"
+label = "EBU DVB PQ10 — Reference"
 
-[sources.overrides."itunes-webdl.mkv"]
-label = "iTunes WEB-DL"
+[sources.overrides."hlg10-encode.mkv"]
+label = "EBU DVB HLG10 — Comparison"
 
-[sources.overrides."movies-anywhere-webdl.mkv"]
-label = "Movies Anywhere WEB-DL"
+[sources.overrides."pq10-encode.mkv"]
+label = "EBU DVB PQ10 — SDR Presentation"
 
 [analysis]
 performance_mode = "quality"
@@ -284,8 +307,10 @@ auto_open = true
 auto_upload = false
 ```
 
-Adjust only fields required by the selected media. Record every adjustment in
-`docs/images/README.md`. Do not add an override merely to make a screenshot look
+Adjust only fields required by the selected media. The previous pass used one explicit
+user frame (`1000`), `report.auto_open = false`, and `--skip-metadata` so the public
+example stayed deterministic and offline; keep those choices unless the maintainer
+approves a larger filmstrip. Record every adjustment in `docs/images/README.md`. Do not add an override merely to make a screenshot look
 cleaner if it would misrepresent normal behavior.
 
 ## Source and frame selection criteria
@@ -318,7 +343,7 @@ The selected frame must survive source trims and final alignment in all three so
 Use one consistent environment for the full report-viewer set:
 
 - one physical Windows host;
-- one browser and recorded exact version;
+- one browser, with its name and exact version recorded;
 - one browser zoom level, normally 100%;
 - one Windows display-scaling value;
 - one report theme;
@@ -326,7 +351,11 @@ Use one consistent environment for the full report-viewer set:
 - no browser developer tools;
 - no unrelated tabs, notifications, overlays, or desktop content.
 
-Record those values in `docs/images/README.md`.
+Record those values in `docs/images/README.md`. Use any browser that can render the
+local report, but record its name and exact version. The previous capture used the Codex
+in-app browser, which did not expose its engine version; if the chosen browser cannot
+report its version, record that limitation for maintainer acceptance instead of
+omitting the field.
 
 Capture lossless PNG masters first. Do not upscale. Crop application content precisely
 without removing context required to understand the UI.
@@ -340,16 +369,36 @@ Recommended final dimensions:
 | Terminal captures | Approximately 1000–1200 px wide, tightly cropped to relevant output |
 | HDR diagnostic | Approximately 1280 × 720 or the natural screenshot aspect ratio |
 
-For the 2026-08-17 recapture, the maintainer requested a 1080p-height browser capture
-so the documentation matches the intended full-screen local report. The current
-in-app-browser surface is 1683 × 1080; a 1920-wide CSS viewport override clips report
-controls on this host, so use the exact visible surface and do not upscale. Do not
-force 1280 × 720 when that crop removes required controls. Preserve clarity over
+The maintainer requested a 1080p-height browser capture so the documentation matches
+the intended full-screen local report. The 2026-08-17 capture browser exposed a
+1683 × 1080 visible surface, and a 1920-wide CSS viewport override clipped report
+controls on that host. Use the exact visible surface of the chosen browser, record it,
+and do not upscale. Keep the `docs/index.md` hero `width`/`height` attributes in step
+with the new overview dimensions. Do not force 1280 × 720 when that crop removes
+required controls. Preserve clarity over
 uniformity, but keep the report-viewer set consistent.
 
 The allowed controlled-pattern `report-diff.webp` exception remains the retained
 1280 × 720 asset documented in the image record; the 1080p-height recapture applies
 to the natural-image overview, slider, grid, and inspector assets.
+
+## Current viewer requirements
+
+The report assets must show the viewer at the verified capture HEAD. At the planning
+baseline that means:
+
+- Inspector tabs are Frame, Clips, Image offset, and Review; there is no Export tab,
+  and review export/import lives in the Review tab;
+- the viewport fit controls are 1:1 and Fit height; there is no Fit width button;
+- the label toggle is called "Source labels" (show/hide source labels), not HUD;
+- mode descriptions appear in the mode-button tooltips and in the Help dialog's
+  View Modes list;
+- the Review tab shows its note-storage text: notes are not stored in the report file,
+  and exporting review JSON keeps or transfers them.
+
+If the viewer at the capture HEAD differs, capture what it actually shows and update
+this list, the captions, and the alt text to match. Do not stage a UI state the product
+no longer has.
 
 ## Asset tasks
 
@@ -365,13 +414,8 @@ Capture the completed report in slider mode with:
 - enough of the natural frame to communicate the comparison use case;
 - no raw paths or original filenames.
 
-This file remains the shared hero for:
-
-```text
-README.md
-docs/index.md
-docs/guides/reports-and-overlays.md
-```
+This file is the `docs/index.md` hero and the only overview asset; if the README or
+`docs/guides/reports-and-overlays.md` embeds the overview again, it reuses this file.
 
 Do not create separate near-duplicate hero assets.
 
@@ -392,12 +436,14 @@ artificially exaggerated.
 
 ### 4. `report-inspector.webp` — required replacement
 
-Use the same report and frame. Open the inspector or review area that best demonstrates:
+Use the same report and frame. Open the Image offset or Review tab, whichever best
+demonstrates the current Inspector (not the retired Align tab or the removed Export tab):
 
 - frame/category context;
-- source-frame or alignment mapping;
-- selected source/pair;
-- review state or export/import controls where useful.
+- the selected pair and its spatial image offset (Image offset), or its review state,
+  note, and note-storage text (Review).
+
+The previous capture used the old Align tab, so this asset must change.
 
 Inspect the full image for raw physical filenames or paths. If the inspector exposes
 unsafe raw identity that cannot be hidden through supported presentation labels, stop and

@@ -98,6 +98,7 @@ def _apply_cached_alignment_result(
         result=result,
         comparison_cache_key=comparison_key,
         provenance="shared_computed_offsets" if computed_cache_hit else "shared_previous_offsets",
+        evidence_availability="historical_details_unavailable",
     )
 
 

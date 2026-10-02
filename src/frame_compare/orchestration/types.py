@@ -152,6 +152,9 @@ class RunResult:
     errors: list[str] = field(default_factory=list[str])
     warnings: list[str] = field(default_factory=list[str])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
+    # Measured VSView review wait for the human summary. Memory only: never a
+    # phase timing, never persisted to the run record or JSON output.
+    vsview_review_seconds: float = 0.0
 
 
 @dataclass

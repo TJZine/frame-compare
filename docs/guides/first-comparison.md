@@ -66,9 +66,13 @@ case-insensitively.
 
 ### 1. Wizard
 
-The wizard reviews workspace paths, source behavior, frame selection, rendering, and
-publishing choices. It writes configuration only after confirmation. The first-use
-configuration explicitly keeps `slowpics.auto_upload = false`.
+The wizard interactively sets the input directory, the generated-data location,
+reference selection, and the frame-selection goal. It does not configure rendering
+or publishing; those remain config-file and preset concerns. It writes configuration
+only after confirmation, and the first-use configuration explicitly keeps
+`slowpics.auto_upload = false`. After a successful save, or a no-op with nothing to
+change, it prints suggested `doctor`, `run --dry-run`, and `run` commands for your
+resolved workspace and config file. It never runs them.
 
 ### 2. Doctor
 
@@ -83,7 +87,9 @@ comparison; the optional TMDB integration can remain unconfigured.
 ### 3. Dry run
 
 A dry run validates configuration, source discovery, reference and comparison order,
-selection intent, and output intent without entering the rendering pipeline. Check:
+selection intent, and output intent without entering the rendering pipeline. It does
+not probe media, contact the render or alignment runtime, or otherwise prove the
+runtime is ready to render; run `doctor` to confirm runtime readiness. Check:
 
 - the expected reference is first;
 - every intended comparison is present once;
@@ -107,6 +113,50 @@ or command explicitly enables it.
   <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched EBU/DVB clips, one selected frame, the report and run-folder paths, the optional VSView warning summary, and elapsed time.">
   <figcaption>The completed run summary links the report and run folder to the three matched sources, records frame 1000, surfaces the optional VSView warning, and reports the duration.</figcaption>
 </figure>
+
+## Repeat comparisons
+
+Once configuration and the runtime are established, most later comparisons only need
+the preview and execute stages; you do not have to repeat the wizard or doctor for
+every run.
+
+=== "Windows portable"
+
+    ```powershell
+    frame-compare run --dry-run
+    frame-compare run
+    ```
+
+=== "Docker"
+
+    ```bash
+    docker compose run --rm frame-compare-run run --root /workspace --dry-run
+    docker compose run --rm frame-compare-run run --root /workspace
+    ```
+
+=== "Native with uv"
+
+    ```bash
+    uv run --no-sync frame-compare run --root . --dry-run
+    uv run --no-sync frame-compare run --root .
+    ```
+
+=== "Native with pip"
+
+    ```bash
+    frame-compare run --root . --dry-run
+    frame-compare run --root .
+    ```
+
+Revisit `wizard` when the input directory, generated-data location, reference, or
+frame-selection goal changes. After a successful save, or a no-op, it prints suggested
+`doctor`/`run --dry-run`/`run` commands for your resolved workspace and config file.
+Run them through the same route that ran the wizard. In Docker, the printed paths are
+container paths such as `/workspace`; use the Docker commands above from the host. Revisit `doctor` after any change to the
+runtime: an application upgrade, a new machine, a different Docker image, a
+graphics-driver or Vulkan update, or a VSView/plugin change. A dry run only validates
+configuration and intent; it does not probe media or prove the runtime is ready to
+render.
 
 ## Find the result
 

@@ -26,6 +26,7 @@ from tests.orchestration.phase_task_helpers import (
     _context,
     _render_artifacts,
     _RenderRunner,
+    _run_align_phase,
 )
 
 
@@ -113,7 +114,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     )
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    align_output = phase_alignment.run_align_phase(
+    align_output = _run_align_phase(
         ctx,
         selected_frames=list(initial_selection.frames),
     )
@@ -296,7 +297,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    align_output = phase_alignment.run_align_phase(ctx, selected_frames=[0, 66])
+    align_output = _run_align_phase(ctx, selected_frames=[0, 66])
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
     ctx.selection_breakdown = align_output.selection_breakdown

@@ -156,7 +156,6 @@ async def _resolve_run_directory(
                 filenames=[input_videos[0].name],
                 error_type=type(exc).__name__,
                 error=str(exc),
-                exc_info=exc,
             )
 
     filenames = [video.name for video in input_videos]
@@ -540,6 +539,10 @@ async def execute_prep(
     load_sources_start = deps.monotonic_timer()
     workspace = preflight.workspace
     config = resolve_effective_config(preflight.config, request.cli_config_overrides())
+    if deps.vs_loader is None:
+        from frame_compare.vs.loader import DefaultVSLoader
+
+        deps.vs_loader = DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
     validate_skip_analysis_frame_selection_contract(
         skip_analysis=request.skip_analysis,
         config=config.analysis,

@@ -4,17 +4,18 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const assetPath = path.join(
+const assetsPath = path.join(
     repoRoot,
     'src',
     'frame_compare',
     'services',
     'report',
     'assets',
-    'grid_view.js',
 );
+const formatPath = path.join(assetsPath, 'viewer_format.js');
+const assetPath = path.join(assetsPath, 'grid_view.js');
 const context = {};
-const source = `${fs.readFileSync(assetPath, 'utf8')}\nglobalThis.__GridView = GridView;`;
+const source = `${fs.readFileSync(formatPath, 'utf8')}\n${fs.readFileSync(assetPath, 'utf8')}\nglobalThis.__GridView = GridView;`;
 vm.runInNewContext(source, context, { filename: assetPath });
 const grid = context.__GridView;
 
@@ -212,12 +213,6 @@ const viewer = {
     },
     dom: { stage: gridRoot },
     currentFrame() { return frame; },
-    clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
-    sourceHudLabel(clip, profile = 'control') {
-        return `${clip.display[profile]} • ${clip.resolution[0]}×${clip.resolution[1]} • SDR • ${this.formatFileSize(clip.size_bytes)}`;
-    },
-    formatFileSize(size) { return `${(size / 1024 ** 3).toFixed(2)} GiB`; },
-    clipAccessibleName(clip) { return `${clip.display.primary} — ${clip.display.filename}`; },
     referenceClipIndex() { return 0; },
     viewport: { clampPan() {} },
     updateInspectorData() {},
@@ -249,12 +244,14 @@ assert.equal(cells.children[1].dataset.active, 'true');
 assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
 assert.equal(
     cells.children[0].querySelector('.rv-grid-label-text').textContent,
-    'Clip 1 • 1920×1080 • SDR • 17.00 GiB',
+    'Clip 1 · 1920×1080 · SDR · 17.00 GiB',
 );
 assert.equal(
     cells.children[1].querySelector('.rv-grid-label-text').textContent,
-    'Clip 2 • 1080×1920 • SDR • 18.00 GiB',
+    'Clip 2 · 1080×1920 · SDR · 18.00 GiB',
 );
+assert.ok(cells.children[0].getAttribute('aria-label').startsWith('Clip 1 — clip-1.mkv'));
+assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /^Clip \d,/);
 viewer.state.overlaysHidden = true;
 owner.updateCellRoles();
 assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);

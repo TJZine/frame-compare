@@ -74,8 +74,10 @@ const context = {
 };
 context.globalThis = context;
 
-const asset = path.join(__dirname, '..', '..', 'src', 'frame_compare', 'services', 'report', 'assets', 'review_state.js');
-vm.runInNewContext(`${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, context, { filename: asset });
+const assets = path.join(__dirname, '..', '..', 'src', 'frame_compare', 'services', 'report', 'assets');
+const formatAsset = path.join(assets, 'viewer_format.js');
+const asset = path.join(assets, 'review_state.js');
+vm.runInNewContext(`${fs.readFileSync(formatAsset, 'utf8')}\n${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, context, { filename: asset });
 const ReviewState = context.__ReviewState;
 const reportId = `report_${'c'.repeat(32)}`;
 const encoder = new TextEncoder();
@@ -221,9 +223,11 @@ async function main() {
     controller.render();
     assert.equal(dom.reviewPreferred.replaceCount, 1);
     assert.equal(announcements.length, 0);
+    assert.equal(dom.reviewStatus.textContent, '0 review records saved in this browser.');
 
     dom.reviewNote.value = 'working note';
     dom.reviewNote.fire('input');
+    assert.equal(dom.reviewStatus.textContent, '1 review record saved in this browser.');
     const replacementCount = dom.reviewPreferred.replaceCount;
     viewer.announce('Lens on.');
     controller.render();
@@ -263,8 +267,8 @@ async function main() {
     storage.failWrite = true;
     dom.reviewBookmark.checked = true;
     dom.reviewBookmark.fire('change');
-    assert.match(dom.reviewStatus.textContent, /could not be saved/);
-    assert.match(announcements.at(-1), /could not be saved/);
+    assert.equal(dom.reviewStatus.textContent, ReviewState.constants.PERSISTENCE_WARNING);
+    assert.equal(announcements.at(-1), ReviewState.constants.PERSISTENCE_WARNING);
     storage.failWrite = false;
 
     dom.reviewExport.click();

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from fractions import Fraction
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -16,7 +20,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.execution_types import RenderArtifacts
+from frame_compare.orchestration.execution_types import AlignPhaseOutput, RenderArtifacts
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.media_facts import (
@@ -40,22 +44,11 @@ random_seed = 7
 
 [audio_alignment]
 enable = true
-sample_rate = 12000
 max_offset_seconds = 4.5
 use_vsview = true
 force_interactive = false
 cache_results = false
-correlation_mode = "gcc_phat"
-preprocessing_mode = "standard"
 channel_strategy = "best_channel"
-confidence_threshold = 0.25
-ambiguity_peak_ratio = 1.5
-window_length_seconds = 8.0
-window_stride_seconds = 2.0
-minimum_valid_windows = 2
-consensus_minimum_ratio = 0.75
-refinement_mode = "local"
-refinement_sample_rate = 16000
 reference_stream = 1
 comparison_streams = { encode = 2 }
 
@@ -65,6 +58,25 @@ use_ffmpeg = true
 [report]
 enable = false
 """
+
+
+def _run_align_phase(*args: Any, **kwargs: Any) -> AlignPhaseOutput:
+    """Run the async phase while adapting existing synchronous test doubles."""
+
+    async def invoke() -> AlignPhaseOutput:
+        from frame_compare.orchestration import phase_alignment
+
+        collaborator = phase_alignment.align_clips_from_request
+        if inspect.iscoroutinefunction(collaborator):
+            return await phase_alignment.run_align_phase(*args, **kwargs)
+
+        async def async_collaborator(*inner_args: Any, **inner_kwargs: Any) -> Any:
+            return collaborator(*inner_args, **inner_kwargs)
+
+        with patch.object(phase_alignment, "align_clips_from_request", async_collaborator):
+            return await phase_alignment.run_align_phase(*args, **kwargs)
+
+    return asyncio.run(invoke())
 
 
 class _RenderRunner:

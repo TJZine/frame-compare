@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 
 
 class FakeVSLoader:
+    def __init__(self, memory_limit_mb: int | None = None) -> None:
+        assert memory_limit_mb is None
+
     def load(self, path: Path) -> SourceInfo:
         _ = path
         return SourceInfo(

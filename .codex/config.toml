@@ -1,3 +1,8 @@
+[features]
+multi_agent = true
+# Codex currently ignores agents.max_depth under the V2 runtime.
+multi_agent_v2 = false
+
 [agents]
 max_threads = 6
 max_depth = 1
@@ -7,8 +12,12 @@ description = "Read-only Frame Compare codebase explorer for gathering evidence 
 config_file = "agents/explorer.toml"
 
 [agents.reviewer]
-description = "Read-only reviewer focused on correctness, regressions, security, architecture fit, maintainability, and missing tests."
+description = "Default read-only reviewer (standard depth) focused on correctness, regressions, security, architecture fit, maintainability, and missing tests. Use deep_reviewer for high-risk or broad changes."
 config_file = "agents/reviewer.toml"
+
+[agents.deep_reviewer]
+description = "Deep read-only reviewer for high-risk, broad, or hard-to-prove changes; same focus as reviewer with more reasoning depth."
+config_file = "agents/deep-reviewer.toml"
 
 [agents.docs_researcher]
 description = "Read-only documentation specialist for verifying API, runtime, packaging, and tool behavior from official sources."

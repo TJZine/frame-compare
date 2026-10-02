@@ -2,6 +2,7 @@
 
 import sys
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 from rich.console import Console
@@ -11,6 +12,7 @@ from frame_compare.orchestration.progress import (
     emit_execution_section_end,
     emit_execution_section_start,
     select_reporter,
+    start_phase_progress,
 )
 from frame_compare.utils.progress import (
     LogProgressReporter,
@@ -150,6 +152,55 @@ def test_select_reporter_no_color_non_tty_returns_plain():
     assert isinstance(reporter, PlainProgressReporter)
 
 
+def test_interactive_alignment_uses_plain_activity_without_discarding_log_progress() -> None:
+    rich_reporter = RichProgressReporter(no_color=True)
+    with patch.object(
+        rich_reporter,
+        "start_phase",
+        wraps=rich_reporter.start_phase,
+    ) as rich_start_phase:
+        start_phase_progress(
+            rich_reporter,
+            name="align",
+            display_label="ALIGN",
+            total=3,
+        )
+    rich_start_phase.assert_called_once_with("Align", total=1)
+    rich_reporter.complete_phase()
+
+    log_reporter = LogProgressReporter()
+    with patch.object(
+        log_reporter,
+        "start_phase",
+        wraps=log_reporter.start_phase,
+    ) as log_start_phase:
+        start_phase_progress(
+            log_reporter,
+            name="align",
+            display_label="ALIGN",
+            total=3,
+        )
+    log_start_phase.assert_called_once_with("align", total=3)
+
+
+def test_rich_phase_label_drops_skip_detail() -> None:
+    """Rich live labels use the bare title-case label; detail rides the summary."""
+    reporter = RichProgressReporter(no_color=True)
+    with patch.object(
+        reporter,
+        "start_phase",
+        wraps=reporter.start_phase,
+    ) as start_phase:
+        start_phase_progress(
+            reporter,
+            name="publish",
+            display_label="PUBLISH  Disabled",
+            total=1,
+        )
+    start_phase.assert_called_once_with("Publish", total=1)
+    reporter.complete_phase()
+
+
 @pytest.mark.parametrize("width", [60, 80])
 def test_execution_section_is_rich_only_and_fits_without_color(
     width: int,
@@ -157,7 +208,7 @@ def test_execution_section_is_rich_only_and_fits_without_color(
 ) -> None:
     output = StringIO()
     console = Console(file=output, width=width, no_color=True, force_terminal=False)
-    monkeypatch.setattr(progress_module, "Console", lambda **_kwargs: console)
+    monkeypatch.setattr(progress_module, "human_console", lambda **_kwargs: console)
 
     reporter = RichProgressReporter(no_color=True)
     emit_execution_section_start(reporter, no_color=True)

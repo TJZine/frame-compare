@@ -7,27 +7,93 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ## Unreleased
 
+### Added
+
+- Optional `[runtime].memory_limit_mb` (integer, minimum 512) caps the
+  VapourSynth frame cache for analysis, rendering, alignment video checks, and
+  the separate VSView session. Unset retains the native default; this is not
+  a hard limit on total process memory and does not affect audio buffers.
+
+### Changed
+
+- Select video-check positions by reference motion instead of even spacing: each
+  base and examined-target slot scores the candidate frame with the most luma
+  motion, while unexamined targets keep evenly spaced planned frames that are
+  never scored. Without stream overrides, the reference now switches to its
+  best-ranked stream in a language both sides share when its default language
+  is missing from the comparison, and `screenshots.active_rect_detection`
+  defaults to `auto`. Stale entries miss and recompute under the
+  `whole-track-chunked-phat-video-check-motion-20260929` policy.
+- Analyse retimed sources' audio on their effective timeline: when a source's
+  effective frame rate differs from its native rate (`match_fps` or a per-source
+  `effective_fps` override), alignment stretches its audio by the exact
+  source-over-effective ratio before chunking, so 24 fps releases of 23.976
+  content and PAL 25 fps releases hold a constant frame offset. Verbose output
+  and panel details note each retimed side, and stale entries miss and recompute
+  under the `whole-track-chunked-phat-video-check-motion-20260929` policy.
+- Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT
+  correlation plus container start compensation and bounded L-SMASH video
+  confirmation. Fresh results apply only when global audio authority, the exact-frame
+  video vote, and every frame-distinct credible disagreement gate pass; unresolved
+  runs/chunks and video-confirmed alternatives remain reviewable but unapplied.
+  Level, compression, downmix, stem, quiet, and locally inconclusive weak-audio
+  differences remain context rather than false vetoes; a video-confirmed alternative
+  still blocks at any target. Terminal and VSView review now share the same
+  bounded region/check-point projection, and only `trusted_automatic` results reach
+  trims or the computed cache. The removed `[audio_alignment]` tuning fields are
+  rejected as unknown keys, the diagnostic artifact moves to schema v4, VSView
+  session metadata moves
+  to v5 (both extended in place with explicit chunk/run/context records under one
+  shared 2 MiB per-comparison bound; native metadata omits per-chunk rows), and stale
+  computed or shared entries miss and recompute under the new
+  `whole-track-chunked-phat-video-check-motion-20260929` policy. Cache schema v2 and the
+  manual-override schema are unchanged.
+  Review regions now use reference-video time, retain the actual winning local
+  video offset, and report every applicable audio/video refusal reason.
+- **Upgrade note:** configs that still set any removed `[audio_alignment]` key
+  (`sample_rate`, `correlation_mode`, `preprocessing_mode`,
+  `confidence_threshold`, `ambiguity_peak_ratio`, `window_length_seconds`,
+  `window_stride_seconds`, `minimum_valid_windows`, `consensus_minimum_ratio`,
+  `refinement_mode`, `refinement_sample_rate`) now fail validation as unknown
+  keys; delete each such key.
+
+## [0.6.0]
+
 ### Fixed
 
 - Populate guarded GitHub releases from the matching validated changelog section
   instead of a placeholder, and verify the release body through publication.
+- Preserve successful TMDB variant results when another lookup fails, while keeping
+  credentials and request details out of diagnostics.
+- Isolate VSView child imports from caller-controlled Python paths and repair stable
+  `doctor` guidance links.
+- Make phase, render-failure, and slow.pics webhook cancellation outcomes deterministic,
+  including repeated cancellation while a thread-backed request is draining.
+- Require signed, canonical Windows update manifests; verify signatures before parsing,
+  bind updates to an exact clean source/version, and bound archive extraction.
 
 ### Changed
 
-- Replace the retired interactive viewer integration with VSView 0.10.3 using its
+- Replace the retired interactive viewer integration with VSView 0.11.0 using its
   documented named-output API. The supported dependency is the base `vsview` extra;
   its `recommended` and `full` extras are not selected.
 - Preserve generated-session L-SMASH-Works loading, Frame Compare overlays, source
-  ordering, audio alignment semantics, and terminal confirmation while removing the
-  old viewer compatibility bootstrap. VSView's BestSource workspace remains UI-only
-  and does not replace Frame Compare's analysis, probe, render, index, or cache-key
-  source loader.
+  ordering, audio offset sign and review conventions, and terminal confirmation while
+  removing the old viewer compatibility bootstrap. VSView's BestSource workspace
+  remains UI-only and does not replace Frame Compare's analysis, probe, render, index,
+  or cache-key source loader.
 - Rename interactive diagnostic and machine-readable identifiers to VSView, including
   `audio_alignment.use_vsview`, the `vsview` doctor check, and the
   `browser_clipboard_or_vsview` dry-run field. Numeric error codes remain unchanged.
 - Bump the shared alignment reuse cache to schema v2 with neutral interactive origins;
   schema-v1 entries are ignored and recomputed. Run-local `manual_overrides.toml`
   remains a v1 file with the same path and offset semantics.
+- Replace unbounded full-track audio correlation with selected-stream timeline windows,
+  fixed FFT/window/scoring budgets, sequential extraction, requested-rate confidence
+  scoring, and majority consensus. Requests that cannot be analyzed safely remain
+  unapplied with an explicit diagnostic instead of using a truncated estimate.
+- Refresh the locked dependency graph and update the coordinated uv toolchain to
+  0.12.9 for the v0.6.0 release.
 
 ### Upgrade notes
 
@@ -38,6 +104,12 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 - Replace `audio_alignment.use_vspreview = true` with
   `audio_alignment.use_vsview = true` in authored configuration. The old key is no
   longer accepted, and the shared alignment reuse cache is rebuilt as schema v2.
+- Computed audio-alignment cache entries are recomputed under the new bounded estimator.
+  Media without a reliable selected-stream duration, or settings outside its fixed work
+  budget, now continue through the existing manual/VSView or best-effort rejection path.
+- Windows code-only updates now accept only the canonical signed manifest and fail
+  closed when the installed version cannot be established; use a complete portable
+  reinstall for legacy or unverifiable bundles.
 
 ## [0.5.0]
 

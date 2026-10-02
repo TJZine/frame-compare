@@ -87,8 +87,10 @@ def _cached_metrics(
     return cache_result.metrics
 
 
-def _load_analysis_source(source_path: Path, vs_loader: VSLoader | None) -> SourceInfo:
-    loader = vs_loader or DefaultVSLoader()
+def _load_analysis_source(
+    source_path: Path, vs_loader: VSLoader | None, memory_limit_mb: int | None
+) -> SourceInfo:
+    loader = vs_loader or DefaultVSLoader(memory_limit_mb=memory_limit_mb)
     try:
         return loader.load(source_path)
     except (PluginNotFoundError, SourceLoadError):
@@ -185,6 +187,7 @@ def calculate_metrics(
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
     timing_recorder: AnalysisTimingRecorder | None = None,
+    memory_limit_mb: int | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -199,6 +202,7 @@ def calculate_metrics(
         config: Analysis configuration
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
+        memory_limit_mb: Optional VapourSynth frame-cache cap in MiB for the default loader.
         vs_loader: Optional VapourSynth clip loader seam
         selection_domain: Optional selection-domain token included in
             the analysis cache key when source overrides affect reference
@@ -261,7 +265,7 @@ def calculate_metrics(
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     with record_span(timing_recorder, "source_load"):
-        source = _load_analysis_source(source_path, vs_loader)
+        source = _load_analysis_source(source_path, vs_loader, memory_limit_mb)
     try:
         resolved_range = _resolved_metric_frame_range(source, metric_frame_range)
         strategy_result = calculate_metric_strategy(

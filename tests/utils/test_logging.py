@@ -113,3 +113,22 @@ def test_repeated_configuration_replaces_renderer(monkeypatch: pytest.MonkeyPatc
     structlog.get_logger().info("message")
 
     assert json.loads(stream.getvalue())["event"] == "message"
+
+
+def test_json_exception_diagnostics_do_not_capture_locals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stream)
+    configure_logging(log_format="json")
+    api_key = "sentinel-tmdb-api-key"
+
+    try:
+        raise RuntimeError("lookup failed")
+    except RuntimeError as exc:
+        structlog.get_logger().warning("metadata_degraded", exc_info=exc)
+
+    payload = json.loads(stream.getvalue())
+    assert payload["exception"]
+    assert "locals" not in payload["exception"][0]["frames"][0]
+    assert api_key not in json.dumps(payload)

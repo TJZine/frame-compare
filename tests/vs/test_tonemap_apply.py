@@ -12,7 +12,7 @@ from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I
 
 
 @patch("frame_compare.vs.tonemap_conversion.detect_hdr")
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):
     """Verify metadata extraction is attempted in fallback path if missing."""
     mock_detect.return_value = {"libplacebo": False}
@@ -36,10 +36,10 @@ def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_
     assert result is fallback_result
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
-@patch("frame_compare.vs.tonemap._apply_libplacebo")
-@patch("frame_compare.vs.tonemap._fallback_tonemap")
+@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
+@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
 def test_apply_tonemap_falls_back_on_libplacebo_runtime_failure(
     mock_fallback, mock_libplacebo, mock_runtime_usable, mock_detect
 ):
@@ -59,10 +59,10 @@ def test_apply_tonemap_falls_back_on_libplacebo_runtime_failure(
     assert result is mock_fallback.return_value
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
-@patch("frame_compare.vs.tonemap._apply_libplacebo")
-@patch("frame_compare.vs.tonemap._fallback_tonemap")
+@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
+@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
 def test_apply_tonemap_uses_libplacebo_when_available(
     mock_fallback, mock_libplacebo, mock_runtime_usable, mock_detect
 ):
@@ -80,7 +80,7 @@ def test_apply_tonemap_uses_libplacebo_when_available(
         mock_fallback.assert_not_called()
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_runtime_usable, mock_detect):
     """Verify unsupported tone curve raises error in libplacebo path."""
@@ -97,9 +97,9 @@ def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_runtime_usable, 
     assert "bt2390, spline, reinhard" in exc.value.context.hint
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
-@patch("frame_compare.vs.tonemap._apply_libplacebo")
-@patch("frame_compare.vs.tonemap._fallback_tonemap")
+@patch("frame_compare.vs.env.detect_plugins")
+@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
+@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
 def test_apply_tonemap_uses_fallback_when_libplacebo_missing(
     mock_fallback, mock_libplacebo, mock_detect
 ):
@@ -115,10 +115,10 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_missing(
     mock_libplacebo.assert_not_called()
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=False)
-@patch("frame_compare.vs.tonemap._apply_libplacebo")
-@patch("frame_compare.vs.tonemap._fallback_tonemap")
+@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
+@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
 def test_apply_tonemap_uses_fallback_when_libplacebo_unusable(
     mock_fallback, mock_libplacebo, mock_runtime_usable, mock_detect
 ):
@@ -137,7 +137,7 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_unusable(
     assert result is mock_fallback.return_value
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_rejects_non_positive_target_nits_before_processing(
     mock_runtime_usable, mock_detect
@@ -154,7 +154,7 @@ def test_apply_tonemap_rejects_non_positive_target_nits_before_processing(
 
 
 @patch("frame_compare.vs.tonemap_conversion.detect_hdr")
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_detects_metadata_when_missing_libplacebo(
     mock_runtime_usable, mock_detect, mock_detect_hdr
@@ -185,9 +185,9 @@ def test_apply_tonemap_detects_metadata_when_missing_libplacebo(
         assert kwargs["src_max"] == 1234
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
-@patch("frame_compare.vs.tonemap._fallback_tonemap")
+@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
 def test_apply_tonemap_typeerror_is_fatal_without_retry_or_fallback(
     mock_fallback, mock_runtime_usable, mock_detect
 ):
@@ -210,7 +210,7 @@ def test_apply_tonemap_typeerror_is_fatal_without_retry_or_fallback(
         mock_fallback.assert_not_called()
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 def test_apply_tonemap_rejects_non_positive_target_nits_for_fallback_path(mock_detect):
     """Validation should run before selecting libplacebo/fallback path."""
     mock_detect.return_value = {"libplacebo": False}
@@ -221,7 +221,7 @@ def test_apply_tonemap_rejects_non_positive_target_nits_for_fallback_path(mock_d
         apply_tonemap(mock_clip, settings)
 
 
-@patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_runtime_usable, mock_detect):
     """Verify HDR10 metadata yields src_csp hint and SDR output defaults."""
