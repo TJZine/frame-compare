@@ -362,7 +362,7 @@ def test_in_flight_consumer_finishes_before_cancellation_is_observed() -> None:
 
 def _paired_failure(
     *,
-    category: str,
+    category: CollectionFailureCategory,
     reference_exited: bool = True,
     comparison_exited: bool = True,
 ) -> PairedAudioCollectionFailure:
@@ -392,7 +392,7 @@ def _paired_failure(
         )
 
     return PairedAudioCollectionFailure(
-        category=category,  # type: ignore[arg-type]
+        category=category,
         side="reference",
         message=f"paired audio collection failed: {category}",
         reference_facts=facts(),

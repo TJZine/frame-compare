@@ -21,6 +21,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioCollectionFacts,
     AudioCollectionFailure,
     AudioDecisionCandidate,
+    AudioPairSide,
     AudioSameFrameContext,
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
@@ -38,7 +39,7 @@ OTHER_DIGEST = "c" * 64
 POLICY = "whole-track-chunked-phat-video-check-motion-20260929"
 
 
-def stream(role: str, digest: str = DIGEST) -> SelectedAudioStreamEvidence:
+def stream(role: AudioPairSide, digest: str = DIGEST) -> SelectedAudioStreamEvidence:
     return SelectedAudioStreamEvidence(
         role=role,
         source_identity_digest=digest,
@@ -84,7 +85,7 @@ def retimed_comparison_stream() -> SelectedAudioStreamEvidence:
     )
 
 
-def collection(role: str) -> AudioCollectionFacts:
+def collection(role: AudioPairSide) -> AudioCollectionFacts:
     return AudioCollectionFacts(
         role=role,
         emitted_samples=2880000,

@@ -29,9 +29,12 @@ from frame_compare.services.alignment_decision import (
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AudioAuthorityRecount,
+    AudioOutcomeStatus,
     VideoCheckObservation,
     VideoTargetEvidence,
+    VideoTargetKind,
     VideoTargetPosition,
+    VideoTargetResolution,
 )
 from frame_compare.utils.alignment_policy import rounded_frame
 from tests.services.alignment_synthetic_audio import (
@@ -231,14 +234,14 @@ def _observation(index: int, *, lag: int | None, credible: bool, agrees: bool) -
 def _estimate(
     observations: tuple[ChunkObservation, ...],
     *,
-    outcome: str = "agreed",
+    outcome: AudioOutcomeStatus = "agreed",
     global_lag: int = 0,
     agreeing_count: int | None = None,
     runs: tuple[ChunkRun, ...] = (),
 ) -> ChunkedAudioEstimate:
     credible_count = sum(item.credible for item in observations)
     return ChunkedAudioEstimate(
-        outcome=outcome,  # type: ignore[arg-type]
+        outcome=outcome,
         global_lag=global_lag,
         observations=observations,
         runs=runs,
@@ -261,11 +264,13 @@ def _plan_for(*observations: ChunkObservation) -> ChunkPlan:
     )
 
 
-def _authority(*, passed: bool = True, status: str = "agreed") -> AudioAuthorityRecount:
+def _authority(
+    *, passed: bool = True, status: AudioOutcomeStatus = "agreed"
+) -> AudioAuthorityRecount:
     return AudioAuthorityRecount(
         raw_status="agreed",
         raw_agreeing_chunks=3,
-        authority_status=status,  # type: ignore[arg-type]
+        authority_status=status,
         authority_agreeing_chunks=3 if passed else 1,
         passed=passed,
     )
@@ -295,10 +300,10 @@ def _video(
 
 
 def _target(
-    kind: str,
+    kind: VideoTargetKind,
     first: int,
     last: int,
-    resolution: str,
+    resolution: VideoTargetResolution,
     *,
     position_index: int,
 ) -> VideoTargetEvidence:
@@ -330,7 +335,7 @@ def _target(
     else:
         positions = (VideoTargetPosition(position_index, position_index, 1.0, 1.0, "neither"),)
     return VideoTargetEvidence(
-        kind=kind,  # type: ignore[arg-type]
+        kind=kind,
         first_chunk_index=first,
         last_chunk_index=last,
         credible=True,
@@ -338,7 +343,7 @@ def _target(
         end_sample=((last) + 1) * 240_000,
         target_offset=1,
         alternative_offsets=(1, 2),
-        resolution=resolution,  # type: ignore[arg-type]
+        resolution=resolution,
         positions=positions,
     )
 

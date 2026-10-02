@@ -7,7 +7,7 @@ from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
-from typing import Literal
+from typing import Literal, Protocol, cast
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -31,14 +31,23 @@ from frame_compare.utils.alignment_evidence import (
     AudioChunkColumns,
     AudioStageOutcome,
     VideoCheckObservation,
+    VideoTargetResolution,
 )
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.types import SourceInfo
 from tests.services.test_alignment_evidence import attempt_with_chunks
 
-if isinstance(vs, MagicMock):
+if isinstance(cast(object, vs), MagicMock):
     pytest.skip("VapourSynth is not installed", allow_module_level=True)
 
+
+class _FloatFormats(Protocol):
+    GRAYS: int
+    YUV444PS: int
+
+
+# The repo VS stub omits these real runtime constants.
+_FLOAT_FORMATS = cast(_FloatFormats, vs)
 FPS = Fraction(24, 1)
 
 
@@ -56,7 +65,7 @@ def _moving_clip(
                     width=8,
                     height=9,
                     length=1,
-                    format=vs.GRAYS,
+                    format=_FLOAT_FORMATS.GRAYS,
                     color=(transform(value) if transform is not None else value),
                 )
             )
@@ -396,7 +405,9 @@ def test_video_confirmation_only_accepts_neighbouring_truths(
 
 
 def test_static_content_is_uninformative(tmp_path: Path) -> None:
-    clip = vs.core.std.BlankClip(width=64, height=36, length=60, format=vs.GRAYS, color=0)
+    clip = vs.core.std.BlankClip(
+        width=64, height=36, length=60, format=_FLOAT_FORMATS.GRAYS, color=0
+    )
     result = _run(tmp_path, truth=0, reference_clip=clip, comparison_clip=clip)
     assert result.observation == "observed"
     assert result.confirmed_offset is None
@@ -503,7 +514,9 @@ def test_missing_or_failing_loader_is_unavailable(tmp_path: Path) -> None:
 
 
 def test_non_finite_reference_luma_is_unavailable(tmp_path: Path) -> None:
-    float_clip = vs.core.std.BlankClip(format=vs.YUV444PS, width=128, height=72, length=180)
+    float_clip = vs.core.std.BlankClip(
+        format=_FLOAT_FORMATS.YUV444PS, width=128, height=72, length=180
+    )
     nan_clip = vs.core.std.Expr(float_clip, ["0 0 /", "", ""])
 
     result = _run(tmp_path, truth=0, reference_clip=nan_clip, comparison_clip=_moving_clip())
@@ -628,12 +641,12 @@ def test_cancellation_between_positions_is_observed(
     original = alignment_video._read_frame
     reads = 0
 
-    def read_frame(node: object, frame: int) -> np.ndarray:
+    def read_frame(node: vs.VideoNode, frame: int) -> np.ndarray:
         nonlocal reads
         reads += 1
         if reads >= 6:
             cancellation.set()
-        return original(node, frame)  # type: ignore[arg-type]
+        return original(node, frame)
 
     monkeypatch.setattr(alignment_video, "_read_frame", read_frame)
     result = _run(tmp_path, truth=0, cancellation=cancellation)
@@ -642,7 +655,11 @@ def test_cancellation_between_positions_is_observed(
 
 def test_source_identity_change_after_load_is_unavailable(tmp_path: Path) -> None:
     reference, comparison, loader = _media(tmp_path, _moving_clip(), _moving_clip())
-    loader.after_load = lambda path: path.write_bytes(path.read_bytes() + b"changed")
+
+    def change_identity(path: Path) -> None:
+        path.write_bytes(path.read_bytes() + b"changed")
+
+    loader.after_load = change_identity
     result = alignment_video.check_video_alignment(
         reference=reference,
         comparison=comparison,
@@ -956,7 +973,9 @@ def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
 
 
 def test_inconclusive_video_still_has_review_check_points(tmp_path: Path) -> None:
-    clip = vs.core.std.BlankClip(width=64, height=36, length=60, format=vs.GRAYS, color=0)
+    clip = vs.core.std.BlankClip(
+        width=64, height=36, length=60, format=_FLOAT_FORMATS.GRAYS, color=0
+    )
     result = _run(tmp_path, truth=0, reference_clip=clip, comparison_clip=clip)
     assert result.confirmed_offset is None
     assert len(result.check_points) == 5
@@ -968,7 +987,7 @@ def _checkpoint_target(
     offset: int,
     alternatives: tuple[int, ...],
     *,
-    resolution: str = "unresolved",
+    resolution: VideoTargetResolution = "unresolved",
     winner: Literal["confirmed", "neither"] = "neither",
 ) -> alignment_video.VideoTargetEvidence:
     return alignment_video.VideoTargetEvidence(
@@ -1019,6 +1038,7 @@ def test_check_points_use_producer_scored_offsets_for_confirmed_contrast(
 def test_check_points_target_source(
     scored: bool, reference_frame: int, comparison_frame: int
 ) -> None:
+    planned: dict[tuple[Literal["chunk", "run"], int, int], tuple[int, ...]] | None
     if scored:
         target = _checkpoint_target(1, 500, 246, (245, 246, 247))
         confirmed = 146

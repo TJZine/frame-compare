@@ -1008,8 +1008,8 @@ def test_at_most_two_simultaneous_children(monkeypatch: pytest.MonkeyPatch) -> N
             release()
             return code
 
-        process.poll = poll  # type: ignore[method-assign]
-        process.wait = wait  # type: ignore[method-assign]
+        monkeypatch.setattr(process, "poll", poll)
+        monkeypatch.setattr(process, "wait", wait)
         return process
 
     monkeypatch.setattr(alignment_streaming.subprocess, "Popen", tracking_popen)
@@ -1109,7 +1109,7 @@ def test_keyboard_interrupt_mid_queue_wait_reraises_after_cleanup(
                 raise KeyboardInterrupt("injected mid-wait interrupt")
             return real_get(*get_args, **get_kwargs)
 
-        infrastructure.chunks.get = get_once  # type: ignore[method-assign]
+        monkeypatch.setattr(infrastructure.chunks, "get", get_once)
         return infrastructure
 
     monkeypatch.setattr(alignment_streaming.subprocess, "Popen", tracking_popen)
@@ -1145,8 +1145,10 @@ def test_request_validation_happens_before_spawn(
     accumulator = _StrictAccumulator()
     base = _paired_kwargs(accumulator)
     with pytest.raises(ValueError, match="chunks must contain at least one planned chunk"):
-        collect_paired_audio_chunks(_child_argv(), _child_argv(), **{**base, "chunks": ()})
-    bad_requests = [
+        collect_paired_audio_chunks(
+            _child_argv(), _child_argv(), **_paired_kwargs(accumulator, chunks=())
+        )
+    bad_requests: list[dict[str, Any]] = [
         {**base, "lag_samples": -1},
         {**base, "consumer": None},
         {**base, "reference_limit_samples": 0},
