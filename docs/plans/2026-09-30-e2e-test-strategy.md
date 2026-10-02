@@ -1058,13 +1058,58 @@ Unit E follows after the controller checks the repair.
 - **Final gates:** the full native gate, and one
   `bash tools/verify_docker_integration.sh --no-build`.
 
+### Unit F: test performance (`.handoff/T8-codex-test-performance.md`, after unit E)
+
+Maintainer approval (2026-10-02): parallel execution with `pytest-xdist`, caching
+generated Docker media fixtures, fixing slow tests, and CI speedups. The
+condition: no large adverse effects.
+
+**Starting point:**
+- native suite: about 115 s for 3,050 tests on 10 cores, run serially;
+- Docker gate: about 7.5 min, 434 s of it pytest. The alignment acceptance media
+  is regenerated on every run.
+
+**Steps, serial:** F1 measure → F2 xdist (native) → F3a parallel container
+(u4 media grouped on one worker) → F3b u4 media cache → F4 slow tests →
+F5 CI (parallel only) → F6 docs.
+
+**Guards, applied to every step:**
+- Outcomes are identical per test: the `sort -u` sets of (`classname::name`
+  without xdist's `@group` suffix, outcome) from `--junitxml`, serial against
+  parallel, natively and in Docker.
+- No deleted tests, changed assertions, changed expected values, production
+  behavior changes or new production seams. Test-harness environment variables
+  are allowed, as with the E2E variables.
+- **Parallel safety:** after F2, F3a and F4, five consecutive full native
+  parallel runs pass. After F3a and F3b, the E2E summaries from the serial
+  baseline Docker run and the parallel run are byte-identical. A test that shares
+  state is made isolated, or pinned with `xdist_group`, never skipped.
+- **Payoff:** a change stays only if it saves the smaller of 10% or 10 s of its
+  target's median wall time over 3 runs, and more than the spread of those runs.
+  Otherwise it is reverted and reported. F5 (CI) is exempt: it can't be measured
+  without pushing.
+- Timeouts are never raised to accommodate parallelism.
+- The Docker media cache is read-only to tests: files are symlinked into each
+  worker's temp directory, so L-SMASH `.lwi` indexes never land in the cache.
+  Cached media is verified by FFmpeg stream hashes, not byte hashes, because
+  Matroska's IDs are random.
+- CI keeps `--no-cache`, with no new caches. The only CI change is parallel
+  runs.
+- The default `pytest` invocation keeps working. `-n` goes in the command canon,
+  CI and the verify script, not in `addopts`, so single-test runs stay fast.
+
+**Follow-up (outside unit F):** `tests/workflows/test_docker_integration_contract.py` runs the real `tools/verify_docker_integration.sh` with `cwd=repo_root` and a fake `docker`. The script's `rm -rf -- generated/e2e` therefore deletes the developer's E2E artifacts on every native run. Fix by running the script against a temp copy of the repo or a temp working directory, so the test has no side effects outside `tmp_path`.
+
 ## Invariants
 
 - No product behavior change, apart from S7's deletion of test-only production code
   and S9's fix.
 - No test-only production seams: no new flags, env reads, hooks or exports in
   `src/`.
-- No new dependencies and no new pytest plugins.
+- No new dependencies and no new pytest plugins, except `pytest-xdist` in unit F
+  (maintainer, 2026-10-02).
+- Unit F's test-media cache may write under `generated/test-media-cache`, a
+  test-harness location like `artifact_root`.
 - No added skips, `xfail`s or loosened assertions in retained tests, except S5's
   deletion of the inverted negative-trigger assertions. A retained test that fails
   on the base is a possible product bug: report it `blocked`.
@@ -1100,6 +1145,7 @@ Any of these stops the unit and sends a `blocked` message:
 | C | C0 records; full gate per commit (the C5 "after" run may count); C5 line and branch diff | C2 Docker mutations; verify script per the C4 triggers | mutation records |
 | D | lane `pyright --warnings`; full gate per lane | verify script per the D gate triggers | case mapping; one mutation per group and per rewrite |
 | E | `pyright --warnings` repo-wide, with `tests` included; full gate | verify script once | rules text against S10 and S11 |
+| F | junitxml outcome sets, serial against parallel; 5 consecutive parallel runs; full gate | serial against parallel junitxml; E2E summary identity; cached media stream hashes | medians of 3, before → after |
 
 ## Residual risks
 
@@ -1323,3 +1369,21 @@ Reverting one restores its tests and any seams it deleted.
   - All production mutations were restored and the final checkout was clean.
     An external fast-forward to `a997ef51` during lane 3a was preserved; no
     production changes were committed by the repair workers. Nothing pushed.
+- 2026-10-02: unit E (T7) completed at `26459597`.
+  - Test pyright errors: 35 → 0. `[tool.pyright] include = ["src", "tests"]`, and
+    repo-wide pyright reports 0/0.
+  - `AGENTS.md`'s testing block is six one-line rules ending with a pointer to
+    `python-test-design`. The skill, 92 lines, carries S10 and S11 in full.
+  - T7's gates: the full native suite twice, 3,069 passed and 90 skipped each, with
+    no failing node IDs; Docker 276 passed with zero skips; the documentation
+    tests passed.
+  - **Checkpoint E** (controller, 2026-10-02): verified.
+    - The T7 diff adds 2 assertion lines (type narrowing) and removes none, and
+      touches no `src/` file.
+    - Repo-wide pyright with tests is 0/0.
+    - The skill covers the flow rule, one owner, the seven categories, internal
+      assertions, R1 and R2.
+    - The native and Docker results are reused from T7 under the currency rule.
+  - Test lines: 81,523.
+  - **Unit F** (test performance) is added above, with its Invariants amendments,
+    and dispatched from `.handoff/T8-codex-test-performance.md`.
