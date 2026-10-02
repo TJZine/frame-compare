@@ -177,6 +177,10 @@ def check_video_alignment(
         )
         if scored_positions is None:
             return _failed()
+        if _is_cancelled(cancellation):
+            return _failed()
+        if not _identities_match(reference) or not _identities_match(comparison):
+            return _failed()
         reference_frames.clear()
         base_positions, winners, margins = scored_positions
         confirmed = _confirmed_offset(
@@ -314,6 +318,10 @@ def check_video_alignment(
             chunks=chunks,
             planned_target_frames=planned_target_frames,
         )
+        if _is_cancelled(cancellation):
+            return _failed()
+        if not _identities_match(reference) or not _identities_match(comparison):
+            return _failed()
         return VideoCheckObservation(
             observation="observed",
             scored_offsets=scored_offsets,

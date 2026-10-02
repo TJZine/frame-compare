@@ -156,7 +156,7 @@ async def test_loadsources_reuses_clip_probe_cache_file(
 
 
 @pytest.fixture
-def runtime_clip(tmp_path: Path) -> Path:
+def runtime_clip(tmp_path: Path, require_ffmpeg: None) -> Path:
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     run_subprocess(
