@@ -136,6 +136,7 @@ def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
     )
 
     assert result.success is False
+    assert result.path == root / "generated" / "Example" / "Example.url"
     assert result.warning is not None
     assert "failed to write URL shortcut" in result.warning
     assert "locked" in result.warning

@@ -218,6 +218,8 @@ async def test_tmdb_failures_do_not_leak_api_key_through_json_tracebacks(
             )
         except TmdbError as exc:
             structlog.get_logger().warning("metadata_degraded", exc_info=exc)
+            assert exc.__cause__ is None
+            assert exc.__context__ is None
         else:
             pytest.fail("TMDB failure did not raise TmdbError")
 

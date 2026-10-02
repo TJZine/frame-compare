@@ -995,18 +995,18 @@ async def test_publish_to_slowpics_metadata_timeout_and_request_error_do_not_ret
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("status", "retry_after"),
+    ("status", "retry_after", "expected_delay"),
     [
-        (429, "-1"),
-        (429, "nan"),
-        (429, "inf"),
-        (429, "-inf"),
-        (429, "1e300"),
-        (429, "past-date"),
-        (429, "future-date"),
-        (429, "not-a-retry-delay"),
-        (429, None),
-        (503, None),
+        (429, "-1", 0.0),
+        (429, "nan", 60.0),
+        (429, "inf", 60.0),
+        (429, "-inf", 0.0),
+        (429, "1e300", 60.0),
+        (429, "past-date", 0.0),
+        (429, "future-date", 60.0),
+        (429, "not-a-retry-delay", 60.0),
+        (429, None, 60.0),
+        (503, None, None),
     ],
 )
 async def test_publish_to_slowpics_metadata_retries_http_response(
@@ -1016,6 +1016,7 @@ async def test_publish_to_slowpics_metadata_retries_http_response(
     mock_sleep,
     status: int,
     retry_after: str | None,
+    expected_delay: float | None,
 ) -> None:
     upload_plan = _plan(tmp_path, rows=1, cols=1)
     if retry_after == "past-date":
@@ -1047,6 +1048,8 @@ async def test_publish_to_slowpics_metadata_retries_http_response(
 
     assert result.url == "https://slow.pics/c/first-key"
     assert metadata_route.call_count == 2
+    if expected_delay is not None:
+        mock_sleep.assert_awaited_once_with(expected_delay)
 
 
 @pytest.mark.anyio

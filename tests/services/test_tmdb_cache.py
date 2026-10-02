@@ -242,6 +242,7 @@ async def test_locked_atomic_write_failure_is_warning_only(
 
     @contextmanager
     def fake_lock(path: Path) -> Generator[None]:
+        assert path == cache.lock_path
         events.append("lock_enter")
         try:
             yield

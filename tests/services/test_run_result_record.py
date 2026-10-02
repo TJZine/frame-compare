@@ -194,6 +194,11 @@ def test_failed_record_preserves_only_bounded_generic_warning_facts(tmp_path: Pa
         facts=FailedRunFacts(warnings=("token=secret", "path=/Users/private")),
     )
 
+    assert record.warning_count == 2
+    assert record.warning_summaries == (
+        "A run warning was reported.",
+        "A run warning was reported.",
+    )
     serialized = serialize_run_result(record)
     assert "token=secret" not in serialized
     assert "/Users/private" not in serialized

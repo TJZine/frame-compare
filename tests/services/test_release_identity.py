@@ -181,6 +181,8 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
 
     _, identity = parse_filename_with_release_identity("Movie.1080p.WEB-DL-GROUP.mkv")
 
+    assert identity.content.title == "Movie Title"
+    assert identity.release_group == "GROUP EVIL"
     assert "\n" not in format_compact_identity(identity)
     assert "\x1b" not in format_compact_identity(identity)
 

@@ -163,6 +163,7 @@ def test_reserve_run_folder_creates_non_colliding_dir(tmp_path: Path) -> None:
         tmdb_metadata=tmdb,
     )
     assert result.path == tmp_path / "Fight Club (1999)"
+    assert result.naming_source == "tmdb"
     assert result.path.exists()
     assert result.path.is_dir()
 
@@ -186,6 +187,7 @@ def test_reserve_run_folder_avoids_existing_directory_collision(tmp_path: Path) 
     )
 
     assert result.path == tmp_path / "Fight Club (1999)_2"
+    assert result.naming_source == "tmdb"
     assert result.path.exists()
     assert result.path.is_dir()
 
@@ -258,6 +260,7 @@ def test_reserve_run_folder_empty_filenames_uses_canonical_fallback(tmp_path: Pa
     )
 
     assert result.path == tmp_path / "unnamed_run"
+    assert result.naming_source == "unnamed"
     assert result.path.exists()
     assert result.path.is_dir()
 

@@ -152,10 +152,18 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
     )
     monkeypatch.setattr("frame_compare.services.slowpics_post_upload.log.warning", _capture_warning)
 
-    await run_slowpics_post_upload_actions(
+    output = await run_slowpics_post_upload_actions(
         _request(tmp_path, create_url_shortcut=True, collection_title="Example")
     )
 
+    assert output == (
+        PostUploadActionResult(
+            kind="shortcut",
+            success=False,
+            path=failure_path,
+            warning=warning,
+        ),
+    )
     assert warning_calls == [
         (
             "slowpics_shortcut_create_failed",
