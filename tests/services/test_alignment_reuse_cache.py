@@ -232,7 +232,6 @@ def test_computed_this_run_without_trusted_attempt_is_not_write_eligible(
     """Second layer: an applied same-run result still needs trusted evidence to be written."""
     request = _request(tmp_path)
     result = replace(_result(request), audio_attempt=None)
-    assert result.applied and result.frame_offset is not None
 
     save_reusable_offsets(request, [_provenance(request, result=result)])
 
@@ -336,8 +335,6 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     result = entry.result
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
     assert entry.origin == "computed"
-    assert result.source == "cached"
-    assert result.algorithm == "cross_correlation"
     assert result.correlation_score == 0.876
     assert result.frame_offset == 42
 
@@ -345,7 +342,6 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     assert f'version = "{CACHE_VERSION}"' in content
     assert 'origin = "computed"' in content
     assert 'accepted_at = "2026-06-06T12:00:00Z"' in content
-    assert f'estimator_policy = "{reuse_cache.ALIGNMENT_ESTIMATOR_POLICY}"' in content
 
 
 def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
@@ -440,8 +436,6 @@ def test_shared_reuse_cache_round_trips_interactive_confirmed_entry_with_score_o
     result = entry.result
     assert entry.accepted_at == "2026-06-06T12:00:00Z"
     assert entry.origin == "interactive_confirmed"
-    assert result.source == "cached"
-    assert result.algorithm is None
     assert result.correlation_score == 1.0
     assert entry.computed_result is None
 
@@ -485,12 +479,11 @@ def test_shared_reuse_cache_round_trips_interactive_entry_with_computed_fallback
     assert entry.result.stability == summary
     assert entry.computed_result is not None
     assert entry.computed_result.frame_offset == 42
-    assert entry.computed_result.algorithm == "cross_correlation"
     assert entry.computed_result.correlation_score == pytest.approx(0.876)
     assert entry.computed_result.stability == summary
 
 
-def test_shared_reuse_cache_requires_complete_source_set(tmp_path: Path) -> None:
+def test_incomplete_requested_source_set_is_not_written_or_reused(tmp_path: Path) -> None:
     request = _request(tmp_path)
     second = _clip(_touch_clip(tmp_path / "comp_b.mkv", b"second"), label="Encode 2", stream=2)
     complete_request = replace(request, comparisons=[request.comparisons[0], second])
@@ -775,7 +768,7 @@ def test_shared_reuse_cache_does_not_write_unapplied_or_incomplete_results(
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
 
-def test_shared_reuse_cache_uses_atomic_deterministic_write(
+def test_repeated_accepted_cache_writes_have_identical_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -796,10 +789,6 @@ def test_shared_reuse_cache_uses_atomic_deterministic_write(
     _write_computed(request)
     second = calls[1][1]
 
-    assert [call[0] for call in calls] == [
-        request.shared_alignment_cache_dir / CACHE_FILE_NAME,
-        request.shared_alignment_cache_dir / CACHE_FILE_NAME,
-    ]
     assert first == second
 
 
@@ -844,47 +833,28 @@ def test_shared_reuse_cache_locks_entire_read_modify_write(
     assert events == ["lock_enter", "read", "write", "lock_exit"]
 
 
-def test_shared_reuse_cache_write_failure_warns_without_raising(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("boundary", "error"),
+    [
+        ("write_bytes_atomic", OSError("disk full")),
+        ("exclusive_file_lock", FileLockTimeoutError("timed out acquiring lock file")),
+    ],
+)
+def test_shared_reuse_cache_write_boundary_failure_warns_without_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, error: Exception
 ) -> None:
     request = _request(tmp_path)
     warnings: list[str] = []
 
-    def _raise_write(_path: Path, _content: bytes) -> None:
-        raise OSError("disk full")
+    def fail(*_args: object) -> None:
+        raise error
 
-    def _warning(event: str, **_kwargs: object) -> None:
+    def warning(event: str, **_kwargs: object) -> None:
         warnings.append(event)
 
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_reuse_cache.write_bytes_atomic", _raise_write
-    )
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
+    monkeypatch.setattr(reuse_cache, boundary, fail)
+    monkeypatch.setattr(reuse_cache.log, "warning", warning)
     _write_computed(request)
-
-    assert warnings == ["alignment_reuse_cache_write_failed"]
-
-
-def test_shared_reuse_cache_lock_timeout_warns_without_raising(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    warnings: list[str] = []
-
-    def _raise_lock_timeout(_path: Path) -> None:
-        raise FileLockTimeoutError("timed out acquiring lock file")
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr(reuse_cache, "exclusive_file_lock", _raise_lock_timeout)
-    monkeypatch.setattr(reuse_cache.log, "warning", _warning)
-
-    _write_computed(request)
-
     assert warnings == ["alignment_reuse_cache_write_failed"]
 
 

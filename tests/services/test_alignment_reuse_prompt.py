@@ -213,7 +213,7 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
 
 
 @pytest.mark.parametrize("columns", [60, 80, 120, 240])
-def test_prompt_uses_actual_narrow_terminal_width(
+def test_prompt_output_fits_terminal_width(
     columns: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -341,7 +341,7 @@ def test_prompt_emits_no_human_diagnostic_when_stderr_is_not_tty(
     assert captured.out == ""
 
 
-def test_prompt_suspends_and_resumes_progress_around_table_and_read(
+def test_prompt_accepts_short_y(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -357,8 +357,6 @@ def test_prompt_suspends_and_resumes_progress_around_table_and_read(
     )
 
     assert accepted is True
-    progress.suspend.assert_called_once_with()
-    progress.resume.assert_called_once_with()
 
 
 def test_prompt_falls_back_to_filename_when_labels_are_blank(

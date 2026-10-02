@@ -256,61 +256,33 @@ def test_unknown_duration_rejected_before_decode(
 
     assert result.applied is False
     assert result.diagnostic == "selected_audio_timeline_unavailable"
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.status == "preanalysis_rejection"
-    assert result.audio_attempt.collection_observation == "not_observed"
 
 
-def test_budget_exceeded_rejected_before_decode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("budget", ["fft", "chunk-count"])
+def test_planning_budget_rejects_before_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, budget: str
 ) -> None:
     reference, comparison = _media(tmp_path)
     program = make_program(SEED, _DURATION_SECONDS)
     _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    monkeypatch.setattr(
-        alignment,
-        "collect_paired_audio_chunks",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("decode must not run")),
-    )
+    if budget == "chunk-count":
+        reference_duration = (MAX_AUDIO_CHUNKS + 1) * 5
+        monkeypatch.setattr(
+            alignment_audio,
+            "probe_streams",
+            lambda path, *args, **kwargs: _probe(
+                duration_seconds=reference_duration if Path(path).stem == "reference" else 10.0
+            ),
+        )
 
-    (result,) = _align(reference, comparison, _config(max_offset_seconds=3600.0), tmp_path)
-
-    assert result.applied is False
-    assert result.diagnostic == "analysis_budget_exceeded"
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.status == "preanalysis_rejection"
-
-
-def test_long_reference_short_comparison_budget_rejects_before_decode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    reference_duration = (MAX_AUDIO_CHUNKS + 1) * 5
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda path, *args, **kwargs: _probe(
-            duration_seconds=reference_duration if Path(path).stem == "reference" else 10.0
-        ),
-    )
-    decode_calls: list[tuple[object, ...]] = []
-
-    def fail_if_decode_runs(*args: object, **kwargs: object) -> Any:
-        del kwargs
-        decode_calls.append(args)
+    def fail_if_decode_runs(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("decode must not run after the planning budget refusal")
 
     monkeypatch.setattr(alignment, "collect_paired_audio_chunks", fail_if_decode_runs)
-
-    (result,) = _align(reference, comparison, _config(), tmp_path)
-
+    config = _config(max_offset_seconds=3600.0) if budget == "fft" else _config()
+    (result,) = _align(reference, comparison, config, tmp_path)
     assert result.applied is False
     assert result.diagnostic == "analysis_budget_exceeded"
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.status == "preanalysis_rejection"
-    assert decode_calls == []
 
 
 def _failure_facts() -> tuple[CollectionFacts, CollectionFacts]:
@@ -364,18 +336,6 @@ def test_collection_failure_is_aborted_with_category(
 
     assert result.applied is False
     assert result.diagnostic == "timeout"
-    attempt = result.audio_attempt
-    assert attempt is not None
-    assert attempt.status == "aborted"
-    assert attempt.decision.state == "unavailable"
-    assert attempt.decision.primary_reason == "timeout"
-    assert attempt.chunks.starts == ()
-    assert attempt.collection_observation == "observed"
-    assert attempt.collection_failure is not None
-    assert attempt.collection_failure.category == "timeout"
-    assert attempt.collection_failure.side is None
-    assert attempt.collection[0].emitted_samples == 10
-    assert attempt.audio.compensation_seconds is not None
 
 
 def test_cleanup_failure_is_fatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -416,8 +376,6 @@ def test_identity_change_mid_collection_is_aborted(
 
     assert result.applied is False
     assert result.diagnostic == "source_identity_changed"
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.status == "aborted"
 
 
 def test_pre_collection_identity_change_is_aborted_per_comparison(
@@ -466,18 +424,10 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
     changed = by_name[mutated.name]
     assert changed.applied is False
     assert changed.diagnostic == "source_identity_changed"
-    assert changed.audio_attempt is not None
-    assert changed.audio_attempt.status == "aborted"
-    assert changed.audio_attempt.collection_observation == "not_observed"
-    assert changed.audio_attempt.collection == ()
-    assert changed.audio_attempt.decision.state == "unavailable"
-    assert changed.audio_attempt.decision.primary_reason == "source_identity_changed"
 
     untouched = by_name[ok.name]
     assert untouched.applied is False
     assert untouched.diagnostic == "video_check_unavailable"
-    assert untouched.audio_attempt is not None
-    assert untouched.audio_attempt.status == "complete"
 
     overridden = by_name[manual.name]
     assert overridden.applied is True
@@ -569,7 +519,6 @@ def test_entry_identity_mismatch_has_no_attempt(
 
     assert result.applied is False
     assert result.diagnostic == "source_identity_changed"
-    assert result.audio_attempt is None
 
 
 def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

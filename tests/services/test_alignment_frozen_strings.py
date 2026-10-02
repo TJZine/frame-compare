@@ -1201,29 +1201,17 @@ def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) 
     assert "Alpha audio applied · Beta needs visual confirmation" in err
 
 
-def test_vsview_review_message_singular_pair_and_kept() -> None:
-    assert (
-        format_vsview_review_message(1, 1)
-        == "Accepted 1 confirmed pair; 1 comparison kept its current offset."
-    )
-
-
-def test_vsview_review_message_plural_pairs_and_kept() -> None:
-    assert (
-        format_vsview_review_message(2, 1)
-        == "Accepted 2 confirmed pairs; 1 comparison kept its current offset."
-    )
-
-
-def test_vsview_review_message_plural_kept() -> None:
-    assert (
-        format_vsview_review_message(2, 3)
-        == "Accepted 2 confirmed pairs; 3 comparisons kept their current offset."
-    )
-
-
-def test_vsview_review_message_omits_kept_clause_when_zero() -> None:
-    assert format_vsview_review_message(2, 0) == "Accepted 2 confirmed pairs."
+@pytest.mark.parametrize(
+    ("pairs_confirmed", "kept_count", "expected"),
+    [
+        (1, 1, "Accepted 1 confirmed pair; 1 comparison kept its current offset."),
+        (2, 1, "Accepted 2 confirmed pairs; 1 comparison kept its current offset."),
+        (2, 3, "Accepted 2 confirmed pairs; 3 comparisons kept their current offset."),
+        (2, 0, "Accepted 2 confirmed pairs."),
+    ],
+)
+def test_vsview_review_message(pairs_confirmed: int, kept_count: int, expected: str) -> None:
+    assert format_vsview_review_message(pairs_confirmed, kept_count) == expected
 
 
 @pytest.mark.parametrize(
@@ -2581,7 +2569,7 @@ def test_video_vote_uses_only_strict_informative_positions() -> None:
     )
 
 
-def test_check_points_preserve_order_and_cap_at_five() -> None:
+def test_check_points_preserve_five_supplied_positions() -> None:
     attempt = _review_attempt("competing_offset_confirmed_by_video")
     points = tuple(VideoCheckPoint(float(index), 1_000 + index, 854 + index) for index in range(5))
     review = build_audio_review_presentation(
@@ -2597,7 +2585,7 @@ def test_check_points_preserve_order_and_cap_at_five() -> None:
     ]
 
 
-def test_applied_noted_line_only_exists_with_context(
+def test_applied_noted_line_prefers_same_frame_context_over_weak_audio_context(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     config = AlignmentConfig(cache_results=False, no_color=True)
