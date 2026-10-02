@@ -398,7 +398,7 @@ def test_child_that_closes_stdout_but_never_exits_stalls_on_its_side() -> None:
     result = collect_paired_audio_chunks(
         [sys.executable, "-c", script],
         _child_argv(_payload([1.0] * 1200)),
-        **_paired_kwargs(accumulator, stall_timeout_seconds=2.0, total_timeout_seconds=20.0),
+        **_paired_kwargs(accumulator, stall_timeout_seconds=0.5, total_timeout_seconds=20.0),
     )
 
     failed = _assert_failed(result, "stalled", "reference")
@@ -685,7 +685,7 @@ def test_backpressured_side_is_never_stall_timed() -> None:
         _child_argv(
             _payload([1.0] * 800),
             write_step=320,
-            write_pause=0.15,
+            write_pause=0.1,
         ),
         _flood_argv(samples_per_write=16_384, writes=16),
         **_paired_kwargs(
@@ -702,7 +702,7 @@ def test_backpressured_side_is_never_stall_timed() -> None:
     assert result.chunks_delivered == 1
     # The comparison child emitted 262144 samples while blocked on its pipe for
     # well over the stall timeout; the run still succeeds, outlasting a full
-    # watchdog window (the awaited reference side takes ~1.4 s to trickle in).
+    # watchdog window (the awaited reference side takes ~0.9 s to trickle in).
     assert result.comparison_facts.emitted_sample_count == 262_144
     assert time.monotonic() - started > 0.5
     assert result.reference_cleanup.completed
@@ -732,9 +732,9 @@ def test_one_side_at_eof_while_the_other_streams(short_side: str) -> None:
     accumulator = _StrictAccumulator()
     if short_side == "reference":
         reference_argv = _child_argv(_payload([1.0] * 400))
-        comparison_argv = _child_argv(_payload([2.0] * 3000), write_step=1200, write_pause=0.2)
+        comparison_argv = _child_argv(_payload([2.0] * 3000), write_step=1200, write_pause=0.05)
     else:
-        reference_argv = _child_argv(_payload([1.0] * 3000), write_step=1200, write_pause=0.2)
+        reference_argv = _child_argv(_payload([1.0] * 3000), write_step=1200, write_pause=0.05)
         comparison_argv = _child_argv(_payload([2.0] * 400))
     result = collect_paired_audio_chunks(
         reference_argv,
@@ -922,7 +922,7 @@ def test_uncooperative_children_are_killed_and_reaped() -> None:
         [sys.executable, "-c", script],
         [sys.executable, "-c", script],
         # Long enough for both children to install SIG_IGN on a loaded host.
-        **_paired_kwargs(accumulator, total_timeout_seconds=3.0),
+        **_paired_kwargs(accumulator, total_timeout_seconds=1.0),
     )
     elapsed = time.monotonic() - started
 
@@ -1015,8 +1015,8 @@ def test_at_most_two_simultaneous_children(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(alignment_streaming.subprocess, "Popen", tracking_popen)
     accumulator = _StrictAccumulator()
     result = collect_paired_audio_chunks(
-        _child_argv(_payload([1.0] * 100), delay_seconds=1.0),
-        _child_argv(_payload([2.0] * 100), delay_seconds=1.0),
+        _child_argv(_payload([1.0] * 100), delay_seconds=0.2),
+        _child_argv(_payload([2.0] * 100), delay_seconds=0.2),
         **_paired_kwargs(accumulator, chunks=((0, 100),), lag_samples=10),
     )
 
