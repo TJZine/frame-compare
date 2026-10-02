@@ -7,6 +7,7 @@ from typing import Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
+from vapoursynth import Core, VideoFormat, VideoNode
 
 import frame_compare.vs.source as source_module
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
@@ -387,90 +388,6 @@ def test_load_source_ignores_legacy_unversioned_index(tmp_path: Path) -> None:
 # HDR Detection Tests
 
 
-def test_detect_hdr_pq_bt2020_returns_true():
-    props = {"_Transfer": 16, "_Primaries": 9}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.is_hdr is True
-    assert source.hdr_metadata is not None
-    assert source.hdr_metadata.transfer == 16
-    assert source.hdr_metadata.color_primaries == 9
-
-
-def test_detect_hdr_hlg_bt2020_returns_true():
-    props = {"_Transfer": 18, "_Primaries": 9}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.is_hdr is True
-
-
-def test_detect_hdr_pq_bt709_returns_false():
-    props = {"_Transfer": 16, "_Primaries": 1}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.is_hdr is False
-    assert source.hdr_metadata is None
-
-
-def test_detect_hdr_sdr_returns_false():
-    props = {"_Transfer": 1, "_Primaries": 1}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.is_hdr is False
-
-
-def test_detect_hdr_extracts_metadata_fields():
-    props = {
-        "_Transfer": 16,
-        "_Primaries": 9,
-        "MasteringDisplayPrimaries": "Display P3",
-        "ContentLightLevelMax": 1000,
-        "ContentLightLevelAverage": 400,
-        "_Matrix": 9,
-    }
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-
-    meta = source.hdr_metadata
-    assert meta is not None
-    assert meta.mastering_display == "Display P3"
-    assert meta.max_cll == 1000
-    assert meta.max_fall == 400
-    assert meta.matrix == 9
-
-
-def test_detect_hdr_empty_props_returns_false_and_none():
-    props = {}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.is_hdr is False
-    assert source.hdr_metadata is None
-
-
 def test_load_source_falls_back_to_ffprobe_for_absent_hdr_props(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -639,52 +556,77 @@ def test_load_source_wraps_malformed_ffprobe_metadata(
     assert exc_info.value.code == "FC-4015"
 
 
-def test_detect_hdr_defaults_matrix_when_missing():
-    props = {"_Transfer": 16, "_Primaries": 9}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(
-            LWLibavSource=lambda p, **_kwargs: MockClip(frame_props=props)  # type: ignore
-        )
-    )
-    source = load_source("video.mkv", core)  # type: ignore
-    assert source.is_hdr is True
-    assert source.hdr_metadata.matrix == 2
-
-
 # Apply Trim Tests
 
 
-def test_apply_trim_with_end_is_inclusive():
+@pytest.mark.parametrize(
+    "end, expected_frames", [(200, 101), (None, 900)], ids=["inclusive_end", "to_end"]
+)
+def test_apply_trim_frame_count(end: int | None, expected_frames: int) -> None:
     clip = MockClip(num_frames=1000)
     source = SourceInfo(
-        clip=clip,  # type: ignore
+        clip=cast(VideoNode, clip),
         width=1920,
         height=1080,
         num_frames=1000,
         fps=Fraction(24, 1),
-        format=SimpleNamespace(),  # type: ignore
+        format=cast(VideoFormat, SimpleNamespace()),
         frame_props={},
         is_hdr=False,
         hdr_metadata=None,
     )
-    trimmed = apply_trim(source, 100, 200)
-    # 100 to 200 inclusive is 200 - 100 + 1 = 101 frames
-    assert trimmed.num_frames == 101
+    trimmed = apply_trim(source, 100, end)
+    assert trimmed.num_frames == expected_frames
 
 
-def test_apply_trim_end_none_trims_to_end():
-    clip = MockClip(num_frames=1000)
-    source = SourceInfo(
-        clip=clip,  # type: ignore
-        width=1920,
-        height=1080,
-        num_frames=1000,
-        fps=Fraction(24, 1),
-        format=SimpleNamespace(),  # type: ignore
-        frame_props={},
-        is_hdr=False,
-        hdr_metadata=None,
+@pytest.mark.parametrize(
+    "props, expected_hdr, expected_metadata, metadata_none",
+    [
+        pytest.param(
+            {"_Transfer": 16, "_Primaries": 9},
+            True,
+            {"transfer": 16, "color_primaries": 9},
+            False,
+            id="pq_bt2020",
+        ),
+        pytest.param({"_Transfer": 18, "_Primaries": 9}, True, {}, False, id="hlg_bt2020"),
+        pytest.param({"_Transfer": 16, "_Primaries": 1}, False, {}, True, id="pq_bt709"),
+        pytest.param({"_Transfer": 1, "_Primaries": 1}, False, {}, False, id="sdr"),
+        pytest.param(
+            {
+                "_Transfer": 16,
+                "_Primaries": 9,
+                "MasteringDisplayPrimaries": "Display P3",
+                "ContentLightLevelMax": 1000,
+                "ContentLightLevelAverage": 400,
+                "_Matrix": 9,
+            },
+            None,
+            {"mastering_display": "Display P3", "max_cll": 1000, "max_fall": 400, "matrix": 9},
+            False,
+            id="metadata_fields",
+        ),
+        pytest.param({}, False, {}, True, id="empty"),
+        pytest.param(
+            {"_Transfer": 16, "_Primaries": 9}, True, {"matrix": 2}, False, id="default_matrix"
+        ),
+    ],
+)
+def test_load_source_hdr_cases(
+    props: dict[str, object],
+    expected_hdr: bool | None,
+    expected_metadata: dict[str, object],
+    metadata_none: bool,
+) -> None:
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
     )
-    trimmed = apply_trim(source, 100, None)
-    # 100 to end (999) is 1000 - 100 = 900 frames
-    assert trimmed.num_frames == 900
+    source = load_source("video.mkv", cast(Core, core))
+    if expected_hdr is not None:
+        assert source.is_hdr is expected_hdr
+    if metadata_none:
+        assert source.hdr_metadata is None
+    if expected_metadata:
+        assert source.hdr_metadata is not None
+        for field, value in expected_metadata.items():
+            assert getattr(source.hdr_metadata, field) == value

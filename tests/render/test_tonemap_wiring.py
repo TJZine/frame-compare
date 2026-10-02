@@ -16,40 +16,6 @@ from frame_compare.vs.errors import TonemapRequiresVapourSynthError, VapourSynth
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
 
-def test_resolve_tonemap_settings_applies_config_and_cli_overrides() -> None:
-    config = ConfigSchema(
-        color=ColorConfig(
-            enable_tonemap=True,
-            preset=TonemapPreset.FILMIC,
-            target_nits=250,
-            tone_curve=ToneCurve.SPLINE,
-            gamma_lift=True,
-            contrast_recovery=0.25,
-        )
-    )
-    cli_overrides: TonemapCliOverrides = {
-        "tm_preset": TonemapPreset.REFERENCE,
-        "tm_target": 400,
-        "tm_curve": ToneCurve.REINHARD,
-    }
-    with patch("frame_compare.vs.tonemap.get_preset_settings") as get_preset:
-        get_preset.return_value = TonemapSettings()
-        settings = resolve_tonemap_settings(config, cli_overrides)
-    get_preset.assert_called_once_with(TonemapPreset.REFERENCE)
-    assert settings.target_nits == 400
-    assert settings.tone_curve is ToneCurve.REINHARD
-    assert settings.gamma_lift is True
-    assert settings.contrast_recovery == 0.25
-
-
-def test_resolve_tonemap_settings_preserves_implicit_preset_target() -> None:
-    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
-    with patch("frame_compare.vs.tonemap.get_preset_settings") as get_preset:
-        get_preset.return_value = TonemapSettings(target_nits=150)
-        settings = resolve_tonemap_settings(config)
-    assert settings.target_nits == 150
-
-
 def test_auto_sdr_fallback_uses_canonical_classification_without_probe() -> None:
     runner = MagicMock()
     config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
@@ -134,3 +100,60 @@ def test_direct_ffmpeg_tonemap_gate_probes_once_without_classification() -> None
     )
     runner.probe_hdr.assert_called_once_with(Path("sdr_video.mkv"))
     assert prepared.presentation_state is PresentationState.SDR
+
+
+@pytest.mark.parametrize(
+    "color, overrides, preset_settings, expected, expected_preset",
+    [
+        pytest.param(
+            ColorConfig(
+                enable_tonemap=True,
+                preset=TonemapPreset.FILMIC,
+                target_nits=250,
+                tone_curve=ToneCurve.SPLINE,
+                gamma_lift=True,
+                contrast_recovery=0.25,
+            ),
+            {
+                "tm_preset": TonemapPreset.REFERENCE,
+                "tm_target": 400,
+                "tm_curve": ToneCurve.REINHARD,
+            },
+            TonemapSettings(),
+            {
+                "target_nits": 400,
+                "tone_curve": ToneCurve.REINHARD,
+                "gamma_lift": True,
+                "contrast_recovery": 0.25,
+            },
+            TonemapPreset.REFERENCE,
+            id="config_cli_overrides",
+        ),
+        pytest.param(
+            ColorConfig(preset=TonemapPreset.FILMIC),
+            None,
+            TonemapSettings(target_nits=150),
+            {"target_nits": 150},
+            None,
+            id="implicit_target",
+        ),
+    ],
+)
+def test_resolve_tonemap_settings_cases(
+    color: ColorConfig,
+    overrides: TonemapCliOverrides | None,
+    preset_settings: TonemapSettings,
+    expected: dict[str, object],
+    expected_preset: TonemapPreset | None,
+) -> None:
+    with patch(
+        "frame_compare.vs.tonemap.get_preset_settings", return_value=preset_settings
+    ) as get_preset:
+        settings = resolve_tonemap_settings(ConfigSchema(color=color), overrides)
+    if expected_preset is not None:
+        get_preset.assert_called_once_with(expected_preset)
+    for field, value in expected.items():
+        if field in ("tone_curve", "gamma_lift"):
+            assert getattr(settings, field) is value
+        else:
+            assert getattr(settings, field) == value

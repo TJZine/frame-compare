@@ -14,66 +14,6 @@ def _clip(frame_count: int = 240, fps: Fraction = Fraction(24, 1)) -> ClipWindow
     return ClipWindowInput(frame_count=frame_count, fps=fps)
 
 
-def test_lead_only_exclusion_uses_ceiling_start_frame() -> None:
-    window = compute_shared_selection_window(
-        [_clip()],
-        ignore_lead_seconds=1.25,
-        ignore_trail_seconds=0.0,
-        min_window_seconds=0.0,
-    )
-
-    assert window.start_frame == 30
-    assert window.end_frame_exclusive == 240
-
-
-def test_trail_only_exclusion_uses_exclusive_end_frame() -> None:
-    window = compute_shared_selection_window(
-        [_clip()],
-        ignore_lead_seconds=0.0,
-        ignore_trail_seconds=2.0,
-        min_window_seconds=0.0,
-    )
-
-    assert window.start_frame == 0
-    assert window.end_frame_exclusive == 192
-
-
-def test_lead_and_trail_exclusion_intersects_all_clips() -> None:
-    window = compute_shared_selection_window(
-        [_clip(frame_count=240), _clip(frame_count=180)],
-        ignore_lead_seconds=1.0,
-        ignore_trail_seconds=1.0,
-        min_window_seconds=0.0,
-    )
-
-    assert window.start_frame == 24
-    assert window.end_frame_exclusive == 156
-
-
-def test_collapsed_window_expands_end_first_then_start() -> None:
-    window = compute_shared_selection_window(
-        [_clip(frame_count=100)],
-        ignore_lead_seconds=3.8,
-        ignore_trail_seconds=0.5,
-        min_window_seconds=1.0,
-    )
-
-    assert window.start_frame == 76
-    assert window.end_frame_exclusive == 100
-
-
-def test_min_window_at_or_above_duration_uses_full_clip_domain() -> None:
-    window = compute_shared_selection_window(
-        [_clip(frame_count=120)],
-        ignore_lead_seconds=2.0,
-        ignore_trail_seconds=2.0,
-        min_window_seconds=5.0,
-    )
-
-    assert window.start_frame == 0
-    assert window.end_frame_exclusive == 120
-
-
 def test_no_shared_selectable_window_raises_selection_error() -> None:
     with pytest.raises(SelectionError, match="leave no selectable frames"):
         compute_shared_selection_window(
@@ -84,12 +24,36 @@ def test_no_shared_selectable_window_raises_selection_error() -> None:
         )
 
 
-def test_rounding_boundary_uses_ceiling_with_small_epsilon() -> None:
+@pytest.mark.parametrize(
+    "clips, lead, trail, minimum, expected_start, expected_end",
+    [
+        pytest.param([_clip()], 1.25, 0.0, 0.0, 30, 240, id="lead_only"),
+        pytest.param([_clip()], 0.0, 2.0, 0.0, 0, 192, id="trail_only"),
+        pytest.param([_clip(240), _clip(180)], 1.0, 1.0, 0.0, 24, 156, id="lead_and_trail"),
+        pytest.param([_clip(100)], 3.8, 0.5, 1.0, 76, 100, id="collapsed"),
+        pytest.param([_clip(120)], 2.0, 2.0, 5.0, 0, 120, id="minimum_full_domain"),
+        pytest.param(
+            [_clip(100, Fraction(24000, 1001))],
+            float(Fraction(1001, 24000) * 10),
+            0.0,
+            0.0,
+            10,
+            None,
+            id="rounding_boundary",
+        ),
+    ],
+)
+def test_selection_window_cases(
+    clips: list[ClipWindowInput],
+    lead: float,
+    trail: float,
+    minimum: float,
+    expected_start: int,
+    expected_end: int | None,
+) -> None:
     window = compute_shared_selection_window(
-        [_clip(frame_count=100, fps=Fraction(24000, 1001))],
-        ignore_lead_seconds=float(Fraction(1001, 24000) * 10),
-        ignore_trail_seconds=0.0,
-        min_window_seconds=0.0,
+        clips, ignore_lead_seconds=lead, ignore_trail_seconds=trail, min_window_seconds=minimum
     )
-
-    assert window.start_frame == 10
+    assert window.start_frame == expected_start
+    if expected_end is not None:
+        assert window.end_frame_exclusive == expected_end

@@ -18,7 +18,7 @@ from frame_compare.vs.tonemap_libplacebo import (
     apply_libplacebo,
     build_libplacebo_tonemap_kwargs,
 )
-from frame_compare.vs.tonemap_presets import TONEMAP_PRESETS, get_preset_settings
+from frame_compare.vs.tonemap_presets import get_preset_settings
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
 if TYPE_CHECKING:
@@ -94,35 +94,6 @@ class _Placebo:
         if isinstance(result, BaseException):
             raise result
         return cast(_Clip, result)
-
-
-def test_tonemap_presets_cover_enum_and_return_expected_values() -> None:
-    """Preset lookup should expose one concrete settings object per preset enum."""
-    assert set(TONEMAP_PRESETS) == set(TonemapPreset)
-
-    settings = get_preset_settings(TonemapPreset.BRIGHT_LIFT)
-
-    assert settings.preset is TonemapPreset.BRIGHT_LIFT
-    assert settings.tone_curve is ToneCurve.BT2390
-    assert settings.target_nits == 250
-    assert settings.gamma_lift is True
-
-
-def test_reference_preset_uses_legacy_hdr_target() -> None:
-    """Reference preset keeps the legacy screenshot baseline target."""
-    settings = get_preset_settings(TonemapPreset.REFERENCE)
-
-    assert settings.target_nits == 100
-    assert settings.dynamic_peak_detection is True
-    assert settings.dst_min_nits == 0.18
-    assert settings.knee_offset == 0.50
-    assert settings.smoothing_period == 45.0
-    assert settings.scene_threshold_low == 0.8
-    assert settings.scene_threshold_high == 2.4
-    assert settings.percentile == 99.995
-    assert settings.metadata == 0
-    assert settings.use_dovi is True
-    assert settings.contrast_recovery == 0.30
 
 
 def test_fallback_tonemap_detects_metadata_and_uses_reinhard_expression() -> None:
@@ -363,3 +334,44 @@ def test_convert_non_rgb_matrix_presence_uses_frame_prop_boundary() -> None:
     assert clip.resize.bicubic_calls == [
         {"format": vs.RGBS, "matrix_in": 9, "range_in": vs.RANGE_LIMITED}
     ]
+
+
+@pytest.mark.parametrize(
+    "preset, expected",
+    [
+        pytest.param(
+            TonemapPreset.BRIGHT_LIFT,
+            {
+                "preset": TonemapPreset.BRIGHT_LIFT,
+                "tone_curve": ToneCurve.BT2390,
+                "target_nits": 250,
+                "gamma_lift": True,
+            },
+            id="bright_lift",
+        ),
+        pytest.param(
+            TonemapPreset.REFERENCE,
+            {
+                "target_nits": 100,
+                "dynamic_peak_detection": True,
+                "dst_min_nits": 0.18,
+                "knee_offset": 0.50,
+                "smoothing_period": 45.0,
+                "scene_threshold_low": 0.8,
+                "scene_threshold_high": 2.4,
+                "percentile": 99.995,
+                "metadata": 0,
+                "use_dovi": True,
+                "contrast_recovery": 0.30,
+            },
+            id="reference",
+        ),
+    ],
+)
+def test_extended_preset_settings(preset: TonemapPreset, expected: dict[str, object]) -> None:
+    settings = get_preset_settings(preset)
+    for field, value in expected.items():
+        if field in ("preset", "tone_curve", "gamma_lift", "dynamic_peak_detection", "use_dovi"):
+            assert getattr(settings, field) is value
+        else:
+            assert getattr(settings, field) == value

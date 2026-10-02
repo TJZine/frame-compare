@@ -293,108 +293,59 @@ def test_default_ffmpeg_runner_probe_hdr_keeps_fixed_timeout(
 
 
 @pytest.mark.parametrize(
-    ("color_primaries", "transfer", "matrix"),
+    "signal, complete",
     [
-        pytest.param(2, 2, 1, id="matrix-only"),
-        pytest.param(2, 16, 2, id="transfer-only"),
-        pytest.param(9, 2, 2, id="primaries-only"),
+        pytest.param((2, 2, 1), False, id="matrix_only"),
+        pytest.param((2, 16, 2), False, id="transfer_only"),
+        pytest.param((9, 2, 2), False, id="primaries_only"),
+        pytest.param((1, 1, 1), True, id="sdr"),
+        pytest.param((9, 16, 9), True, id="hdr"),
     ],
 )
-def test_default_ffmpeg_runner_probe_hdr_treats_partial_color_signals_as_unknown(
-    monkeypatch: pytest.MonkeyPatch,
-    color_primaries: int,
-    transfer: int,
-    matrix: int,
+def test_ffmpeg_probe_color_signal_cases(
+    monkeypatch: pytest.MonkeyPatch, signal: tuple[int, int, int], complete: bool
 ) -> None:
-    metadata = HDRMetadata(
-        mastering_display=None,
-        max_cll=None,
-        max_fall=None,
-        color_primaries=color_primaries,
-        transfer=transfer,
-        matrix=matrix,
-    )
-    probe_hdr_metadata = MagicMock(return_value=metadata)
-    monkeypatch.setattr(
-        "frame_compare.render.backend.ffmpeg.probe_hdr_metadata",
-        probe_hdr_metadata,
-    )
-
-    assert DefaultFFmpegRunner().probe_hdr(Path("clip.mkv")) is None
-    probe_hdr_metadata.assert_called_once_with(Path("clip.mkv"))
+    primaries, transfer, matrix = signal
+    metadata = HDRMetadata(None, None, None, primaries, transfer, matrix)
+    probe = MagicMock(return_value=metadata)
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.probe_hdr_metadata", probe)
+    result = DefaultFFmpegRunner().probe_hdr(Path("clip.mkv"))
+    if complete:
+        assert result is metadata
+    else:
+        assert result is None
+    probe.assert_called_once_with(Path("clip.mkv"))
 
 
 @pytest.mark.parametrize(
-    "metadata",
+    "failure, input_path, expected_error, check_details",
     [
         pytest.param(
-            HDRMetadata(
-                mastering_display=None,
-                max_cll=None,
-                max_fall=None,
-                color_primaries=1,
-                transfer=1,
-                matrix=1,
-            ),
-            id="sdr",
+            FileNotFoundError(), Path("clip.mkv"), FFmpegNotFoundError, False, id="missing_binary"
         ),
         pytest.param(
-            HDRMetadata(
-                mastering_display=None,
-                max_cll=None,
-                max_fall=None,
-                color_primaries=9,
-                transfer=16,
-                matrix=9,
-            ),
-            id="hdr",
+            subprocess.CalledProcessError(1, ["ffmpeg"], stderr=b"No such file or directory"),
+            Path("nonexistent.mkv"),
+            FFmpegError,
+            True,
+            id="missing_input",
         ),
     ],
 )
-def test_default_ffmpeg_runner_probe_hdr_preserves_complete_color_signals(
+def test_ffmpeg_extract_wraps_external_errors(
     monkeypatch: pytest.MonkeyPatch,
-    metadata: HDRMetadata,
+    tmp_path: Path,
+    failure: Exception,
+    input_path: Path,
+    expected_error: type[FFmpegError],
+    check_details: bool,
 ) -> None:
-    probe_hdr_metadata = MagicMock(return_value=metadata)
-    monkeypatch.setattr(
-        "frame_compare.render.backend.ffmpeg.probe_hdr_metadata",
-        probe_hdr_metadata,
-    )
-
-    assert DefaultFFmpegRunner().probe_hdr(Path("clip.mkv")) is metadata
-    probe_hdr_metadata.assert_called_once_with(Path("clip.mkv"))
-
-
-def test_default_ffmpeg_runner_extract_frame_wraps_missing_binary(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    run_subprocess = MagicMock(side_effect=FileNotFoundError)
+    run_subprocess = MagicMock(side_effect=failure)
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
-
-    runner = DefaultFFmpegRunner()
-
-    with pytest.raises(FFmpegNotFoundError):
-        runner.extract_frame(Path("clip.mkv"), 1, tmp_path / "frame.png")
-
-
-def test_default_ffmpeg_runner_extract_frame_wraps_missing_input_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    run_subprocess = MagicMock(
-        side_effect=subprocess.CalledProcessError(
-            1,
-            ["ffmpeg"],
-            stderr=b"No such file or directory",
-        )
-    )
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
-
-    runner = DefaultFFmpegRunner()
-
-    with pytest.raises(FFmpegError) as exc_info:
-        runner.extract_frame(Path("nonexistent.mkv"), 1, tmp_path / "frame.png")
-
-    details = exc_info.value.context.details
-    assert details is not None
-    assert details["returncode"] == 1
-    assert "No such file or directory" in str(details["stderr"])
+    with pytest.raises(expected_error) as exc_info:
+        DefaultFFmpegRunner().extract_frame(input_path, 1, tmp_path / "frame.png")
+    if check_details:
+        details = exc_info.value.context.details
+        assert details is not None
+        assert details["returncode"] == 1
+        assert "No such file or directory" in str(details["stderr"])

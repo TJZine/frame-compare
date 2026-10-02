@@ -11,54 +11,6 @@ from frame_compare.vs.tonemap import apply_tonemap  # noqa: E402, I001
 from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
 
 
-@patch("frame_compare.vs.tonemap_conversion.detect_hdr")
-@patch("frame_compare.vs.env.detect_plugins")
-def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):
-    """Verify metadata extraction is attempted in fallback path if missing."""
-    mock_detect.return_value = {"libplacebo": False}
-
-    mock_clip = MagicMock()
-    fallback_result = MagicMock()
-    mock_clip.std.Expr = MagicMock(return_value=fallback_result)
-    mock_clip.format.id = vs.RGBS
-
-    # Mock detect_hdr return
-    mock_metadata = MagicMock()
-    mock_metadata.max_cll = 5678
-    mock_detect_hdr.return_value = (True, mock_metadata)
-
-    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.REINHARD)
-
-    result = apply_tonemap(mock_clip, settings, hdr_metadata=None)
-
-    mock_detect_hdr.assert_called_once()
-    mock_clip.std.Expr.assert_called_once()
-    assert result is fallback_result
-
-
-@patch("frame_compare.vs.env.detect_plugins")
-@patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
-@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
-@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
-def test_apply_tonemap_falls_back_on_libplacebo_runtime_failure(
-    mock_fallback, mock_libplacebo, mock_runtime_usable, mock_detect
-):
-    """Verify runtime failure in libplacebo triggers fallback."""
-    mock_detect.return_value = {"libplacebo": True}
-    mock_libplacebo.return_value = None  # Signals runtime failure
-    mock_fallback.return_value = MagicMock()
-
-    mock_clip = MagicMock()
-    settings = TonemapSettings(enabled=True)
-
-    result = apply_tonemap(mock_clip, settings)
-
-    mock_runtime_usable.assert_called_once_with()
-    mock_libplacebo.assert_called_once()
-    mock_fallback.assert_called_once()
-    assert result is mock_fallback.return_value
-
-
 @patch("frame_compare.vs.env.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 @patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
@@ -113,28 +65,6 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_missing(
 
     mock_fallback.assert_called_once_with(mock_clip, settings, None)
     mock_libplacebo.assert_not_called()
-
-
-@patch("frame_compare.vs.env.detect_plugins")
-@patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=False)
-@patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo")
-@patch("frame_compare.vs.tonemap_fallback.fallback_tonemap")
-def test_apply_tonemap_uses_fallback_when_libplacebo_unusable(
-    mock_fallback, mock_libplacebo, mock_runtime_usable, mock_detect
-):
-    """Plugin presence alone must not force the crashing libplacebo path."""
-    mock_detect.return_value = {"libplacebo": True}
-    mock_fallback.return_value = MagicMock()
-
-    mock_clip = MagicMock()
-    settings = TonemapSettings(enabled=True)
-
-    result = apply_tonemap(mock_clip, settings)
-
-    mock_runtime_usable.assert_called_once_with()
-    mock_libplacebo.assert_not_called()
-    mock_fallback.assert_called_once_with(mock_clip, settings, None)
-    assert result is mock_fallback.return_value
 
 
 @patch("frame_compare.vs.tonemap_libplacebo.apply_libplacebo", return_value=MagicMock())
@@ -257,3 +187,51 @@ def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_runtime_usable, mock_d
         assert kwargs["src_csp"] == 1
         assert kwargs["dst_csp"] == 0
         assert kwargs["dst_prim"] == 1
+
+
+@pytest.mark.parametrize("case", ["metadata_missing", "runtime_failure", "runtime_unusable"])
+def test_apply_tonemap_fallback_cases(case: str) -> None:
+    clip = MagicMock()
+    fallback_result = MagicMock()
+    with patch(
+        "frame_compare.vs.env.detect_plugins",
+        return_value={"libplacebo": case != "metadata_missing"},
+    ):
+        if case == "metadata_missing":
+            clip.format.id = vs.RGBS
+            clip.std.Expr.return_value = fallback_result
+            metadata = MagicMock(max_cll=5678)
+            with patch(
+                "frame_compare.vs.tonemap_conversion.detect_hdr", return_value=(True, metadata)
+            ) as detect_hdr:
+                result = apply_tonemap(
+                    clip,
+                    TonemapSettings(enabled=True, tone_curve=ToneCurve.REINHARD),
+                    hdr_metadata=None,
+                )
+            detect_hdr.assert_called_once()
+            clip.std.Expr.assert_called_once()
+        else:
+            settings = TonemapSettings(enabled=True)
+            with (
+                patch(
+                    "frame_compare.vs.tonemap._libplacebo_runtime_usable",
+                    return_value=case == "runtime_failure",
+                ) as runtime_usable,
+                patch(
+                    "frame_compare.vs.tonemap_libplacebo.apply_libplacebo", return_value=None
+                ) as libplacebo,
+                patch(
+                    "frame_compare.vs.tonemap_fallback.fallback_tonemap",
+                    return_value=fallback_result,
+                ) as fallback,
+            ):
+                result = apply_tonemap(clip, settings)
+            runtime_usable.assert_called_once_with()
+            if case == "runtime_failure":
+                libplacebo.assert_called_once()
+                fallback.assert_called_once()
+            else:
+                libplacebo.assert_not_called()
+                fallback.assert_called_once_with(clip, settings, None)
+    assert result is fallback_result

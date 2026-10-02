@@ -78,48 +78,6 @@ def _lines(
     return compose_overlay_text_lines(config, facts)
 
 
-def test_required_minimal_example() -> None:
-    assert _lines(_config(OverlayMode.MINIMAL)) == [
-        "CtrlHD",
-        "Frame 1842 • B-frame • 17.42 GiB",
-    ]
-
-
-def test_required_standard_examples() -> None:
-    assert _lines(_config(OverlayMode.STANDARD)) == [
-        "CtrlHD",
-        "Frame 1842/143892 • B-frame",
-        "Selection: Bright",
-        "Source: 3840×2160 • 17.42 GiB",
-    ]
-    assert _lines(_config(OverlayMode.STANDARD, source_frame=1855))[1:] == [
-        "Comparison 1842 → source 1855/143892 • B-frame",
-        "Selection: Bright",
-        "Source: 3840×2160 • 17.42 GiB",
-    ]
-
-
-def test_required_diagnostic_sdr_example() -> None:
-    signal = SourceSignalFacts(
-        is_hdr=False, primaries=1, transfer=1, matrix=1, color_range="limited"
-    )
-    config = _config(
-        OverlayMode.DIAGNOSTIC,
-        label="WEB-DL",
-        source_resolution=(1920, 1080),
-        signal=signal,
-        selection_label="Random",
-        file_size_bytes=int(6.84 * 1024**3),
-    )
-    assert _lines(config, picture_type="P") == [
-        "WEB-DL",
-        "Frame 1842/143892 • P-frame",
-        "Selection: Random",
-        "Source: 1920×1080 • 6.84 GiB",
-        "Signal: SDR • BT.709 / BT.709 / BT.709 • Limited",
-    ]
-
-
 def _hdr_config(*, dovi: bool = False) -> OverlayConfig:
     signal = SourceSignalFacts(
         is_hdr=True,
@@ -142,61 +100,6 @@ def _hdr_config(*, dovi: bool = False) -> OverlayConfig:
     )
 
 
-def test_required_diagnostic_hdr_example() -> None:
-    assert _lines(_hdr_config(), picture_type="B") == [
-        "CtrlHD",
-        "Comparison 1842 → source 1855/143892 • B-frame",
-        "Selection: Bright",
-        "Source: 3840×2160 • 17.42 GiB",
-        "Signal: HDR • BT.2020 / PQ / BT.2020nc • Limited",
-        "Tonemap: BT.2390 → 100 nits",
-        "HDR static: MDL 0.005–1000 nits • MaxCLL/FALL 982/244",
-    ]
-
-
-def test_required_diagnostic_dv_source_facts() -> None:
-    config = _hdr_config(dovi=True)
-    assert _lines(config, picture_type="B") == [
-        "UHD Blu-ray",
-        "Comparison 1842 → source 1855/143892 • B-frame",
-        "Selection: Bright",
-        "Source: 3840×2160 • 54.72 GiB",
-        "Geometry: active 3840×1608 @ (0,276) • DV L5 → 3840×2160 canvas",
-        "Signal: HDR • BT.2020 / PQ / BT.2020nc • Limited • DV RPU",
-        "Tonemap: BT.2390 → 100 nits",
-        "HDR static: MDL 0.005–1000 nits • MaxCLL/FALL 982/244",
-    ]
-
-
-def test_none_mode_has_no_lines() -> None:
-    config = _config(OverlayMode.NONE)
-    assert _lines(config) == []
-
-
-def test_unknown_optional_values_are_omitted_without_dangling_separators() -> None:
-    signal = SourceSignalFacts(is_hdr=True, primaries=2, transfer=99, matrix=None)
-    config = _config(
-        OverlayMode.DIAGNOSTIC,
-        signal=signal,
-        source_resolution=(0, 0),
-        file_size_bytes=0,
-        selection_label=None,
-        presentation_state=PresentationState.HDR_TONEMAP_OFF,
-    )
-    assert _lines(config, picture_type=None) == [
-        "CtrlHD",
-        "Frame 1842/143892",
-        "Signal: HDR • tonemap off",
-    ]
-
-
-def test_frame_numbers_can_be_disabled_while_picture_type_remains() -> None:
-    config = _config(OverlayMode.STANDARD, include_frame_number=False)
-    assert _lines(config)[:2] == ["CtrlHD", "B-frame"]
-    unknown = _config(OverlayMode.STANDARD, include_frame_number=False)
-    assert _lines(unknown, picture_type=None)[0:2] == ["CtrlHD", "Selection: Bright"]
-
-
 @pytest.mark.parametrize(
     ("size", "expected"),
     [
@@ -208,3 +111,139 @@ def test_frame_numbers_can_be_disabled_while_picture_type_remains() -> None:
 )
 def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
     assert format_file_size(size) == expected
+
+
+@pytest.mark.parametrize(
+    "config, picture_type, start, stop, expected",
+    [
+        pytest.param(
+            _config(OverlayMode.MINIMAL),
+            "B",
+            None,
+            None,
+            ["CtrlHD", "Frame 1842 • B-frame • 17.42 GiB"],
+            id="required_minimal_example-0",
+        ),
+        pytest.param(
+            _config(OverlayMode.STANDARD),
+            "B",
+            None,
+            None,
+            [
+                "CtrlHD",
+                "Frame 1842/143892 • B-frame",
+                "Selection: Bright",
+                "Source: 3840×2160 • 17.42 GiB",
+            ],
+            id="required_standard_examples-0",
+        ),
+        pytest.param(
+            _config(OverlayMode.STANDARD, source_frame=1855),
+            "B",
+            1,
+            None,
+            [
+                "Comparison 1842 → source 1855/143892 • B-frame",
+                "Selection: Bright",
+                "Source: 3840×2160 • 17.42 GiB",
+            ],
+            id="required_standard_examples-1",
+        ),
+        pytest.param(
+            _config(
+                OverlayMode.DIAGNOSTIC,
+                label="WEB-DL",
+                source_resolution=(1920, 1080),
+                signal=SourceSignalFacts(
+                    is_hdr=False, primaries=1, transfer=1, matrix=1, color_range="limited"
+                ),
+                selection_label="Random",
+                file_size_bytes=int(6.84 * 1024**3),
+            ),
+            "P",
+            None,
+            None,
+            [
+                "WEB-DL",
+                "Frame 1842/143892 • P-frame",
+                "Selection: Random",
+                "Source: 1920×1080 • 6.84 GiB",
+                "Signal: SDR • BT.709 / BT.709 / BT.709 • Limited",
+            ],
+            id="required_diagnostic_sdr_example-0",
+        ),
+        pytest.param(
+            _hdr_config(),
+            "B",
+            None,
+            None,
+            [
+                "CtrlHD",
+                "Comparison 1842 → source 1855/143892 • B-frame",
+                "Selection: Bright",
+                "Source: 3840×2160 • 17.42 GiB",
+                "Signal: HDR • BT.2020 / PQ / BT.2020nc • Limited",
+                "Tonemap: BT.2390 → 100 nits",
+                "HDR static: MDL 0.005–1000 nits • MaxCLL/FALL 982/244",
+            ],
+            id="required_diagnostic_hdr_example-0",
+        ),
+        pytest.param(
+            _hdr_config(dovi=True),
+            "B",
+            None,
+            None,
+            [
+                "UHD Blu-ray",
+                "Comparison 1842 → source 1855/143892 • B-frame",
+                "Selection: Bright",
+                "Source: 3840×2160 • 54.72 GiB",
+                "Geometry: active 3840×1608 @ (0,276) • DV L5 → 3840×2160 canvas",
+                "Signal: HDR • BT.2020 / PQ / BT.2020nc • Limited • DV RPU",
+                "Tonemap: BT.2390 → 100 nits",
+                "HDR static: MDL 0.005–1000 nits • MaxCLL/FALL 982/244",
+            ],
+            id="required_diagnostic_dv_source_facts-0",
+        ),
+        pytest.param(_config(OverlayMode.NONE), "B", None, None, [], id="none_mode_has_no_lines-0"),
+        pytest.param(
+            _config(
+                OverlayMode.DIAGNOSTIC,
+                signal=SourceSignalFacts(is_hdr=True, primaries=2, transfer=99, matrix=None),
+                source_resolution=(0, 0),
+                file_size_bytes=0,
+                selection_label=None,
+                presentation_state=PresentationState.HDR_TONEMAP_OFF,
+            ),
+            None,
+            None,
+            None,
+            ["CtrlHD", "Frame 1842/143892", "Signal: HDR • tonemap off"],
+            id="unknown_optional_values_are_omitted_without_dangling_separators-0",
+        ),
+        pytest.param(
+            _config(OverlayMode.STANDARD, include_frame_number=False),
+            "B",
+            None,
+            2,
+            ["CtrlHD", "B-frame"],
+            id="frame_numbers_can_be_disabled_while_picture_type_remains-0",
+        ),
+        pytest.param(
+            _config(OverlayMode.STANDARD, include_frame_number=False),
+            None,
+            0,
+            2,
+            ["CtrlHD", "Selection: Bright"],
+            id="frame_numbers_can_be_disabled_while_picture_type_remains-1",
+        ),
+    ],
+)
+def test_overlay_text_examples(
+    config: OverlayConfig,
+    picture_type: PictureType | None,
+    start: int | None,
+    stop: int | None,
+    expected: list[str],
+) -> None:
+    assert _lines(config, picture_type=picture_type)[start:stop] == expected

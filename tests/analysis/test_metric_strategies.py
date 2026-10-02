@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import sys
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from vapoursynth import VideoNode
 
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
@@ -18,6 +20,7 @@ from frame_compare.analysis.metric_strategies import (
 from frame_compare.analysis.timing import AnalysisTimingRecorder
 from frame_compare.analysis.types import MetricActiveRect, MetricFrameRange
 from frame_compare.config.schema import AnalysisConfig
+from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 type FakeClipOp = tuple[str, int | None, int | None] | tuple[str, int, int, int, int]
@@ -326,15 +329,6 @@ def test_quality_planestats_applies_active_rect_without_resize(
     assert clip.ops == [("CropAbs", 10, 20, 400, 200)]
 
 
-def test_quality_planestats_rejects_empty_clip(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-
-    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
-        calculate_quality_planestats_metrics(FakeBalancedClip([]))
-
-
 def test_quality_planestats_reports_missing_frame_properties(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -418,19 +412,6 @@ def test_quality_strategy_bounds_range_and_preserves_motion_lookbehind(
     assert clip.slice_calls == [(1, 5, None), (0, 1, None), (0, -1, None)]
 
 
-def test_performance_strategy_rejects_empty_clip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    source = MagicMock()
-    source.clip = FakeBalancedClip([])
-
-    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
-        calculate_metric_strategy(
-            source,
-            AnalysisConfig(performance_mode="performance"),
-            reporter=None,
-        )
-
-
 def test_performance_strategy_crops_without_spatial_resize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -490,3 +471,22 @@ def test_performance_metric_identity_is_distinct_and_stable() -> None:
     assert parsed_performance["motion"]["spatial"] == "active_rect_aware_full_resolution_luma"
     assert '"x"' not in first_performance
     assert "coarse_to_refined" not in first_performance
+
+
+@pytest.mark.parametrize("strategy", ["quality_direct", "performance_dispatch"])
+def test_metric_strategies_reject_empty_clip(
+    monkeypatch: pytest.MonkeyPatch, strategy: str
+) -> None:
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    clip = FakeBalancedClip([])
+    with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
+        if strategy == "quality_direct":
+            calculate_quality_planestats_metrics(cast(VideoNode, clip))
+        else:
+            source = MagicMock()
+            source.clip = clip
+            calculate_metric_strategy(
+                source,
+                AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
+                reporter=None,
+            )

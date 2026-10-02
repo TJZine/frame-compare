@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from PIL import Image
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
@@ -860,64 +861,6 @@ def test_clip_to_rgb24_for_pillow_skips_expand_when_not_limited_internal_tonemap
     assert clip.resize.calls[0] == ("Point", {"format": 1})
 
 
-def test_maybe_expand_tonemapped_video_range_requires_internal_expand_marker() -> None:
-    array = np.full((2, 2, 3), 32, dtype=np.uint8)
-
-    result = _maybe_expand_tonemapped_video_range(array, {"_Tonemapped": 1})
-
-    assert result is array
-
-
-def test_maybe_expand_tonemapped_video_range_expands_marked_limited_video_range() -> None:
-    array = np.array(
-        [
-            [[16, 16, 16], [32, 32, 32], [90, 90, 90]],
-            [[18, 18, 18], [48, 48, 48], [120, 120, 120]],
-        ],
-        dtype=np.uint8,
-    )
-
-    result = _maybe_expand_tonemapped_video_range(
-        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0}
-    )
-
-    assert result.dtype == np.uint8
-    assert result[0, 0, 0] == 0
-    assert result[1, 2, 0] > array[1, 2, 0]
-
-
-def test_maybe_expand_tonemapped_video_range_skips_marked_full_range() -> None:
-    array = np.full((2, 2, 3), 32, dtype=np.uint8)
-
-    result = _maybe_expand_tonemapped_video_range(
-        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1}
-    )
-
-    assert result is array
-
-
-def test_maybe_expand_tonemapped_video_range_expands_deprecated_limited_color_range() -> None:
-    array = np.array([[[16, 16, 16], [120, 120, 120]]], dtype=np.uint8)
-
-    result = _maybe_expand_tonemapped_video_range(
-        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 1}
-    )
-
-    assert result.dtype == np.uint8
-    assert result[0, 0, 0] == 0
-    assert result[0, 1, 0] > array[0, 1, 0]
-
-
-def test_maybe_expand_tonemapped_video_range_skips_deprecated_full_color_range() -> None:
-    array = np.full((2, 2, 3), 32, dtype=np.uint8)
-
-    result = _maybe_expand_tonemapped_video_range(
-        array, {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 0}
-    )
-
-    assert result is array
-
-
 @pytest.mark.parametrize(
     ("prop_value", "expected"),
     [
@@ -1058,3 +1001,53 @@ def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
     )
     assert result.facts.picture_type is None
     assert result.facts.dolby_vision_rpu is (None if source_case == "raises" else False)
+
+
+@pytest.mark.parametrize(
+    "array, props, brighter",
+    [
+        pytest.param(
+            np.full((2, 2, 3), 32, dtype=np.uint8), {"_Tonemapped": 1}, None, id="requires_marker"
+        ),
+        pytest.param(
+            np.array(
+                [
+                    [[16, 16, 16], [32, 32, 32], [90, 90, 90]],
+                    [[18, 18, 18], [48, 48, 48], [120, 120, 120]],
+                ],
+                dtype=np.uint8,
+            ),
+            {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 0},
+            (1, 2, 0),
+            id="marked_limited",
+        ),
+        pytest.param(
+            np.full((2, 2, 3), 32, dtype=np.uint8),
+            {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_Range": 1},
+            None,
+            id="marked_full",
+        ),
+        pytest.param(
+            np.array([[[16, 16, 16], [120, 120, 120]]], dtype=np.uint8),
+            {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 1},
+            (0, 1, 0),
+            id="deprecated_limited",
+        ),
+        pytest.param(
+            np.full((2, 2, 3), 32, dtype=np.uint8),
+            {"_Tonemapped": 1, "_FrameCompareExpandRange": 1, "_ColorRange": 0},
+            None,
+            id="deprecated_full",
+        ),
+    ],
+)
+def test_tonemapped_video_range_cases(
+    array: NDArray[np.uint8], props: dict[str, object], brighter: tuple[int, int, int] | None
+) -> None:
+    result = _maybe_expand_tonemapped_video_range(array, props)
+    if brighter is None:
+        assert result is array
+    else:
+        assert result.dtype == np.uint8
+        assert result[0, 0, 0] == 0
+        assert result[brighter] > array[brighter]

@@ -1,9 +1,11 @@
 """Tests for VapourSynth environment detection."""
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from vapoursynth import Core
 
 import frame_compare.vs.env as env_module
 from frame_compare.vs.env import (
@@ -447,27 +449,18 @@ def test_try_load_lsmas_plugin_continues_after_load_failure(
     assert load_calls == [str(first), str(second)]
 
 
-def test_detect_plugins_all_present() -> None:
-    """Verify all plugins detected when present."""
-    core = make_mock_core(lsmas=True, libplacebo=True)
-    # Cast to MagicMock/Core for typing if needed, or rely on duck typing
-    plugins = detect_plugins(core)  # type: ignore
-    assert set(plugins.keys()) == {"lsmas", "libplacebo"}
-    assert plugins["lsmas"] is True
-    assert plugins["libplacebo"] is True
-
-
-def test_detect_plugins_none_present() -> None:
-    """Verify no plugins detected when missing."""
-    core = make_mock_core()
-    plugins = detect_plugins(core)  # type: ignore
-    assert set(plugins.keys()) == {"lsmas", "libplacebo"}
-    assert all(not v for v in plugins.values())
-
-
 def test_require_plugin_missing_raises_error() -> None:
     """Verify error raised for missing plugin."""
     core = make_mock_core()
     with pytest.raises(PluginNotFoundError) as exc:
         require_plugin(core, "libplacebo")  # type: ignore
     assert exc.value.code == "FC-2003"
+
+
+@pytest.mark.parametrize("present", [True, False], ids=["all_present", "none_present"])
+def test_detect_plugins_presence(present: bool) -> None:
+    core = make_mock_core(lsmas=present, libplacebo=present)
+    plugins = detect_plugins(cast(Core, core))
+    assert set(plugins) == {"lsmas", "libplacebo"}
+    assert plugins["lsmas"] is present
+    assert plugins["libplacebo"] is present
