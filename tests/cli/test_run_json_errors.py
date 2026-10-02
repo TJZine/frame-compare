@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
@@ -345,7 +346,7 @@ confirm_upload_after_report = true
     assert ("audio_alignment", "previous_offsets") not in validation_locs
 
 
-def test_run_json_outputs_error_schema_and_exit_code(
+def test_run_json_routes_typed_error_through_shared_formatter(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -468,74 +469,31 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
     assert payload == format_error_json(error)
 
 
-def test_run_json_invalid_tm_preset_outputs_config_error_schema(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("flag", "value", "loc"),
+    [
+        ("--tm-preset", "invalid", ["color", "preset"]),
+        ("--overlay", "invalid", ["screenshots", "overlay_mode"]),
+        ("--frames", "abc", ["analysis", "user_frames"]),
+    ],
+)
+def test_run_json_invalid_choice_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch, tmp_path: Path, flag: str, value: str, loc: list[str]
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI choices")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
     result = _invoke_run_with_minimal_workspace(
-        ["--json", "--tm-preset", "invalid"], tmp_path=tmp_path, monkeypatch=monkeypatch
+        ["--json", flag, value], tmp_path=tmp_path, monkeypatch=monkeypatch
     )
-
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
     payload = json.loads(result.stdout)
     assert payload["success"] is False
     assert payload["error"]["code"] == "FC-1003"
     assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
-    assert payload["error"]["details"]["validation_errors"][0]["loc"] == ["color", "preset"]
-
-
-def test_run_json_invalid_overlay_outputs_config_error_schema(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--json", "--overlay", "invalid"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stderr == ""
-    payload = json.loads(result.stdout)
-    assert payload["success"] is False
-    assert payload["error"]["code"] == "FC-1003"
-    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
-    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
-        "screenshots",
-        "overlay_mode",
-    ]
-
-
-def test_run_json_invalid_frames_outputs_config_error_schema(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid frame selectors")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--json", "--frames", "abc"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stderr == ""
-    payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == "FC-1003"
-    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
-        "analysis",
-        "user_frames",
-    ]
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == loc
 
 
 def test_run_json_skip_analysis_rejects_metric_frame_count_before_runner(

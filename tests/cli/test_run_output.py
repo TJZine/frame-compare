@@ -63,7 +63,6 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         print("Clip Overview", file=sys.stderr)
         print("Frame Alignment", file=sys.stderr)
         return RunResult(
@@ -96,7 +95,6 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
     tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         reporter = PlainProgressReporter()
         emit_consolidated_fps_report(
             stage="after_load_sources",

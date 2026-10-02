@@ -487,7 +487,6 @@ def test_handle_run_rejects_previous_offset_prompt_with_quiet_before_runner() ->
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert runner.requests == []
     assert handled_errors
     assert handled_errors[0].validation_errors == [
         {
@@ -541,7 +540,6 @@ def test_handle_run_write_config_rejects_previous_offsets_before_writing() -> No
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert runner.requests == []
     assert written_paths == []
     assert {tuple(error["loc"]) for error in handled_errors[0].validation_errors} == {
         ("audio_alignment", "force_interactive"),

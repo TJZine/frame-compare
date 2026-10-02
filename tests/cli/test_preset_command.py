@@ -17,50 +17,23 @@ def _assert_ok_glyph_prefixed(output: str, fragment: str) -> None:
     assert line[:2] in ("✓ ", "+ ")
 
 
-def test_preset_apply_missing_preset_exits_with_error_code(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [("missing", "FC-1004"), ("../escape", "FC-1006")],
+    ids=["missing", "invalid-name"],
+)
+def test_preset_apply_invalid_preset_exits_with_error_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, code: str
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path(".")
         config_path = _write_minimal_config(root)
         result = runner.invoke(
-            app,
-            [
-                "preset",
-                "apply",
-                "missing",
-                "--root",
-                str(root),
-                "--config",
-                str(config_path),
-            ],
+            app, ["preset", "apply", name, "--root", str(root), "--config", str(config_path)]
         )
         assert result.exit_code == 2
         assert result.stdout == ""
-        assert "FC-1004" in result.stderr
-
-
-def test_preset_apply_invalid_name_exits_with_error_code(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path(".")
-        config_path = _write_minimal_config(root)
-        result = runner.invoke(
-            app,
-            [
-                "preset",
-                "apply",
-                "../escape",
-                "--root",
-                str(root),
-                "--config",
-                str(config_path),
-            ],
-        )
-        assert result.exit_code == 2
-        assert result.stdout == ""
-        assert "FC-1006" in result.stderr
+        assert code in result.stderr
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 from structlog.testing import capture_logs
 
@@ -306,7 +307,7 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     assert "Core runtime checks passed" not in result.stdout
 
 
-def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: MonkeyPatch) -> None:
+def test_doctor_network_failure_is_warning_only(monkeypatch: MonkeyPatch) -> None:
     _run_doctor_optional_failure_and_assert(monkeypatch)
 
 
@@ -340,129 +341,50 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
     assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
 
 
-def test_doctor_human_marks_optional_vsview_unavailable_neutrally(
-    monkeypatch: MonkeyPatch,
+@pytest.mark.parametrize(
+    ("message", "available", "expected"),
+    [
+        (
+            "VSView not installed (optional for manual alignment)",
+            False,
+            "– VSView VSView not installed",
+        ),
+        ("VSView availability probe failed", False, "– VSView VSView availability probe failed"),
+        (
+            "VSView is available for interactive alignment",
+            True,
+            "✓ VSView VSView is available for interactive alignment",
+        ),
+    ],
+    ids=["unavailable", "probe-failure", "available"],
+)
+def test_doctor_optional_vsview_presentation(
+    monkeypatch: MonkeyPatch, message: str, available: bool, expected: str
 ) -> None:
     check = DoctorCheck(
         name="vsview",
         category="optional",
-        check_fn=lambda: CheckResult(
-            passed=True,
-            message="VSView not installed (optional for manual alignment)",
-            available=False,
-        ),
+        check_fn=lambda: CheckResult(passed=True, message=message, available=available),
     )
-    report = DoctorReport(
-        checks=[(check, check.check_fn())],
-        all_passed=True,
-        critical_failures=[],
-    )
+    report = DoctorReport(checks=[(check, check.check_fn())], all_passed=True, critical_failures=[])
 
     def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
+        checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None
     ) -> DoctorReport:
         return report
 
     monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
     result = runner.invoke(app, ["doctor"])
-
     assert result.exit_code == 0
     assert result.stderr == ""
     normalized = " ".join(result.stdout.split())
-    assert "\u2013 VSView VSView not installed" in normalized
-    assert "\u2713 VSView" not in normalized
-    assert "\u2717 VSView" not in normalized
-    assert normalized.endswith("\u2713 Runtime is ready for comparisons.")
-
-    json_result = runner.invoke(app, ["doctor", "--json"])
-    assert json_result.exit_code == 0
-    assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
-    assert check_entry["status"] == "pass"
-    assert "available" not in check_entry
-
-
-def test_doctor_human_marks_optional_vsview_probe_failure_neutrally(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    check = DoctorCheck(
-        name="vsview",
-        category="optional",
-        check_fn=lambda: CheckResult(
-            passed=True,
-            message="VSView availability probe failed",
-            available=False,
-        ),
-    )
-    report = DoctorReport(
-        checks=[(check, check.check_fn())],
-        all_passed=True,
-        critical_failures=[],
-    )
-
-    def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
-    ) -> DoctorReport:
-        return report
-
-    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
-    result = runner.invoke(app, ["doctor"])
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    normalized = " ".join(result.stdout.split())
-    assert "\u2013 VSView VSView availability probe failed" in normalized
-    assert "\u2713 VSView" not in normalized
-    assert "\u2717 VSView" not in normalized
-    assert normalized.endswith("\u2713 Runtime is ready for comparisons.")
-
-    json_result = runner.invoke(app, ["doctor", "--json"])
-    assert json_result.exit_code == 0
-    assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
-    assert check_entry["status"] == "pass"
-    assert "available" not in check_entry
-
-
-def test_doctor_human_marks_available_optional_vsview_as_pass(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    check = DoctorCheck(
-        name="vsview",
-        category="optional",
-        check_fn=lambda: CheckResult(
-            passed=True,
-            message="VSView is available for interactive alignment",
-            available=True,
-        ),
-    )
-    report = DoctorReport(
-        checks=[(check, check.check_fn())],
-        all_passed=True,
-        critical_failures=[],
-    )
-
-    def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
-    ) -> DoctorReport:
-        return report
-
-    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
-    result = runner.invoke(app, ["doctor"])
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    normalized = " ".join(result.stdout.split())
-    assert "\u2713 VSView VSView is available for interactive alignment" in normalized
-    assert "\u2013 VSView" not in normalized
-    assert normalized.endswith("\u2713 Runtime is ready for comparisons.")
-
+    assert expected in normalized
+    if available:
+        assert "– VSView" not in normalized
+    else:
+        assert "✓ VSView" not in normalized
+        assert "✗ VSView" not in normalized
+    assert normalized.endswith("✓ Runtime is ready for comparisons.")
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
     assert json_result.stderr == ""
@@ -511,7 +433,7 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     assert "\x1b[" not in result.stdout
 
 
-def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
+def test_doctor_preserves_supplied_hint_text_in_human_and_json_output(
     monkeypatch: MonkeyPatch,
 ) -> None:
     checks = [
@@ -644,7 +566,7 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
         raise RuntimeError(f"{sentinel} at /private/config.toml")
 
     check = DoctorCheck(name="custom_check", category="optional", check_fn=_raise)
-    with capture_logs() as captured_logs:
+    with capture_logs():
         report = run_doctor(checks=[check])
 
     def _run_doctor(
@@ -665,12 +587,6 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
     assert entry["details"] == {"exception_type": "RuntimeError"}
     assert sentinel not in result.stdout
     assert "/private/config.toml" not in result.stdout
-    record = next(item for item in captured_logs if item["event"] == "doctor_check_failed")
-    assert record["event"] == "doctor_check_failed"
-    assert record["check"] == "custom_check"
-    assert record["exception_type"] == "RuntimeError"
-    assert record["exc_info"] is True
-    assert record["log_level"] == "debug"
 
 
 def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(

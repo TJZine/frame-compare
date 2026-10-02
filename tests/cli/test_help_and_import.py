@@ -12,7 +12,7 @@ from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPre
 from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
 
-def test_app_help_lists_all_commands():
+def test_root_help_mentions_run_wizard_doctor_preset_and_version():
     result = runner.invoke(
         app,
         ["--help"],
@@ -29,7 +29,7 @@ def test_app_help_lists_all_commands():
     assert "version" in output
 
 
-def test_run_help_shows_all_options():
+def test_run_help_declares_required_options_and_displays_selected_flags():
     REQUIRED_RUN_OPTIONS = [
         "--root",
         "-r",

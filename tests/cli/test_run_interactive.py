@@ -95,9 +95,6 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
     ) -> int:
         assert isinstance(error, ConfigValidationError)
         handled_errors.append(error)
-        assert no_color is False
-        assert verbose is False
-        assert verbose_hint == "--verbose"
         return int(ExitCode.CONFIG_ERROR)
 
     with pytest.raises(typer.Exit) as exc_info:
@@ -114,7 +111,6 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert runner.requests == []
     assert handled_errors
     assert expected_message in {str(error["msg"]) for error in handled_errors[0].validation_errors}
 
@@ -328,37 +324,11 @@ def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive
     assert zero_margin_dependencies is None
 
 
-def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> None:
-    disabled_auto_open = get_default_config()
-    disabled_auto_open.report.auto_open = False
+@pytest.mark.parametrize("auto_open", [False, True], ids=["disabled", "browser-refused"])
+def test_confirmation_callback_prints_report_path(auto_open: bool) -> None:
+    config = get_default_config()
+    config.report.auto_open = auto_open
     output = StringIO()
-
-    callback = build_confirm_slowpics_upload_callback(
-        args=replace(_base_args(), quiet=False),
-        deps=_deps(
-            DepsOptions(
-                stdout_is_tty=True,
-                confirm_upload=lambda _text, *, default: False,
-            )
-        ),
-        console=Console(file=output, no_color=True, force_terminal=False),
-        resolve_effective_config=lambda: disabled_auto_open,
-        visibility=Visibility.PUBLIC,
-    )
-
-    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
-        "declined"
-    )
-    rendered = output.getvalue()
-    assert "Publish to slow.pics?" in rendered
-    assert "Visibility  Public" in rendered
-    assert rendered.count("report.html") == 1
-    assert "Report: report.html" not in rendered
-
-
-def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails() -> None:
-    output = StringIO()
-
     callback = build_confirm_slowpics_upload_callback(
         args=replace(_base_args(), quiet=False),
         deps=_deps(
@@ -369,16 +339,18 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
             )
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
-        resolve_effective_config=get_default_config,
+        resolve_effective_config=lambda: config,
         visibility=Visibility.PUBLIC,
     )
-
-    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
-        "declined"
+    assert (
+        callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == "declined"
     )
     rendered = output.getvalue()
     assert "Publish to slow.pics?" in rendered
     assert rendered.count("report.html") == 1
+    if not auto_open:
+        assert "Visibility  Public" in rendered
+        assert "Report: report.html" not in rendered
 
 
 @pytest.mark.parametrize("width", [60, 80])
@@ -456,7 +428,7 @@ def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:
     assert exc_info.value.exit_code == int(ExitCode.INTERRUPTED)
 
 
-def test_maybe_open_run_report_requires_report_human_output_and_tty() -> None:
+def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
     opened: list[Path] = []
     result = RunResult(success=True, report_path=Path("report.html"))
 

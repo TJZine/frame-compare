@@ -164,38 +164,48 @@ api_key = "sentinel-api-key"
     assert "secret.invalid" not in result.stdout
 
 
-def test_run_dry_run_human_and_quiet_follow_current_quiet_semantics(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("names", "quiet"),
+    [
+        (("source.mkv",), False),
+        (("source.mkv",), True),
+        (("reference.mkv", "comparison.mkv"), True),
+    ],
+    ids=["normal-one", "quiet-one", "quiet-two"],
+)
+def test_run_dry_run_source_count_and_quiet_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: tuple[str, ...], quiet: bool
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path("workspace")
         config_path = _write_workspace(root)
         input_dir = root / "comparison_videos"
         input_dir.mkdir()
-        (input_dir / "source.mkv").write_bytes(b"")
-
-        normal = _invoke(root, config_path)
-        quiet = _invoke(root, config_path, "--quiet")
-
-    assert normal.exit_code == 0
-    assert "No side effects:" in normal.stdout
-    for section in (
-        "Will use",
-        "Would create in a real run",
-        "Publishing after success",
-        "Unknown until execution",
-        "Not performed by dry-run",
-    ):
-        assert section in normal.stdout
-    assert "source.mkv" in normal.stdout
-    assert "ffprobe_or_ffmpeg" not in normal.stdout
-    assert "runtime readiness checks" in normal.stdout
-    assert "Input directory: comparison_videos" in normal.stdout
-    assert normal.stderr == ""
-    assert quiet.exit_code == 0
-    assert "Dry run: 1 source file; no side effects performed." in quiet.stdout
-    assert "source files" not in quiet.stdout
-    assert quiet.stderr == ""
+        for name in names:
+            (input_dir / name).write_bytes(b"")
+        result = _invoke(root, config_path, *(["--quiet"] if quiet else []))
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    if quiet:
+        if len(names) == 1:
+            assert "Dry run: 1 source file; no side effects performed." in result.stdout
+            assert "source files" not in result.stdout
+        else:
+            assert "Dry run: 2 source files; no side effects performed." in result.stdout
+    else:
+        assert "No side effects:" in result.stdout
+        for section in (
+            "Will use",
+            "Would create in a real run",
+            "Publishing after success",
+            "Unknown until execution",
+            "Not performed by dry-run",
+        ):
+            assert section in result.stdout
+        assert "source.mkv" in result.stdout
+        assert "ffprobe_or_ffmpeg" not in result.stdout
+        assert "runtime readiness checks" in result.stdout
+        assert "Input directory: comparison_videos" in result.stdout
 
 
 def test_run_dry_run_human_reports_workspace_root_input_path(
@@ -300,24 +310,6 @@ create_url_shortcut = false
     assert "Open the published URL: configured" in result.stdout
     assert "Create a URL shortcut: not configured" in result.stdout
     assert "Send a webhook notification: not configured" in result.stdout
-
-
-def test_run_dry_run_quiet_uses_plural_source_grammar(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
-        config_path = _write_workspace(root)
-        input_dir = root / "comparison_videos"
-        input_dir.mkdir()
-        for name in ("reference.mkv", "comparison.mkv"):
-            (input_dir / name).write_bytes(b"")
-
-        result = _invoke(root, config_path, "--quiet")
-
-    assert result.exit_code == 0
-    assert "Dry run: 2 source files; no side effects performed." in result.stdout
-    assert result.stderr == ""
 
 
 def test_run_dry_run_accepts_external_input_override_and_reports_only_that_absolute_path(
