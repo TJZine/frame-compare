@@ -153,6 +153,11 @@ def test_verifier_passes_host_user_media_environment_and_artifacts(
         "FRAME_COMPARE_E2E_REQUIRE_MEDIA=1",
         "FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e",
     } <= set(_docker_environment_args(invocation))
+    args = _docker_invocation_args(invocation)
+    user_index = args.index("--user")
+    uid_gid = args[user_index + 1].split(":")
+    assert len(uid_gid) == 2
+    assert all(part.isdigit() for part in uid_gid)
 
 
 def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(

@@ -463,6 +463,7 @@ def test_windows_portable_updater_validates_rollback_backup_id_format_and_contai
     body = _extract_powershell_function(updater, "Invoke-Rollback")
     assert r"^\d{14}$" in body
     assert "backup id" in body.lower()
+    assert "Get-SafeChildPath" in body
 
 
 def test_windows_portable_build_update_rejects_native_parent_prefix(repo_root: Path) -> None:
@@ -495,6 +496,7 @@ def test_windows_update_keygen_hardens_windows_and_posix_private_files(
     assert writer_fn.index("Set-PrivateFilePermissions -PathValue $PathValue") < writer_fn.index(
         "$writer.Write($Content)"
     )
+    assert "Test-Path -LiteralPath $PathValue -PathType Leaf" in fn
 
 
 def test_windows_update_keygen_requires_powershell_7_3_before_runtime_types(
@@ -726,6 +728,8 @@ def test_windows_portable_build_update_uses_clean_committed_source(repo_root: Pa
     assert "app\\\\src\\\\frame_compare" in source_match
     assert "$actualHash -cne $expectedHash" in source_match
     assert "$bundleAppVersion -cne $toAppVersion" in build_script
+    assert "New-ManifestFiles -SourceRoot $sourceRoot" in build_script
+    assert "Get-AppVersionFromSource -RepoRootPath $sourceSnapshotRoot" in build_script
 
 
 def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
@@ -735,6 +739,7 @@ def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
     updater = _read_text_or_fail(updater_path)
     assert '$bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"' in updater
     assert "& $bundleLauncher version 2>&1" in updater
+    assert "Get-VersionFromCommandOutput -OutputLines $launcherResult" in updater
 
 
 def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(

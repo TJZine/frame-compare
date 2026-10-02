@@ -86,6 +86,9 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
     assert "%ProgramFiles%\\PowerShell\\7\\pwsh.exe" in build_script
     assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in build_script
     assert '"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File' in build_script
+    for assignment in ("$cmd = @'", "$updateCmd = @'"):
+        launcher = build_script.split(assignment, 1)[1].split("'@", 1)[0]
+        assert 'set "POWERSHELL_EXE="' in launcher
 
 
 def test_windows_portable_build_resolves_relative_paths_from_provider_location(
@@ -93,6 +96,8 @@ def test_windows_portable_build_resolves_relative_paths_from_provider_location(
     tmp_path: Path,
 ) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)" in build_script
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("PowerShell 7 is required for the portable build regression")
@@ -141,6 +146,8 @@ def test_windows_portable_build_creates_default_workspace_directories(repo_root:
     assert '$bundleConfigDir = Join-Path $OutDir "config"' in build_script
     assert '$bundleInputDir = Join-Path $OutDir "comparison_videos"' in build_script
     assert 'Join-Path $OutDir "screenshots"' not in build_script
+    assert "Ensure-Directory -Path $bundleConfigDir" in build_script
+    assert "Ensure-Directory -Path $bundleInputDir" in build_script
 
 
 def test_windows_portable_installed_default_config_uses_generated_root_only(
@@ -389,6 +396,7 @@ def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
         )
     ]
     assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
+    assert "direct_out.get_frame(0)" in direct_smoke
 
 
 def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Path) -> None:
@@ -526,6 +534,7 @@ def test_windows_portable_build_installs_manifest_wheels_dependency_closed(
     assert "uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel" in (
         build_script
     )
+    assert 'Get-RequiredStringProperty -Object $artifact -Name "sha256"' in build_script
 
 
 def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> None:
@@ -559,6 +568,9 @@ def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
     assert "throw $dirtySourceMessage" in copy_repo_app
     assert "Write-Warning $dirtySourceMessage" in copy_repo_app
     assert copy_repo_app.index(status_command) < copy_repo_app.index(archive_command)
+    assert 'Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"' in (
+        copy_repo_app
+    )
 
 
 def test_windows_portable_build_reads_version_from_archived_app_source(
@@ -618,6 +630,12 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "qt_webengine_runtime=absent deployment=excluded" in build_script
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
+    assert combined_proof.index("preload_vapoursynth_runtime()") < combined_proof.index(
+        "from PySide6.QtCore import QTimer"
+    )
+    assert combined_proof.index("from PySide6.QtCore import QTimer") < combined_proof.index(
+        "import vsview.main"
+    )
 
 
 def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
@@ -731,6 +749,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert "Color metadata incomplete; using standard display defaults (BT.709)" in build_script
+    assert '$normalizedCombined = ($combined -replace "\\s+", " ").Trim()' in launch_proof
 
 
 def test_windows_portable_workflow_requires_combined_vsview_proof(
@@ -1662,6 +1681,16 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "[guid]::NewGuid()" in physical_checklist
     assert "every other stdout or stderr evidence file is capped at 16 MiB" in physical_checklist
     assert "reports the overflowing stream and byte limit" in physical_checklist
+    for label in (
+        "candidate_launcher_--help",
+        "candidate_launcher_version",
+        "candidate_launcher_doctor_--json",
+        "candidate_install",
+        "installed_shim_version",
+        "installed_shim_--help",
+    ):
+        assert verifier.count(f'-Label "{label}"') == 1
+    assert "$validatedEntry.Entry.Open()" in verifier
 
 
 def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
@@ -1707,6 +1736,10 @@ def test_windows_portable_build_uses_vendored_manifest_license_files(repo_root: 
     build_script = _read_text_or_fail(build_path)
     assert "Assert-Sha256 -FilePath $resolvedPath -ExpectedHex $expectedSha256" in build_script
     assert "Invoke-WebRequest -Uri $licenseUrl" not in build_script
+    assert (
+        "Copy-ManifestLicenseFiles -LicensesDir $licensesDir -ArtifactId $id -Spdx $spdx"
+        in build_script
+    )
 
 
 def test_windows_portable_manifest_schema_models_current_install_shapes(repo_root: Path) -> None:
