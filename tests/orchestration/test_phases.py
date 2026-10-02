@@ -34,6 +34,8 @@ from frame_compare.utils.progress import (
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.types import WorkspacePaths
 
+from .execute_run_helpers import FakeFFmpegRunner
+
 
 def _make_context(tmp_path: Path) -> RunContext:
     config = ConfigSchema()
@@ -181,12 +183,12 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
 ) -> None:
     context = _make_context(tmp_path)
 
-    class SpyReporter:
+    class SpyReporter(NullProgressReporter):
         def __init__(self) -> None:
             self.complete_phase_calls: list[ProgressPhaseStatus] = []
 
-        def start_phase(self, name: str, total: int) -> None:
-            del name, total
+        def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
+            del name, total, presentation
 
         def advance(self, amount: int = 1) -> None:
             del amount
@@ -257,7 +259,7 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
     phases = build_phases_after_align(
         request=RunRequest(root=Path("."), no_upload=False),
         monotonic_timer=lambda: 0.0,
-        ffmpeg_runner=object(),
+        ffmpeg_runner=FakeFFmpegRunner(),
         http_client=None,
         state=state,
         metadata_prefetch=MetadataPrefetch(None, False),

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Never
 
 import pytest
 
@@ -26,10 +26,11 @@ class FailingVSLoader:
     def __init__(self, error: RuntimeError) -> None:
         self.error = error
 
-    def load(self, _path: Path) -> object:
+    def load(self, path: Path) -> Never:
+        del path
         raise self.error
 
-    def ensure_core(self) -> object:
+    def ensure_core(self) -> Never:
         raise AssertionError("not reached")
 
 
@@ -61,9 +62,7 @@ def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
     result = asyncio.run(
         execute_run(
             _request(tmp_path),
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
-            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
         )
     )
 
@@ -93,7 +92,7 @@ def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
             _request(tmp_path),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                ffmpeg_runner=FakeFFmpegRunner(),
                 clock=lambda: next(wall_times),
                 monotonic_timer=AdvancingTimer(step=0.25),
             ),
@@ -124,8 +123,8 @@ def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identi
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    vs_loader=FailingVSLoader(original),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )
@@ -162,8 +161,8 @@ def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    vs_loader=FailingVSLoader(original),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                     clock=lambda: next(wall_times),
                     monotonic_timer=AdvancingTimer(step=0.5),
                 ),
@@ -288,8 +287,8 @@ def test_failed_result_write_failure_preserves_original_exception(
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    vs_loader=FailingVSLoader(original),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )
@@ -314,7 +313,7 @@ def test_failure_after_alignment_records_known_selected_frame_count(
                 _request(tmp_path),
                 deps=RunDependencies(
                     vs_loader=FakeVSLoader(),
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )

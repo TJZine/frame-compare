@@ -28,7 +28,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_post_render, phase_selection
-from frame_compare.orchestration.context import ClipActiveRect
+from frame_compare.orchestration.context import ClipActiveRect, ClipState
 from frame_compare.orchestration.full_window_retry import (
     compute_selection_window_with_recovery,
     recover_from_exclusion_selection_failure,
@@ -190,7 +190,7 @@ def test_run_analyze_phase_satisfied_selection_never_prompts(
         }
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
-    ctx.confirm_full_window_retry = lambda _request: (_ for _ in ()).throw(
+    ctx.confirm_full_window_retry = lambda request: (_ for _ in ()).throw(
         AssertionError("valid selection must not prompt")
     )
     monkeypatch.setattr(
@@ -254,7 +254,7 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
         return CacheLoadResult(success=True, metrics=_metrics_for_range(start=40, end=60))
 
     def _confirm(
-        _request: FullWindowRetryConfirmationRequest,
+        request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         nonlocal prompt_calls
         prompt_calls += 1
@@ -278,7 +278,7 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
             workspace=ctx.workspace,
         )
 
-    assert "clip-specific config" in exc_info.value.hint
+    assert "clip-specific config" in cast(str, exc_info.value.hint)
     assert config_path.read_bytes() == authored_bytes
 
 
@@ -326,7 +326,7 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
         )
 
     def _confirm(
-        _request: FullWindowRetryConfirmationRequest,
+        request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         nonlocal prompt_calls
         prompt_calls += 1
@@ -381,7 +381,7 @@ def test_full_window_retry_progress_failure_is_fatal_before_override(
     prompt_calls = 0
 
     def _confirm(
-        _request: FullWindowRetryConfirmationRequest,
+        request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         nonlocal prompt_calls
         prompt_calls += 1
@@ -422,7 +422,7 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
     prompt_calls = 0
 
     def _confirm(
-        _request: FullWindowRetryConfirmationRequest,
+        request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         nonlocal prompt_calls
         prompt_calls += 1
@@ -760,7 +760,7 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
         ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=72)
     input_videos = [ctx.reference.path]
     if domain in {"analysis-source", "untrimmed-analysis"}:
-        input_videos.append(ctx.analysis_clip.path)
+        input_videos.append(cast(ClipState, ctx.analysis_clip).path)
 
     monkeypatch.setattr(
         phase_selection.cache_io,
@@ -817,7 +817,7 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
         assert output.selection_breakdown == SelectionBreakdown(
             quantile_dark=expected_dark, quantile_bright=expected_bright
         )
-    details_by_frame = cast(dict[int, SelectionDetail], output.selection_details_by_source_frame)
+    details_by_frame = output.selection_details_by_source_frame
     assert set(details_by_frame) == set(expected_dark + (expected_bright or []))
     if domain == "untrimmed-analysis":
         assert details_by_frame[10].timecode == "00:00:00.417"

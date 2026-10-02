@@ -41,7 +41,7 @@ def _result_for_requests(
             tmp_path / f"{request.clip_path.stem}-{frame}.png"
             for frame in request.comparison_frames
         ]
-        values = (
+        values: list[PictureType | None] = (
             picture_types[request.label]
             if picture_types is not None and request.label in picture_types
             else ["I"] * len(request.source_frames)

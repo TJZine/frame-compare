@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from typing import cast
+from typing import Never, cast
 
 import pytest
 
@@ -13,6 +13,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
+from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.execution_types import (
@@ -516,7 +517,9 @@ enable = false
 
     captured: dict[str, object] = {}
 
-    async def _capture_execute_phases(_phases: object, context: object, _reporter: object) -> None:
+    async def _capture_execute_phases(
+        _phases: object, context: RunContext, _reporter: object
+    ) -> None:
         if "config" not in captured:
             captured["config"] = context.config
 
@@ -611,7 +614,7 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         def load(self, path: Path) -> SourceInfo:
             raise AssertionError(f"Fake VS loader should not be called: {path}")
 
-        def ensure_core(self) -> object:
+        def ensure_core(self) -> Never:
             raise AssertionError("Fake VS core should not be requested when cache is warm")
 
     reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())

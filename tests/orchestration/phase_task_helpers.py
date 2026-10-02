@@ -32,6 +32,16 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.utils.types import WorkspacePaths
 
+__all__ = [
+    "_run_align_phase",
+    "_RenderRunner",
+    "_render_artifacts",
+    "_workspace",
+    "_create_config",
+    "_clip",
+    "_context",
+]
+
 MINIMAL_CONFIG = """\
 [paths]
 input_dir = "comparison_videos"

@@ -5,12 +5,18 @@ from __future__ import annotations
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError, SelectionError
-from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.analysis.types import (
+    ClipIdentity,
+    FrameMetrics,
+    MetricsMetadata,
+    SelectionBreakdown,
+    SelectionDetail,
+)
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
 from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
@@ -434,11 +440,16 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     output = _run_align_phase(ctx, selected_frames=selected_frames)
 
     assert output.selected_frames == [0, 12]
-    assert output.selection_breakdown.quantile_dark == [60, 72]
-    assert set(output.selection_details_by_source_frame) == {60, 72}
+    assert cast(SelectionBreakdown, output.selection_breakdown).quantile_dark == [60, 72]
+    assert set(cast(dict[int, SelectionDetail], output.selection_details_by_source_frame)) == {
+        60,
+        72,
+    }
     assert all(
         detail.label in {"Dark", "Bright"}
-        for detail in output.selection_details_by_source_frame.values()
+        for detail in cast(
+            dict[int, SelectionDetail], output.selection_details_by_source_frame
+        ).values()
     )
 
 
@@ -487,8 +498,11 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
 
     assert output.reference.trim.trim_start_frames == 60
     assert output.selected_frames == [15, 30]
-    assert output.selection_breakdown.quantile_dark == [75, 90]
-    assert set(output.selection_details_by_source_frame) == {75, 90}
+    assert cast(SelectionBreakdown, output.selection_breakdown).quantile_dark == [75, 90]
+    assert set(cast(dict[int, SelectionDetail], output.selection_details_by_source_frame)) == {
+        75,
+        90,
+    }
 
 
 def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
@@ -623,9 +637,15 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
     output = _run_align_phase(ctx, selected_frames=[98, 0])
 
     assert output.selected_frames == [0, 1]
-    assert output.selection_breakdown.user == [98]
-    assert output.selection_details_by_source_frame[98].label == "User"
-    assert output.selection_details_by_source_frame[99].label == "Dark"
+    assert cast(SelectionBreakdown, output.selection_breakdown).user == [98]
+    assert (
+        cast(dict[int, SelectionDetail], output.selection_details_by_source_frame)[98].label
+        == "User"
+    )
+    assert (
+        cast(dict[int, SelectionDetail], output.selection_details_by_source_frame)[99].label
+        == "Dark"
+    )
 
 
 def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
@@ -678,7 +698,9 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
     selected_source_frames = {
         output.reference.trim.trim_start_frames + frame for frame in output.selected_frames
     }
-    assert selected_source_frames == set(output.selection_details_by_source_frame)
+    assert selected_source_frames == set(
+        cast(dict[int, SelectionDetail], output.selection_details_by_source_frame)
+    )
     assert selected_source_frames
     assert all(80 <= frame < 140 for frame in selected_source_frames)
 

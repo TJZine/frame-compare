@@ -53,13 +53,13 @@ from tests.orchestration.phase_task_helpers import (
 )
 
 
-class _RecordingProgressReporter:
+class _RecordingProgressReporter(NullProgressReporter):
     def __init__(self) -> None:
         self.events: list[str] = []
         self.completions: list[tuple[ProgressPhaseStatus, bool | None]] = []
 
-    def start_phase(self, name: str, total: int) -> None:
-        del total
+    def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
+        del total, presentation
         self.events.append(f"start:{name}")
 
     def advance(self, amount: int = 1) -> None:
@@ -132,7 +132,7 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
 
     async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
         nonlocal captured_upload_plan
-        upload_plan = kwargs["upload_plan"]
+        upload_plan = cast(SlowpicsUploadPlan, kwargs["upload_plan"])
         captured_upload_plan = upload_plan
         return PublishResult(
             url="https://slow.pics/c/example",
@@ -162,7 +162,10 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
             selected_frames=[10],
         )
 
-    assert [[image.image_name for image in row.images] for row in captured_upload_plan.rows] == [
+    assert [
+        [image.image_name for image in row.images]
+        for row in cast(SlowpicsUploadPlan, captured_upload_plan).rows
+    ] == [
         [
             "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
             "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",

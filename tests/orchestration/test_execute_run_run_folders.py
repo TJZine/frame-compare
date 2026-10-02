@@ -90,7 +90,7 @@ class AnalysisCapableVSLoader:
             hdr_metadata=None,
         )
 
-    def ensure_core(self) -> object:
+    def ensure_core(self) -> NoReturn:
         raise RuntimeError("ensure_core should not be called in this test")
 
 
@@ -164,7 +164,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
 
     asyncio.run(execute_run(request, deps=deps))
 
-    assert not analysis_cache_path.exists()
+    assert not cast(Path, analysis_cache_path).exists()
     assert manual_overrides_path.exists()
 
 
@@ -250,9 +250,10 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
         )
     )
 
-    assert prep.workspace.run_dir.is_relative_to((root / "generated").resolve())
-    assert prep.workspace.screenshots_dir.is_relative_to(prep.workspace.run_dir)
-    assert prep.workspace.generated_dir.is_relative_to(prep.workspace.run_dir)
+    run_dir = cast(Path, prep.workspace.run_dir)
+    assert run_dir.is_relative_to((root / "generated").resolve())
+    assert prep.workspace.screenshots_dir.is_relative_to(run_dir)
+    assert prep.workspace.generated_dir.is_relative_to(run_dir)
     assert [path for path in external_input.iterdir() if path.is_dir()] == []
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Never
 
 import pytest
 
@@ -32,7 +33,7 @@ class NoProbeVSLoader:
         del path
         raise AssertionError("run_info write failure should happen before probing")
 
-    def ensure_core(self) -> object:
+    def ensure_core(self) -> Never:
         raise AssertionError("run_info write failure should happen before VS core access")
 
 

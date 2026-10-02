@@ -512,7 +512,7 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     state = ExecutionState(artifacts=RunArtifacts())
 
     with pytest.raises(TypeError, match="UnknownPhaseOutput"):
-        apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]
+        apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]  # Exercise rejection of an unsupported carrier.
 
 
 @pytest.mark.anyio
