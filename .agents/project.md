@@ -126,11 +126,12 @@ replace a required full gate. Do not overlap verifier runs in one checkout: the
 generated-media cache/pruning protocol does not support that. Browser smoke needs
 a discoverable Chrome/Chromium or `REPORT_BROWSER`; inspect relevant skips.
 
-CI trigger facts must be checked at the target branch. At the prepared baseline,
-CI and Docker PR jobs target `main`, `pre-release`, and `staging`, so a PR targeting
-`dev/v0.6.0-review-remediation` does not trigger them. Windows portable's PR path is
-not restricted to those branches. Record exact source SHA and actual job result
-when using hosted evidence. A green PR indicator does not establish a missing gate.
+CI trigger facts must be checked at the target revision. CI and Docker PR jobs
+accept every base branch, including integration branches. Docker retains its
+code/runtime path filter, so documentation-only PRs do not invoke the media gate.
+Record exact source SHA and actual job result when using hosted evidence. Local
+workflow assertions do not prove GitHub ran a job; a green PR indicator does not
+establish a missing gate.
 
 ## Test design
 

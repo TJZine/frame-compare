@@ -154,34 +154,33 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     ci = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
 
-    assert {"push", "pull_request", "workflow_dispatch"} <= set(ci["on"])
+    assert set(ci["on"]) == {"push", "pull_request", "workflow_dispatch"}
+    assert set(ci["on"]["push"]["branches"]) == {"main", "staging"}
     assert ci["permissions"] == {"contents": "read"}
-    assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
+    assert set(docker["on"]) == {"pull_request", "workflow_dispatch"}
     assert docker["permissions"] == {"contents": "read"}
     assert docker["concurrency"] == {
         "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
         "cancel-in-progress": "true",
     }
-    assert set(docker["on"]["pull_request"]["branches"]) == {
-        "main",
-        "pre-release",
-        "staging",
-    }
-    assert set(ci["on"]["pull_request"]["branches"]) == {
-        "main",
-        "pre-release",
-        "staging",
-    }
+    # Integration PRs must be checked regardless of their base branch.
+    for workflow in (ci, docker):
+        pr_options = workflow["on"]["pull_request"] or {}
+        assert "branches" not in pr_options
+        assert "branches-ignore" not in pr_options
+    assert not ci["on"]["pull_request"]
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
         "src/**",
         "tests/**",
+        "pyproject.toml",
         "uv.lock",
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
         ".github/workflows/docker-integration.yml",
-    } <= set(workflow_paths)
+    } == set(workflow_paths)
+    assert "paths-ignore" not in docker["on"]["pull_request"]
 
 
 def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:

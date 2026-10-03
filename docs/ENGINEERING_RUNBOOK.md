@@ -308,7 +308,7 @@ no warm-cache speedup.
 
 If this path cannot be run locally, record it as documented-only until an observed
 matching-SHA run of `.github/workflows/docker-integration.yml` supplies the proof.
-On pull requests to `main`, `pre-release`, or `staging`, the job runs when changes
+On pull requests to any base branch, the job runs when changes
 touch `src/**`, `tests/**`, the project lock/config files, Docker files, verifier
 scripts, or the workflow itself.
 Obtain an authorized manual run when required; an absent or skipped CI job is not
