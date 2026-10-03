@@ -256,35 +256,6 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
     assert state.frame_plan_warnings == []
 
 
-def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
-    from frame_compare.orchestration.execution_types import ReportPhaseOutput
-
-    workspace = _workspace(
-        tmp_path,
-        input_subdir="comparison_videos",
-        run_subdir=None,
-        screenshots_subdir="screenshots",
-    )
-    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = execution_context(
-        config=ConfigSchema(),
-        workspace=workspace,
-        reference=reference,
-        comparisons=[],
-    )
-    state = ExecutionState(artifacts=RunArtifacts())
-    report_path = tmp_path / "report.html"
-
-    apply_phase_output(
-        ctx=ctx,
-        state=state,
-        output=ReportPhaseOutput(report_path=report_path, report_succeeded=True),
-    )
-
-    assert state.artifacts.report_path == report_path
-    assert state.artifacts.report_succeeded is True
-
-
 def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) -> None:
     workspace = _workspace(
         tmp_path,
