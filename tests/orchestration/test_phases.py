@@ -16,22 +16,19 @@ from frame_compare.orchestration.context import (
     ClipFingerprint,
     RunContext,
 )
-from frame_compare.orchestration.execution import _create_timed_phase, build_phases_after_align
+from frame_compare.orchestration.execution import _create_timed_phase
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     ExecutionState,
-    MetadataPrefetch,
-    RunArtifacts,
 )
 from frame_compare.orchestration.phases import Phase, execute_phases
-from frame_compare.orchestration.types import RunRequest
 from frame_compare.utils.progress import (
     NullProgressReporter,
     RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
-from .execute_run_helpers import FakeFFmpegRunner, clip_state
+from .execute_run_helpers import clip_state
 from .phase_task_helpers import _workspace
 
 
@@ -64,36 +61,6 @@ def _make_context(tmp_path: Path) -> RunContext:
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         reporter=NullProgressReporter(),
     )
-
-
-def test_execute_phases_unresolved_review_warns_and_keeps_summary(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    context = _make_context(tmp_path)
-
-    async def phase_align(_: RunContext) -> None:
-        return None
-
-    asyncio.run(
-        execute_phases(
-            [
-                Phase(
-                    name="align",
-                    execute=phase_align,
-                    success_summary="SCOPE needs visual confirmation",
-                    success_status=ProgressPhaseStatus.WARNED,
-                )
-            ],
-            context,
-            RichProgressReporter(no_color=True),
-        )
-    )
-
-    err = capsys.readouterr().err
-    assert "!" in err
-    assert "✓" not in err
-    assert "SCOPE needs visual confirmation" in err
 
 
 def test_timed_align_phase_with_unresolved_review_renders_warning_line(
@@ -235,27 +202,3 @@ def test_execute_phases_fail_fast_failure_marks_failed_and_raises(
         raise AssertionError("Expected RuntimeError from required phase")
 
     assert executed == ["fail"]
-
-
-def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
-    artifacts = RunArtifacts()
-    state = ExecutionState(artifacts=artifacts)
-
-    phases = build_phases_after_align(
-        request=RunRequest(root=Path("."), no_upload=False),
-        monotonic_timer=lambda: 0.0,
-        ffmpeg_runner=FakeFFmpegRunner(),
-        http_client=None,
-        state=state,
-        metadata_prefetch=MetadataPrefetch(None, False),
-        config=ConfigSchema(),
-    )
-
-    publish_phase = next(phase for phase in phases if phase.name == "publish")
-    config = ConfigSchema()
-    config.slowpics.auto_upload = False
-
-    assert publish_phase.skip_condition is not None
-    assert publish_phase.skip_condition(config) is True
-    assert callable(publish_phase.skip_detail)
-    assert publish_phase.skip_detail(config) == "Disabled"

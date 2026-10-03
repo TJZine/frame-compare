@@ -203,3 +203,20 @@ New for this plan:
     rendering) and one R2 `redundant-failure`
     (`test_run_report_phase_requires_reserved_run_folder`, owned by
     `test_run_report_phase_rejects_short_artifacts_before_indexing`). Then O5.
+- 2026-10-03: **O4-1 final dispositions** (C3 authority update, explicitly
+  authorized by the maintainer after the original plan-write scope conflict):
+  - O4-09, `test_execute_phases_unresolved_review_warns_and_keeps_summary`,
+    deleted as internal progress rendering. Its production flow reaches only
+    Rich completion glyphs/summary; the retained timed-align progress test
+    preserves native coverage.
+  - O4-10, `test_run_report_phase_requires_reserved_run_folder`, deleted under
+    R2. The retained `test_run_report_phase_rejects_short_artifacts_before_indexing`
+    owns the same `run_report_phase` warning/refusal/no-report outcome for
+    internal carriers. C5 accepts the missing-run-folder guard's one lost line
+    and one lost branch (`phase_post_render.py:401`, `400 -> 401`).
+  - O4-01 and O4-08 remain because C2 did not establish two-sided assertion
+    failures. O4-06 passed C2 but was restored by C5 for two no-progress-reporter
+    branches; its deletion needs maintainer approval. Five covered records
+    (O4-02–05 and O4-07) passed C2 and remain deleted.
+  - This records the two named candidates' final disposition while preserving
+    the earlier execution evidence. O5 closeout remains pending.

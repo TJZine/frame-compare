@@ -398,27 +398,6 @@ def test_run_report_phase_discloses_shared_tonemap_setting(
     assert captured["report_data"].rendering.tonemap_settings == settings
 
 
-def test_run_report_phase_requires_reserved_run_folder(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    ctx.workspace = replace(ctx.workspace, run_dir=None)
-    render = _render_artifacts(
-        screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [1]},
-    )
-
-    with pytest.raises(RuntimeError, match="reserved run folder"):
-        phase_post_render.run_report_phase(
-            ctx,
-            frames=[1],
-            render=render,
-            metadata=None,
-            slowpics_url=None,
-        )
-
-
 def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -657,65 +636,6 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
                 render=render,
                 selected_frames=[10],
             )
-
-
-async def test_report_confirmed_decline_skips_publish(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.config.slowpics.auto_upload = True
-    ctx.config.slowpics.confirm_upload_after_report = True
-    ctx.config.report.enable = True
-    report_path = tmp_path / "report.html"
-    state = ExecutionState(
-        artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
-        selected_frames=[10],
-    )
-    reporter = _RecordingProgressReporter()
-    ctx.reporter = reporter
-    callback_calls: list[SlowpicsUploadConfirmationRequest] = []
-
-    def _decline(
-        request: SlowpicsUploadConfirmationRequest,
-    ) -> SlowpicsUploadConfirmationDecision:
-        callback_calls.append(request)
-        return "declined"
-
-    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
-        raise AssertionError("declined report-confirmed upload must not publish")
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.execution.run_publish_phase",
-        _unexpected_publish,
-    )
-
-    async with httpx.AsyncClient() as client:
-        phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
-            monotonic_timer=lambda: 0.0,
-            ffmpeg_runner=cast(Any, _RenderRunner()),
-            http_client=client,
-            state=state,
-            metadata_prefetch=MetadataPrefetch(None, False),
-            config=ctx.config,
-            confirm_slowpics_upload=_decline,
-        )
-        selected_phases = [
-            phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
-        ]
-        await execute_phases(selected_phases, ctx, reporter)
-
-    assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=report_path)]
-    assert state.artifacts.slowpics_upload_confirmation_status == "declined"
-    assert state.artifacts.slowpics_url is None
-    assert state.artifacts.uploaded_slowpics_file_paths == ()
-    assert [event for event in reporter.events if event in {"suspend", "resume"}] == [
-        "suspend",
-        "resume",
-    ]
-    assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
-    assert "start:PUBLISH  Declined" in reporter.events
-    assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 
 async def test_report_confirmed_available_report_confirms_then_publishes(
@@ -971,62 +891,6 @@ def test_post_report_cleanup_skips_without_upload_handoff(tmp_path: Path) -> Non
 
     assert output.warnings == []
     assert stale.exists()
-
-
-def test_post_report_cleanup_requires_report_success_when_report_enabled(
-    tmp_path: Path,
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.config.slowpics.delete_after_upload = True
-    ctx.config.report.enable = True
-    ctx.config.report.embed_images = True
-    uploaded = (tmp_path / "screenshots" / "planned.png",)
-    uploaded[0].parent.mkdir(parents=True, exist_ok=True)
-    uploaded[0].write_bytes(b"\x89PNG\r\n\x1a\n")
-
-    output = phase_post_render.run_post_report_cleanup_phase(
-        ctx,
-        uploaded_file_paths=uploaded,
-        report_succeeded=False,
-    )
-
-    assert output.warnings == []
-    assert uploaded[0].exists()
-
-
-def test_post_report_cleanup_returns_warning_and_logs_for_delete_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.config.slowpics.delete_after_upload = True
-    ctx.config.report.enable = False
-    uploaded = (tmp_path / "screenshots" / "planned.png",)
-    uploaded[0].parent.mkdir(parents=True, exist_ok=True)
-    uploaded[0].write_bytes(b"\x89PNG\r\n\x1a\n")
-    warning_events: list[str] = []
-
-    def _raise_permission_error(self: Path) -> None:
-        if self == uploaded[0]:
-            raise PermissionError("locked")
-        Path.unlink(self)
-
-    def _capture_warning(event: str, **kwargs: object) -> None:
-        del kwargs
-        warning_events.append(event)
-
-    monkeypatch.setattr(Path, "unlink", _raise_permission_error)
-    monkeypatch.setattr(phase_post_render.log, "warning", _capture_warning)
-
-    output = phase_post_render.run_post_report_cleanup_phase(
-        ctx,
-        uploaded_file_paths=uploaded,
-        report_succeeded=False,
-    )
-
-    assert output.warnings == [
-        f"cleanup: failed to delete uploaded screenshot {uploaded[0]}: locked"
-    ]
 
 
 async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_and_log_progress(

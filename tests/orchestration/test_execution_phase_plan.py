@@ -23,7 +23,6 @@ from frame_compare.orchestration.execution import (
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
-    ConfirmSlowpicsUploadPhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
     MetadataPrefetch,
@@ -327,39 +326,6 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
     assert state.artifacts.slowpics_url == "https://slow.pics/c/example"
     assert state.artifacts.uploaded_slowpics_file_paths == (uploaded,)
     assert state.artifacts.post_upload_actions == (shortcut, webhook)
-
-
-def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
-    tmp_path: Path,
-) -> None:
-    workspace = _workspace(
-        tmp_path,
-        input_subdir="comparison_videos",
-        run_subdir=None,
-        screenshots_subdir="screenshots",
-    )
-    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = execution_context(
-        config=ConfigSchema(),
-        workspace=workspace,
-        reference=reference,
-        comparisons=[],
-    )
-    state = ExecutionState(artifacts=RunArtifacts())
-
-    apply_phase_output(
-        ctx=ctx,
-        state=state,
-        output=ConfirmSlowpicsUploadPhaseOutput(
-            status="report_unavailable",
-            warnings=["slow.pics upload skipped because report confirmation was unavailable"],
-        ),
-    )
-
-    assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
-    assert state.warnings == [
-        "slow.pics upload skipped because report confirmation was unavailable"
-    ]
 
 
 def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:
