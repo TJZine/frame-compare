@@ -86,8 +86,9 @@ applies unchanged. In particular:
 New for this plan:
 - **E1. Builders don't hide inputs.** A builder takes the values a test asserts on
   as explicit arguments; only irrelevant fields get defaults. A test must still
-  read as "given X, expect Y". Builders are typed (pyright runs on tests), live
-  in the existing helper modules, and are shared across files.
+  read as "given X, expect Y". Builders are typed (pyright runs on tests). A
+  builder shared across files lives in an existing helper module; one used by a
+  single file lives in that file.
 - **E2. Widening is per field, with maintainer approval.** An E2E summary field or
   scenario is added only if its measured yield is at least 5× the E2E lines it
   adds. Yield means the test lines whose sole remaining reason is that the field
@@ -105,10 +106,14 @@ New for this plan:
   - Each task extracts or extends shared builders for the repeated
     constructions, then rewrites tests to use them under E1. Proof:
     - every test keeps its assertions **unchanged** (an AST comparison of the
-      assertion statements, before and after);
+      assertion statements and the call-free expected values they read, before
+      and after);
     - the collected node set is identical;
+    - every test executes exactly the same `src/` lines (a per-test coverage
+      comparison), so the refactor changes no input's path;
     - pyright is clean;
     - one mutation per file still fails its owner test.
+  - The proof scripts are `.handoff/orch-trim/assert_ast.py` and `cov_ctx.py`.
   - **Parallelism:** file groups are disjoint, so tasks may run in parallel git
     worktrees (at most 3). Each has its own `uv sync --frozen`. Builder modules are
     shared, so assign `phase_task_helpers.py` and `execute_run_helpers.py` to one
@@ -148,3 +153,6 @@ New for this plan:
 
 - 2026-10-02: plan created with the baseline measurements above. Next: write and
   review the O1 handoff (`.handoff/O1-codex-builders.md`), then dispatch it.
+- 2026-10-02: O1 handoff written and reviewed. E1 now allows file-local builders,
+  and O1's proof adds the per-test coverage comparison. Two base coverage runs of
+  `tests/orchestration` were identical, at about 20 s each.
