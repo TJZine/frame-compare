@@ -24,8 +24,9 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.utils.media_facts import RenderedFrameFacts
-from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
+
+from .phase_task_helpers import _workspace
 
 
 class StopAfterDependencyInit(RuntimeError):
@@ -212,15 +213,11 @@ def test_reserved_warning_sink_survives_prep_failure(
     from frame_compare.orchestration import coordinator
 
     captured_artifacts: RunArtifacts | None = None
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=tmp_path / "generated" / "run",
-        screenshots_dir=tmp_path / "generated" / "run" / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir="generated/run",
+        screenshots_subdir="generated/run/screenshots",
     )
 
     async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):

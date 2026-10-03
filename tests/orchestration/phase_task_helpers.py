@@ -141,16 +141,23 @@ def _render_artifacts(
     )
 
 
-def _workspace(tmp_path: Path) -> WorkspacePaths:
+def _workspace(
+    tmp_path: Path,
+    *,
+    input_subdir: str = "comparison_videos",
+    run_subdir: str | None = "run",
+    screenshots_subdir: str = "screenshots",
+    config_filename: str | None = "config.toml",
+) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
+        input_dir=tmp_path / input_subdir,
         generated_root=tmp_path / "generated",
-        run_dir=tmp_path / "run",
-        screenshots_dir=tmp_path / "screenshots",
+        run_dir=None if run_subdir is None else tmp_path / run_subdir,
+        screenshots_dir=tmp_path / screenshots_subdir,
         generated_dir=tmp_path / "generated",
         config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+        config_file=None if config_filename is None else tmp_path / "config" / config_filename,
     )
 
 

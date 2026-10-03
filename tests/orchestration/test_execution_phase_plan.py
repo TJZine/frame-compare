@@ -37,24 +37,19 @@ from frame_compare.orchestration.execution_types import (
 from frame_compare.orchestration.phase_output_application import apply_phase_output
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
-from .phase_task_helpers import _context, _render_artifacts
+from .phase_task_helpers import _context, _render_artifacts, _workspace
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     tmp_path: Path,
 ) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
 
     config = ConfigSchema()
@@ -119,15 +114,11 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
 def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     tmp_path: Path,
 ) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     state = ExecutionState(artifacts=RunArtifacts())
 
@@ -186,15 +177,11 @@ def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_
 
 
 def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(
@@ -228,15 +215,11 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
 
 
 def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(
@@ -285,15 +268,11 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
 def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
     from frame_compare.orchestration.execution_types import ReportPhaseOutput
 
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(
@@ -318,15 +297,11 @@ def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> 
 
 
 def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(
@@ -369,15 +344,11 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
 def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
     tmp_path: Path,
 ) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(
@@ -406,15 +377,11 @@ def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
 
 
 def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(
@@ -442,15 +409,11 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
 
 
 def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     comparison = clip_state(tmp_path / "encode_b.mkv", label="Encode B")
@@ -490,15 +453,11 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     class UnknownPhaseOutput:
         pass
 
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = RunContext(

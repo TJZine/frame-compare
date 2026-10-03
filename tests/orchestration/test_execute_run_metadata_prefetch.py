@@ -22,18 +22,17 @@ from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
-    create_config,
     create_video_files,
     metric_cache_request_for_cache_inputs,
     write_probe_cache_for_inputs,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 METADATA_CACHE_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [analysis]
 random_frame_count = 0
@@ -47,7 +46,7 @@ unattended = true
 )
 
 METADATA_RETRY_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [tmdb]
 enabled = true
@@ -60,7 +59,7 @@ category_preference = "movie"
 )
 
 METADATA_UNEXPECTED_ERROR_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [tmdb]
 enabled = true
@@ -193,7 +192,7 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     expected_metadata = TmdbMetadata(

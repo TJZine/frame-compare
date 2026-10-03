@@ -25,29 +25,15 @@ from frame_compare.orchestration.types import (
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.run_result_record import read_run_result
 from frame_compare.services.types import AlignmentResult, AlignmentReviewSummary, TmdbMetadata
-from frame_compare.utils.types import WorkspacePaths
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
     FakeVSLoader,
     clip_state,
-    create_config,
     create_video_files,
 )
-from .phase_task_helpers import _render_artifacts
-
-
-def _workspace(tmp_path: Path) -> WorkspacePaths:
-    return WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=tmp_path / "run",
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
+from .phase_task_helpers import _render_artifacts, _workspace
+from .preparation_test_support import create_config
 
 
 def test_execute_run_align_applies_trim_first_frame_mapping(

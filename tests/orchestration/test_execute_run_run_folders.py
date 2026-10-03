@@ -35,23 +35,22 @@ from frame_compare.services.run_folder import RunFolderReservation, reserve_run_
 from frame_compare.vs.types import SourceInfo
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
-    create_config,
     create_video_files,
     metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 if TYPE_CHECKING:
     import vapoursynth as vs
 
 
 METRIC_RUN_FOLDERS_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [analysis]
 random_frame_count = 0
@@ -230,7 +229,7 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "workspace"
-    create_config(root, content=RUN_FOLDERS_CONFIG)
+    create_config(root, content=MINIMAL_CONFIG)
     external_input = tmp_path / "external-media"
     create_video_files(external_input, "source.mkv")
 
@@ -262,7 +261,7 @@ def test_execute_prep_creates_missing_generated_root_only_during_reservation(
 ) -> None:
     create_config(
         tmp_path,
-        content=RUN_FOLDERS_CONFIG.replace(
+        content=MINIMAL_CONFIG.replace(
             'generated_dir = "generated"',
             'generated_dir = "nested/generated-data"',
         ),
@@ -295,7 +294,7 @@ def test_execute_prep_external_generated_root_owns_run_and_shared_state(
     external_generated_root = tmp_path / "external-generated-data"
     create_config(
         tmp_path,
-        content=RUN_FOLDERS_CONFIG.replace(
+        content=MINIMAL_CONFIG.replace(
             'generated_dir = "generated"',
             f'generated_dir = "{external_generated_root.as_posix()}"',
         ),
@@ -352,7 +351,7 @@ def test_execute_prep_reserves_under_resolved_generated_root_symlink(
         pytest.skip("directory symlink creation is unavailable on this platform")
     create_config(
         tmp_path,
-        content=RUN_FOLDERS_CONFIG.replace(
+        content=MINIMAL_CONFIG.replace(
             'generated_dir = "generated"',
             f'generated_dir = "{generated_root_link.as_posix()}"',
         ),
@@ -383,7 +382,7 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     generated_root = tmp_path / "generated"

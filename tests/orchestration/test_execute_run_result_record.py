@@ -14,12 +14,11 @@ from frame_compare.orchestration.errors import NoVideosFoundError
 from frame_compare.services.run_result_record import read_run_result
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
-    create_config,
     create_video_files,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 
 class FailingVSLoader:
@@ -56,7 +55,7 @@ def _request(root: Path) -> RunRequest:
 
 
 def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     result = asyncio.run(
@@ -77,7 +76,7 @@ def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
 def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     wall_times = iter(
         (
@@ -114,7 +113,7 @@ def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
 def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identical(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("secret=/Users/private?token=abc")
 
@@ -145,7 +144,7 @@ def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identi
 def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("loader failed")
     wall_times = iter(
@@ -186,7 +185,7 @@ def test_failure_before_reservation_creates_no_result(tmp_path: Path) -> None:
 
 
 def test_empty_input_failure_before_reservation_creates_no_result(tmp_path: Path) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     (tmp_path / "comparison_videos").mkdir()
 
     with pytest.raises(NoVideosFoundError):
@@ -199,7 +198,7 @@ def test_empty_input_failure_before_reservation_creates_no_result(tmp_path: Path
 def test_completed_result_write_failure_is_warning_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, logger_fails: bool
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     def fail_write(_run_dir: Path, _record: object) -> None:
@@ -244,7 +243,7 @@ def test_result_process_control_write_failure_propagates(
     execution_fails: bool,
     control_error: BaseException,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     def fail_write(_run_dir: Path, _record: object) -> None:
@@ -271,7 +270,7 @@ def test_result_process_control_write_failure_propagates(
 def test_failed_result_write_failure_preserves_original_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("original")
 
@@ -299,7 +298,7 @@ def test_failed_result_write_failure_preserves_original_exception(
 def test_failure_after_alignment_records_known_selected_frame_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("post-alignment failure")
 

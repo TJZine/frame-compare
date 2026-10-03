@@ -21,11 +21,10 @@ from frame_compare.services.types import TmdbMetadata
 from frame_compare.vs.types import SourceInfo
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
-    create_config,
     create_video_files,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 
 class NoProbeVSLoader:
@@ -41,7 +40,7 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     generated_dir = preparation.prepare_preflight(root=tmp_path).workspace.generated_dir
@@ -70,7 +69,7 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     reserved_paths: list[Path] = []

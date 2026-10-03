@@ -11,15 +11,15 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
-    ClipProbeSnapshot,
-    ClipState,
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
 from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import RenderedFrameFacts
-from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata
+
+from .execute_run_helpers import clip_state
+from .phase_task_helpers import _workspace
 
 
 class FakeFFmpegRunner:
@@ -56,34 +56,26 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
     config = ConfigSchema.model_validate(
         {"screenshots": {"use_ffmpeg": True, "overlay_mode": "standard"}}
     )
-    workspace = WorkspacePaths(
-        root=tmp_path.resolve(),
-        input_dir=(tmp_path / "comparison_videos").resolve(),
-        generated_root=(tmp_path / "generated").resolve(),
-        run_dir=None,
-        screenshots_dir=(tmp_path / "screenshots").resolve(),
-        generated_dir=(tmp_path / "generated").resolve(),
-        config_dir=(tmp_path / "config").resolve(),
-        config_file=None,
+    workspace = _workspace(
+        tmp_path.resolve(),
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
+        config_filename=None,
     )
 
     fingerprint = ClipFingerprint(Path("ref.mkv"), 1, 1)
-    probe = ClipProbeSnapshot(
+
+    # Reference was trimmed by 10 frames; aligned frame 0 maps to source frame 10.
+    reference = clip_state(
+        fingerprint.path,
+        label="Reference",
         fingerprint=fingerprint,
         width=1920,
         height=1080,
         num_frames=200,
         fps=Fraction(24, 1),
         is_hdr=False,
-    )
-
-    # Reference was trimmed by 10 frames; aligned frame 0 maps to source frame 10.
-    reference = ClipState(
-        path=Path("ref.mkv"),
-        label="Reference",
-        probe=probe,
-        source_fps=probe.fps,
-        effective_fps=probe.fps,
     ).with_trim(trim_start_frames=10, trim_end_frame_inclusive=None)
 
     ctx = RunContext(
@@ -119,32 +111,24 @@ def test_selection_detail_label_is_looked_up_in_reference_source_frame_domain_af
     config = ConfigSchema.model_validate(
         {"screenshots": {"use_ffmpeg": True, "overlay_mode": "standard"}}
     )
-    workspace = WorkspacePaths(
-        root=tmp_path.resolve(),
-        input_dir=(tmp_path / "comparison_videos").resolve(),
-        generated_root=(tmp_path / "generated").resolve(),
-        run_dir=None,
-        screenshots_dir=(tmp_path / "screenshots").resolve(),
-        generated_dir=(tmp_path / "generated").resolve(),
-        config_dir=(tmp_path / "config").resolve(),
-        config_file=None,
+    workspace = _workspace(
+        tmp_path.resolve(),
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
+        config_filename=None,
     )
 
     fingerprint = ClipFingerprint(Path("ref.mkv"), 1, 1)
-    probe = ClipProbeSnapshot(
+    reference = clip_state(
+        fingerprint.path,
+        label="Reference",
         fingerprint=fingerprint,
         width=1920,
         height=1080,
         num_frames=200,
         fps=Fraction(24, 1),
         is_hdr=False,
-    )
-    reference = ClipState(
-        path=Path("ref.mkv"),
-        label="Reference",
-        probe=probe,
-        source_fps=probe.fps,
-        effective_fps=probe.fps,
     ).with_trim(trim_start_frames=10, trim_end_frame_inclusive=None)
 
     ctx = RunContext(

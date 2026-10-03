@@ -24,7 +24,6 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
 
@@ -33,23 +32,10 @@ from .execute_run_helpers import (
     FakeHDRVSLoader,
     FakeVSLoader,
     clip_state,
-    create_config,
     create_video_files,
 )
-from .phase_task_helpers import _render_artifacts
-
-
-def _workspace(tmp_path: Path) -> WorkspacePaths:
-    return WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
+from .phase_task_helpers import _render_artifacts, _workspace
+from .preparation_test_support import create_config
 
 
 def _zero_monotonic_timer() -> float:
@@ -117,7 +103,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         message="Shortcut written.",
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -160,7 +146,7 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -224,7 +210,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         screenshot_dir=uploaded.parent,
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -309,7 +295,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         screenshot_dir=tmp_path / "screenshots",
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -390,7 +376,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         screenshot_dir=uploaded.parent,
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",

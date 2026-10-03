@@ -43,50 +43,6 @@ if TYPE_CHECKING:
     import vapoursynth as vs
 
 
-MINIMAL_CONFIG = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
-
-RUN_FOLDERS_CONFIG = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
-
-
-def create_config(tmp_path: Path, content: str = MINIMAL_CONFIG) -> Path:
-    """Create a config file in the standard location."""
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_file = config_dir / "config.toml"
-    config_file.write_text(content, encoding="utf-8")
-    return config_file
-
-
 def create_video_files(input_dir: Path, *filenames: str) -> None:
     """Create empty video files for testing."""
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -241,6 +197,17 @@ def metric_cache_request_for_cache_inputs(
     )
 
 
+def metric_cache_fingerprint(
+    *, video_paths: list[Path], config: ConfigSchema, selection_domain: str
+) -> str:
+    return cache_io.compute_cache_key(
+        video_paths,
+        config.analysis,
+        selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs(video_paths, config),
+    )
+
+
 def write_probe_cache_for_inputs(
     cache_path: Path,
     video_paths: list[Path],
@@ -324,14 +291,28 @@ def _clip_fingerprint_for_path(path: Path) -> ClipFingerprint:
     return ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
 
 
-def clip_state(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
+def clip_state(
+    path: Path,
+    *,
+    label: str,
+    num_frames: int = 100,
+    fingerprint: ClipFingerprint | None = None,
+    width: int = 1920,
+    height: int = 1080,
+    fps: Fraction = Fraction(24, 1),
+    is_hdr: bool = False,
+) -> ClipState:
     probe = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path=path, size_bytes=0, mtime_ns=0),
-        width=1920,
-        height=1080,
+        fingerprint=(
+            ClipFingerprint(path=path, size_bytes=0, mtime_ns=0)
+            if fingerprint is None
+            else fingerprint
+        ),
+        width=width,
+        height=height,
         num_frames=num_frames,
-        fps=Fraction(24, 1),
-        is_hdr=False,
+        fps=fps,
+        is_hdr=is_hdr,
     )
     return ClipState(
         path=path,

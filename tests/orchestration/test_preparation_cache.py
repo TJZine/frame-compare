@@ -34,7 +34,7 @@ from frame_compare.orchestration.execution_types import PrepState
 from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
-    metric_cache_request_for_cache_inputs,
+    metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -268,11 +268,8 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
     cache_dir = generated_dir / "cache" / "analysis"
     write_metrics_cache(cache_dir, source_path=source_path, config=config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
     assert cache_path is not None

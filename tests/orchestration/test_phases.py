@@ -14,8 +14,6 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
-    ClipProbeSnapshot,
-    ClipState,
     RunContext,
 )
 from frame_compare.orchestration.execution import _create_timed_phase, build_phases_after_align
@@ -32,43 +30,30 @@ from frame_compare.utils.progress import (
     RichProgressReporter,
 )
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
-from frame_compare.utils.types import WorkspacePaths
 
-from .execute_run_helpers import FakeFFmpegRunner
+from .execute_run_helpers import FakeFFmpegRunner, clip_state
+from .phase_task_helpers import _workspace
 
 
 def _make_context(tmp_path: Path) -> RunContext:
     config = ConfigSchema()
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "input",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screens",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path, input_subdir="input", run_subdir=None, screenshots_subdir="screens"
     )
     fingerprint = ClipFingerprint(
         path=tmp_path / "source.mkv",
         size_bytes=0,
         mtime_ns=0,
     )
-    probe = ClipProbeSnapshot(
+    reference = clip_state(
+        fingerprint.path,
+        label="Reference",
         fingerprint=fingerprint,
         width=1920,
         height=1080,
         num_frames=100,
         fps=Fraction(24, 1),
         is_hdr=False,
-        hdr_metadata=None,
-    )
-    reference = ClipState(
-        path=fingerprint.path,
-        label="Reference",
-        probe=probe,
-        source_fps=probe.fps,
-        effective_fps=probe.fps,
     )
     return RunContext(
         config=config,

@@ -28,12 +28,13 @@ from .execute_run_helpers import (
     FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
-    create_config,
     create_video_files,
+    metric_cache_fingerprint,
     metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
+from .preparation_test_support import create_config
 
 
 @pytest.mark.parametrize("performance", [False, True], ids=["quality", "performance"])
@@ -81,11 +82,8 @@ enable = false
     source_path = input_dir / "source.mkv"
     write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     analysis_cache_path = cast(
         Path, cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
@@ -449,11 +447,8 @@ enable = false
     source_path = input_dir / "source.mkv"
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_payload = {
