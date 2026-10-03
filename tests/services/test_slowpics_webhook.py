@@ -472,48 +472,33 @@ async def test_certificate_verification_failure_is_not_retried() -> None:
     assert calls == 1
 
 
-async def test_rate_limit_retries_after_short_server_delay() -> None:
+@pytest.mark.parametrize("retry_after", [2.5, None, WEBHOOK_MAX_RETRY_AFTER_SECONDS + 0.1])
+async def test_rate_limit_uses_only_bounded_server_delay(retry_after: float | None) -> None:
     calls = 0
     sleep_calls: list[float] = []
 
     def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            return WebhookResponse(status_code=429, retry_after_seconds=2.5)
-        return WebhookResponse(status_code=204)
-
-    result = await _deliver(
-        "https://hooks.example.test/path",
-        connector=_connector,
-        sleeper=sleep_calls.append,
-    )
-
-    assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
-    assert calls == 2
-    assert sleep_calls == [2.5]
-
-
-@pytest.mark.parametrize("retry_after", [None, WEBHOOK_MAX_RETRY_AFTER_SECONDS + 0.1])
-async def test_rate_limit_without_usable_bounded_delay_is_not_retried(
-    retry_after: float | None,
-) -> None:
-    calls = 0
-
-    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
-        nonlocal calls
-        calls += 1
+        if retry_after == 2.5 and calls > 1:
+            return WebhookResponse(status_code=204)
         return WebhookResponse(status_code=429, retry_after_seconds=retry_after)
 
-    result = await _deliver("https://hooks.example.test/path", connector=_connector)
-
-    assert result == SlowpicsWebhookResult(
-        success=False,
-        warning=WEBHOOK_FAILURE_WARNING,
-        failure_kind=WebhookFailureKind.RATE_LIMITED,
-        status_code=429,
+    result = await _deliver(
+        "https://hooks.example.test/path", connector=_connector, sleeper=sleep_calls.append
     )
-    assert calls == 1
+    if retry_after == 2.5:
+        assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
+        assert calls == 2
+        assert sleep_calls == [2.5]
+    else:
+        assert result == SlowpicsWebhookResult(
+            success=False,
+            warning=WEBHOOK_FAILURE_WARNING,
+            failure_kind=WebhookFailureKind.RATE_LIMITED,
+            status_code=429,
+        )
+        assert calls == 1
 
 
 async def test_retryable_failures_rotate_across_validated_addresses() -> None:

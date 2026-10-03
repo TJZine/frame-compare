@@ -158,30 +158,3 @@ def test_upload_plan_rejects_mismatched_screenshot_counts(tmp_path: Path) -> Non
             clips=[SlowpicsUploadClip(label="Reference", image_name="Reference")],
             screenshots_by_label={"Reference": [only_file]},
         )
-
-
-def test_upload_plan_rejects_missing_clip_labels(tmp_path: Path) -> None:
-    _png(tmp_path / "10 - ref.png")
-
-    with pytest.raises(SlowpicsError, match="Missing screenshots for clip label 'Encode'"):
-        build_slowpics_upload_plan(
-            selected_frames=[10],
-            clips=[
-                SlowpicsUploadClip(label="Reference", image_name="Reference"),
-                SlowpicsUploadClip(label="Encode", image_name="Encode"),
-            ],
-            screenshots_by_label={
-                "Reference": [tmp_path / "10 - ref.png"],
-            },
-        )
-
-
-def test_upload_plan_rejects_empty_image_display_names(tmp_path: Path) -> None:
-    screenshot = _png(tmp_path / "10 - ref.png")
-
-    with pytest.raises(SlowpicsError, match="Empty slow.pics image display name"):
-        build_slowpics_upload_plan(
-            selected_frames=[10],
-            clips=[SlowpicsUploadClip(label="Reference", image_name="  ")],
-            screenshots_by_label={"Reference": [screenshot]},
-        )

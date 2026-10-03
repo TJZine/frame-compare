@@ -2,6 +2,7 @@ import json
 import tomllib
 from pathlib import Path
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
 from frame_compare.cli.entry import app
@@ -364,149 +365,103 @@ previous_offsets = "always"
     }
 
 
-def test_run_invalid_frames_uses_owned_human_error_contract(
+@pytest.mark.parametrize(
+    ("args", "raw_present", "present", "absent"),
+    [
+        pytest.param(
+            ["--frames", "-1"],
+            ("--frames must contain only non-negative integers",),
+            (),
+            (
+                "Usage:",
+                "Traceback",
+            ),
+            id="invalid_frames_uses_owned_human_error_contract",
+        ),
+        pytest.param(
+            ["--motion-frame-count", "-1"],
+            ("--motion-frame-count must be a non-negative integer",),
+            ("Hint: Example: --motion-frame-count 3",),
+            (
+                "Usage:",
+                "Traceback",
+            ),
+            id="negative_metric_count_uses_owned_human_error_contract",
+        ),
+        pytest.param(
+            ["--frames", "abc"],
+            ("--frames must contain only non-negative integers",),
+            ("Hint: Example: --frames 12,48,100",),
+            (),
+            id="invalid_frames_names_option_and_example",
+        ),
+        pytest.param(
+            ["--overlay", "banana"],
+            (),
+            (
+                "Invalid value for --overlay: banana",
+                "Choose one of: " + ", ".join(member.value for member in OverlayMode) + ".",
+            ),
+            (
+                "Usage:",
+                "Traceback",
+            ),
+            id="invalid_overlay_names_flag_and_choices_without_verbose",
+        ),
+        pytest.param(
+            ["--tm-preset", "bogus"],
+            (),
+            (
+                "Invalid value for --tm-preset: bogus",
+                "Choose one of: " + ", ".join(member.value for member in TonemapPreset) + ".",
+            ),
+            (),
+            id="invalid_tm_preset_names_flag_and_choices_without_verbose",
+        ),
+        pytest.param(
+            ["--tm-curve", "bogus"],
+            (),
+            (
+                "Invalid value for --tm-curve: bogus",
+                "Choose one of: " + ", ".join(member.value for member in ToneCurve) + ".",
+            ),
+            (),
+            id="invalid_tm_curve_names_flag_and_choices_without_verbose",
+        ),
+        pytest.param(
+            ["--skip-analysis", "--dark-frame-count", "1"],
+            ("Metric-based frame selection requires analysis",),
+            (),
+            (
+                "Usage:",
+                "Traceback",
+            ),
+            id="skip_analysis_metric_count_uses_owned_human_error_contract",
+        ),
+    ],
+)
+def test_run_invalid_options_use_owned_human_error_contract(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
+    args: list[str],
+    raw_present: tuple[str, ...],
+    present: tuple[str, ...],
+    absent: tuple[str, ...],
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid frame selectors")
+        raise AssertionError("runner.run should not be invoked for invalid CLI options")
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--frames", "-1"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
+    result = _invoke_run_with_minimal_workspace(args, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stdout == ""
-    assert "--frames must contain only non-negative integers" in result.stderr
-    assert "Usage:" not in result.stderr
-    assert "Traceback" not in result.stderr
-
-
-def test_run_negative_metric_count_uses_owned_human_error_contract(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid metric count")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--motion-frame-count", "-1"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
-    assert "--motion-frame-count must be a non-negative integer" in result.stderr
-    assert "Hint: Example: --motion-frame-count 3" in _normalize_cli_help(result.stderr)
-    assert "Usage:" not in result.stderr
-    assert "Traceback" not in result.stderr
-
-
-def test_run_invalid_frames_names_option_and_example(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid frame selectors")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--frames", "abc"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
-    assert "--frames must contain only non-negative integers" in result.stderr
-    assert "Hint: Example: --frames 12,48,100" in _normalize_cli_help(result.stderr)
-
-
-def test_run_invalid_overlay_names_flag_and_choices_without_verbose(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--overlay", "banana"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
+    for fragment in raw_present:
+        assert fragment in result.stderr
     stderr = _normalize_cli_help(result.stderr)
-    assert "Invalid value for --overlay: banana" in stderr
-    expected_choices = ", ".join(member.value for member in OverlayMode)
-    assert f"Choose one of: {expected_choices}." in stderr
-    assert "Usage:" not in stderr
-    assert "Traceback" not in stderr
-
-
-def test_run_invalid_tm_preset_names_flag_and_choices_without_verbose(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--tm-preset", "bogus"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
-    stderr = _normalize_cli_help(result.stderr)
-    assert "Invalid value for --tm-preset: bogus" in stderr
-    expected_choices = ", ".join(member.value for member in TonemapPreset)
-    assert f"Choose one of: {expected_choices}." in stderr
-
-
-def test_run_invalid_tm_curve_names_flag_and_choices_without_verbose(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--tm-curve", "bogus"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
-    stderr = _normalize_cli_help(result.stderr)
-    assert "Invalid value for --tm-curve: bogus" in stderr
-    expected_choices = ", ".join(member.value for member in ToneCurve)
-    assert f"Choose one of: {expected_choices}." in stderr
-
-
-def test_run_skip_analysis_metric_count_uses_owned_human_error_contract(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        raise AssertionError("runner.run should not be invoked for --skip-analysis conflict")
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace(
-        ["--skip-analysis", "--dark-frame-count", "1"], tmp_path=tmp_path, monkeypatch=monkeypatch
-    )
-
-    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert result.stdout == ""
-    assert "Metric-based frame selection requires analysis" in result.stderr
-    assert "Usage:" not in result.stderr
-    assert "Traceback" not in result.stderr
+    for fragment in present:
+        assert fragment in stderr
+    for fragment in absent:
+        assert fragment not in stderr
 
 
 def test_run_write_config_write_error_uses_cli_error_contract(

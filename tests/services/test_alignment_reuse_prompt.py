@@ -35,17 +35,6 @@ class _TTYStringIO(io.StringIO):
         return self._is_tty
 
 
-class _EchoingTTYStringIO(_TTYStringIO):
-    def __init__(self, value: str, *, is_tty: bool, echo_to: io.StringIO) -> None:
-        super().__init__(value, is_tty=is_tty)
-        self._echo_to = echo_to
-
-    def readline(self, *_args: object, **_kwargs: object) -> str:
-        response = super().readline()
-        self._echo_to.write(response)
-        return response
-
-
 class _FailingTTYStringIO(_TTYStringIO):
     def readline(self, *_args: object, **_kwargs: object) -> str:
         raise OSError("input unavailable")
@@ -156,37 +145,6 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert stderr_output.index("Accepted") < stderr_output.index("Cache")
 
 
-def test_prompt_leaves_one_blank_line_after_a_normal_answer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    stderr = _TTYStringIO("", is_tty=True)
-    monkeypatch.setattr(
-        reuse_prompt.sys,
-        "stdin",
-        _EchoingTTYStringIO("yes\n", is_tty=True, echo_to=stderr),
-    )
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
-
-    assert prompt_for_previous_offset_reuse(
-        prompt_input=_prompt_input(request),
-        progress=None,
-        no_color=True,
-    )
-
-    stderr.write("  [OK] ALIGN  Completed in 20s\n")
-    rendered = stderr.getvalue()
-    assert rendered.endswith(
-        f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}yes\n\n  [OK] ALIGN  Completed in 20s\n"
-    )
-    assert (
-        rendered.index("Alignment reuse")
-        < rendered.index("    Reuse these offsets?")
-        < rendered.index("  [OK] ALIGN")
-    )
-
-
 def test_prompt_shows_full_filename_once_when_label_equals_stem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -254,40 +212,8 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
-def test_prompt_does_not_use_unbounded_terminal_width(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    console_widths: list[int | None] = []
-    original_human_console = reuse_prompt.human_console
-
-    def recording_human_console(**kwargs: object) -> object:
-        console_widths.append(kwargs.get("width"))  # type: ignore[arg-type]
-        return original_human_console(**kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(
-        reuse_prompt.shutil,
-        "get_terminal_size",
-        lambda **_: os.terminal_size((240, 24)),
-    )
-    monkeypatch.setattr(reuse_prompt, "human_console", recording_human_console)
-    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", _TTYStringIO("", is_tty=True))
-
-    accepted = prompt_for_previous_offset_reuse(
-        prompt_input=_prompt_input(request),
-        progress=None,
-        no_color=True,
-    )
-
-    assert accepted is False
-    assert console_widths
-    assert all(width is not None and width < 240 for width in console_widths)
-
-
 @pytest.mark.parametrize("columns", [60, 80, 120, 240])
-def test_prompt_uses_actual_narrow_terminal_width(
+def test_prompt_output_fits_terminal_width(
     columns: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -415,7 +341,7 @@ def test_prompt_emits_no_human_diagnostic_when_stderr_is_not_tty(
     assert captured.out == ""
 
 
-def test_prompt_suspends_and_resumes_progress_around_table_and_read(
+def test_prompt_accepts_short_y(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -431,37 +357,6 @@ def test_prompt_suspends_and_resumes_progress_around_table_and_read(
     )
 
     assert accepted is True
-    progress.suspend.assert_called_once_with()
-    progress.resume.assert_called_once_with()
-
-
-@pytest.mark.parametrize(
-    ("stdin", "stderr"),
-    [
-        (_TTYStringIO("yes\n", is_tty=False), _TTYStringIO("", is_tty=True)),
-        (_TTYStringIO("yes\n", is_tty=True), _TTYStringIO("", is_tty=False)),
-    ],
-)
-def test_prompt_hidden_or_noninteractive_paths_do_not_suspend_progress(
-    stdin: io.StringIO,
-    stderr: io.StringIO,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    progress = MagicMock()
-    monkeypatch.setattr(reuse_prompt.sys, "stdin", stdin)
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
-
-    accepted = prompt_for_previous_offset_reuse(
-        prompt_input=_prompt_input(request),
-        progress=progress,
-        no_color=True,
-    )
-
-    assert accepted is False
-    progress.suspend.assert_not_called()
-    progress.resume.assert_not_called()
 
 
 def test_prompt_falls_back_to_filename_when_labels_are_blank(

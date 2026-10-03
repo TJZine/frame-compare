@@ -4,14 +4,15 @@ from pytest import MonkeyPatch
 from typer.core import TyperGroup
 from typer.main import get_command
 
-from frame_compare.cli.entry import _stabilize_typer_help_width, app
+from frame_compare.cli.cli_helpers import stabilize_typer_help_width
+from frame_compare.cli.entry import app
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
 from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
 
 from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
 
-def test_app_help_lists_all_commands():
+def test_root_help_mentions_run_wizard_doctor_preset_and_version():
     result = runner.invoke(
         app,
         ["--help"],
@@ -28,7 +29,7 @@ def test_app_help_lists_all_commands():
     assert "version" in output
 
 
-def test_run_help_shows_all_options():
+def test_run_help_declares_required_options_and_displays_selected_flags():
     REQUIRED_RUN_OPTIONS = [
         "--root",
         "-r",
@@ -402,7 +403,7 @@ def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> Non
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("TERMINAL_WIDTH", "200")
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
-    _stabilize_typer_help_width()
+    stabilize_typer_help_width()
     assert typer_rich_utils.MAX_WIDTH == 200
 
 
@@ -413,42 +414,6 @@ def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
 ) -> None:
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", 120)
 
-    _stabilize_typer_help_width(terminal_width)
+    stabilize_typer_help_width(terminal_width)
 
     assert typer_rich_utils.MAX_WIDTH == 120
-
-
-def test_import_does_not_mutate_terminal_width():
-    import os
-    import subprocess
-    import sys
-
-    env = os.environ.copy()
-    env.pop("TERMINAL_WIDTH", None)
-    cmd = [
-        sys.executable,
-        "-c",
-        "import os; "
-        "import frame_compare.cli.entry; "
-        "assert 'TERMINAL_WIDTH' not in os.environ, 'should not set env on import'; "
-        "import typer.rich_utils as tru; "
-        "assert tru.MAX_WIDTH is None, 'should not set MAX_WIDTH on import'; ",
-    ]
-    try:
-        res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
-    except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"CLI import subprocess timed out after {exc.timeout} seconds")
-    assert res.returncode == 0, res.stderr
-
-
-def test_cli_installs_ascii_fallback_before_any_command(monkeypatch: MonkeyPatch) -> None:
-    calls: list[None] = []
-    monkeypatch.setattr(
-        "frame_compare.cli.entry.use_ascii_fallback_on_non_utf_streams",
-        lambda: calls.append(None),
-    )
-
-    result = runner.invoke(app, ["version"])
-
-    assert result.exit_code == 0
-    assert calls == [None]

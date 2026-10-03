@@ -138,31 +138,6 @@ def plan_audio_chunks(
     return ChunkPlan(chunk_samples=chunk_samples, lag_samples=lag_samples, chunks=chunks)
 
 
-def comparison_window(
-    comparison: npt.ArrayLike,
-    reference_start: int,
-    reference_count: int,
-    lag_samples: int,
-) -> FloatArray:
-    """Build the comparison window for one chunk, zero-padding past stream edges.
-
-    The window covers comparison samples
-    ``[reference_start - lag_samples, reference_start + reference_count + lag_samples)``.
-    """
-    if reference_start < 0 or reference_count < 1 or lag_samples < 0:
-        raise ValueError(
-            "comparison window needs reference_start >= 0, reference_count >= 1, lag_samples >= 0"
-        )
-    signal = np.asarray(comparison, dtype=np.float64).reshape(-1)
-    window = np.zeros(reference_count + 2 * lag_samples, dtype=np.float64)
-    window_start = reference_start - lag_samples
-    copy_start = max(window_start, 0)
-    copy_end = min(window_start + window.size, signal.size)
-    if copy_end > copy_start:
-        window[copy_start - window_start : copy_end - window_start] = signal[copy_start:copy_end]
-    return window
-
-
 def _chunk_psr(correlation: FloatArray, peak: int) -> float:
     side = np.concatenate(
         (

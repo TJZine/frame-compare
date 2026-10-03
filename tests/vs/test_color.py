@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from frame_compare.vs.color import (
     apply_color_props,
     expand_limited_rgb_to_full,
@@ -11,61 +13,6 @@ from frame_compare.vs.color import (
     to_rgb24,
 )
 from frame_compare.vs.types import ColorProps
-
-
-def test_infer_color_props_sd_defaults_to_smpte170m():
-    """For height 480 and unspecified values, asserts matrix/transfer/primaries==6."""
-    clip = MagicMock()
-    clip.height = 480
-    props = ColorProps(primaries=2, transfer=2, matrix=2, color_range=1)
-
-    inferred = infer_color_props(clip, props)
-    assert inferred.primaries == 6
-    assert inferred.transfer == 6
-    assert inferred.matrix == 6
-    assert inferred.color_range == 1
-
-
-def test_infer_color_props_hd_defaults_to_bt709():
-    """For height 1080 and unspecified values, asserts matrix/transfer/primaries==1."""
-    clip = MagicMock()
-    clip.height = 1080
-    props = ColorProps(primaries=2, transfer=2, matrix=2, color_range=1)
-
-    inferred = infer_color_props(clip, props)
-    assert inferred.primaries == 1
-    assert inferred.transfer == 1
-    assert inferred.matrix == 1
-    assert inferred.color_range == 1
-
-
-def test_infer_color_props_hdr_matrix_prefers_ncl():
-    """Verify matrix backfill uses the R80 MATRIX_BT2020_NCL constant."""
-    clip = MagicMock()
-    clip.height = 2160
-    props = ColorProps(primaries=2, transfer=16, matrix=2, color_range=1)
-
-    mock_vs = MagicMock()
-    mock_vs.MATRIX_BT2020_NCL = 9
-
-    with patch.dict("sys.modules", {"vapoursynth": mock_vs}):
-        inferred = infer_color_props(clip, props)
-
-    assert inferred.matrix == 9
-    assert inferred.primaries == 9
-
-
-def test_infer_color_props_preserves_specified_props():
-    """Specified props (not 2) are not overwritten by height-based defaults."""
-    clip = MagicMock()
-    clip.height = 1080
-    props = ColorProps(primaries=6, transfer=6, matrix=6, color_range=0)
-
-    inferred = infer_color_props(clip, props)
-    assert inferred.primaries == 6
-    assert inferred.transfer == 6
-    assert inferred.matrix == 6
-    assert inferred.color_range == 0
 
 
 def test_apply_color_props_calls_setframeprops():
@@ -176,3 +123,48 @@ def test_to_rgb24_does_not_expand_when_output_range_limited():
     ):
         to_rgb24(clip, props=props, output_range=1, expand_to_full=True)
         mock_expand.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "height, props, expected, hdr",
+    [
+        pytest.param(
+            480,
+            ColorProps(2, 2, 2, 1),
+            {"primaries": 6, "transfer": 6, "matrix": 6, "color_range": 1},
+            False,
+            id="sd_defaults",
+        ),
+        pytest.param(
+            1080,
+            ColorProps(2, 2, 2, 1),
+            {"primaries": 1, "transfer": 1, "matrix": 1, "color_range": 1},
+            False,
+            id="hd_defaults",
+        ),
+        pytest.param(
+            2160, ColorProps(2, 16, 2, 1), {"matrix": 9, "primaries": 9}, True, id="hdr_matrix"
+        ),
+        pytest.param(
+            1080,
+            ColorProps(6, 6, 6, 0),
+            {"primaries": 6, "transfer": 6, "matrix": 6, "color_range": 0},
+            False,
+            id="specified",
+        ),
+    ],
+)
+def test_infer_color_props_cases(
+    height: int, props: ColorProps, expected: dict[str, int], hdr: bool
+) -> None:
+    clip = MagicMock()
+    clip.height = height
+    if hdr:
+        mock_vs = MagicMock()
+        mock_vs.MATRIX_BT2020_NCL = 9
+        with patch.dict("sys.modules", {"vapoursynth": mock_vs}):
+            inferred = infer_color_props(clip, props)
+    else:
+        inferred = infer_color_props(clip, props)
+    for field, value in expected.items():
+        assert getattr(inferred, field) == value

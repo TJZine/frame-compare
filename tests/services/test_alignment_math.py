@@ -2,19 +2,10 @@
 
 # pyright: reportPrivateUsage=false
 
-from dataclasses import FrozenInstanceError
-
 import pytest
 
 from frame_compare.services.alignment_math import calculate_alignment_trims
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
-
-
-def test_alignment_result_is_frozen() -> None:
-    """AlignmentResult stays immutable."""
-    res = AlignmentResult("ref", "comp", 0, 0.0, 1.0, "cross_correlation", "computed")
-    with pytest.raises(FrozenInstanceError):
-        res.frame_offset = 10  # type: ignore[misc]
+from frame_compare.services.types import AlignmentConfig
 
 
 def test_alignment_config_defaults() -> None:

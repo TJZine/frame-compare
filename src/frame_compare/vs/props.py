@@ -15,12 +15,6 @@ _COLOR_RANGE_LIMITED = 1
 _UNSPECIFIED_COLOR_PROP = 2
 
 
-def get_int_prop(props: Mapping[str, object], key: str, default: int) -> int:
-    """Safely extract an integer property from frame properties with fallback."""
-    value = get_optional_int_prop(props, key)
-    return default if value is None else value
-
-
 def get_optional_int_prop(props: Mapping[str, object], key: str) -> int | None:
     """Safely extract an optional integer property from frame properties."""
     val = props.get(key)

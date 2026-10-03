@@ -191,12 +191,12 @@ def test_history_list_human_exposes_concise_fields(tmp_path: Path) -> None:
     assert result.stderr == ""
 
 
-def test_history_list_json_rejects_missing_generated_root(tmp_path: Path) -> None:
-    _setup_config(tmp_path)
-
-    result = _invoke(tmp_path, ["list", "--json"])
-
-    generated = (tmp_path / "generated").resolve()
+@pytest.mark.parametrize("external", [False, True], ids=["contained", "external"])
+def test_history_list_json_rejects_missing_generated_root(tmp_path: Path, external: bool) -> None:
+    root = tmp_path / "workspace" if external else tmp_path
+    generated = (tmp_path / "persistent-generated" if external else root / "generated").resolve()
+    _setup_config(root, generated_root=generated if external else None)
+    result = _invoke(root, ["list", "--json"])
     stderr = result.stderr.replace("\n", "")
     assert result.exit_code == 4
     assert result.stdout == ""
@@ -205,25 +205,6 @@ def test_history_list_json_rejects_missing_generated_root(tmp_path: Path) -> Non
     assert "Reconnect" in stderr
     assert "permissions" in stderr
     assert not generated.exists()
-
-
-def test_history_list_json_external_missing_root_never_falls_back(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "workspace"
-    generated_root = tmp_path / "persistent-generated"
-    _setup_config(root, generated_root=generated_root)
-
-    result = _invoke(root, ["list", "--json"])
-
-    stderr = result.stderr.replace("\n", "")
-    assert result.exit_code == 4
-    assert result.stdout == ""
-    assert "[FC-3016]" in stderr
-    assert str(generated_root.resolve()) in stderr
-    assert "Reconnect" in stderr
-    assert "permissions" in stderr
-    assert not generated_root.exists()
     assert not (root / "generated").exists()
 
 
@@ -260,43 +241,27 @@ def test_history_list_json_returns_empty_runs_for_existing_empty_root(tmp_path: 
     assert json.loads(result.stdout) == {"runs": []}
 
 
+@pytest.mark.parametrize("external", [False, True], ids=["contained", "external"])
 def test_history_open_uses_exact_recorded_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, external: bool
 ) -> None:
-    report = _setup(tmp_path)
+    root = tmp_path / "workspace" if external else tmp_path
+    generated = tmp_path / "persistent-generated" if external else root / "generated"
+    report = _setup(root, generated_root=generated if external else None)
     opened: list[Path] = []
     monkeypatch.setattr(
         "frame_compare.cli.entry._maybe_open_report",
         lambda path: opened.append(path) is None or True,
     )
-
-    result = _invoke(tmp_path, ["open", "Exact Run"])
-
-    assert result.exit_code == 0
-    assert opened == [report.resolve()]
-    assert result.stdout.endswith("Opened report for run 'Exact Run'.\n")
-    assert result.stdout[:2] in ("\u2713 ", "+ ")
-
-
-def test_history_open_uses_external_generated_root_and_canonical_report(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
-    generated_root = tmp_path / "persistent-generated"
-    report = _setup(root, generated_root=generated_root)
-    opened: list[Path] = []
-    monkeypatch.setattr(
-        "frame_compare.cli.entry._maybe_open_report",
-        lambda path: opened.append(path) is None or True,
-    )
-
     result = _invoke(root, ["open", "Exact Run"])
-
     assert result.exit_code == 0
     assert opened == [report.resolve()]
-    assert opened[0] == generated_root / "Exact Run" / "report.html"
-    assert not (root / "generated").exists()
+    if external:
+        assert opened[0] == generated / "Exact Run" / "report.html"
+        assert not (root / "generated").exists()
+    else:
+        assert result.stdout.endswith("Opened report for run 'Exact Run'.\n")
+        assert result.stdout[:2] in ("✓ ", "+ ")
 
 
 @pytest.mark.parametrize("outcome", [False, RuntimeError("browser secret")])
@@ -326,26 +291,3 @@ def test_history_open_rejects_nonexact_name(tmp_path: Path) -> None:
 
     assert result.exit_code == 4
     assert "Run was not found" in result.stderr
-
-
-def test_history_help_does_not_import_vs_runtime() -> None:
-    code = """
-import sys
-from typer.testing import CliRunner
-from frame_compare.cli.entry import app
-result = CliRunner().invoke(app, ['history', '--help'])
-assert result.exit_code == 0, result.output
-assert 'vapoursynth' not in sys.modules
-assert 'frame_compare.vs.loader' not in sys.modules
-"""
-    import subprocess
-    import sys
-
-    completed = subprocess.run(
-        [sys.executable, "-c", code],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert completed.returncode == 0, completed.stderr

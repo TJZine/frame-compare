@@ -1,6 +1,7 @@
 """Tests for run folder naming utilities."""
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -162,14 +163,12 @@ def test_reserve_run_folder_creates_non_colliding_dir(tmp_path: Path) -> None:
         tmdb_metadata=tmdb,
     )
     assert result.path == tmp_path / "Fight Club (1999)"
-    assert result.folder_name == "Fight Club (1999)"
-    assert result.base_name == "Fight Club (1999)"
     assert result.naming_source == "tmdb"
     assert result.path.exists()
     assert result.path.is_dir()
 
 
-def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> None:
+def test_reserve_run_folder_avoids_existing_directory_collision(tmp_path: Path) -> None:
     # Pre-create the directory to simulate a collision
     (tmp_path / "Fight Club (1999)").mkdir()
 
@@ -188,8 +187,6 @@ def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> Non
     )
 
     assert result.path == tmp_path / "Fight Club (1999)_2"
-    assert result.folder_name == "Fight Club (1999)_2"
-    assert result.base_name == "Fight Club (1999)"
     assert result.naming_source == "tmdb"
     assert result.path.exists()
     assert result.path.is_dir()
@@ -263,7 +260,6 @@ def test_reserve_run_folder_empty_filenames_uses_canonical_fallback(tmp_path: Pa
     )
 
     assert result.path == tmp_path / "unnamed_run"
-    assert result.folder_name == "unnamed_run"
     assert result.naming_source == "unnamed"
     assert result.path.exists()
     assert result.path.is_dir()
@@ -296,10 +292,12 @@ def test_reserve_run_folder_maps_destination_failure_without_fallback(
 ) -> None:
     original_mkdir = Path.mkdir
 
-    def _fail_reservation(path: Path, *args: object, **kwargs: object) -> None:
+    def _fail_reservation(
+        path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False
+    ) -> None:
         if path == tmp_path / "source":
             raise PermissionError("destination is read-only")
-        original_mkdir(path, *args, **kwargs)
+        original_mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
 
     monkeypatch.setattr(Path, "mkdir", _fail_reservation)
 
@@ -437,10 +435,10 @@ def test_reserve_run_folder_maps_resolve_failure_without_fallback(
 ) -> None:
     original_resolve = Path.resolve
 
-    def _fail_owner_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+    def _fail_owner_resolve(path: Path, strict: bool = False) -> Path:
         if path == tmp_path:
             raise RuntimeError("symlink loop")
-        return original_resolve(path, *args, **kwargs)
+        return original_resolve(path, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _fail_owner_resolve)
 
@@ -449,5 +447,5 @@ def test_reserve_run_folder_maps_resolve_failure_without_fallback(
 
     assert exc_info.value.code == "FC-3018"
     assert str(tmp_path) in str(exc_info.value)
-    assert "symlink loop" in (exc_info.value.context.details or {}).get("error", "")
+    assert "symlink loop" in cast(str, (exc_info.value.context.details or {}).get("error", ""))
     assert not any(tmp_path.iterdir())

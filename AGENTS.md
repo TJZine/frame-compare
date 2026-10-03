@@ -34,6 +34,12 @@ Always-on defaults:
   boundaries for consequential decisions that remain unresolved.
 - Before claiming completion, run risk-matched verification, inspect the diff, and
   preserve unrelated user changes.
+- Prove features with real-CLI E2E tests in `tests/e2e/` on generated media, leaving checked artifacts; run the media tier through Docker.
+- Keep one owner per user-visible behavior; follow production value flow before calling an assertion internal.
+- Keep isolated tests only for `owner`, `edge`, `failure`, `contract`, `network`, `security` or `platform`; internal assertions never justify retention.
+- Apply R1 to test-only production code and R2 to failure outcomes for program-written data; preserve distinct external-input and security cases.
+- List failure modes first; prove bug regressions fail on pre-fix code once at the highest reproducing seam.
+- Load `python-test-design` before writing, changing or reviewing tests.
 
 Where to look next:
 

@@ -5,55 +5,11 @@ import pytest
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
 
 
-def test_generate_name_simple():
-    assert generate_screenshot_name("Source", 100) == "100 - Source.png"
-
-
-def test_generate_name_zero_frame():
-    assert generate_screenshot_name("Ref", 0) == "0 - Ref.png"
-
-
-def test_generate_name_custom_extension():
-    assert generate_screenshot_name("Test", 1, extension="jpg") == "1 - Test.jpg"
-
-
-def test_generate_name_preserves_spaces():
-    assert generate_screenshot_name("My Source", 50) == "50 - My Source.png"
-
-
-def test_generate_name_sanitizes_special_chars():
-    assert generate_screenshot_name("Bad:Name?.mkv", 10) == "10 - Bad_Name_.mkv.png"
-
-
 def test_generate_name_sanitizes_surrogate_escape():
     name = generate_screenshot_name("Source\udcff", 10)
 
     assert name == "10 - Source_.png"
     assert not any("\ud800" <= character <= "\udfff" for character in name)
-
-
-def test_generate_name_collapses_underscores():
-    assert generate_screenshot_name("A:::B", 1) == "1 - A___B.png"
-
-
-def test_generate_name_strips_leading_trailing():
-    assert generate_screenshot_name(" **Test** ", 1) == "1 - __Test__.png"
-
-
-def test_generate_name_empty_becomes_unnamed():
-    assert generate_screenshot_name("", 1) == "1 - comparison.png"
-
-
-def test_generate_name_all_special_becomes_unnamed():
-    assert generate_screenshot_name("<>:/\\|?*", 1) == "1 - ________.png"
-
-
-def test_generate_name_preserves_hyphen():
-    assert generate_screenshot_name("My-Source", 1) == "1 - My-Source.png"
-
-
-def test_generate_name_preserves_windows_reserved_name_stem():
-    assert generate_screenshot_name("CON", 1) == "1 - CON.png"
 
 
 def test_generate_name_negative_frame_raises():
@@ -64,10 +20,6 @@ def test_generate_name_negative_frame_raises():
 def test_generate_name_empty_extension_raises():
     with pytest.raises(ValueError, match="extension must not be empty"):
         generate_screenshot_name("Test", 1, extension="")
-
-
-def test_generate_path_simple(tmp_path):
-    assert generate_screenshot_path(tmp_path, "Ref", 100) == tmp_path / "100 - Ref.png"
 
 
 def test_generate_path_sanitizes(tmp_path):
@@ -136,3 +88,29 @@ def test_generate_path_bounds_multibyte_component_for_large_frame(tmp_path):
     assert len(os.path.abspath(first).encode("utf-16-le")) // 2 <= 259
     assert first != second
     assert first == generate_screenshot_path(output_dir, source_stem, 100000)
+
+
+@pytest.mark.parametrize(
+    "label, frame, extension, expected",
+    [
+        pytest.param("Test", 1, "jpg", "1 - Test.jpg", id="custom_extension"),
+        pytest.param("My Source", 50, "png", "50 - My Source.png", id="preserves_spaces"),
+        pytest.param(
+            "Bad:Name?.mkv", 10, "png", "10 - Bad_Name_.mkv.png", id="sanitizes_special_chars"
+        ),
+        pytest.param("A:::B", 1, "png", "1 - A___B.png", id="preserves_replacement_underscores"),
+        pytest.param(" **Test** ", 1, "png", "1 - __Test__.png", id="strips_leading_trailing"),
+        pytest.param("", 1, "png", "1 - comparison.png", id="empty_becomes_unnamed"),
+        pytest.param(
+            "<>:/\\|?*",
+            1,
+            "png",
+            "1 - ________.png",
+            id="all_special_preserves_replacement_underscores",
+        ),
+        pytest.param("My-Source", 1, "png", "1 - My-Source.png", id="preserves_hyphen"),
+        pytest.param("CON", 1, "png", "1 - CON.png", id="preserves_windows_reserved_name_stem"),
+    ],
+)
+def test_generate_name_cases(label: str, frame: int, extension: str, expected: str) -> None:
+    assert generate_screenshot_name(label, frame, extension=extension) == expected

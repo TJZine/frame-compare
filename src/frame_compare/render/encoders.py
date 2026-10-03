@@ -85,24 +85,6 @@ def _should_expand_tonemapped_limited_rgb(frame_props: Mapping[str, object]) -> 
     return props_indicate_limited_range(frame_props) is True
 
 
-def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
-    """
-    Render a single frame to image file.
-
-    Args:
-        request: Render configuration
-        renderer: "vapoursynth", "ffmpeg", or "auto"
-
-    Returns:
-        Path to rendered image
-
-    Raises:
-        RenderError: If rendering fails
-        FrameExtractionError: If renderer requires vs.VideoNode but Path usage detected (or vice versa)
-    """
-    return render_frame_detailed(request, renderer).path
-
-
 def render_frame_detailed(
     request: RenderRequest, renderer: Renderer = "auto"
 ) -> RenderedFrameResult:

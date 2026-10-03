@@ -35,6 +35,7 @@ from frame_compare.services.errors import (
     raise_if_alignment_cancelled,
 )
 from frame_compare.services.types import AlignmentConfig
+from frame_compare.utils.alignment_evidence import CollectionFailureCategory
 from tests.services.alignment_request_test_support import alignment_request
 
 
@@ -328,31 +329,6 @@ def test_prespawn_cancellation_delivers_no_pairs_and_completes_cleanup() -> None
     assert result.comparison_cleanup.completed
 
 
-def test_cancelled_paired_collection_stops_delivery_between_chunks() -> None:
-    cancellation = threading.Event()
-    delivered: list[int] = []
-
-    def consumer(index: int, _reference: np.ndarray, _window: np.ndarray) -> None:
-        delivered.append(index)
-        cancellation.set()
-
-    result = collect_paired_audio_chunks(
-        _float_writer_argv(),
-        _float_writer_argv(),
-        **_paired_kwargs(
-            consumer,
-            chunks=((0, 8000), (8000, 8000)),
-            cancellation=cancellation,
-        ),
-    )
-
-    assert isinstance(result, PairedAudioCollectionFailure)
-    assert result.category == "cancelled"
-    assert delivered == [0]
-    assert result.reference_cleanup.completed
-    assert result.comparison_cleanup.completed
-
-
 def test_in_flight_consumer_finishes_before_cancellation_is_observed() -> None:
     cancellation = threading.Event()
     entered = threading.Event()
@@ -386,7 +362,7 @@ def test_in_flight_consumer_finishes_before_cancellation_is_observed() -> None:
 
 def _paired_failure(
     *,
-    category: str,
+    category: CollectionFailureCategory,
     reference_exited: bool = True,
     comparison_exited: bool = True,
 ) -> PairedAudioCollectionFailure:
@@ -416,7 +392,7 @@ def _paired_failure(
         )
 
     return PairedAudioCollectionFailure(
-        category=category,  # type: ignore[arg-type]
+        category=category,
         side="reference",
         message=f"paired audio collection failed: {category}",
         reference_facts=facts(),
@@ -426,159 +402,84 @@ def _paired_failure(
     )
 
 
-def test_cancelled_pair_with_incomplete_cleanup_raises_cleanup_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reference = tmp_path / "reference.mkv"
-    comparison = tmp_path / "comparison.mkv"
-    reference.touch()
-    comparison.touch()
-    config = AlignmentConfig(cache_results=False)
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        config=config,
-        generated_dir=tmp_path,
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda _path, **_kwargs: _probe(),
-    )
-    monkeypatch.setattr(
-        alignment,
-        "collect_paired_audio_chunks",
-        lambda *_args, **_kwargs: _paired_failure(
-            category="cancelled",
-            reference_exited=False,
+@pytest.mark.parametrize(
+    "category, reference_exited, comparison_exited, change_identity, expected_error, expected_category, detail",
+    [
+        pytest.param(
+            "cancelled",
+            False,
+            True,
+            False,
+            AudioAlignmentCleanupError,
+            "cancelled",
+            None,
+            id="cancelled_pair_with_incomplete_cleanup_raises_cleanup_error",
         ),
-    )
-
-    with pytest.raises(AudioAlignmentCleanupError) as raised:
-        alignment._estimate_audio_pair(
-            reference,
-            comparison,
-            config=config,
-            fps_reference=Fraction(24),
-            reference_request=request.reference,
-            comparison_request=request.comparisons[0],
-        )
-
-    assert raised.value.category == "cancelled"
-
-
-def test_identity_change_with_incomplete_cleanup_raises_cleanup_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reference = tmp_path / "reference.mkv"
-    comparison = tmp_path / "comparison.mkv"
-    reference.touch()
-    comparison.touch()
-    config = AlignmentConfig(cache_results=False)
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        config=config,
-        generated_dir=tmp_path,
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda _path, **_kwargs: _probe(),
-    )
-
-    def collect_then_touch(*_args: Any, **_kwargs: Any) -> Any:
-        with open(comparison, "ab") as handle:
-            handle.write(b"mutated")
-        return _paired_failure(category="timeout", reference_exited=False)
-
-    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", collect_then_touch)
-
-    with pytest.raises(AudioAlignmentCleanupError) as raised:
-        alignment._estimate_audio_pair(
-            reference,
-            comparison,
-            config=config,
-            fps_reference=Fraction(24),
-            reference_request=request.reference,
-            comparison_request=request.comparisons[0],
-        )
-
-    assert raised.value.category == "timeout"
-
-
-def test_cancelled_pair_with_identity_change_still_cancels(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With cleanup complete, cancellation (step 2) outranks the identity check (step 3)."""
-    reference = tmp_path / "reference.mkv"
-    comparison = tmp_path / "comparison.mkv"
-    reference.touch()
-    comparison.touch()
-    config = AlignmentConfig(cache_results=False)
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        config=config,
-        generated_dir=tmp_path,
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda _path, **_kwargs: _probe(),
-    )
-
-    def collect_then_touch(*_args: Any, **_kwargs: Any) -> Any:
-        with open(comparison, "ab") as handle:
-            handle.write(b"mutated")
-        return _paired_failure(category="cancelled")
-
-    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", collect_then_touch)
-
-    with pytest.raises(AudioAlignmentCancellationError):
-        alignment._estimate_audio_pair(
-            reference,
-            comparison,
-            config=config,
-            fps_reference=Fraction(24),
-            reference_request=request.reference,
-            comparison_request=request.comparisons[0],
-        )
-
-
-def test_incomplete_cleanup_after_failed_pair_is_fatal(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reference = tmp_path / "reference.mkv"
-    comparison = tmp_path / "comparison.mkv"
-    reference.touch()
-    comparison.touch()
-    config = AlignmentConfig(cache_results=False)
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        config=config,
-        generated_dir=tmp_path,
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda _path, **_kwargs: _probe(),
-    )
-    monkeypatch.setattr(
-        alignment,
-        "collect_paired_audio_chunks",
-        lambda *_args, **_kwargs: _paired_failure(
-            category="nonzero_exit",
-            comparison_exited=False,
+        pytest.param(
+            "timeout",
+            False,
+            True,
+            True,
+            AudioAlignmentCleanupError,
+            "timeout",
+            None,
+            id="identity_change_with_incomplete_cleanup_raises_cleanup_error",
         ),
+        pytest.param(
+            "cancelled",
+            True,
+            True,
+            True,
+            AudioAlignmentCancellationError,
+            None,
+            None,
+            id="cancelled_pair_with_identity_change_still_cancels",
+        ),
+        pytest.param(
+            "nonzero_exit",
+            True,
+            False,
+            False,
+            AudioAlignmentCleanupError,
+            "nonzero_exit",
+            "cleanup did not complete",
+            id="incomplete_cleanup_after_failed_pair_is_fatal",
+        ),
+    ],
+)
+def test_pair_failure_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    category: CollectionFailureCategory,
+    reference_exited: bool,
+    comparison_exited: bool,
+    change_identity: bool,
+    expected_error: type[Exception],
+    expected_category: str | None,
+    detail: str | None,
+) -> None:
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    config = AlignmentConfig(cache_results=False)
+    request = alignment_request(
+        reference=reference, comparisons=[comparison], config=config, generated_dir=tmp_path
     )
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda _path, **_kwargs: _probe())
 
-    with pytest.raises(AudioAlignmentCleanupError) as raised:
+    def collect(*_args: Any, **_kwargs: Any) -> Any:
+        if change_identity:
+            with open(comparison, "ab") as handle:
+                handle.write(b"mutated")
+        return _paired_failure(
+            category=category,
+            reference_exited=reference_exited,
+            comparison_exited=comparison_exited,
+        )
+
+    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", collect)
+    with pytest.raises(expected_error) as raised:
         alignment._estimate_audio_pair(
             reference,
             comparison,
@@ -587,9 +488,11 @@ def test_incomplete_cleanup_after_failed_pair_is_fatal(
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
         )
-
-    assert raised.value.category == "nonzero_exit"
-    assert "cleanup did not complete" in str(raised.value)
+    if expected_category is not None:
+        assert isinstance(raised.value, AudioAlignmentCleanupError)
+        assert raised.value.category == expected_category
+    if detail is not None:
+        assert detail in str(raised.value)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill(SIGINT) uses POSIX signal delivery")
@@ -610,6 +513,7 @@ from pathlib import Path
 from frame_compare.services import alignment
 from frame_compare.services.errors import raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig
+from frame_compare.utils.alignment_evidence import CollectionFailureCategory
 from tests.services.alignment_request_test_support import alignment_request
 
 reference = Path(sys.argv[1])

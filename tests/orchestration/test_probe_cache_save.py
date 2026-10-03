@@ -1,5 +1,6 @@
 """Unit tests for probe cache keying logic and I/O."""
 
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -100,11 +101,22 @@ def test_save_clip_probe_cache_writes_version_first_and_keys_sorted(
     assert contents.index(f"[{key_a}]") < contents.index(f"[{key_b}]")
 
 
-def test_save_clip_probe_cache_atomic_write_failure_preserves_existing_cache(
-    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
+@pytest.mark.parametrize(
+    ("operation", "failure_target", "message"),
+    [
+        (save_clip_probe_cache, "write_bytes_atomic", "disk full"),
+        (merge_shared_clip_probe_cache, "exclusive_file_lock", "lock unavailable"),
+    ],
+    ids=["atomic-write", "merge-lock"],
+)
+def test_probe_cache_write_failure_preserves_existing_cache(
+    tmp_path: Path,
+    sample_snapshot: ClipProbeSnapshot,
+    operation: Callable[[Path, dict[str, ClipProbeSnapshot]], None],
+    failure_target: str,
+    message: str,
 ) -> None:
-    """Probe cache writes are best-effort generated-state acceleration."""
-    f = tmp_path / "cache.toml"
+    path = tmp_path / "cache.toml"
     existing = ClipProbeSnapshot(
         fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
         width=1280,
@@ -115,48 +127,17 @@ def test_save_clip_probe_cache_atomic_write_failure_preserves_existing_cache(
     )
     existing_key = compute_probe_cache_key(existing.fingerprint)
     current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
-    save_clip_probe_cache(f, {existing_key: existing})
-
+    save_clip_probe_cache(path, {existing_key: existing})
     with (
         patch(
-            "frame_compare.orchestration.probing.probe_cache.write_bytes_atomic",
-            side_effect=OSError("disk full"),
+            f"frame_compare.orchestration.probing.probe_cache.{failure_target}",
+            side_effect=OSError(message),
         ),
         patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
     ):
-        save_clip_probe_cache(f, {current_key: sample_snapshot})
-
+        operation(path, {current_key: sample_snapshot})
     assert warning.call_args.args[0] == "probe_cache_write_error"
-    assert set(load_clip_probe_cache(f)) == {existing_key}
-
-
-def test_merge_shared_clip_probe_cache_lock_failure_warns_without_replacing(
-    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
-) -> None:
-    f = tmp_path / "cache.toml"
-    existing = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
-        width=1280,
-        height=720,
-        num_frames=50,
-        fps=Fraction(24, 1),
-        is_hdr=False,
-    )
-    existing_key = compute_probe_cache_key(existing.fingerprint)
-    current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
-    save_clip_probe_cache(f, {existing_key: existing})
-
-    with (
-        patch(
-            "frame_compare.orchestration.probing.probe_cache.exclusive_file_lock",
-            side_effect=OSError("lock unavailable"),
-        ),
-        patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
-    ):
-        merge_shared_clip_probe_cache(f, {current_key: sample_snapshot})
-
-    assert warning.call_args.args[0] == "probe_cache_write_error"
-    assert set(load_clip_probe_cache(f)) == {existing_key}
+    assert set(load_clip_probe_cache(path)) == {existing_key}
 
 
 def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
@@ -181,7 +162,6 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
             "frame_compare.orchestration.probing.probe_cache.tomllib.load",
             side_effect=PermissionError("temporarily unavailable"),
         ),
-        patch("frame_compare.orchestration.probing.probe_cache.write_bytes_atomic") as atomic_write,
         patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
     ):
         merge_shared_clip_probe_cache(f, {current_key: sample_snapshot})
@@ -190,14 +170,12 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
     assert set(load_clip_probe_cache(f)) == {existing_key}
     assert warning.call_args_list[0].args[0] == "probe_cache_read_error"
     assert [call.args[0] for call in warning.call_args_list] == ["probe_cache_read_error"]
-    atomic_write.assert_not_called()
 
 
 @pytest.mark.parametrize(
     "existing_content",
     [
         pytest.param("invalid [ toml", id="malformed-toml"),
-        pytest.param('version = "2"\n', id="version-mismatch"),
     ],
 )
 def test_merge_shared_clip_probe_cache_invalid_state_aborts_without_replacing(

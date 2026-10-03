@@ -19,60 +19,6 @@ def _clear_libplacebo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
 
 
-def test_libplacebo_runtime_require_env_forces_true_without_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Require override should bypass the cached subprocess probe."""
-    _clear_libplacebo_env(monkeypatch)
-    monkeypatch.setenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", "1")
-
-    calls = 0
-
-    def probe() -> bool:
-        nonlocal calls
-        calls += 1
-        return False
-
-    assert libplacebo_runtime_usable(LibplaceboRuntimeState(), probe) is True
-    assert calls == 0
-
-
-def test_libplacebo_runtime_disable_env_forces_false_without_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Disable override should bypass the cached subprocess probe."""
-    _clear_libplacebo_env(monkeypatch)
-    monkeypatch.setenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", "1")
-
-    calls = 0
-
-    def probe() -> bool:
-        nonlocal calls
-        calls += 1
-        return True
-
-    assert libplacebo_runtime_usable(LibplaceboRuntimeState(), probe) is False
-    assert calls == 0
-
-
-def test_libplacebo_runtime_probe_env_forces_true_without_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Child probe processes should bypass the runtime probe recursion guard."""
-    _clear_libplacebo_env(monkeypatch)
-    monkeypatch.setenv("FRAME_COMPARE_LIBPLACEBO_PROBE", "1")
-
-    calls = 0
-
-    def probe() -> bool:
-        nonlocal calls
-        calls += 1
-        return False
-
-    assert libplacebo_runtime_usable(LibplaceboRuntimeState(), probe) is True
-    assert calls == 0
-
-
 def test_libplacebo_runtime_usable_caches_probe_result_for_state_lifetime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -145,3 +91,27 @@ def test_libplacebo_probe_uses_current_vapoursynth_range_property(
     assert probe_libplacebo_runtime() is True
     assert "_Range=1" in captured["script"]
     assert "_ColorRange" not in captured["script"]
+
+
+@pytest.mark.parametrize(
+    "variable, probe_result, expected",
+    [
+        pytest.param("FRAME_COMPARE_REQUIRE_LIBPLACEBO", False, True, id="require"),
+        pytest.param("FRAME_COMPARE_DISABLE_LIBPLACEBO", True, False, id="disable"),
+        pytest.param("FRAME_COMPARE_LIBPLACEBO_PROBE", False, True, id="probe_child"),
+    ],
+)
+def test_libplacebo_runtime_overrides_bypass_probe(
+    monkeypatch: pytest.MonkeyPatch, variable: str, probe_result: bool, expected: bool
+) -> None:
+    _clear_libplacebo_env(monkeypatch)
+    monkeypatch.setenv(variable, "1")
+    calls = 0
+
+    def probe() -> bool:
+        nonlocal calls
+        calls += 1
+        return probe_result
+
+    assert libplacebo_runtime_usable(LibplaceboRuntimeState(), probe) is expected
+    assert calls == 0

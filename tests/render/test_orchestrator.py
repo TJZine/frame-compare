@@ -1,5 +1,5 @@
-from collections.abc import Sequence
 from concurrent.futures import CancelledError, Future
+from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event, Lock, Thread
 from unittest.mock import MagicMock, patch
@@ -11,7 +11,6 @@ from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
-    render_batch,
     render_batch_detailed,
 )
 from frame_compare.render.types import (
@@ -123,7 +122,7 @@ def test_render_batch_fail_fast(mock_render_request):
 
         mock_render.side_effect = side_effect
         with pytest.raises(RuntimeError, match="Failed"):
-            render_batch(requests, parallelism=2)
+            render_batch_detailed(requests, parallelism=2)
 
         invoked_requests = [call.args[0] for call in mock_render.call_args_list]
         assert requests[2] in invoked_requests
@@ -251,41 +250,6 @@ def default_config() -> ConfigSchema:
     return ConfigSchema(color=ColorConfig(enable_tonemap=False))
 
 
-def test_render_batch_progress(mock_render_request):
-    requests = [mock_render_request] * 3
-    reporter = MagicMock(spec=ProgressReporter)
-
-    with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
-        mock_render.side_effect = _rendered
-        render_batch(requests, parallelism=1, reporter=reporter)
-
-        reporter.start_phase.assert_called_once_with("Rendering", 3)
-        assert reporter.set_description.call_count == 3
-        assert reporter.advance.call_count == 3
-        reporter.complete_phase.assert_called_once()
-
-
-def test_render_batch_progress_prefers_dedicated_presentation_label(mock_render_request):
-    request = RenderRequest(
-        clip=mock_render_request.clip,
-        diagnostic_source=mock_render_request.diagnostic_source,
-        frame_number=42,
-        output_path=mock_render_request.output_path,
-        overlay=None,
-        encoder_settings=mock_render_request.encoder_settings,
-        progress_label="Comparison 1 | ATV WEB-DL",
-    )
-    reporter = MagicMock(spec=ProgressReporter)
-
-    with patch(
-        "frame_compare.render.batch.orchestrator.render_frame_detailed",
-        side_effect=_rendered,
-    ):
-        render_batch([request], reporter=reporter)
-
-    reporter.set_description.assert_called_once_with("Comparison 1 | ATV WEB-DL - frame 42")
-
-
 def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None:
     slow_started = Event()
     slow_blocked = Event()
@@ -328,7 +292,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
 
     def run_render() -> None:
         try:
-            render_batch(requests, parallelism=2)
+            render_batch_detailed(requests, parallelism=2)
         except BaseException as exc:
             render_exceptions.append(exc)
         finally:
@@ -419,17 +383,20 @@ def test_render_batch_marks_progress_failed_on_exception(mock_render_request) ->
         ),
         pytest.raises(RuntimeError, match="Failed"),
     ):
-        render_batch([mock_render_request], parallelism=1, reporter=reporter)
+        render_batch_detailed([mock_render_request], parallelism=1, reporter=reporter)
 
     reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
 def test_render_batch_sequential(mock_render_request):
-    requests = [mock_render_request] * 3
+    requests = [
+        replace(mock_render_request, frame_number=index, output_path=Path(f"out_{index}.png"))
+        for index in range(3)
+    ]
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
         mock_render.side_effect = _rendered
-        results = render_batch(requests, parallelism=1)
-        assert results == [r.output_path for r in requests]
+        results = [rendered.path for rendered in render_batch_detailed(requests, parallelism=1)]
+        assert results == [Path("out_0.png"), Path("out_1.png"), Path("out_2.png")]
         assert mock_render.call_count == 3
 
 
@@ -443,47 +410,6 @@ def test_render_batch_empty_validates_work_unit_ranges() -> None:
     )
     with pytest.raises(ValueError, match="contiguous and ordered"):
         render_batch_detailed([], work_unit_ranges=[range(1, 1)])
-
-
-def test_render_batch_sequential_batches_adjacent_default_ffmpeg_requests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runner = DefaultFFmpegRunner()
-    batches: list[tuple[Path, list[int]]] = []
-
-    def _extract_frames(
-        video: Path,
-        frame_nums: Sequence[int],
-        output_dir: Path,
-        **_kwargs: object,
-    ) -> list[RenderedFrameFacts]:
-        batches.append((video, list(frame_nums)))
-        for index in range(len(frame_nums)):
-            Image.new("RGB", (2, 2), color=(index, 0, 0)).save(output_dir / f"{index:09d}.png")
-        return [
-            RenderedFrameFacts(source_frame=frame_num, picture_type="I") for frame_num in frame_nums
-        ]
-
-    monkeypatch.setattr(runner, "extract_frames", _extract_frames)
-    requests = [
-        RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
-            frame_number=frame,
-            output_path=tmp_path / f"out_{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for frame in [10, 20, 42]
-    ]
-
-    results = render_batch_detailed(requests, parallelism=1)
-
-    assert batches == [(Path("video.mkv"), [10, 20, 42])]
-    assert [result.path for result in results] == [request.output_path for request in requests]
-    assert [result.facts.source_frame for result in results] == [10, 20, 42]
-    assert all(request.output_path.is_file() for request in requests)
 
 
 def test_render_batch_sequential_preserves_default_runner_subclass_override(
@@ -722,60 +648,6 @@ def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
         Path("comparison.mkv"): [30, 40],
     }
     assert [result.facts.source_frame for result in results] == [10, 20, 30, 40]
-
-
-def test_clip_unit_progress_advances_before_the_unit_finishes(tmp_path: Path) -> None:
-    release_units = Event()
-    progress_advanced = Event()
-    requests = [
-        RenderRequest(
-            clip=Path(clip_name),
-            diagnostic_source=Path(clip_name),
-            frame_number=frame,
-            output_path=tmp_path / f"{clip_name}-{frame}.jpg",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-        )
-        for clip_name, frames in (("reference.mkv", [10, 20]), ("comparison.mkv", [30, 40]))
-        for frame in frames
-    ]
-    reporter = MagicMock(spec=ProgressReporter)
-    reporter.advance.side_effect = lambda _amount=1: progress_advanced.set()
-    exceptions: list[BaseException] = []
-
-    def render_single(request: RenderRequest) -> RenderedFrameResult:
-        if request.frame_number in {20, 30}:
-            assert release_units.wait(timeout=2.0)
-        return _rendered(request)
-
-    def run_render() -> None:
-        try:
-            render_batch_detailed(
-                requests,
-                parallelism=2,
-                reporter=reporter,
-                work_unit_ranges=[range(0, 2), range(2, 4)],
-            )
-        except BaseException as exc:
-            exceptions.append(exc)
-
-    with patch(
-        "frame_compare.render.batch.orchestrator.render_frame_detailed",
-        side_effect=render_single,
-    ):
-        thread = Thread(target=run_render, daemon=True)
-        thread.start()
-        try:
-            assert progress_advanced.wait(timeout=1.0)
-        finally:
-            release_units.set()
-            thread.join(timeout=2.0)
-
-    assert not thread.is_alive()
-    assert exceptions == []
-    reporter.start_phase.assert_called_once_with("Screenshots", 4)
-    reporter.set_description.assert_not_called()
-    assert reporter.advance.call_count == 4
 
 
 def test_clip_unit_failure_preserves_partial_serialized_progress_and_admission(

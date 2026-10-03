@@ -32,7 +32,7 @@ _LIVE_WEBHOOK_ENABLED = os.environ.get("FRAME_COMPARE_LIVE_WEBHOOK") == "1" and 
         "one live smoke notification"
     ),
 )
-async def test_live_webhook_delivery_posts_one_notification() -> None:
+async def test_live_webhook_delivery_reports_success() -> None:
     webhook_url = os.environ["FRAME_COMPARE_LIVE_WEBHOOK_URL"]
 
     result = await deliver_slowpics_webhook(

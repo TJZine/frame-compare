@@ -17,108 +17,23 @@ def _assert_ok_glyph_prefixed(output: str, fragment: str) -> None:
     assert line[:2] in ("✓ ", "+ ")
 
 
-def test_preset_apply_missing_preset_exits_with_error_code(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [("missing", "FC-1004"), ("../escape", "FC-1006")],
+    ids=["missing", "invalid-name"],
+)
+def test_preset_apply_invalid_preset_exits_with_error_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, code: str
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
         root = Path(".")
         config_path = _write_minimal_config(root)
         result = runner.invoke(
-            app,
-            [
-                "preset",
-                "apply",
-                "missing",
-                "--root",
-                str(root),
-                "--config",
-                str(config_path),
-            ],
+            app, ["preset", "apply", name, "--root", str(root), "--config", str(config_path)]
         )
         assert result.exit_code == 2
         assert result.stdout == ""
-        assert "FC-1004" in result.stderr
-
-
-def test_preset_apply_invalid_name_exits_with_error_code(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path(".")
-        config_path = _write_minimal_config(root)
-        result = runner.invoke(
-            app,
-            [
-                "preset",
-                "apply",
-                "../escape",
-                "--root",
-                str(root),
-                "--config",
-                str(config_path),
-            ],
-        )
-        assert result.exit_code == 2
-        assert result.stdout == ""
-        assert "FC-1006" in result.stderr
-
-
-def test_preset_list_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
-        presets_dir = root / "config" / "presets"
-        presets_dir.mkdir(parents=True, exist_ok=True)
-        (presets_dir / "Zebra.toml").write_text('[paths]\ninput_dir = "a"')
-        (presets_dir / "alpha.toml").write_text('[paths]\ninput_dir = "b"')
-
-        result = runner.invoke(app, ["preset", "list", "--root", str(root)])
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == ["alpha", "Zebra"]
-        assert result.stderr == ""
-
-
-def test_preset_apply_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
-        config_path = root / "config" / "config.toml"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(MINIMAL_CONFIG)
-        presets_dir = root / "config" / "presets"
-        presets_dir.mkdir(parents=True, exist_ok=True)
-        (presets_dir / "boost.toml").write_text(
-            "[analysis]\nrandom_frame_count = 12\n",
-            encoding="utf-8",
-        )
-
-        result = runner.invoke(
-            app,
-            ["preset", "apply", "boost", "--root", str(root), "--config", "config/config.toml"],
-        )
-        assert result.exit_code == 0
-        assert result.stdout == ""
-        assert f"Applied preset 'boost' to {config_path.resolve()}" in result.stderr
-        _assert_ok_glyph_prefixed(result.stderr, "Applied preset 'boost'")
-        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert data["analysis"]["random_frame_count"] == 12
-
-
-def test_preset_save_stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
-        config_path = root / "config" / "config.toml"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(MINIMAL_CONFIG)
-
-        result = runner.invoke(
-            app,
-            ["preset", "save", "demo", "--root", str(root), "--config", "config/config.toml"],
-        )
-        assert result.exit_code == 0
-        assert result.stdout == ""
-        preset_path = root / "config" / "presets" / "demo.toml"
-        assert preset_path.exists()
-        assert f"Saved preset 'demo' to {preset_path.resolve()}" in result.stderr
-        _assert_ok_glyph_prefixed(result.stderr, "Saved preset 'demo'")
+        assert code in result.stderr
 
 
 @pytest.mark.parametrize("operation", ["apply", "save"])

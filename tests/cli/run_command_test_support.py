@@ -4,14 +4,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, cast
 
 from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import (
+    ConfirmFullWindowRetryPromptFn,
+    ConfirmUploadPromptFn,
+    CopyToClipboardFn,
     HandleErrorFn,
     LoadConfigFn,
+    OpenReportFn,
+    OpenUrlFn,
     RunCliRawArgs,
     RunCommandDeps,
     WriteConfigFn,
@@ -35,7 +40,7 @@ class RecordingRunner:
         return self.result
 
 
-def _base_args() -> RunCliRawArgs:
+def base_args() -> RunCliRawArgs:
     return RunCliRawArgs(
         resolved_root=Path("/workspace"),
         config_path=Path("/workspace/config/config.toml"),
@@ -112,7 +117,7 @@ class DepsOptions:
     confirm_full_window_retry: Callable[[str], bool] | None = None
 
 
-def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) -> RunCommandDeps:
+def deps(options: DepsOptions | None = None, opened: list[Path] | None = None) -> RunCommandDeps:
     opts = options or DepsOptions()
     opened_reports = [] if opened is None else opened
 
@@ -127,18 +132,30 @@ def _deps(options: DepsOptions | None = None, opened: list[Path] | None = None) 
         handle_error=opts.handle_error,
         configure_logging=lambda *, level, log_format: None,
         console_factory=_console_factory,
-        open_report=opts.open_report or _open_report,
-        copy_to_clipboard=opts.copy_to_clipboard or (lambda _text: None),
-        open_url=opts.open_url or (lambda _url: True),
-        confirm_upload=opts.confirm_upload or (lambda _text, *, default: default),
-        confirm_full_window_retry=opts.confirm_full_window_retry or (lambda _text: False),
+        open_report=cast(OpenReportFn, opts.open_report)
+        if opts.open_report is not None
+        else _open_report,
+        copy_to_clipboard=cast(CopyToClipboardFn, opts.copy_to_clipboard)
+        if opts.copy_to_clipboard is not None
+        else (lambda text: None),
+        open_url=cast(OpenUrlFn, opts.open_url)
+        if opts.open_url is not None
+        else (lambda url: True),
+        confirm_upload=cast(ConfirmUploadPromptFn, opts.confirm_upload)
+        if opts.confirm_upload is not None
+        else (lambda text, *, default: default),
+        confirm_full_window_retry=cast(
+            ConfirmFullWindowRetryPromptFn, opts.confirm_full_window_retry
+        )
+        if opts.confirm_full_window_retry is not None
+        else (lambda text: False),
         stdout_is_tty=opts.stdout_is_tty,
         stdin_is_tty=opts.stdin_is_tty,
         no_color_env_present=opts.no_color_env_present,
     )
 
 
-def _prompt_required_config(*, report_enable: bool = True) -> ConfigSchema:
+def prompt_required_config(*, report_enable: bool = True) -> ConfigSchema:
     config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = True

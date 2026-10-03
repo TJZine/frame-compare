@@ -140,7 +140,7 @@ class ClipState:
     def effective_num_frames(self) -> int:
         """Return effective frame count after applied trims.
 
-        This MUST be used as the frame domain for FramePlan and rendering decisions.
+        This MUST be used as the frame domain for selection and rendering decisions.
         """
         end_inclusive = (
             self.trim.trim_end_frame_inclusive

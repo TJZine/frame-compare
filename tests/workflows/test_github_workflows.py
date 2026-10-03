@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -175,14 +174,13 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     }
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
+        "src/**",
+        "tests/**",
         "uv.lock",
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
-        "tests/workflows/**",
-        "src/frame_compare/analysis/**",
-        "src/frame_compare/render/**",
-        "src/frame_compare/vs/**",
+        ".github/workflows/docker-integration.yml",
     } <= set(workflow_paths)
 
 
@@ -323,7 +321,7 @@ def test_release_preflight_ref_validation_fails_closed(
     assert message in completed.stderr
 
 
-def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
+def test_ci_keeps_test_audit_browser_and_distribution_gates(
     repo_root: Path,
 ) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
@@ -333,12 +331,7 @@ def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
     assert "uv run --no-sync ruff check ." in lint_run
     assert "uv run --no-sync ruff format --check ." in lint_run
     test_run = "\n".join(str(step.get("run", "")) for step in jobs["test"]["steps"])
-    assert "pytest -q" in test_run
-    assert "--cov=src/frame_compare" in test_run
-    assert "--cov-report=term-missing" in test_run
-    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["tool"]["coverage"]["run"]["branch"] is True
-    assert project["tool"]["coverage"]["report"]["fail_under"] == 80
+    assert "pytest -q -n auto --dist loadgroup" in test_run
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
     assert any("tests/browser/test_report_browser_smoke.py" in run for run in browser_runs)

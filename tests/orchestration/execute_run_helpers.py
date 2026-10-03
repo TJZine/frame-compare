@@ -22,10 +22,16 @@ from frame_compare.analysis.types import (
     MetricCacheRequest,
     MetricsMetadata,
 )
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
-from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
+from frame_compare.orchestration.context import (
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+    RunContext,
+)
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     save_clip_probe_cache,
@@ -37,54 +43,11 @@ from frame_compare.orchestration.selection_domain import (
 )
 from frame_compare.orchestration.source_selection import SourceSelection, resolve_source_selection
 from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
     import vapoursynth as vs
-
-
-MINIMAL_CONFIG = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
-
-RUN_FOLDERS_CONFIG = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
-
-
-def create_config(tmp_path: Path, content: str = MINIMAL_CONFIG) -> Path:
-    """Create a config file in the standard location."""
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_file = config_dir / "config.toml"
-    config_file.write_text(content, encoding="utf-8")
-    return config_file
 
 
 def create_video_files(input_dir: Path, *filenames: str) -> None:
@@ -241,6 +204,17 @@ def metric_cache_request_for_cache_inputs(
     )
 
 
+def metric_cache_fingerprint(
+    *, video_paths: list[Path], config: ConfigSchema, selection_domain: str
+) -> str:
+    return cache_io.compute_cache_key(
+        video_paths,
+        config.analysis,
+        selection_domain=selection_domain,
+        metric_request=metric_cache_request_for_cache_inputs(video_paths, config),
+    )
+
+
 def write_probe_cache_for_inputs(
     cache_path: Path,
     video_paths: list[Path],
@@ -324,14 +298,28 @@ def _clip_fingerprint_for_path(path: Path) -> ClipFingerprint:
     return ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
 
 
-def clip_state(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
+def clip_state(
+    path: Path,
+    *,
+    label: str,
+    num_frames: int = 100,
+    fingerprint: ClipFingerprint | None = None,
+    width: int = 1920,
+    height: int = 1080,
+    fps: Fraction = Fraction(24, 1),
+    is_hdr: bool = False,
+) -> ClipState:
     probe = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path=path, size_bytes=0, mtime_ns=0),
-        width=1920,
-        height=1080,
+        fingerprint=(
+            ClipFingerprint(path=path, size_bytes=0, mtime_ns=0)
+            if fingerprint is None
+            else fingerprint
+        ),
+        width=width,
+        height=height,
         num_frames=num_frames,
-        fps=Fraction(24, 1),
-        is_hdr=False,
+        fps=fps,
+        is_hdr=is_hdr,
     )
     return ClipState(
         path=path,
@@ -403,3 +391,20 @@ class FakeFFmpegRunner:
             transfer=1,
             matrix=1,
         )
+
+
+def execution_context(
+    *,
+    config: ConfigSchema,
+    workspace: WorkspacePaths,
+    reference: ClipState,
+    comparisons: list[ClipState],
+) -> RunContext:
+    return RunContext(
+        config=config,
+        workspace=workspace,
+        reference=reference,
+        comparisons=comparisons,
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )

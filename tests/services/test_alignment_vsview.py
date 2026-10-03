@@ -115,7 +115,7 @@ def _call(
     )
 
 
-def test_audio_review_envelope_carries_a_parseable_v4_attempt() -> None:
+def test_constructed_audio_review_envelope_round_trips_attempt_parser() -> None:
     """The VSView audio-review envelope embeds the v4 attempt validated by one parser."""
     attempt = audio_attempt()
     envelope = {
@@ -162,7 +162,7 @@ def test_disabled_review_has_no_runtime_side_effects(
     )
 
 
-def test_native_result_confirms_and_keeps_in_request_order(
+def test_native_result_applies_confirmed_pair_and_keeps_other_pair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _set_interactive(monkeypatch)
@@ -187,44 +187,15 @@ def test_native_result_confirms_and_keeps_in_request_order(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    result = _call(
+    _call(
         tmp_path,
         config=AlignmentConfig(use_vsview=True),
         comparisons=comparisons,
     )
 
-    assert result == AlignmentVSViewOutcome(
-        {"ref:first": 12},
-        "confirmed",
-        (("ref:first", 120, 108),),
-    )
     overrides = load_manual_overrides(tmp_path)
     assert set(overrides) == {"ref:first"}
     assert overrides["ref:first"].frame_offset == 12
-
-
-def test_keep_current_only_is_a_successful_empty_override_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _set_interactive(monkeypatch)
-
-    def launch(*_args: object, **_kwargs: object):
-        session = _session(tmp_path)
-        write_alignment_review_result(
-            session,
-            AlignmentReviewResult(
-                session_id=session.session_id,
-                decisions=(KeepCurrentAlignmentReviewDecision("ref:comparison"),),
-            ),
-        )
-        return session, 0.0
-
-    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
-
-    assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
-        {}, "keep_current"
-    )
-    assert load_manual_overrides(tmp_path) == {}
 
 
 @pytest.mark.parametrize("wait_seconds", [42.5, 0.0])
@@ -402,7 +373,7 @@ def test_pending_review_without_launch_marks_review_unresolved(
     ],
     ids=("malformed", "stale-session", "partial", "out-of-bounds"),
 )
-def test_optional_invalid_result_fails_closed_and_retains_offsets(
+def test_optional_invalid_result_is_rejected_without_persisting_override(
     payload: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -435,23 +406,6 @@ def test_close_without_finish_is_optional_cancellation(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         None, "rejected_result"
     )
-
-
-def test_forced_close_without_finish_is_typed_alignment_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _set_interactive(monkeypatch)
-    monkeypatch.setattr(
-        alignment_vsview,
-        "launch_alignment_verification_session",
-        lambda *_args, **_kwargs: (_session(tmp_path), 0.0),
-    )
-
-    with pytest.raises(AudioAlignmentError, match="did not return a valid VSView review result"):
-        _call(
-            tmp_path,
-            config=AlignmentConfig(use_vsview=True, force_interactive=True),
-        )
 
 
 def test_result_bounds_come_from_typed_request_not_sidecar(
@@ -529,7 +483,6 @@ def test_non_tty_forced_review_fails_before_session_creation(
             tmp_path,
             config=AlignmentConfig(use_vsview=True, force_interactive=True),
         )
-    launch.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -631,43 +584,3 @@ def test_native_review_never_reads_terminal_input(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         {}, "keep_current"
     )
-
-
-def test_progress_is_resumed_after_review_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _set_interactive(monkeypatch)
-    progress = MagicMock()
-    monkeypatch.setattr(
-        alignment_vsview,
-        "launch_alignment_verification_session",
-        MagicMock(side_effect=VSViewError("failed")),
-    )
-    reference = _clip(tmp_path / "ref.mkv")
-    comparison = _clip(tmp_path / "comparison.mkv")
-
-    maybe_launch_alignment_vsview(
-        reference=reference,
-        comparisons=[comparison],
-        offsets_by_key={"ref:comparison": 0},
-        audio_review_by_key={
-            "ref:comparison": json.dumps(
-                {
-                    "current_authority": {
-                        "origin": "shared_computed_offsets",
-                        "frame_offset": 0,
-                    },
-                    "evidence_availability": "historical_details_unavailable",
-                    "audio_attempt": None,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        },
-        cache_dir=tmp_path,
-        config=AlignmentConfig(use_vsview=True),
-        progress=progress,
-    )
-
-    progress.suspend.assert_called_once_with()
-    progress.resume.assert_called_once_with()

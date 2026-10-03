@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -463,13 +463,6 @@ def test_image_src_for_report_encodes_url_path_characters(
     screenshot.write_bytes(b"fake_png_data")
 
     assert image_src_for_report(screenshot, report_dir=report_dir, embed_images=False) == expected
-
-
-def test_report_data_and_clip_are_frozen(report_data: ReportData) -> None:
-    with pytest.raises(FrozenInstanceError):
-        report_data.frames = []  # type: ignore
-    with pytest.raises(FrozenInstanceError):
-        report_data.clips[0].name = "new"  # type: ignore
 
 
 def test_generate_report_json_contains_v12_rendering(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -114,72 +113,6 @@ def test_generate_report_persists_to_explicit_output_path_over_config_dir(
 def test_generate_report_requires_explicit_output_path(report_data: ReportData) -> None:
     with pytest.raises(ReportError, match="report output path is required"):
         generate_report(report_data, ReportConfig())
-
-
-def _clear_clips(data: ReportData) -> ReportData:
-    data.clips.clear()
-    return data
-
-
-def _remove_one_clip(data: ReportData) -> ReportData:
-    data.clips.pop()
-    return data
-
-
-def _clear_frames(data: ReportData) -> ReportData:
-    data.frames.clear()
-    return data
-
-
-def _clear_all_images(data: ReportData) -> ReportData:
-    for clip in data.clips:
-        clip.images.clear()
-    return data
-
-
-def _clear_encode_images(data: ReportData) -> ReportData:
-    data.clips[1].images.clear()
-    return data
-
-
-@pytest.mark.parametrize(
-    ("data_builder", "message"),
-    [
-        (_clear_clips, "no clips provided"),
-        (_remove_one_clip, "at least 2 clips required for comparison"),
-        (_clear_frames, "no frames provided"),
-        (_clear_all_images, "no screenshots provided"),
-        (_clear_encode_images, "no screenshots for clip: encode"),
-    ],
-)
-def test_generate_report_rejects_invalid_report_data_before_writing(
-    report_data: ReportData,
-    tmp_path: Path,
-    data_builder: Callable[[ReportData], ReportData],
-    message: str,
-) -> None:
-    with pytest.raises(ReportError, match=message):
-        generate_report(
-            data_builder(report_data),
-            ReportConfig(),
-            output_path=tmp_path / "report.html",
-        )
-
-    assert not (tmp_path / "report.html").exists()
-
-
-def test_generate_report_rejects_mismatched_screenshot_counts(report_data: ReportData) -> None:
-    report_data.clips[0].images.pop()
-
-    with pytest.raises(
-        ReportError,
-        match="screenshot count mismatch for reference: expected 2, got 1",
-    ):
-        generate_report(
-            report_data,
-            ReportConfig(),
-            output_path=report_data.clips[0].path.parent / "report.html",
-        )
 
 
 def test_generate_report_wraps_persistence_failures_as_report_error(

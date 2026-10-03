@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
 
 
 def no_color_requested(
     *,
     explicit_no_color: bool = False,
-    environ: Mapping[str, str] | None = None,
 ) -> bool:
     """Return whether ANSI color should be disabled for human output."""
-    resolved_environ = os.environ if environ is None else environ
-    return explicit_no_color or "NO_COLOR" in resolved_environ
+    return explicit_no_color or "NO_COLOR" in os.environ
 
 
 def stream_is_tty(stream: object) -> bool:

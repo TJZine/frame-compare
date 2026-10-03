@@ -51,14 +51,14 @@ Bootstrap:
 uv sync --group dev --extra vsview --frozen
 ```
 
-Core local gates:
+Core local gates (Pyright checks both `src/` and `tests/`):
 
 ```bash
 uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
 
@@ -152,11 +152,11 @@ or different fingerprints, before any unsafe dependency override; each refusal
 requires a complete portable bundle reinstall. Crossing a media-runtime
 fingerprint also requires a complete portable bundle reinstall.
 
-Locked runtime dependency audit (PowerShell):
+Locked dependency audit (PowerShell):
 
 ```powershell
 $auditRequirements = Join-Path $env:TEMP "frame-compare-audit-requirements.txt"
-uv export --frozen --no-dev --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
+uv export --frozen --all-groups --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
 uv run --no-sync pip-audit --strict --require-hashes --disable-pip --progress-spinner off --timeout 20 --vulnerability-service pypi --requirement $auditRequirements
 Remove-Item -LiteralPath $auditRequirements
 ```
@@ -185,6 +185,14 @@ inputs, dependencies, and relevant environment are unchanged. Reuse that evidenc
 including a worker's observed results. Rerun affected checks after integration or
 other changes invalidate it; run additional integration proof for interactions not
 covered by unit results. Do not repeat an unchanged clean gate solely at closeout.
+
+Full native runs use the measured local count of four workers with `--dist loadgroup`.
+Focused selections, including single-test runs, may stay serial; `addopts` does not
+enable parallelism. Native CI uses `-n auto --dist loadgroup` because runner core
+counts differ. Windows portable CI stays serial. New tests must be parallel-safe:
+use `tmp_path` and `monkeypatch`, avoid fixed paths or ports, and use `xdist_group`
+only with a stated concrete reason. Existing groups serialize browser tests sharing
+a Chrome profile and the alignment-u4 module sharing session-generated media.
 
 ### Fast Local Sanity
 
@@ -220,7 +228,7 @@ uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
 
@@ -286,6 +294,10 @@ owner is outside a listed directory:
 - FFmpeg/ffprobe execution in `src/frame_compare/services/alignment_audio.py`
 - shared process behavior in `src/frame_compare/utils/subproc.py` affecting media calls
 - integration tests that validate real VS/FFmpeg behavior
+- `tests/e2e/` media-tier scenarios
+- behavior changes in `orchestration/`, `services/` or `analysis/` that change what a
+  media-tier scenario observes: run output, selected frames, screenshots, alignment,
+  cache or report payload
 
 Pure calculations or serialization in these owners use the applicable Python gate
 when the native execution contract is unchanged. The test suite may mock missing
@@ -297,9 +309,30 @@ Canonical command for the default Docker media runtime:
 bash tools/verify_docker_integration.sh
 ```
 
+The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
+10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
+Use `--pytest-path tests/e2e` for focused development or scenario proof; it does not
+replace the full gate when the runtime/dependency/media triggers above apply.
+The script builds images by default. After `docker-test` dependency or `uv.lock`
+changes, rebuild before using the new plugin/runtime; `--no-build` reuses only
+known-current images.
+
+The verifier exports `FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache`
+(host `generated/test-media-cache`). Only u4 media is cached, under
+`<cache>/<generator>/<key>/`; E2E media is regenerated. The SHA-256 key includes the
+exact generator source and complete `ffmpeg -version` output, obtained with an
+explicit timeout. Generation publishes by same-filesystem rename and prunes only
+that generator's old keys. Tests consume temporary symlinks so source indexes stay
+outside the cache. Unset the variable to generate in temporary storage as before.
+Run the verifier one at a time from a checkout: overlapping pruning is unsupported.
+No CI cache was added; Docker CI retains `--no-cache` and cold regeneration receives
+no warm-cache speedup.
+
 If this path cannot be run locally, record it as documented-only until an observed
 matching-SHA run of `.github/workflows/docker-integration.yml` supplies the proof.
-Inspect its event/path filters: a PR need not trigger it for every relevant owner.
+On pull requests to `main`, `pre-release`, or `staging`, the job runs when changes
+touch `src/**`, `tests/**`, the project lock/config files, Docker files, verifier
+scripts, or the workflow itself.
 Obtain an authorized manual run when required; an absent or skipped CI job is not
 successful proof.
 
@@ -812,16 +845,6 @@ changes do not require a reviewer because of their location or risk label alone.
 Review a plan separately only when its seam or public contract is still expensive
 to get wrong. Do not require both same-reviewer closure and a fresh clean review
 for an unchanged artifact.
-
-## Subagent Transparency
-
-When dispatching a subagent, resolve its `config_file` from `.codex/config.toml`
-and record the selected role and resolved TOML path; role keys need not match file
-names. At task closeout, list each role used with
-the `model` and `model_reasoning_effort` read from that TOML. The child role's
-`CONFIGURED ROLE` opening line is a visible confirmation of the selected role;
-the TOML remains the authoritative configuration and avoids duplicating model
-names in prompts or workflow docs.
 
 ## Documentation Freshness Triggers
 

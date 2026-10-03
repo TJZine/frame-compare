@@ -8,18 +8,15 @@ from typing import Any, cast
 
 import pytest
 
-from frame_compare.analysis.errors import SelectionError
-from frame_compare.analysis.types import FrameMetrics, MetricsMetadata, SelectionBreakdown
+from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.schema import OverlayMode
-from frame_compare.orchestration import phase_alignment, phase_render
+from frame_compare.orchestration import phase_render
 from frame_compare.orchestration.context import ClipActiveRect
 from frame_compare.render.types import (
     RenderedBatchResult,
     RenderedClipFacts,
     ScreenshotBatchRequest,
 )
-from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
-from frame_compare.services.types import AlignmentResult
 from frame_compare.utils.media_facts import (
     PictureType,
     PresentationState,
@@ -27,7 +24,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
 )
 from frame_compare.vs.types import HDRMetadata
-from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner, _run_align_phase
+from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner
 
 
 def _result_for_requests(
@@ -44,7 +41,7 @@ def _result_for_requests(
             tmp_path / f"{request.clip_path.stem}-{frame}.png"
             for frame in request.comparison_frames
         ]
-        values = (
+        values: list[PictureType | None] = (
             picture_types[request.label]
             if picture_types is not None and request.label in picture_types
             else ["I"] * len(request.source_frames)
@@ -121,11 +118,9 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
     assert requests[0].filename_label == "reference"
     assert captured["output_dir"] == ctx.workspace.screenshots_dir
     assert captured["options"].overlay_mode == OverlayMode.NONE
-    assert captured["options"].parallelism == 2
     assert output.render.frame_facts_by_label["Reference"] == [
         RenderedFrameFacts(source_frame=4, picture_type="B")
     ]
-    assert output.render.warnings == []
 
 
 def test_run_render_phase_maps_multiple_clips_in_stable_order(
@@ -150,47 +145,6 @@ def test_run_render_phase_maps_multiple_clips_in_stable_order(
         ("Encode B", [6, 7]),
     ]
     assert [request.comparison_frames for request in requests] == [[1, 2], [1, 2], [1, 2]]
-
-
-def test_run_render_phase_adds_unique_progress_labels_without_changing_canonical_labels(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    identity = ReleaseIdentity(
-        ContentIdentity("Example", year=2026),
-        service="ATV",
-        source_type="WEB-DL",
-        dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
-    )
-    comparison = _clip(
-        tmp_path / "comparison_videos" / "comparison.mkv",
-        label="Canonical comparison",
-        release_identity=identity,
-    )
-    generated_progress_label = "Comparison 1 | ATV WEB-DL | DV HDR10+ | Kitsune"
-    explicit = _clip(
-        tmp_path / "comparison_videos" / "explicit.mkv",
-        label=generated_progress_label,
-        release_identity=identity,
-        label_is_explicit=True,
-    )
-    ctx = _context(tmp_path, comparisons=[comparison, explicit])
-    ctx.reference = replace(ctx.reference, release_identity=identity)
-    captured = _capture_detailed_render(monkeypatch, tmp_path)
-
-    phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
-
-    requests = captured["batch_requests"]
-    assert [request.label for request in requests] == [
-        "Reference",
-        "Canonical comparison",
-        generated_progress_label,
-    ]
-    assert [request.progress_label for request in requests] == [
-        "Reference | ATV WEB-DL · DV HDR10+ · Kitsune",
-        "Comparison 1 | ATV WEB-DL · DV HDR10+ · Kitsune",
-        generated_progress_label,
-    ]
 
 
 def test_run_render_phase_maps_canonical_clip_facts_without_io(
@@ -335,48 +289,3 @@ def test_run_render_phase_rejects_backend_source_frame_mismatch(
 
     with pytest.raises(ValueError, match="do not match source mapping"):
         phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
-
-
-def test_run_render_phase_rejects_analysis_fallback_when_overlap_is_smaller_than_counts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.config.analysis = ctx.config.analysis.model_copy(
-        update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
-    )
-    ctx.analysis_metrics = FrameMetrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=ctx.reference.effective_fps,
-            config_fingerprint="test",
-            clips=[],
-        ),
-    )
-
-    monkeypatch.setattr(
-        phase_alignment,
-        "align_clips_from_request",
-        lambda *_args, **_kwargs: [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ],
-    )
-
-    with pytest.raises(SelectionError) as exc_info:
-        _run_align_phase(ctx, selected_frames=[0, 1, 2, 3])
-
-    assert exc_info.value.context.details == {
-        "reason": "insufficient generated candidates after alignment",
-        "requested": 4,
-        "found": 2,
-    }

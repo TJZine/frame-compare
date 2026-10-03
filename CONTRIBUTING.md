@@ -113,7 +113,7 @@ uv run --no-sync ruff format .
 uv run --no-sync pyright --warnings
 ```
 
-All production code must pass the configured strict Pyright policy.
+Pyright checks both `src/` and `tests/` under their configured typing policies.
 
 ## Tests and verification
 
@@ -123,8 +123,8 @@ Test markers include:
 | --- | --- |
 | `unit` | Fast isolated coverage |
 | `integration` | Module interaction |
-| `e2e` | End-to-end CLI behavior |
-| `vs_required` | Requires a VapourSynth runtime |
+| `e2e` | End-to-end CLI behavior in `tests/e2e/`; includes the runtime-free CLI tier and media tier |
+| `vs_required` | Media-tier E2E scenarios that require a VapourSynth runtime |
 | `slow` | Long-running proof |
 | `network` | Requires external network access |
 | `tier_a` | Contract/security tests without VS or network |
@@ -132,11 +132,38 @@ Test markers include:
 Examples:
 
 ```bash
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync pytest -m unit
 uv run --no-sync pytest -m "not vs_required"
+uv run --no-sync pytest -q tests/e2e/ -m "e2e and not vs_required"  # CLI tier
+bash tools/verify_docker_integration.sh --pytest-path tests/e2e  # focused media scenarios
 uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
 ```
+
+The CLI tier runs without a media runtime. The media tier is Docker-only: the gate
+sets `FRAME_COMPARE_E2E_REQUIRE_MEDIA=1` and `FRAME_COMPARE_E2E_ARTIFACTS` for the
+pinned media runtime and its inspectable scenario artifacts.
+
+The full Docker gate is `bash tools/verify_docker_integration.sh`: it runs E2E,
+integration and VS tests with ten workers and `--dist loadgroup`, plus runtime and
+production-image proofs. The focused media command above is for development and
+scenario proof; use the full gate for the runbook's runtime, dependency and media
+boundary triggers. Images build by default; rebuild after `docker-test` dependency
+or `uv.lock` changes before using the new plugin. Use `--no-build` only with
+known-current images.
+
+The verifier sets `FRAME_COMPARE_TEST_MEDIA_CACHE` to
+`/workspace/generated/test-media-cache` (host `generated/test-media-cache`) for u4
+media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact generator
+source and complete FFmpeg version output. Tests use temporary symlinks, keeping
+indexes outside the cache; unset the variable for temporary generation. Run the
+verifier one at a time from a checkout because cache pruning cannot overlap.
+CI starts cold, adds no media cache, and retains Docker `--no-cache`.
+
+New tests must be parallel-safe: use `tmp_path` and `monkeypatch`, avoid fixed paths
+or ports, and use `xdist_group` only with a stated concrete reason. The local full
+native count is four; focused runs may stay serial. Native CI uses
+`-n auto --dist loadgroup`; Windows portable CI stays serial.
 
 These examples do not replace the runbook. Changes to CLI/config contracts, runtime
 owners, Docker, Windows portable packaging, release workflows, or architectural

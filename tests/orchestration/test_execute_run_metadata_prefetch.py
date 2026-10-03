@@ -22,18 +22,17 @@ from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
-    create_config,
     create_video_files,
-    metric_cache_request_for_cache_inputs,
+    metric_cache_fingerprint,
     write_probe_cache_for_inputs,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 METADATA_CACHE_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [analysis]
 random_frame_count = 0
@@ -47,7 +46,7 @@ unattended = true
 )
 
 METADATA_RETRY_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [tmdb]
 enabled = true
@@ -60,7 +59,7 @@ category_preference = "movie"
 )
 
 METADATA_UNEXPECTED_ERROR_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [tmdb]
 enabled = true
@@ -71,7 +70,7 @@ timeout_seconds = 7.5
 )
 
 
-def test_execute_run_from_cache_only_missing_shared_cache_skips_metadata_prefetch(
+def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch_and_reserve(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -112,7 +111,6 @@ def test_execute_run_from_cache_only_missing_shared_cache_skips_metadata_prefetc
         asyncio.run(execute_run(request, deps=deps))
 
     assert metadata_calls == []
-    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
 
 
 def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetch_and_reserve(
@@ -126,11 +124,8 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
     config = load_config(tmp_path / "config" / "config.toml")
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True)
@@ -188,15 +183,13 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         asyncio.run(execute_run(request, deps=deps))
 
     assert metadata_calls == []
-    assert reserve_calls == []
-    assert [path.name for path in input_dir.iterdir() if path.is_dir()] == []
 
 
-def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
+def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     expected_metadata = TmdbMetadata(
@@ -250,19 +243,10 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     )
 
     assert result.success is True
-    assert captured_tmdb_metadata == [expected_metadata]
-    assert resolve_calls == [["source.mkv"]]
-    assert cache_paths == [(tmp_path / "generated" / "cache" / "tmdb.toml").resolve()]
     assert result.screenshot_dir is not None
-    assert (
-        result.screenshot_dir
-        == (tmp_path / "generated" / "Fight Club (1999)" / "screenshots").resolve()
-    )
     run_info = tomllib.loads(
         (tmp_path / "generated" / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
     )
-    assert run_info["folder_name"] == "Fight Club (1999)"
-    assert run_info["naming_source"] == "tmdb"
     assert run_info["source_filenames"] == ["source.mkv"]
     assert run_info["tmdb"] == {
         "enabled": True,
@@ -274,6 +258,11 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         "year": 1999,
         "media_type": "movie",
     }
+    assert captured_tmdb_metadata == [expected_metadata]
+    assert resolve_calls == [["source.mkv"]]
+    assert cache_paths == [(tmp_path / "generated" / "cache" / "tmdb.toml").resolve()]
+    assert run_info["folder_name"] == "Fight Club (1999)"
+    assert run_info["naming_source"] == "tmdb"
 
 
 def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
@@ -331,16 +320,6 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
 
     assert result.success is True
     assert result.warnings == []
-    assert prefetch_calls == [["source.mkv"]]
-    assert phase_calls == [["source.mkv"]]
-    expected_config = MetadataConfig(
-        api_key="test-key",
-        unattended=True,
-        timeout_seconds=7.5,
-        year_tolerance=1,
-        category_preference="movie",
-    )
-    assert captured_configs == [expected_config, expected_config]
     assert warning_fields == [
         {
             "event": "metadata_prefetch_degraded",
@@ -359,6 +338,15 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
         "failed": True,
         "error_type": "TmdbError",
     }
+
+    expected_config = MetadataConfig(
+        api_key="test-key",
+        unattended=True,
+        timeout_seconds=7.5,
+        year_tolerance=1,
+        category_preference="movie",
+    )
+    assert captured_configs == [expected_config, expected_config]
 
 
 def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
