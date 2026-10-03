@@ -87,7 +87,7 @@ def _metrics_for_range(*, start: int, end: int, source_frame_count: int = 100) -
     )
 
 
-def _config_with_analysis(config: ConfigSchema, *, analysis: dict[str, object]) -> ConfigSchema:
+def _config_with_analysis(*, config: ConfigSchema, analysis: dict[str, object]) -> ConfigSchema:
     return config.model_copy(update={"analysis": config.analysis.model_copy(update=analysis)})
 
 
@@ -106,7 +106,7 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     )
     authored_bytes = config_path.read_bytes()
     ctx.config = _config_with_analysis(
-        ctx.config,
+        config=ctx.config,
         analysis={
             "user_frames": [10, 120],
             "random_frame_count": 12,
@@ -183,7 +183,7 @@ def test_run_analyze_phase_satisfied_selection_never_prompts(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.config = _config_with_analysis(
-        ctx.config,
+        config=ctx.config,
         analysis={
             "random_frame_count": 1,
             "motion_frame_count": 0,
@@ -234,7 +234,7 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
     config_path = tmp_path / "config" / "config.toml"
     authored_bytes = config_path.read_bytes()
     ctx.config = _config_with_analysis(
-        ctx.config,
+        config=ctx.config,
         analysis={
             "random_frame_count": 12,
             "motion_frame_count": 12,
@@ -287,7 +287,7 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.config = _config_with_analysis(
-        ctx.config,
+        config=ctx.config,
         analysis={
             "random_frame_count": 0,
             "motion_frame_count": 100,
@@ -368,7 +368,7 @@ def test_full_window_retry_progress_failure_is_fatal_before_override(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.config = _config_with_analysis(
-        ctx.config, analysis={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
+        config=ctx.config, analysis={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
     )
     progress = ConfirmationProgressSpy(fail_at=fail_at)
     prompt_calls = 0
@@ -445,7 +445,7 @@ def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.config = _config_with_analysis(
-        ctx.config,
+        config=ctx.config,
         analysis={
             "random_frame_count": 12,
             "motion_frame_count": 12,
@@ -477,7 +477,7 @@ def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path
     ctx = _context(tmp_path)
     short_clip = _clip(ctx.reference.path, label="Reference", num_frames=10)
     config = _config_with_analysis(
-        ctx.config,
+        config=ctx.config,
         analysis={
             "ignore_lead_seconds": 1.0,
             "ignore_trail_seconds": 1.0,
