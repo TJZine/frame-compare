@@ -26,7 +26,7 @@ from .execute_run_helpers import (
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
-    metric_cache_request_for_cache_inputs,
+    metric_cache_fingerprint,
     write_probe_cache_for_inputs,
 )
 from .preparation_test_support import MINIMAL_CONFIG, create_config
@@ -124,11 +124,8 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
     config = load_config(tmp_path / "config" / "config.toml")
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     cache_dir.mkdir(parents=True)

@@ -22,10 +22,16 @@ from frame_compare.analysis.types import (
     MetricCacheRequest,
     MetricsMetadata,
 )
+from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
-from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
+from frame_compare.orchestration.context import (
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+    RunContext,
+)
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     save_clip_probe_cache,
@@ -37,6 +43,7 @@ from frame_compare.orchestration.selection_domain import (
 )
 from frame_compare.orchestration.source_selection import SourceSelection, resolve_source_selection
 from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
@@ -384,3 +391,20 @@ class FakeFFmpegRunner:
             transfer=1,
             matrix=1,
         )
+
+
+def execution_context(
+    *,
+    config: ConfigSchema,
+    workspace: WorkspacePaths,
+    reference: ClipState,
+    comparisons: list[ClipState],
+) -> RunContext:
+    return RunContext(
+        config=config,
+        workspace=workspace,
+        reference=reference,
+        comparisons=comparisons,
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )

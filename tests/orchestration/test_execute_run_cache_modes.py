@@ -16,7 +16,6 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
-    MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
@@ -30,11 +29,31 @@ from .execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
     metric_cache_fingerprint,
-    metric_cache_request_for_cache_inputs,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
+from .phase_task_helpers import _frame_metrics
 from .preparation_test_support import create_config
+
+
+def _cache_config(*, analysis: str, audio_alignment: str, screenshots: str, report: str) -> str:
+    return f"""[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[analysis]
+{analysis}
+
+[audio_alignment]
+{audio_alignment}
+
+[screenshots]
+{screenshots}
+
+[report]
+{report}
+"""
 
 
 @pytest.mark.parametrize("performance", [False, True], ids=["quality", "performance"])
@@ -45,26 +64,12 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -98,11 +103,8 @@ enable = false
             }
         )
         write_metrics_cache(analysis_cache_dir, source_path=source_path, config=quality_config)
-        other_fingerprint = cache_io.compute_cache_key(
-            [source_path],
-            quality_config.analysis,
-            selection_domain=selection_domain,
-            metric_request=metric_cache_request_for_cache_inputs([source_path], quality_config),
+        other_fingerprint = metric_cache_fingerprint(
+            video_paths=[source_path], config=quality_config, selection_domain=selection_domain
         )
         other_cache_path = cast(
             Path, cache_io.find_metrics_cache_file(analysis_cache_dir, other_fingerprint)
@@ -129,22 +131,20 @@ enable = false
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        return FrameMetrics(
+        return _frame_metrics(
             luminance=[0.1] * 100,
             motion=[0.0] * 100,
-            metadata=MetricsMetadata(
-                frame_count=100,
-                fps=Fraction(24, 1),
-                config_fingerprint="fingerprint",
-                clips=[
-                    ClipIdentity(
-                        path=str(source_path),
-                        size=source_path.stat().st_size,
-                        mtime=source_path.stat().st_mtime,
-                        sha1=None,
-                    )
-                ],
-            ),
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[
+                ClipIdentity(
+                    path=str(source_path),
+                    size=source_path.stat().st_size,
+                    mtime=source_path.stat().st_mtime,
+                    sha1=None,
+                )
+            ],
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
@@ -162,26 +162,12 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -204,27 +190,12 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-performance_mode = "performance"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis='random_frame_count = 0\ndark_frame_count = 1\nperformance_mode = "performance"',
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -287,26 +258,12 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
     analysis_filename: str,
 ) -> None:
     config_content = (
-        """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
+        _cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        )
         + source_config
     )
     create_config(tmp_path, content=config_content)
@@ -417,26 +374,12 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -489,26 +432,12 @@ enable = false
 def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_alignment_enabled(
     tmp_path: Path,
 ) -> None:
-    config_content = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = true
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
+    config_content = _cache_config(
+        analysis="random_frame_count = 0\ndark_frame_count = 1",
+        audio_alignment="enable = true",
+        screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+        report="enable = false",
+    )
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")

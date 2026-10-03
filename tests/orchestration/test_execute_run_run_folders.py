@@ -39,10 +39,11 @@ from .execute_run_helpers import (
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
-    metric_cache_request_for_cache_inputs,
+    metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
+from .phase_task_helpers import _frame_metrics
 from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 if TYPE_CHECKING:
@@ -119,11 +120,8 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     source_path = input_dir / "source.mkv"
     write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
 
@@ -140,22 +138,20 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        return FrameMetrics(
+        return _frame_metrics(
             luminance=[0.1] * 100,
             motion=[0.0] * 100,
-            metadata=MetricsMetadata(
-                frame_count=100,
-                fps=Fraction(24, 1),
-                config_fingerprint="fingerprint",
-                clips=[
-                    ClipIdentity(
-                        path=str(source_path),
-                        size=source_path.stat().st_size,
-                        mtime=source_path.stat().st_mtime,
-                        sha1=None,
-                    )
-                ],
-            ),
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[
+                ClipIdentity(
+                    path=str(source_path),
+                    size=source_path.stat().st_size,
+                    mtime=source_path.stat().st_mtime,
+                    sha1=None,
+                )
+            ],
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
@@ -447,11 +443,8 @@ enable = false
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
 
     def _fake_calculate_metrics(
@@ -687,11 +680,8 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         asyncio.run(execute_run(request, deps=deps))
 
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     assert run_generated_dir.exists()
     assert [path for path in input_dir.iterdir() if path.is_dir()] == []

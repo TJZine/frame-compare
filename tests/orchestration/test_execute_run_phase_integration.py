@@ -9,10 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_alignment, phase_post_render
-from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
@@ -31,6 +29,7 @@ from .execute_run_helpers import (
     FakeVSLoader,
     clip_state,
     create_video_files,
+    execution_context,
 )
 from .phase_task_helpers import _render_artifacts, _workspace
 from .preparation_test_support import create_config
@@ -248,13 +247,11 @@ def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Pa
     create_config(tmp_path)
     config = load_config(tmp_path / "config" / "config.toml")
     reference = clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     expected_metadata = TmdbMetadata(
         tmdb_id=789,
@@ -278,13 +275,11 @@ def test_run_publish_phase_without_client_clears_slowpics_url(tmp_path: Path) ->
     create_config(tmp_path)
     config = load_config(tmp_path / "config" / "config.toml")
     reference = clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     artifacts = RunArtifacts(slowpics_url="https://slow.pics/c/example")
 
@@ -304,13 +299,11 @@ def test_run_report_phase_clears_report_path_when_no_screenshots(tmp_path: Path)
     create_config(tmp_path)
     config = load_config(tmp_path / "config" / "config.toml")
     reference = clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
 
@@ -337,13 +330,11 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         label="Encode 1",
         num_frames=80,
     )
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[comparison],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     metadata = TmdbMetadata(
         tmdb_id=321,
