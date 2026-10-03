@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Shrink `tests/orchestration` (17.6k lines, the highest test-to-source ratio, 1.79:1) through shared typed builders, and through targeted E2E widening that lets orchestration tests be deleted under mutation and coverage proof.
 Owner: Claude controller session (planning, rulings, verification); Codex executes through `.handoff/` prompts. Branch `agent/e2e-test-strategy` (not pushed; no PR yet, by maintainer decision).
 
@@ -220,3 +220,39 @@ New for this plan:
     (O4-02–05 and O4-07) passed C2 and remain deleted.
   - This records the two named candidates' final disposition while preserving
     the earlier execution evidence. O5 closeout remains pending.
+- 2026-10-03: **Checkpoint O4 and O5 closeout (controller).**
+  - **Commits:** `9fbf9836` (O4-1) and `a2f890da`. The O4-1 worker proved O4-01
+    against the Docker M1 owner from the O2 ledger rather than the handoff's
+    native owner. The controller re-ran the handoff's two
+    `phase_output_application.py` mutations, `report_path` → `None` and
+    `report_succeeded` → `False`. Each fails both O4-01 and
+    `test_execute_run_report_confirmed_decline_skips_publish` on an assertion,
+    so `a2f890da` deletes O4-01.
+  - **Kept:**
+    - O4-08: its owner fails with `FileNotFoundError`, not an assertion, so it
+      is `keep:edge`.
+    - O4-06: it is the only test of the no-reporter `suspend`/`resume` guard in
+      `run_confirm_slowpics_upload_phase`. A broken guard would crash API
+      callers that pass no reporter, so it stays as a distinct case unless the
+      maintainer approves its deletion.
+  - **Checkpoint checks:**
+    - Only the eight approved test functions are gone; every other test function
+      is unchanged, and `src/` is unchanged since `7e156394`.
+    - Three controller mutations fail the owners of O4-04, O4-05 and O4-07 on
+      assertions: the delete-error warning, the `report_succeeded` cleanup guard
+      and the `auto_upload` skip operand.
+    - The native gate passes: 3,062 passed, 90 skipped; pyright 0. Docker wasn't
+      triggered; its last run was O1's (276 passed).
+  - **Inventory against the baseline:**
+    - `tests/orchestration`: 17,609 → 17,074 lines (−535). Collected nodes
+      went from 525 to 517.
+    - All tests: 81,605 → 81,070 lines.
+    - `src/`: 46,564 lines, unchanged.
+  - **Outcome:** both levers measured small.
+    - Builders removed 279 lines under a pure-refactor bar.
+    - E2E widening ran about 1:1, so none met E2.
+    - Direct deletions removed 256 lines.
+    - What remains is mostly distinct cases: failure paths, network, and inputs
+      E2E can't produce.
+  - **Lessons** were added to the global `test-suite-slimming` skill. The plan is
+    Historical.
