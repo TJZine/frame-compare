@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -67,9 +68,14 @@ def _run_verifier(
     environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
     environment["FRAME_COMPARE_DOCKER_INVOCATION"] = str(invocation)
     environment["FRAME_COMPARE_DOCKER_MODE"] = mode
+    # Run a copy from a temporary root: the script cds to its parent and deletes
+    # generated/e2e there, which must not touch the developer's checkout.
+    script_root = tmp_path / "repo"
+    (script_root / "tools").mkdir(parents=True)
+    shutil.copy2(repo_root / "tools" / "verify_docker_integration.sh", script_root / "tools")
     result = subprocess.run(
         [bash, "tools/verify_docker_integration.sh", "--no-build", *(extra_args or [])],
-        cwd=repo_root,
+        cwd=script_root,
         env=environment,
         check=False,
         capture_output=True,
