@@ -319,7 +319,10 @@ def test_startup_probe_failure_reports_reason_and_redacted_stderr(
         )
     )
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", failure)
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", MagicMock())
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen",
+        MagicMock(side_effect=AssertionError("Failed startup checks must not launch VSView")),
+    )
     with pytest.raises(VSViewError) as excinfo:
         launch_alignment_verification_session(
             _session_request(tmp_path), VSViewConfig(enabled=True)

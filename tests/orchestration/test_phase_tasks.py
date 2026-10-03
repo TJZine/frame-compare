@@ -351,6 +351,7 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
             workspace=ctx.workspace,
         )
 
+    assert prompt_calls == 1
     assert len(ctx.run_warnings) == 1
     assert "configured lead=1.66667s" in ctx.run_warnings[0]
     assert "effective lead=0s" in ctx.run_warnings[0]

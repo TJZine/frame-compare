@@ -62,7 +62,14 @@ def resolve_entry_point() -> Path:
 def _child_environment() -> dict[str, str]:
     environment = dict(os.environ)
     for key in list(environment):
-        if re.match(r"^FRAME_COMPARE_[A-Za-z0-9_]+__", key):
+        # Isolate both JSON section settings and nested overrides, preserving
+        # runtime selectors such as FRAME_COMPARE_RUNTIME_KIND.
+        if re.match(
+            r"^FRAME_COMPARE_(?:PATHS|RUNTIME|SOURCES|ANALYSIS|AUDIO_ALIGNMENT|"
+            r"SCREENSHOTS|COLOR|SLOWPICS|TMDB|REPORT|LOGGING)(?:__|$)",
+            key,
+            flags=re.IGNORECASE,
+        ):
             del environment[key]
     environment.update({"NO_COLOR": "1", "PYTHONUTF8": "1"})
     return environment

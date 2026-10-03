@@ -15,15 +15,17 @@ _SECRET_CONFIG_LOCATIONS = frozenset(
 )
 
 
-def _is_secret_config_location(location: JSONValue) -> bool:
-    if not isinstance(location, list) or len(location) < 2:
-        return False
-    section, field = location[:2]
-    return (
-        isinstance(section, str)
-        and isinstance(field, str)
-        and (section, field) in _SECRET_CONFIG_LOCATIONS
-    )
+def _redact_config_input(value: JSONValue, location: tuple[str, ...]) -> JSONValue:
+    if any(location[: len(secret)] == secret for secret in _SECRET_CONFIG_LOCATIONS):
+        return "<redacted>"
+    if not any(secret[: len(location)] == location for secret in _SECRET_CONFIG_LOCATIONS):
+        return value
+    if isinstance(value, dict):
+        return {key: _redact_config_input(item, (*location, key)) for key, item in value.items()}
+    if isinstance(value, list):
+        # An invalid array of config tables still has its section's location.
+        return [_redact_config_input(item, location) for item in value]
+    return value
 
 
 class ConfigError(FrameCompareError):
@@ -75,10 +77,14 @@ class ConfigValidationError(ConfigError):
         sanitized_errors: list[dict[str, JSONValue]] = []
         for error in errors:
             sanitized_error = error.copy()
-            if "input" in sanitized_error and _is_secret_config_location(
-                sanitized_error.get("loc")
-            ):
-                sanitized_error["input"] = "<redacted>"
+            if "input" in sanitized_error:
+                raw_location = sanitized_error.get("loc")
+                location = (
+                    tuple(str(part) for part in raw_location)
+                    if isinstance(raw_location, list)
+                    else ()
+                )
+                sanitized_error["input"] = _redact_config_input(sanitized_error["input"], location)
             sanitized_errors.append(sanitized_error)
 
         fields: list[str] = []

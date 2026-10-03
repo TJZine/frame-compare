@@ -162,7 +162,6 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
             "frame_compare.orchestration.probing.probe_cache.tomllib.load",
             side_effect=PermissionError("temporarily unavailable"),
         ),
-        patch("frame_compare.orchestration.probing.probe_cache.write_bytes_atomic"),
         patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
     ):
         merge_shared_clip_probe_cache(f, {current_key: sample_snapshot})

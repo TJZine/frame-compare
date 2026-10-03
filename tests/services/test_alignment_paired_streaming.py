@@ -922,7 +922,7 @@ def test_uncooperative_children_are_killed_and_reaped() -> None:
         [sys.executable, "-c", script],
         [sys.executable, "-c", script],
         # Long enough for both children to install SIG_IGN on a loaded host.
-        **_paired_kwargs(accumulator, total_timeout_seconds=1.0),
+        **_paired_kwargs(accumulator, total_timeout_seconds=3.0),
     )
     elapsed = time.monotonic() - started
 
