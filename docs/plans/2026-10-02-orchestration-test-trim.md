@@ -156,3 +156,32 @@ New for this plan:
 - 2026-10-02: O1 handoff written and reviewed. E1 now allows file-local builders,
   and O1's proof adds the per-test coverage comparison. Two base coverage runs of
   `tests/orchestration` were identical, at about 20 s each.
+- 2026-10-03: O1 done, serially, in `05a115d9..93dcf029` (O1-1 to O1-5), plus the
+  controller's `7af9b72f`, which makes the one new positional builder parameter
+  keyword-only.
+  - **Result:** `tests/orchestration` 17,609 → 17,330 lines, and all tests
+    81,605 → 81,326 (279 lines, 1.6%). The 2.8–3.7k estimate counted overlapping
+    repeated windows. Most setup is specific to its test, and E1's
+    pure-refactor bar left 36 of 51 files unchanged.
+  - **Checkpoint O1 (controller):**
+    - `assert_ast.py` is OK against `9afd968d`.
+    - The diff adds and removes no assertion lines, and `src/` is unchanged.
+    - The per-test coverage comparison against `9afd968d` is identical (523
+      tests).
+    - The native gate passes: 3,070 passed, 90 skipped; pyright 0. Codex ran
+      Docker three times (276 passed each).
+    - The sampled builders meet E1.
+  - **Controller mutations:** three mutations each pass their orchestration
+    file, at base and at HEAD, and fail owners in `tests/analysis`:
+    - the fingerprint check in `cache_io.py`, caught by
+      `test_cache_validation.py`;
+    - the lead trim in `window.py`, caught by `test_window.py`;
+    - the source offset in `metrics.py`, caught by `test_metrics.py`.
+
+    So the suite still guards them.
+  - **Inputs for O2:** within three attempts, no mutation failed a test on an
+    assertion in `test_phase_output_integration.py`, `test_phases.py` or
+    `test_run_dependencies.py`. In particular,
+    `test_output_phases_use_reselected_metric_metadata_after_real_initial_selection`
+    survives both source-offset mutations in `phase_alignment.py` and
+    `phase_selection.py`. These tests are candidates for weak or covered tests.
