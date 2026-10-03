@@ -80,13 +80,14 @@ def run_command(
         cwd=workspace,
         env=_child_environment(),
         capture_output=True,
+        encoding="utf-8",
         timeout=timeout,
         check=False,
     )
     return CommandResult(
         exit_code=completed.returncode,
-        stdout=completed.stdout.decode("utf-8"),
-        stderr=completed.stderr.decode("utf-8"),
+        stdout=completed.stdout,
+        stderr=completed.stderr,
     )
 
 
