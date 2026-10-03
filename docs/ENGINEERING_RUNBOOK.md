@@ -846,16 +846,6 @@ Review a plan separately only when its seam or public contract is still expensiv
 to get wrong. Do not require both same-reviewer closure and a fresh clean review
 for an unchanged artifact.
 
-## Subagent Transparency
-
-When dispatching a subagent, resolve its `config_file` from `.codex/config.toml`
-and record the selected role and resolved TOML path; role keys need not match file
-names. At task closeout, list each role used with
-the `model` and `model_reasoning_effort` read from that TOML. The child role's
-`CONFIGURED ROLE` opening line is a visible confirmation of the selected role;
-the TOML remains the authoritative configuration and avoids duplicating model
-names in prompts or workflow docs.
-
 ## Documentation Freshness Triggers
 
 Update `docs/current-architecture.md` in the same pass when changing:
