@@ -13,8 +13,6 @@
 .venv-*/
 .agent/
 .hypothesis/
-AGENTS.md
-CODEX.md
 .codannaignore
 
 # Generated comparison outputs

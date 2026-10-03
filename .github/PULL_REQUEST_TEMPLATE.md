@@ -26,16 +26,16 @@ Closes #
 ### Code Quality
 
 - [ ] My code follows the project's style guidelines (Ruff)
-- [ ] I have run the risk-matched verification required by `docs/ENGINEERING_RUNBOOK.md`
+- [ ] Verification matches the changed claims using `.agents/project.md` and the applicable specialist runbook procedure
 - [ ] When required, `uv run --no-sync ruff check .` and `uv run --no-sync ruff format --check .` pass
 - [ ] When required, `uv run --no-sync pyright --warnings` passes with no new errors
 - [ ] My changes generate no new warnings
 
 ### Testing
 
-- [ ] I have added tests that prove my fix/feature works
-- [ ] When required, new and existing tests pass locally (`uv run --no-sync pytest -q`)
-- [ ] I have run the canonical import-linter command from the runbook to verify import contracts
+- [ ] I have identified the relevant existing, updated, new, or runtime proof for the changed behavior
+- [ ] The reported commands/results apply to the current source state; skipped or unavailable platform proof is named
+- [ ] Changed import boundaries have been checked with the canonical import-linter command in `.agents/project.md`
 
 ### Documentation
 

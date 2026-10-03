@@ -1,8 +1,18 @@
 # Claude Code runtime map
 
-`AGENTS.md` and the documents it points to are the shared authority. This file only maps Codex runtime terms to Claude Code; it adds no workflow policy.
+Root `CLAUDE.md` imports `AGENTS.md`; `.agents/project.md` supplies repository facts.
+Shared skills are installed once per host. Do not recreate repository-local copies
+or wrappers for the retired workflow names.
 
-- Skills: canonical bodies live in `.agents/skills/<name>/SKILL.md`. Each `.claude/skills/<name>/SKILL.md` is a thin discovery entry that loads the canonical file; edit the canonical file, not the entry. If you change a canonical skill's `name` or `description`, update the matching entry too.
-- Roles: `explorer`, `reviewer`, `deep_reviewer`, `docs_researcher`, `planner`, `worker`, `worker_luna`, `monitor` are Claude subagents with the same names in `.claude/agents/`. `.codex/config.toml` and `.codex/agents/*.toml` (OpenAI models, sandbox modes) configure Codex only. For Claude, the agent file sets model, effort, and tools; role semantics stay as the repository describes them. `worker` is the stronger implementer (Opus); `worker_luna` is the cost-efficient bounded implementer (Sonnet). `reviewer` is the default review depth (Opus, medium); `deep_reviewer` is the deeper review for high-risk or broad changes (Opus, high).
-- Delegation depth: subagents cannot spawn subagents (Codex `max_depth = 1`). Treat six concurrent agents as a ceiling, not a target.
-- Codex `update_plan` corresponds to Claude's task list.
+Host configuration owns model/effort choices, permissions, and available tools.
+Use the shared workflow's delegation criteria with the capabilities actually
+available; a Codex role name or TOML key does not configure Claude.
+
+Independent investigation, verification, and implementation can run in parallel.
+Parallel writers need isolated worktrees or explicit disjoint shared-tree ownership,
+one Git/integration owner, and stable test state. Serialize dependent work and real
+shared-resource conflicts. Claude's task list can hold the controller's live plan.
+
+Codanna is optional. Its absence does not prevent source inspection with direct
+reads and search. Preserve the configured tool permissions; do not claim that an
+unavailable host capability was exercised.

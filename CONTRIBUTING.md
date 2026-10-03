@@ -1,9 +1,10 @@
 # Contributing to Frame Compare
 
 Thank you for improving Frame Compare. This guide covers contributor setup and pull
-request mechanics. The [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) is the
-canonical source for risk classification, verification, release gates, and handoff
-requirements.
+request mechanics. The [repository profile](.agents/project.md) owns local contracts
+and command routes. Shared skills own agent methodology; the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) preserves complete specialist
+verification, platform, release, and durable-plan procedures.
 
 ## Prerequisites
 
@@ -28,8 +29,8 @@ uv sync --group dev --extra vsview --frozen
 A pip-only editable installation can run the application, but it does not reproduce the
 complete contributor or CI toolchain.
 
-Use the runbook command canon to confirm the environment is healthy before changing
-code.
+Use the repository profile and relevant runbook recipe to establish the capabilities
+needed for the task. Do not run unrelated gates merely to begin an edit.
 
 ### Optional Codanna setup
 
@@ -57,8 +58,9 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
    ```
 
 3. Keep the change bounded to one coherent outcome.
-4. Add or update tests and documentation for public behavior.
-5. Run risk-matched verification from the runbook.
+4. Select meaningful evidence for the changed behavior and update affected product
+   documentation. Reuse sufficient proof; do not add tests merely to satisfy a step.
+5. Run applicable verification from the repository profile and specialist runbook.
 6. Open a pull request against the intended integration branch.
 
 Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
