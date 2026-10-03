@@ -28,6 +28,14 @@ def _completed_process(stdout: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.CompletedProcess([], 0, stdout.encode(), b"")
 
 
+def _ffms2_plugin(*, version: str, functions: tuple[str, ...]) -> SimpleNamespace:
+    return SimpleNamespace(
+        Source=lambda *_args, **_kwargs: object(),
+        Version=lambda: {"version": version},
+        functions=lambda: [SimpleNamespace(name=name) for name in functions],
+    )
+
+
 @pytest.fixture(autouse=True)
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
@@ -602,14 +610,7 @@ class TestCheckFFMS2:
     ) -> None:
         monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
-        plugin = SimpleNamespace(
-            Source=lambda *_args, **_kwargs: object(),
-            Version=lambda: {"version": "5.0.0.0"},
-            functions=lambda: [
-                SimpleNamespace(name="Source"),
-                SimpleNamespace(name="Version"),
-            ],
-        )
+        plugin = _ffms2_plugin(version="5.0.0.0", functions=("Source", "Version"))
         checks = collect_checks()
         check = next(candidate for candidate in checks if candidate.name == "ffms2")
 
@@ -630,14 +631,7 @@ class TestCheckFFMS2:
     ) -> None:
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
-        plugin = SimpleNamespace(
-            Source=lambda *_args, **_kwargs: object(),
-            Version=lambda: {"version": "4.0.0.0"},
-            functions=lambda: [
-                SimpleNamespace(name="Source"),
-                SimpleNamespace(name="Version"),
-            ],
-        )
+        plugin = _ffms2_plugin(version="4.0.0.0", functions=("Source", "Version"))
         check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
 
         with patch(
@@ -680,11 +674,7 @@ class TestCheckFFMS2:
     ) -> None:
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "WINDOWS-PORTABLE")
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
-        plugin = SimpleNamespace(
-            Source=lambda *_args, **_kwargs: object(),
-            Version=lambda: {"version": "5.0.0.0"},
-            functions=lambda: [SimpleNamespace(name="Source"), SimpleNamespace(name="Version")],
-        )
+        plugin = _ffms2_plugin(version="5.0.0.0", functions=("Source", "Version"))
         check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
 
         with patch(
