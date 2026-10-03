@@ -185,3 +185,21 @@ New for this plan:
     `test_output_phases_use_reselected_metric_metadata_after_real_initial_selection`
     survives both source-offset mutations in `phase_alignment.py` and
     `phase_selection.py`. These tests are candidates for weak or covered tests.
+- 2026-10-03: O2 done at `78792ddb`. Both lane ledgers pass the checker; the
+  aggregate is in `.handoff/orch-trim/O2-yield.md`.
+  - **No widening meets E2.** The best ratio is 3.3×. All 74 proposed new
+    scenarios together would delete 3,165 test lines for about 3,211 E2E lines and
+    about 632 s of Docker time, about 1:1. There are no material field-only keys.
+    Orchestration tests are mostly distinct cases that would each need their own
+    scenario.
+  - **Status lines:**
+    - covered 221 and internal 28;
+    - widen 3,165;
+    - stays 10,011: failure 2,914, network 1,615, unreachable 4,879, platform
+      319 and security 284.
+  - **Maintainer decision (E2):** reject every widening, so O3 is skipped. O4 is
+    limited to the ten direct candidates: eight `covered`, one `internal`
+    (`test_execute_phases_unresolved_review_warns_and_keeps_summary`, progress
+    rendering) and one R2 `redundant-failure`
+    (`test_run_report_phase_requires_reserved_run_folder`, owned by
+    `test_run_report_phase_rejects_short_artifacts_before_indexing`). Then O5.
