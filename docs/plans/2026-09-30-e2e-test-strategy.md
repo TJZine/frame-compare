@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Make real-CLI end-to-end tests the primary proof for Frame Compare features, prune unit tests that E2E, retained integration tests or a single retained owner per behavior already prove (S10), consolidate and type-check the rest, and change the repository rules so low-value unit tests stop being added.
 Owner: Claude controller session (planning, adjudication, verification); Codex executes units A, B, B2, C, D and E through `.handoff/` prompts. Branch `agent/e2e-test-strategy`.
 
@@ -1392,3 +1392,47 @@ Reverting one restores its tests and any seams it deleted.
   - Test lines: 81,523.
   - **Unit F** (test performance) is added above, with its Invariants amendments,
     and dispatched from `.handoff/T8-codex-test-performance.md`.
+- 2026-10-02: unit F (T8) completed at `be754c71`. Medians of 3 runs:
+  - native suite, serial → 4 workers: 107.2 → 41.1 s. 8 workers and `auto` were
+    rejected because of Chrome teardown failures;
+  - Docker pytest, serial → parallel → warm media cache: 462.4 → 402.5 → 168.9 s.
+    One cold-cache run took 401.1 s;
+  - the six slowest tests: 15.8 → 8.4 s;
+  - CI's native job runs with `-n auto --dist loadgroup`. Docker CI keeps
+    `--no-cache`, and Windows portable CI stays serial.
+  - Peak Docker memory was 1,567 MiB.
+  - Modules pinned to one worker: `browser` (Chrome launches share a profile) and
+    `alignment-u4` (one media-generating worker).
+  - The guards held. Per-test outcome sets matched. All 17 E2E summaries were
+    byte-identical. All 37 cached media files matched a fresh generation by
+    stream hash. Docker: 276 passed, 0 skipped.
+  - The external commit `e7b457dd` (secret redaction in config errors; dependency
+    audit) landed during T8, and is the only `src/` change in this range.
+  - **Checkpoint F** (controller, 2026-10-02): verified.
+    - No T8 commit touches `src/`.
+    - No skips or `xfail`s were added.
+    - One assertion was replaced: the CI command check now asserts
+      `pytest -q -n auto --dist loadgroup`.
+    - The two lowered timeouts (`stall_timeout_seconds` 2.0 → 0.5 and
+      `total_timeout_seconds` 3.0 → 1.0) are in tests that expect the timeout to
+      fire, so they can't flake under load.
+    - The controller's own run with `-n 4`: 3,070 passed, 90 skipped, 39 s.
+  - **Follow-up fixed** (`7c57ffff`): the Docker verifier contract test now runs a
+    copy of the script from `tmp_path`, so native runs no longer delete
+    `generated/e2e`.
+- 2026-10-02: **plan closed.** Final controller gate at `7c57ffff`: pyright 0/0
+  with tests included, ruff and formatting clean, `lint-imports` 2/2 kept, native
+  `-n 4`: 3,070 passed and 90 skipped in 38 s.
+
+  | Measure | Start (`57080b24`) | End |
+  | --- | ---: | ---: |
+  | Test lines (`wc -l tests/**/*.py`) | 92,040 | 81,605 |
+  | Native suite wall time | ~127 s serial | ~40 s (4 workers) |
+  | Docker pytest | ~434 s | ~169 s, warm cache |
+  | Test pyright errors | 539, not gated | 0, gated |
+  | Coverage floor | 80% enforced | removed |
+
+  The test-line total includes the new E2E suite and later feature tests.
+  Unit C deleted 7,507 test lines and 22 test-only production symbols, and unit D
+  removed 3,741 more. The reusable process is the global `test-suite-slimming`
+  skill.
