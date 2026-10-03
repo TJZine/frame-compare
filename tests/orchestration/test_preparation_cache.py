@@ -16,6 +16,7 @@ from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     ALIGNMENT_CONFIG,
     METRIC_CONFIG,
+    source_override_config,
 )
 from tests.orchestration.preparation_test_support import (
     create_config as _create_config,
@@ -132,12 +133,10 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
 
 
 def test_execute_prep_no_cache_uses_analysis_active_rect_fingerprint(tmp_path: Path) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources.overrides."source.mkv"]
-active_rect = { x = 10, y = 20, width = 300, height = 200 }
-"""
+    config_content = source_override_config(
+        base=METRIC_CONFIG,
+        selector="source.mkv",
+        fields="active_rect = { x = 10, y = 20, width = 300, height = 200 }",
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -374,12 +373,10 @@ enable = false
 def test_execute_prep_preserves_explicit_reference_effective_fps_cache_domain_when_equal_to_source(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources.overrides."00-reference.mkv"]
-effective_fps = "24/1"
-"""
+    config_content = source_override_config(
+        base=METRIC_CONFIG,
+        selector="00-reference.mkv",
+        fields='effective_fps = "24/1"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"

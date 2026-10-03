@@ -19,6 +19,7 @@ from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
     MINIMAL_CONFIG,
+    source_override_config,
 )
 from tests.orchestration.preparation_test_support import (
     create_config as _create_config,
@@ -138,15 +139,10 @@ def test_execute_prep_effective_fps(
 def test_execute_prep_match_fps_preserves_explicit_comparison_effective_fps(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources]
-match_fps = "assume_reference"
-
-[sources.overrides."01-source-25.mkv"]
-effective_fps = "25/1"
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "assume_reference"\n',
+        selector="01-source-25.mkv",
+        fields='effective_fps = "25/1"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -276,15 +272,10 @@ def test_execute_prep_majority_fps(
 def test_execute_prep_match_fps_majority_preserves_explicit_override_and_can_still_fail(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources]
-match_fps = "majority"
-
-[sources.overrides."02-explicit.mkv"]
-effective_fps = "25/1"
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n',
+        selector="02-explicit.mkv",
+        fields='effective_fps = "25/1"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"

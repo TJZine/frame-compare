@@ -21,6 +21,7 @@ from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
     MINIMAL_CONFIG,
+    source_override_config,
 )
 from tests.orchestration.preparation_test_support import (
     create_config as _create_config,
@@ -295,14 +296,13 @@ def test_execute_prep_invalid_analysis_source_selector_is_ignored_when_analysis_
 
 
 def test_execute_prep_applies_source_trim_and_active_rect_overrides(tmp_path: Path) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources.overrides."01-encode.mkv"]
-trim_start_frames = 12
-trim_end_frames = 5
-active_rect = { x = 240, y = 0, width = 1440, height = 1080 }
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG,
+        selector="01-encode.mkv",
+        fields=(
+            "trim_start_frames = 12\ntrim_end_frames = 5\n"
+            "active_rect = { x = 240, y = 0, width = 1440, height = 1080 }"
+        ),
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -331,13 +331,10 @@ active_rect = { x = 240, y = 0, width = 1440, height = 1080 }
 def test_execute_prep_reference_source_trims_constrain_effective_frame_domain(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources.overrides."00-reference.mkv"]
-trim_start_frames = 10
-trim_end_frames = 5
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG,
+        selector="00-reference.mkv",
+        fields="trim_start_frames = 10\ntrim_end_frames = 5",
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -356,13 +353,10 @@ trim_end_frames = 5
 
 
 def test_execute_prep_rejects_source_trims_that_remove_every_frame(tmp_path: Path) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources.overrides."01-encode.mkv"]
-trim_start_frames = 100
-trim_end_frames = 0
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG,
+        selector="01-encode.mkv",
+        fields="trim_start_frames = 100\ntrim_end_frames = 0",
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
