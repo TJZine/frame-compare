@@ -9,10 +9,6 @@ import httpx
 import pytest
 
 from frame_compare.analysis.selection import select_frames
-from frame_compare.analysis.types import (
-    FrameMetrics,
-    MetricsMetadata,
-)
 from frame_compare.orchestration import phase_alignment, phase_post_render, phase_render
 from frame_compare.render.types import RenderedBatchResult
 from frame_compare.services.publishers import PublishResult
@@ -24,6 +20,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
+    _frame_metrics,
     _render_artifacts,
     _RenderRunner,
     _run_align_phase,
@@ -43,15 +40,11 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     luminance[1] = 0.01
     luminance[50] = 0.99
     luminance[60] = 1.0
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=luminance,
         motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=ctx.reference.effective_fps,
-            config_fingerprint="test",
-            clips=[],
-        ),
+        frame_count=100,
+        fps=ctx.reference.effective_fps,
     )
     initial_selection = select_frames(
         metrics=ctx.analysis_metrics,

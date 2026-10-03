@@ -12,8 +12,6 @@ import pytest
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError, SelectionError
 from frame_compare.analysis.types import (
     ClipIdentity,
-    FrameMetrics,
-    MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
 )
@@ -27,6 +25,7 @@ from frame_compare.utils.types import AlignmentRequest
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
+    _frame_metrics,
     _run_align_phase,
 )
 
@@ -470,15 +469,12 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
             "dark_quantile": 0.2,
         }
     )
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=[float(frame) / 219.0 for frame in range(220)],
         motion=[0.0 for _ in range(220)],
-        metadata=MetricsMetadata(
-            frame_count=220,
-            fps=Fraction(60, 1),
-            config_fingerprint="test",
-            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-        ),
+        frame_count=220,
+        fps=Fraction(60, 1),
+        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
     )
     selected_frames = [0, 1, 2, 3]
 
@@ -523,19 +519,15 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2}
     )
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=[0.9, 0.8, 0.4, 0.1, 0.2],
         motion=[0.1, 0.1, 0.2, 0.3, 0.4],
-        metadata=MetricsMetadata(
-            frame_count=5,
-            fps=Fraction(24),
-            config_fingerprint="test",
-            clips=[],
-            source_frame_count=220,
-            metric_source_start=0,
-            metric_source_end_exclusive=220,
-            performance_mode="performance",
-        ),
+        frame_count=5,
+        fps=Fraction(24),
+        source_frame_count=220,
+        metric_source_start=0,
+        metric_source_end_exclusive=220,
+        performance_mode="performance",
         sampled_source_frames=(10, 20, 65, 75, 90),
     )
 
@@ -575,19 +567,15 @@ def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2}
     )
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=[0.1, 0.2],
         motion=[0.1, 0.2],
-        metadata=MetricsMetadata(
-            frame_count=2,
-            fps=Fraction(24),
-            config_fingerprint="test",
-            clips=[],
-            source_frame_count=220,
-            metric_source_start=0,
-            metric_source_end_exclusive=220,
-            performance_mode="performance",
-        ),
+        frame_count=2,
+        fps=Fraction(24),
+        source_frame_count=220,
+        metric_source_start=0,
+        metric_source_end_exclusive=220,
+        performance_mode="performance",
         sampled_source_frames=(10, 100),
     )
 
@@ -624,15 +612,12 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=[float(frame) / 99.0 for frame in range(100)],
         motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=Fraction(24, 1),
-            config_fingerprint="test",
-            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-        ),
+        frame_count=100,
+        fps=Fraction(24, 1),
+        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
     )
 
     def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
@@ -668,15 +653,12 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [98], "random_frame_count": 0, "dark_frame_count": 1}
     )
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=[float(frame) / 99.0 for frame in range(100)],
         motion=[0.0 for _ in range(100)],
-        metadata=MetricsMetadata(
-            frame_count=100,
-            fps=Fraction(24, 1),
-            config_fingerprint="test",
-            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-        ),
+        frame_count=100,
+        fps=Fraction(24, 1),
+        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
     )
 
     def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
@@ -724,18 +706,15 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
-    ctx.analysis_metrics = FrameMetrics(
+    ctx.analysis_metrics = _frame_metrics(
         luminance=[float(frame) / 219.0 for frame in range(100, 160)],
         motion=[0.0 for _ in range(60)],
-        metadata=MetricsMetadata(
-            frame_count=60,
-            fps=Fraction(24, 1),
-            config_fingerprint="test",
-            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-            source_frame_count=220,
-            metric_source_start=100,
-            metric_source_end_exclusive=160,
-        ),
+        frame_count=60,
+        fps=Fraction(24, 1),
+        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        source_frame_count=220,
+        metric_source_start=100,
+        metric_source_end_exclusive=160,
     )
 
     def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:

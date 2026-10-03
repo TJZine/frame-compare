@@ -26,6 +26,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect, ClipState
@@ -45,6 +46,7 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _create_config,
+    _frame_metrics,
 )
 
 if TYPE_CHECKING:
@@ -85,6 +87,10 @@ def _metrics_for_range(*, start: int, end: int, source_frame_count: int = 100) -
     )
 
 
+def _config_with_analysis(config: ConfigSchema, *, analysis: dict[str, object]) -> ConfigSchema:
+    return config.model_copy(update={"analysis": config.analysis.model_copy(update=analysis)})
+
+
 def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -99,19 +105,16 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
         encoding="utf-8",
     )
     authored_bytes = config_path.read_bytes()
-    ctx.config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={
-                    "user_frames": [10, 120],
-                    "random_frame_count": 12,
-                    "motion_frame_count": 12,
-                    "ignore_lead_seconds": 40 / 24,
-                    "ignore_trail_seconds": 40 / 24,
-                    "min_window_seconds": 0.0,
-                }
-            )
-        }
+    ctx.config = _config_with_analysis(
+        ctx.config,
+        analysis={
+            "user_frames": [10, 120],
+            "random_frame_count": 12,
+            "motion_frame_count": 12,
+            "ignore_lead_seconds": 40 / 24,
+            "ignore_trail_seconds": 40 / 24,
+            "min_window_seconds": 0.0,
+        },
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     ctx.preflight_warnings = [
@@ -179,18 +182,15 @@ def test_run_analyze_phase_satisfied_selection_never_prompts(
     margin_seconds: float,
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={
-                    "random_frame_count": 1,
-                    "motion_frame_count": 0,
-                    "ignore_lead_seconds": margin_seconds,
-                    "ignore_trail_seconds": margin_seconds,
-                    "min_window_seconds": 0.0,
-                }
-            )
-        }
+    ctx.config = _config_with_analysis(
+        ctx.config,
+        analysis={
+            "random_frame_count": 1,
+            "motion_frame_count": 0,
+            "ignore_lead_seconds": margin_seconds,
+            "ignore_trail_seconds": margin_seconds,
+            "min_window_seconds": 0.0,
+        },
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     ctx.confirm_full_window_retry = lambda request: (_ for _ in ()).throw(
@@ -233,18 +233,15 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
     ctx = _context(tmp_path)
     config_path = tmp_path / "config" / "config.toml"
     authored_bytes = config_path.read_bytes()
-    ctx.config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={
-                    "random_frame_count": 12,
-                    "motion_frame_count": 12,
-                    "ignore_lead_seconds": 40 / 24,
-                    "ignore_trail_seconds": 40 / 24,
-                    "min_window_seconds": 0.0,
-                }
-            )
-        }
+    ctx.config = _config_with_analysis(
+        ctx.config,
+        analysis={
+            "random_frame_count": 12,
+            "motion_frame_count": 12,
+            "ignore_lead_seconds": 40 / 24,
+            "ignore_trail_seconds": 40 / 24,
+            "min_window_seconds": 0.0,
+        },
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     calls = 0
@@ -289,18 +286,15 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={
-                    "random_frame_count": 0,
-                    "motion_frame_count": 100,
-                    "ignore_lead_seconds": 40 / 24,
-                    "ignore_trail_seconds": 40 / 24,
-                    "min_window_seconds": 0.0,
-                }
-            )
-        }
+    ctx.config = _config_with_analysis(
+        ctx.config,
+        analysis={
+            "random_frame_count": 0,
+            "motion_frame_count": 100,
+            "ignore_lead_seconds": 40 / 24,
+            "ignore_trail_seconds": 40 / 24,
+            "min_window_seconds": 0.0,
+        },
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     ctx.run_warnings = []
@@ -373,12 +367,8 @@ def test_full_window_retry_progress_failure_is_fatal_before_override(
     expected_events: list[str],
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
-            )
-        }
+    ctx.config = _config_with_analysis(
+        ctx.config, analysis={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
     )
     progress = ConfirmationProgressSpy(fail_at=fail_at)
     prompt_calls = 0
@@ -454,18 +444,15 @@ def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={
-                    "random_frame_count": 12,
-                    "motion_frame_count": 12,
-                    "ignore_lead_seconds": 40 / 24,
-                    "ignore_trail_seconds": 40 / 24,
-                    "min_window_seconds": 0.0,
-                }
-            )
-        }
+    ctx.config = _config_with_analysis(
+        ctx.config,
+        analysis={
+            "random_frame_count": 12,
+            "motion_frame_count": 12,
+            "ignore_lead_seconds": 40 / 24,
+            "ignore_trail_seconds": 40 / 24,
+            "min_window_seconds": 0.0,
+        },
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     cache_calls = 0
@@ -489,16 +476,13 @@ def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
 def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     short_clip = _clip(ctx.reference.path, label="Reference", num_frames=10)
-    config = ctx.config.model_copy(
-        update={
-            "analysis": ctx.config.analysis.model_copy(
-                update={
-                    "ignore_lead_seconds": 1.0,
-                    "ignore_trail_seconds": 1.0,
-                    "min_window_seconds": 0.0,
-                }
-            )
-        }
+    config = _config_with_analysis(
+        ctx.config,
+        analysis={
+            "ignore_lead_seconds": 1.0,
+            "ignore_trail_seconds": 1.0,
+            "min_window_seconds": 0.0,
+        },
     )
     requests: list[FullWindowRetryConfirmationRequest] = []
 
@@ -557,15 +541,13 @@ def test_run_analyze_phase_metadata_mismatch_recomputes_and_reports_cache_miss(
     ctx = _context(tmp_path)
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     input_videos = [ctx.reference.path]
-    metrics = FrameMetrics(
+    metrics = _frame_metrics(
         luminance=[0.1, 0.9],
         motion=[0.0, 0.8],
-        metadata=MetricsMetadata(
-            frame_count=2,
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[],
-        ),
+        frame_count=2,
+        fps=Fraction(24, 1),
+        config_fingerprint="fingerprint",
+        clips=[],
     )
     calculate_calls = 0
 

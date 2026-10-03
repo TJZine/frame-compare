@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from collections.abc import Sequence
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
@@ -40,6 +42,7 @@ __all__ = [
     "_create_config",
     "_clip",
     "_context",
+    "_frame_metrics",
 ]
 
 MINIMAL_CONFIG = """\
@@ -210,4 +213,35 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         analysis_selection_domain="test-selection-domain",
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         analysis_clip=reference,
+    )
+
+
+def _frame_metrics(
+    *,
+    luminance: Sequence[float],
+    motion: Sequence[float],
+    frame_count: int,
+    fps: Fraction,
+    config_fingerprint: str = "test",
+    clips: Sequence[ClipIdentity] | None = None,
+    source_frame_count: int = -1,
+    metric_source_start: int = 0,
+    metric_source_end_exclusive: int = -1,
+    performance_mode: str = "quality",
+    sampled_source_frames: Sequence[int] | None = None,
+) -> FrameMetrics:
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=frame_count,
+            fps=fps,
+            config_fingerprint=config_fingerprint,
+            clips=[] if clips is None else clips,
+            source_frame_count=source_frame_count,
+            metric_source_start=metric_source_start,
+            metric_source_end_exclusive=metric_source_end_exclusive,
+            performance_mode=performance_mode,
+        ),
+        sampled_source_frames=sampled_source_frames,
     )
