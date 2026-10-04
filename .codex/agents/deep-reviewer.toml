@@ -1,6 +1,6 @@
 name = "deep_reviewer"
 description = "Independent read-only review of difficult or consequential changes; Daybreak at xhigh reasoning."
-model = "gpt-daybreak-blue-latest"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 developer_instructions = """
