@@ -14,6 +14,7 @@ import os
 import re
 import subprocess  # nosec B404
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -346,28 +347,51 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> tuple[int
     """
     # command is a list from _resolve_launch_command; shell=True is never used.
     start = monotonic()
-    with subprocess.Popen(  # nosec B603
+    process = subprocess.Popen(  # nosec B603
         command,
         stdin=None,
         stdout=None,
         stderr=None,
         env=env,
         cwd=_CHILD_PROCESS_CWD,
-    ) as process:
-        try:
-            returncode = process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired as exc:
-            process.terminate()
-            try:
-                process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
-            raise VSViewError(
-                "alignment review timed out before VSView closed",
-                command=tuple(command),
-            ) from exc
+    )
+    try:
+        returncode = process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        _shutdown_vsview_process(process)
+        raise VSViewError(
+            "alignment review timed out before VSView closed",
+            command=tuple(command),
+        ) from exc
+    except BaseException:
+        _shutdown_vsview_process(process)
+        raise
     return returncode, max(0.0, monotonic() - start)
+
+
+def _shutdown_vsview_process(process: subprocess.Popen[bytes]) -> None:
+    """Boundedly terminate and reap a VSView child after an interrupted wait.
+
+    Cleanup must not replace the timeout, cancellation, or other control-flow
+    exception that caused it. In particular, a second interruption while
+    waiting for termination is treated as a cleanup failure and followed by a
+    kill attempt; there is deliberately no ``Popen`` context manager here,
+    because its ``__exit__`` wait is unbounded.
+    """
+    with suppress(BaseException):
+        process.terminate()
+
+    try:
+        process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+        return
+    except BaseException:
+        pass
+
+    with suppress(BaseException):
+        process.kill()
+
+    with suppress(BaseException):
+        process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
 
 
 def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:

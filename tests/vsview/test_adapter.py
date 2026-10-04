@@ -6,9 +6,11 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import types
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -345,7 +347,6 @@ def test_launch_uses_managed_launcher(
     mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
     process = MagicMock()
-    process.__enter__.return_value = process
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
@@ -366,6 +367,8 @@ def test_launch_uses_managed_launcher(
     assert "PYTHONHOME" not in launch_env
     assert launch_env["PYTHONSAFEPATH"] == "1"
     assert launch_env["PYTHONNOUSERSITE"] == "1"
+    process.terminate.assert_not_called()
+    process.kill.assert_not_called()
 
 
 def test_disabled_launch_writes_vsview_named_session_without_starting_process(
@@ -413,7 +416,6 @@ def test_launch_timeout_terminates_child(
         MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
     )
     process = MagicMock()
-    process.__enter__.return_value = process
     process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1), 0]
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
@@ -427,6 +429,121 @@ def test_launch_timeout_terminates_child(
 
     process.terminate.assert_called_once_with()
     process.kill.assert_not_called()
+
+
+def test_launch_timeout_kills_child_when_terminate_does_not_reap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
+    )
+    process = MagicMock()
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired(["vsview"], 1),
+        subprocess.TimeoutExpired(["vsview"], 1),
+        0,
+    ]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(VSViewError, match="timed out"):
+        launch_alignment_verification_session(
+            _session_request(tmp_path),
+            VSViewConfig(enabled=True),
+        )
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert all(call.kwargs == {"timeout": 5.0} for call in process.wait.call_args_list[1:])
+
+
+def test_run_vsview_command_reaps_child_after_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = MagicMock()
+    process.wait.side_effect = [KeyboardInterrupt(), 0]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_vsview_command(["vsview"], env={})
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_not_called()
+    assert process.wait.call_args_list[1].kwargs == {"timeout": 5.0}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGINT wait interruption is POSIX-specific")
+def test_real_child_is_reaped_after_interruption(tmp_path: Path) -> None:
+    """Exercise the signal boundary that a Popen mock cannot model."""
+    marker = tmp_path / "child.pid"
+    child_code = (
+        "import os, time\n"
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text(str(os.getpid()), encoding='ascii')\n"
+        "time.sleep(60)\n"
+    )
+    helper_code = (
+        "import os, signal, sys, threading, time\n"
+        "from pathlib import Path\n"
+        "from frame_compare.vsview.adapter import _run_vsview_command\n"
+        "marker = Path(sys.argv[1])\n"
+        "child_code = sys.argv[2]\n"
+        "def interrupt_parent():\n"
+        "    startup_deadline = time.monotonic() + 2.0\n"
+        "    while not marker.exists() and time.monotonic() < startup_deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    os.kill(os.getpid(), signal.SIGINT)\n"
+        "threading.Thread(target=interrupt_parent, daemon=True).start()\n"
+        "try:\n"
+        "    _run_vsview_command([sys.executable, '-c', child_code], env=os.environ.copy())\n"
+        "except KeyboardInterrupt:\n"
+        "    deadline = time.monotonic() + 2.0\n"
+        "    while not marker.exists() and time.monotonic() < deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    if not marker.exists():\n"
+        "        raise SystemExit('child startup marker was not written before the deadline')\n"
+        "    child_pid = int(marker.read_text(encoding='ascii'))\n"
+        "    while time.monotonic() < deadline:\n"
+        "        try:\n"
+        "            os.kill(child_pid, 0)\n"
+        "        except ProcessLookupError:\n"
+        "            raise SystemExit(0)\n"
+        "        time.sleep(0.01)\n"
+        "    raise SystemExit('child still exists after interruption cleanup')\n"
+        "else:\n"
+        "    raise SystemExit('expected KeyboardInterrupt')\n"
+    )
+
+    runner = subprocess.Popen(  # noqa: S603 - test uses an explicit interpreter argv
+        [sys.executable, "-c", helper_code, str(marker), child_code],
+        cwd=Path(__file__).parents[2],
+        env=os.environ.copy(),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        try:
+            stdout, stderr = runner.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(f"interruption helper exceeded bound: {exc}")
+        assert runner.returncode == 0, f"stdout={stdout!r}\nstderr={stderr!r}"
+    finally:
+        if runner.poll() is None:
+            with suppress(ProcessLookupError):
+                os.killpg(runner.pid, signal.SIGKILL)
+            runner.wait(timeout=2.0)
+        if marker.exists():
+            child_pid = int(marker.read_text(encoding="ascii"))
+            with suppress(ProcessLookupError):
+                os.kill(child_pid, signal.SIGKILL)
 
 
 def _execute_generated_script(
