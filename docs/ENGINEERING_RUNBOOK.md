@@ -4,8 +4,8 @@ Specialist verification and release procedures for Frame Compare.
 
 ## Entrypoint
 
-Start at [`AGENTS.md`](../AGENTS.md) and the repository profile
-[`.agents/project.md`](../.agents/project.md). The shared `develop-code`,
+Start at the repository-root `AGENTS.md` and `.agents/project.md` profile
+(these source files are outside the documentation site). The shared `develop-code`,
 `design-code`, `review-code`, and `verify-code` skills own general methodology;
 `maintain-workflow` is for explicitly requested maintenance. These are conditional
 responsibilities, not mandatory sequential stages.
@@ -289,6 +289,23 @@ bash tools/verify_docker_integration.sh
 
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
+It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
+For changes to whole-track memory bounds, maximum admitted lag, or streaming collector
+cleanup, run the existing resource proof separately after the canonical gate has
+built the test image:
+
+```bash
+docker compose run --rm --no-deps \
+  -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 \
+  --entrypoint python frame-compare-test \
+  -m pytest -o cache_dir=/tmp/frame-compare-resource-pytest-cache \
+  tests/integration/test_alignment_streaming_resources.py -rsx -s
+```
+
+This observes three-hour RSS bounds, the largest admitted lag, and cancellation
+with real child reaping. Docker CI invokes it in a separate step. A successful
+canonical gate alone does not establish those resource claims.
+
 Use `--pytest-path tests/e2e` for focused development or scenario proof; it does not
 replace the full gate when the runtime/dependency/media triggers above apply.
 The script builds images by default. After `docker-test` dependency or `uv.lock`

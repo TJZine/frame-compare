@@ -44,8 +44,8 @@ and its documentation, not application behavior.
 
 ## Current engineering owners
 
-Read [AGENTS.md](../../AGENTS.md) and the task-relevant sections of
-[.agents/project.md](../../.agents/project.md). The profile maps local contracts,
+Read the repository-root `AGENTS.md` and task-relevant sections of
+`.agents/project.md` (source files outside the documentation site). The profile maps local contracts,
 source routes, commands, test policy, and optional executor presets. Shared skills
 own general procedure:
 

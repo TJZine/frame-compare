@@ -121,7 +121,10 @@ Do not shorten those procedures into this profile or infer their result from
 native pytest. No build or verification command grants release/publication authority.
 
 The full Docker verifier enables media E2E, integration and VS tests and rejects
-nonpassing outcomes, including skips. Its focused `--pytest-path` route does not
+nonpassing outcomes, including skips. It excludes the long-running alignment
+resource module; the runbook supplies its separate command, also run by Docker CI.
+Use that proof for changes to whole-track memory bounds or streaming collector cleanup.
+The focused `--pytest-path` route does not
 replace a required full gate. Do not overlap verifier runs in one checkout: the
 generated-media cache/pruning protocol does not support that. Browser smoke needs
 a discoverable Chrome/Chromium or `REPORT_BROWSER`; inspect relevant skips.

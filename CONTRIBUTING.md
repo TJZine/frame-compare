@@ -148,7 +148,9 @@ pinned media runtime and its inspectable scenario artifacts.
 
 The full Docker gate is `bash tools/verify_docker_integration.sh`: it runs E2E,
 integration and VS tests with ten workers and `--dist loadgroup`, plus runtime and
-production-image proofs. The focused media command above is for development and
+production-image proofs. It excludes the long-running alignment resource module;
+see the runbook's separate resource command when streaming alignment memory or
+collector cleanup changes. Docker CI runs that proof separately. The focused media command above is for development and
 scenario proof; use the full gate for the runbook's runtime, dependency and media
 boundary triggers. Images build by default; rebuild after `docker-test` dependency
 or `uv.lock` changes before using the new plugin. Use `--no-build` only with
