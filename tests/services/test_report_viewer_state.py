@@ -178,6 +178,12 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "lowerSelectsGrid": True,
         "upperSelectsGrid": True,
     }
+    assert summary["deferredDiffGridNavigation"] == {
+        "active": True,
+        "renders": 2,
+        "currentFrame": "Frame 20",
+        "stalePairCommitBlocked": True,
+    }
     assert summary["proximityStateMachine"] == {
         "thresholds": True,
         "hysteresis": True,

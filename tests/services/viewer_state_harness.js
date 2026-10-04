@@ -204,6 +204,7 @@ function renderedText(element) {
 
 function loadViewer({ clipCount, savedState = null }) {
     const storage = new Map();
+    const deferredImages = [];
     const reviewMetrics = { creates: 0, binds: 0, renders: 0 };
     const storageApi = {
         getItem(key) {
@@ -215,6 +216,31 @@ function loadViewer({ clipCount, savedState = null }) {
     };
     const context = {
         console,
+        Image: class DeferredImage {
+            constructor() {
+                this.listeners = new Map();
+                this._src = '';
+                deferredImages.push(this);
+            }
+
+            get src() {
+                return this._src;
+            }
+
+            set src(value) {
+                this._src = String(value);
+            }
+
+            addEventListener(type, listener) {
+                const registered = this.listeners.get(type) || [];
+                registered.push(listener);
+                this.listeners.set(type, registered);
+            }
+
+            trigger(type) {
+                for (const listener of this.listeners.get(type) || []) listener();
+            }
+        },
         setInterval(callback) {
             return { callback };
         },
@@ -440,6 +466,7 @@ function loadViewer({ clipCount, savedState = null }) {
         storageKey: viewer.state.storageKey,
         document: context.document,
         window: context.window,
+        deferredImages,
         reviewMetrics,
     };
 }
@@ -1598,6 +1625,61 @@ const summary = {};
     };
 }
 
+async function assertDeferredDiffCannotCommitAfterGridNavigation() {
+    const { viewer, window, deferredImages } = loadViewer({ clipCount: 2 });
+    viewer.dom.currentFrameLabel = fakeElement();
+    viewer.dom.currentFrameCategoryDivider = fakeElement();
+    viewer.dom.currentFrameCategory = fakeElement();
+
+    const gridEvents = { active: false, renders: 0 };
+    viewer.gridView = {
+        setActive(active) {
+            gridEvents.active = active;
+        },
+        render() {
+            gridEvents.renders += 1;
+            viewer.updateCurrentFrameMetadata(viewer.currentFrame());
+        },
+        clear() {},
+    };
+    viewer.render = function renderImageStateTest() {
+        this.updateImages();
+    };
+
+    viewer.state.mode = 'diff';
+    viewer.updateImages();
+    assert.equal(deferredImages.length, 2);
+    const oldFrameSources = deferredImages.map(image => image.src);
+
+    viewer.setMode('grid');
+    viewer.setFrame(1);
+    assert.equal(gridEvents.active, true);
+    assert.equal(gridEvents.renders, 2);
+    assert.equal(viewer.dom.currentFrameLabel.textContent, 'Frame 20');
+    assert.equal(viewer.dom.currentFrameCategory.textContent, 'Selected');
+
+    deferredImages.forEach(image => image.trigger('load'));
+    await new Promise(resolve => setImmediate(resolve));
+    window.rafQueue.splice(0).forEach(callback => callback?.());
+
+    assert.deepEqual(deferredImages.map(image => image.src), oldFrameSources);
+    assert.equal(viewer.dom.leftImg.src, undefined);
+    assert.equal(viewer.dom.rightImg.src, undefined);
+    assert.deepEqual(viewer.dom.labelLeft.children, []);
+    assert.deepEqual(viewer.dom.labelRight.children, []);
+    assert.equal(viewer.dom.currentFrameLabel.textContent, 'Frame 20');
+    assert.equal(viewer.dom.currentFrameCategory.textContent, 'Selected');
+    return {
+        active: gridEvents.active,
+        renders: gridEvents.renders,
+        currentFrame: viewer.dom.currentFrameLabel.textContent,
+        stalePairCommitBlocked: viewer.dom.leftImg.src === undefined
+            && viewer.dom.rightImg.src === undefined
+            && viewer.dom.labelLeft.children.length === 0
+            && viewer.dom.labelRight.children.length === 0,
+    };
+}
+
 {
     const { viewer } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
@@ -1756,4 +1838,12 @@ const summary = {};
     };
 }
 
-console.log(JSON.stringify(summary));
+assertDeferredDiffCannotCommitAfterGridNavigation()
+    .then(result => {
+        summary.deferredDiffGridNavigation = result;
+        console.log(JSON.stringify(summary));
+    })
+    .catch(error => {
+        console.error(error);
+        process.exitCode = 1;
+    });

@@ -1892,8 +1892,13 @@ const ReportViewer = {
         }
     },
 
+    invalidatePendingImageState() {
+        this.state.imageRequestToken += 1;
+        return this.state.imageRequestToken;
+    },
+
     commitImageState(imageState) {
-        const requestToken = ++this.state.imageRequestToken;
+        const requestToken = this.invalidatePendingImageState();
         const commit = () => {
             if (requestToken !== this.state.imageRequestToken) return;
             this.applyImageState(imageState);
@@ -1987,6 +1992,7 @@ const ReportViewer = {
         }
 
         if (this.state.mode === 'grid') {
+            this.invalidatePendingImageState();
             this.hideStageMessage();
             this.clearStatus();
             this.gridView.render();
@@ -2058,7 +2064,7 @@ const ReportViewer = {
     },
 
     clearFrameImages() {
-        this.state.imageRequestToken += 1;
+        this.invalidatePendingImageState();
         this.gridView?.clear();
         this.lens?.clearTransient?.();
         if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
