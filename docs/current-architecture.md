@@ -786,6 +786,16 @@ bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
 honors only short valid `Retry-After` rate-limit delays, and does not retry after
 request transmission when the delivery outcome is unknown so it does not knowingly
 create duplicate notifications.
+Default hostname resolution runs fixed standard-library code in an owned
+current-interpreter subprocess. Its Python runtime and packaged startup
+configuration are trusted: portable `._pth` configuration can enable `site` even
+with `-S`. The child environment excludes application configuration and secrets;
+only required operating-system startup values are retained. It receives the hostname and port,
+never the webhook URL or payload, and returns bounded address data for the parent's
+existing public-address validation. Resolution has a separate ten-second deadline;
+cancellation polls the stop signal and terminates, escalates, and boundedly reaps
+the resolver before the owning task returns. Injected callables remain caller-owned
+and must provide their own blocking-operation deadlines.
 Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.

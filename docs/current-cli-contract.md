@@ -1131,6 +1131,11 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   requests.
 - Hostname targets are rejected when DNS resolution fails, returns no addresses,
   includes an unparseable address, or includes any disallowed address.
+- Default DNS resolution has a separate 10-second deadline and runs in an owned
+  standard-library subprocess. Cancellation stops and reaps that resolver before
+  returning; no HTTP attempt starts after cancellation. The resolver receives only
+  the hostname and port, never the webhook URL or request payload. A resolution
+  timeout produces the warning-only `timeout` diagnostic category.
 - Delivery prevents validation-to-connect DNS rebinding by connecting to a
   prevalidated pinned IP address while preserving TLS certificate verification
   and SNI for the original hostname.
