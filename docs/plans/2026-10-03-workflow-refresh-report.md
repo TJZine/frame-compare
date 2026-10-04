@@ -251,3 +251,99 @@ their own source snapshots; their initial role-retirement and original-model
 statements must not override the later committed settings. The GitHub connector
 can inspect committed source and this report, but cannot independently verify
 those private runtime artifacts without separately supplied evidence.
+
+## Follow-up corrections — 2026-10-04 (Eastern time)
+
+This section records implementation of the complete
+`~/Downloads/Workflow_Followup_Prompts/01_FRAME_COMPARE_FIXES.txt` prompt. The
+original report above remains a historical snapshot; its proposed model changes
+and earlier verification limits do not override this follow-up.
+
+The actual checkout was `/Users/tristan/Software/frame-compare`, branch
+`agent/e2e-test-strategy`, HEAD
+`689f8e8981b6a7b7ecf3b89370e6312aa6bd2bd2`, matching the reviewed baseline.
+Initial staged, unstaged, and untracked state was clean, with no later commits to
+reconcile. At verification closeout, seven owned files were modified, unstaged
+and uncommitted, and HEAD was unchanged. The maintainer subsequently authorized a
+local commit of these corrections and this report. The recorded test evidence
+identifies the verified working state; committing it does not establish new hosted
+proof. There were no already-correct/no-op items. One controller owned edits, integration,
+Git inspection, and serialized Docker/media resources.
+
+| Correction | Implemented result |
+| --- | --- |
+| Missed trigger consumer | The existing staging-sync test forbids both `branches` and `branches-ignore` for CI/Docker PRs. CI push, docs push/PR, and Release Please push assertions remain. Workflow YAML, Docker paths, and stronger workflow tests are unchanged. |
+| Preset descriptions | Explorer, reviewer, and deep reviewer now use the specified neutral descriptions. TOML parsing and comparison to HEAD prove every other field/body unchanged; all eight presets remain. |
+| Absent-runtime mock | The existing conditional global mock defines `YUV420P10 = 1`, distinct from `RGBS = 0`. Real VapourSynth preservation and all other constants remain. Existing HDR conversion assertions are unchanged. |
+| U4 budget expectations | Both `budget` and `budget-7` retain every assertion preceding the former target table. Complete target membership, singleton identity/credibility, offsets, descending serialized PSR, three examined ranks, and twelve positions now replace incidental literal target ordering. |
+
+The U4 change is test-only. The guide and production owner already specify
+credible chunks in descending PSR, four positions each, twelve total, with
+unexamined credible disagreement blocking acceptance. The test reads independently
+serialized audio evidence; it does not call a private target builder for its
+expected answer. Equal scores may appear in either order; unequal priority
+inversions must fail. No production alignment, tonemapping, thresholds, media,
+budgets, lag math, or public contract changed. A FFmpeg/NumPy defect was not
+measured or asserted as the cause of the earlier ranking difference.
+
+### Executed local evidence
+
+The locked mock environment was provisioned with task-local
+`UV_PROJECT_ENVIRONMENT`, `uv sync --python 3.13 --group dev --frozen`; both
+VapourSynth and VSView specs were absent. The normal `.venv`, shell configuration,
+real runtime, `pyproject.toml`, and `uv.lock` were preserved.
+
+| Check | Result and limits |
+| --- | --- |
+| `uv run --no-sync pytest -q tests/workflows tests/vs/test_tonemap_extracted_modules.py` in mock environment | 95 passed, no skips; exercises the repaired import-time branch and both existing YUV conversion tests. |
+| `uv run --no-sync pytest -q -n4 --dist loadgroup` in mock environment | Exit 0: 2,927 passed, 86 skipped case outcomes plus nine collection/module skips (95 skip-summary outcomes in total). Native VS/VSView, media opt-in, Windows/PowerShell, continuous-resource and live-service acceptance remain distinct. |
+| Ruff check and format-check on the three edited Python paths | Passed. Only the supplied U4 generator-expression assertion needed formatting. |
+| `uv run --no-sync pyright --warnings` | Zero errors/warnings in the existing VSView/PySide6/VapourSynth-enabled `.venv`; not run against the incomplete mock environment. |
+| TOML and test inventory comparison | All three TOMLs parse and differ only in description. Function/decorator AST inventories equal HEAD, including both U4 name parameters; no test cases added, removed, or weakened. Relevant mock and Docker collection inspected; standalone Mac U4 collection skips because its real runtime lacks L-SMASH, while Docker collected and ran both parameters. |
+| Focused canonical Docker verifier with both prescribed `--pytest-path` arguments | 16 passed, zero skips; native runtime and production application proof passed. |
+| `bash tools/verify_docker_integration.sh` | 276 passed, zero skips in 404.61 seconds; complete native preflight and production application/artifact proof passed. Test/production images rebuilt by each canonical invocation; final identities retained. |
+| Bounded negative controls | Workflow controls invoke the existing test against temporary workflow copies: both forbidden filter forms fail for both workflows; baseline/restored inputs pass. Both parameter invocations of the existing U4 integration function passed again against cached real Docker media, without a media rebuild. Against their captured actual evidence, the current assertion block rejected unequal-PSR inversions and erroneous 8-/16-position examined/unexamined budgets, then passed restored evidence. These mutants are assertion-level controls over native evidence, not execution of mutated production code. |
+| Final complete owned diff | `git diff --check` passed; only the seven expected paths changed. Original report prefix preserved. |
+
+No unchanged passing full Python suite was repeated after formatting/report work.
+The full Docker gate uses the formatted integrated test source. Early temporary
+capture launches stalled before container start, including a no-mount start probe;
+only task-owned containers/processes were removed. The canonical full verifier
+subsequently started normally. No host configuration, product timeout, failure/skip
+handling, framework, or persistent test inventory was changed to work around it.
+
+### Hosted source and remaining acceptance
+
+One closeout read of current runs/jobs, checkout logs, PR125 metadata, and artifact
+metadata found the relevant published head still at `689f8e8981b6a7b7ecf3b89370e6312aa6bd2bd2`,
+base `2102da630c8f1ab75b1d179a7cfac6050aa537db`. All three checkout logs verify actual
+merge checkout `c402584fe4d51886722622715c4aab7121482b29`; each is completed attempt 1.
+
+| Existing hosted run | Result and artifact limits |
+| --- | --- |
+| [CI 37169367090](https://github.com/TJZine/frame-compare/actions/runs/37169367090) | Failed: the old workflow assertion and two missing mock-format lookups; 68 logged skip-summary outcomes. Other component jobs passed, aggregate failed. No uploaded artifacts. |
+| [Windows portable 37169367456](https://github.com/TJZine/frame-compare/actions/runs/37169367456) | Unsigned verification/build failed at the old workflow assertion; 70 logged skip-summary outcomes. Signed validation/release/verification jobs skipped. No uploaded portable artifacts or candidate signing/physical-host proof. |
+| [Docker 37169367119](https://github.com/TJZine/frame-compare/actions/runs/37169367119) | Failed: both fixed-order U4 cases, with 274 passed and zero skips. One nonexpired `docker-e2e-artifacts` artifact is listed; its contents were not downloaded/validated and cannot prove these edits. |
+
+The latest PR-title run succeeded, but it is not product/runtime acceptance.
+These old hosted runs remain diagnosis evidence. New hosted CI/Windows/Docker
+acceptance awaits user publication of the local edits; no push, dispatch, PR
+metadata/comment, merge, release, or external message was performed. Physical
+Windows/GPU/signing and other distinct platform claims are not established here.
+
+The separate global follow-up receipt is
+`~/Downloads/Workflow_Refresh_Results/followup-2026-10-03/global/COMPLETION.md`, with
+`followup-receipt.json` and `source-cutover.json`. It records unchanged core skills,
+Codex CLI/bundled-wrapper discovery, native canonical suggestion review, and
+projectless create/callback checks with accepted preset arguments. Runtime
+model/effort and child sandbox guarantees were not independently established;
+manual alias was rejected, fresh desktop UI acceptance was untested, Claude OAuth
+was expired, and Windows/WSL/cloud were untested. Those host-specific claims are
+cited without repeating global acceptance or claiming measured savings.
+
+Detailed commands, logs, structural/negative controls, hosted excerpts, source and
+image identities, and the final local diff are outside Git at
+`~/Downloads/Workflow_Refresh_Results/followup-2026-10-03/frame-compare/`.
+`final-state.json` identifies HEAD plus the hashes of the actual uncommitted files;
+`local-changes.diff` is the reviewable complete change. Temporary environments,
+capture scripts, and logs were kept outside the repository.

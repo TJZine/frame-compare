@@ -1550,26 +1550,25 @@ def test_budget_exhaustion_leaves_later_credible_targets_unexamined(
         for run in result.audio_attempt.runs
         if run.lag != 0
     ) == tuple((index, index, -800, 1) for index in disagreement_indices)
-    expected = (
-        (
-            ("chunk", 13, 13, (-3, -2, -1), "resolved", 4),
-            ("chunk", 1, 1, (-3, -2, -1), "resolved", 4),
-            ("chunk", 5, 5, (-3, -2, -1), "resolved", 4),
-            ("chunk", 9, 9, (-3, -2, -1), "unexamined", 0),
-        )
-        if name == "budget"
-        else (
-            ("chunk", 11, 11, (-3, -2, -1), "resolved", 4),
-            ("chunk", 13, 13, (-3, -2, -1), "resolved", 4),
-            ("chunk", 5, 5, (-3, -2, -1), "resolved", 4),
-            ("chunk", 1, 1, (-3, -2, -1), "unexamined", 0),
-            ("chunk", 3, 3, (-3, -2, -1), "unexamined", 0),
-            ("chunk", 7, 7, (-3, -2, -1), "unexamined", 0),
-            ("chunk", 9, 9, (-3, -2, -1), "unexamined", 0),
-        )
-    )
-    _assert_targets(result, expected)
-    assert sum(len(target.positions) for target in result.audio_attempt.video_check.targets) == 12
+    targets = result.audio_attempt.video_check.targets
+    assert len(targets) == len(disagreement_indices)
+    assert {target.first_chunk_index for target in targets} == set(disagreement_indices)
+    # Target priority follows this run's audio evidence, not fixed fixture chunk IDs.
+    ranked_psrs: list[float] = []
+    for rank, target in enumerate(targets):
+        index = target.first_chunk_index
+        assert target.kind == "chunk"
+        assert target.last_chunk_index == index
+        assert target.credible is True
+        assert result.audio_attempt.chunks.credible[index] is True
+        assert target.alternative_offsets == (-3, -2, -1)
+        psr = result.audio_attempt.chunks.psrs[index]
+        assert psr is not None
+        ranked_psrs.append(math.inf if psr == "unbounded" else psr)
+        assert target.resolution == ("resolved" if rank < 3 else "unexamined")
+        assert len(target.positions) == (4 if rank < 3 else 0)
+    assert all(left >= right for left, right in zip(ranked_psrs[:-1], ranked_psrs[1:], strict=True))
+    assert sum(len(target.positions) for target in targets) == 12
 
 
 @pytest.mark.integration
