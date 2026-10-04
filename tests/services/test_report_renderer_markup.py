@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import html as html_module
 import re
+from copy import deepcopy
+from typing import cast
 
 import pytest
 
-from frame_compare.services.report.payload import ReportPayload
+from frame_compare.services.report.payload import (
+    ReportClipPayload,
+    ReportFramePayload,
+    ReportImagePayload,
+    ReportPayload,
+    ReportTonemapSettingsPayload,
+)
 from frame_compare.services.report.renderer import build_html
 from frame_compare.services.report.viewer import get_js
 from tests.services.report_viewer_contracts import (
@@ -156,7 +164,7 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
         "grid": "Grid (G) — scan sources together",
     }
     for button in mode_buttons:
-        assert button.attrs["title"] == mode_purpose_titles[button.attrs["data-mode"]]
+        assert button.attrs["title"] == mode_purpose_titles[cast(str, button.attrs["data-mode"])]
     assert "rv-context-controls" in pair_controls.classes
     assert "rv-context-controls" in active_controls.classes
     assert pair_controls in context_zone.children
@@ -203,7 +211,7 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
     report_payload: ReportPayload,
 ) -> None:
     long_label = "Reference candidate with a very long release label and source annotation "
-    clips = [
+    clips: list[ReportClipPayload] = [
         {
             **report_payload["clips"][0],
             "name": f"clip-{idx + 1}",
@@ -218,10 +226,14 @@ def test_build_html_keeps_ten_plus_long_label_clips_reachable_and_mobile_safe(
         }
         for idx in range(12)
     ]
-    frames = [
+    frames: list[ReportFramePayload] = [
         {
             **report_payload["frames"][0],
-            "images": [{"clip": clip["name"], "src": f"{clip['name']}/10.png"} for clip in clips],
+            # Selector markup consumes only clip/src from this partial image fixture.
+            "images": cast(
+                list[ReportImagePayload],
+                [{"clip": clip["name"], "src": f"{clip['name']}/10.png"} for clip in clips],
+            ),
         }
     ]
     payload: ReportPayload = {
@@ -294,38 +306,28 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
 
 
 @pytest.mark.parametrize(
-    "timestamp",
+    ("timestamp", "tag"),
     [
-        "2026-09-04T14:29:22.256990+00:00",
-        "2026-09-04T23:59:59.123456-04:00",
-        "2026-09-04T00:00:00Z",
+        ("2026-09-04T14:29:22.256990+00:00", "time"),
+        ("2026-09-04T23:59:59.123456-04:00", "time"),
+        ("2026-09-04T00:00:00Z", "time"),
+        ('unknown "<date>"', "span"),
     ],
 )
-def test_build_html_emits_generated_time_element_and_preserves_exact_timestamp(
-    report_payload: ReportPayload, timestamp: str
+def test_build_html_generated_timestamp(
+    report_payload: ReportPayload, timestamp: str, tag: str
 ) -> None:
     payload: ReportPayload = {**report_payload, "generated_at": timestamp}
     html = build_html(payload)
     metadata = require_first(parse_elements(html), class_name="rv-meta")
-    date = require_first(metadata, tag="time")
-
-    assert date.attrs["datetime"] == timestamp
+    date = require_first(metadata, tag=tag)
     assert date.attrs["title"] == timestamp
-    assert parse_info_modal(html).general["Generated"] == timestamp
     assert script_payload(html)["generated_at"] == timestamp
-
-
-def test_build_html_falls_back_to_plain_span_for_unparseable_timestamp(
-    report_payload: ReportPayload,
-) -> None:
-    payload: ReportPayload = {**report_payload, "generated_at": 'unknown "<date>"'}
-    html = build_html(payload)
-    metadata = require_first(parse_elements(html), class_name="rv-meta")
-    date = require_first(metadata, tag="span")
-
-    assert date.text == 'unknown "<date>"'
-    assert date.attrs["title"] == 'unknown "<date>"'
-    assert script_payload(html)["generated_at"] == 'unknown "<date>"'
+    if tag == "time":
+        assert date.attrs["datetime"] == timestamp
+        assert parse_info_modal(html).general["Generated"] == timestamp
+    else:
+        assert date.text == timestamp
 
 
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
@@ -381,7 +383,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
 def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settings(
     report_payload: ReportPayload,
 ) -> None:
-    settings = {
+    settings: ReportTonemapSettingsPayload = {
         "enabled": True,
         "preset": "reference",
         "tone_curve": "bt2390",
@@ -425,60 +427,38 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
 
 
 @pytest.mark.parametrize(
-    ("gamut", "expected"),
+    ("field", "label", "value", "expected"),
     [
-        (0, "Clip"),
-        (1, "Perceptual"),
-        (2, "Soft clip"),
-        (3, "Relative"),
-        (4, "Saturation"),
-        (5, "Absolute"),
-        (6, "Desaturate"),
-        (7, "Darken"),
-        (8, "Highlight"),
-        (9, "Linear"),
-        (42, "42"),
+        ("gamut_mapping", "Gamut mapping", 0, "Clip"),
+        ("gamut_mapping", "Gamut mapping", 1, "Perceptual"),
+        ("gamut_mapping", "Gamut mapping", 2, "Soft clip"),
+        ("gamut_mapping", "Gamut mapping", 3, "Relative"),
+        ("gamut_mapping", "Gamut mapping", 4, "Saturation"),
+        ("gamut_mapping", "Gamut mapping", 5, "Absolute"),
+        ("gamut_mapping", "Gamut mapping", 6, "Desaturate"),
+        ("gamut_mapping", "Gamut mapping", 7, "Darken"),
+        ("gamut_mapping", "Gamut mapping", 8, "Highlight"),
+        ("gamut_mapping", "Gamut mapping", 9, "Linear"),
+        ("gamut_mapping", "Gamut mapping", 42, "42"),
+        ("metadata", "Metadata mode", 0, "Automatic selection"),
+        ("metadata", "Metadata mode", 1, "None"),
+        ("metadata", "Metadata mode", 2, "HDR10 (static)"),
+        ("metadata", "Metadata mode", 3, "HDR10+ (MaxRGB)"),
+        ("metadata", "Metadata mode", 4, "Luminance (CIE Y)"),
+        ("metadata", "Metadata mode", 9, "9"),
     ],
 )
-def test_build_html_labels_gamut_mapping_values(
-    report_payload: ReportPayload, gamut: int, expected: str
+def test_build_html_tonemap_labels(
+    report_payload: ReportPayload, field: str, label: str, value: int, expected: str
 ) -> None:
-    payload: ReportPayload = {
-        **report_payload,
-        "rendering": {
-            **report_payload["rendering"],
-            "tonemap": {"applied": True, "settings": {"gamut_mapping": gamut}},
-        },
+    payload = deepcopy(report_payload)
+    payload["rendering"]["tonemap"] = {
+        "applied": True,
+        "settings": cast(ReportTonemapSettingsPayload, {field: value}),
     }
     html = build_html(payload)
     details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
-    assert parse_definition_pairs(details)["Gamut mapping"] == expected
-
-
-@pytest.mark.parametrize(
-    ("metadata", "expected"),
-    [
-        (0, "Automatic selection"),
-        (1, "None"),
-        (2, "HDR10 (static)"),
-        (3, "HDR10+ (MaxRGB)"),
-        (4, "Luminance (CIE Y)"),
-        (9, "9"),
-    ],
-)
-def test_build_html_labels_metadata_modes(
-    report_payload: ReportPayload, metadata: int, expected: str
-) -> None:
-    payload: ReportPayload = {
-        **report_payload,
-        "rendering": {
-            **report_payload["rendering"],
-            "tonemap": {"applied": True, "settings": {"metadata": metadata}},
-        },
-    }
-    html = build_html(payload)
-    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
-    assert parse_definition_pairs(details)["Metadata mode"] == expected
+    assert parse_definition_pairs(details)[label] == expected
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:

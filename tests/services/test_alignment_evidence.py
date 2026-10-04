@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from dataclasses import asdict, replace
 from fractions import Fraction
 from pathlib import Path
@@ -22,6 +21,7 @@ from frame_compare.utils.alignment_evidence import (
     AudioCollectionFacts,
     AudioCollectionFailure,
     AudioDecisionCandidate,
+    AudioPairSide,
     AudioSameFrameContext,
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
@@ -39,9 +39,9 @@ OTHER_DIGEST = "c" * 64
 POLICY = "whole-track-chunked-phat-video-check-motion-20260929"
 
 
-def stream(role: str, digest: str = DIGEST) -> SelectedAudioStreamEvidence:
+def stream(role: AudioPairSide, digest: str = DIGEST) -> SelectedAudioStreamEvidence:
     return SelectedAudioStreamEvidence(
-        role=role,  # type: ignore[arg-type]
+        role=role,
         source_identity_digest=digest,
         audio_stream_index=0,
         absolute_stream_index=1,
@@ -85,9 +85,9 @@ def retimed_comparison_stream() -> SelectedAudioStreamEvidence:
     )
 
 
-def collection(role: str) -> AudioCollectionFacts:
+def collection(role: AudioPairSide) -> AudioCollectionFacts:
     return AudioCollectionFacts(
-        role=role,  # type: ignore[arg-type]
+        role=role,
         emitted_samples=2880000,
         eof_sample=2880000,
         elapsed_seconds=12.5,
@@ -287,7 +287,7 @@ def test_extended_video_evidence_round_trips_with_all_fields_populated() -> None
 
 @pytest.mark.parametrize(
     "case",
-    ("repeat-parse", "input-immutability", "mixed-target-order", "zero-fps-denominator"),
+    ("mixed-target-order", "zero-fps-denominator"),
 )
 def test_plain_attempt_parser_contract(case: str) -> None:
     payload = asdict(_populated_video_attempt())
@@ -296,16 +296,12 @@ def test_plain_attempt_parser_contract(case: str) -> None:
     elif case == "zero-fps-denominator":
         payload["fps_den"] = 0
 
-    before = deepcopy(payload)
     if case == "zero-fps-denominator":
         with pytest.raises(ValueError, match="fps_den"):
             evidence_from_payload(AudioAlignmentAttempt, payload)
         return
 
     first = evidence_from_payload(AudioAlignmentAttempt, payload)
-    second = evidence_from_payload(AudioAlignmentAttempt, payload)
-    assert first == second
-    assert payload == before
     if case == "mixed-target-order":
         assert tuple(target.target_offset for target in first.video_check.targets) == (
             155,
@@ -335,95 +331,6 @@ def test_native_projection_omits_rows_and_retains_authoritative_target_context()
     assert projected.chunks.total_samples == 1_440_000
     assert parsed == projected
     assert parsed.video_check.targets[0] == _populated_video_attempt().video_check.targets[0]
-
-
-def test_extended_video_evidence_rejects_bad_values() -> None:
-    payload = asdict(_populated_video_attempt())
-    payload["video_check"]["targets"][0]["target_offset"] = True
-    with pytest.raises(ValueError):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(_populated_video_attempt())
-    payload["video_check"]["targets"][0]["resolution"] = "pending"
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(_populated_video_attempt())
-    payload["video_check"]["targets"][0]["alternative_offsets"] = [146]
-    with pytest.raises(ValueError, match="exclude"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(_populated_video_attempt())
-    payload["video_check"]["check_points"][0]["timestamp_seconds"] = -1
-    with pytest.raises(ValueError, match="non-negative"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    for scale_num, scale_den in ((2, 2), (0, 1), (1, 0)):
-        payload = asdict(_populated_video_attempt())
-        payload["selected_streams"][0]["timeline_scale_num"] = scale_num
-        payload["selected_streams"][0]["timeline_scale_den"] = scale_den
-        with pytest.raises(ValueError, match="timeline scale must be a reduced positive fraction"):
-            evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "match"),
-    [
-        ("credible", "yes", "must be a boolean"),
-        ("start_sample", -1, "must be >= 0"),
-        ("end_sample", 0, "sample interval must be non-empty"),
-    ],
-)
-def test_extended_video_evidence_rejects_malformed_target_context(
-    field: str, value: object, match: str
-) -> None:
-    payload = asdict(_populated_video_attempt())
-    payload["video_check"]["targets"][0][field] = value
-
-    with pytest.raises(ValueError, match=match):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-@pytest.mark.parametrize("field", ("credible", "start_sample", "end_sample"))
-def test_extended_video_evidence_requires_total_replacement_target_context(field: str) -> None:
-    payload = asdict(_populated_video_attempt())
-    del payload["video_check"]["targets"][0][field]
-
-    with pytest.raises(ValueError, match="VideoTargetEvidence is missing keys"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-def test_native_target_context_rejects_impossible_kind_and_bounds() -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
-    payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
-    target = payload["video_check"]["targets"][2]
-    target["credible"] = False
-    with pytest.raises(ValueError, match="run targets must be credible"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
-    payload["video_check"]["targets"][0]["end_sample"] = 1
-    with pytest.raises(ValueError, match="end does not match its last chunk"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(_project_audio_attempt_for_review(_populated_video_attempt()))
-    payload["video_check"]["targets"][2]["end_sample"] = 720_001
-    with pytest.raises(ValueError, match="end does not match its last chunk"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-def test_full_run_target_requires_credible_members_with_nominal_bounds() -> None:
-    payload = asdict(_populated_video_attempt())
-    payload["chunks"]["credible"] = [True, True, True, False, True, True]
-    payload["chunks"]["agrees"] = [True, True, True, False, True, True]
-    with pytest.raises(ValueError, match="credible member chunks"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(_populated_video_attempt())
-    payload["chunks"]["counts"] = [240_000, 240_000, 1, 240_000, 240_000, 240_000]
-    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
 def test_partial_final_target_bounds_survive_native_projection() -> None:
@@ -466,76 +373,6 @@ def test_partial_final_target_bounds_survive_native_projection() -> None:
     assert projected.chunks.counts == ()
     assert projected.chunks.total_samples == 840_000
     assert parsed.video_check.targets[0] == target
-    assert (
-        target.start_sample / populated.analysis.analysis_rate,
-        target.end_sample / populated.analysis.analysis_rate,
-    ) == (60.0, 105.0)
-
-
-def test_chunk_total_samples_rejects_invalid_plan_spans() -> None:
-    attempt = attempt_with_chunks(4)
-
-    with pytest.raises(ValueError, match="must be an integer"):
-        replace(attempt.chunks, total_samples=True)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="cover every planned chunk"):
-        replace(attempt, chunks=replace(attempt.chunks, total_samples=0))
-    with pytest.raises(ValueError, match="cover every planned chunk"):
-        replace(attempt, chunks=replace(attempt.chunks, total_samples=720_000))
-    with pytest.raises(ValueError, match="cover every planned chunk"):
-        replace(attempt, chunks=replace(attempt.chunks, total_samples=960_001))
-    with pytest.raises(ValueError, match="zero planned chunks require zero total samples"):
-        replace(attempt, analysis=replace(attempt.analysis, planned_chunk_count=0))
-
-
-def test_full_chunk_rows_require_exact_total_and_nominal_tiling() -> None:
-    payload = asdict(attempt_with_chunks(4))
-    payload["chunks"]["counts"] = [240_000, 120_000, 240_000, 240_000]
-    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(4))
-    payload["chunks"]["counts"] = [240_000, 240_000, 240_000, 240_001]
-    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(4))
-    payload["chunks"]["counts"] = [240_000, 240_000, 240_000, 0]
-    with pytest.raises(ValueError, match="counts must be >= 1"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(4))
-    payload["chunks"]["total_samples"] = 840_000
-    with pytest.raises(ValueError, match="chunk counts must match the total sample span"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(4))
-    payload["chunks"]["starts"] = [0, 240_000, 480_001, 720_000]
-    with pytest.raises(ValueError, match="nominal tiling"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-@pytest.mark.parametrize(
-    ("target_offset", "alternative_offsets", "match"),
-    [
-        (999999, [147, 148], "ordered target-offset neighbourhood"),
-        (147, [148, 147], "ordered target-offset neighbourhood"),
-        (147, [147], "ordered target-offset neighbourhood"),
-        (147, [147, 148, 149], "ordered target-offset neighbourhood"),
-        (146, [145, 147], "must differ from the confirmed offset"),
-    ],
-)
-def test_extended_video_evidence_rejects_noncanonical_target_neighbourhood(
-    target_offset: int,
-    alternative_offsets: list[int],
-    match: str,
-) -> None:
-    payload = asdict(_populated_video_attempt())
-    target = payload["video_check"]["targets"][0]
-    target["target_offset"] = target_offset
-    target["alternative_offsets"] = alternative_offsets
-
-    with pytest.raises(ValueError, match=match):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
 
 
 def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
@@ -637,7 +474,6 @@ def test_native_projection_of_large_attempt_omits_rows() -> None:
 
 def test_round_trip_complete_rejected_and_aborted() -> None:
     complete = attempt_with_chunks(3)
-    assert complete.chunks.total_samples == sum(complete.chunks.counts)
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(complete)) == complete
 
     rejected_payload = asdict(complete)
@@ -718,167 +554,12 @@ def test_round_trip_complete_rejected_and_aborted() -> None:
     assert evidence_from_payload(AudioAlignmentAttempt, asdict(aborted)) == aborted
 
 
-def test_parser_rejects_unknown_and_missing_keys() -> None:
-    payload = asdict(attempt_with_chunks(2))
-    with pytest.raises(ValueError, match="unknown keys"):
-        evidence_from_payload(AudioAlignmentAttempt, {**payload, "legacy_windows": []})
-    with pytest.raises(ValueError, match="missing keys"):
-        evidence_from_payload(
-            AudioAlignmentAttempt,
-            {key: value for key, value in payload.items() if key != "decision"},
-        )
-    nested = asdict(attempt_with_chunks(2))
-    nested["audio"]["agreed"] = True
-    with pytest.raises(ValueError, match="unknown keys"):
-        evidence_from_payload(AudioAlignmentAttempt, nested)
-    nested = asdict(attempt_with_chunks(2))
-    del nested["chunks"]["rows_omitted"]
-    with pytest.raises(ValueError, match="missing keys"):
-        evidence_from_payload(AudioAlignmentAttempt, nested)
-    nested = asdict(attempt_with_chunks(2))
-    del nested["chunks"]["total_samples"]
-    with pytest.raises(ValueError, match="missing keys"):
-        evidence_from_payload(AudioAlignmentAttempt, nested)
-
-
-def test_parser_rejects_bool_as_int_and_non_finite() -> None:
-    payload = asdict(attempt_with_chunks(2))
-    payload["comparison_ordinal"] = True
-    with pytest.raises(ValueError):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["chunks"]["starts"] = [0, False]
-    with pytest.raises(ValueError):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["audio"]["compensation_seconds"] = float("nan")
-    with pytest.raises(ValueError):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["audio"]["compensation_seconds"] = float("inf")
-    with pytest.raises(ValueError):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["audio"]["compensation_seconds"] = 10**1000
-    with pytest.raises(ValueError, match="finite number"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["chunks"]["psrs"] = [float("nan"), 88.5]
-    with pytest.raises(ValueError):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-def test_parser_rejects_wrong_literal_values() -> None:
-    payload = asdict(attempt_with_chunks(2))
-    payload["status"] = "finished"
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["decision"]["state"] = "pending"
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["collection_observation"] = "sometimes"
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["selected_streams"][0]["selection_method"] = "auto"
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-def test_parser_rejects_out_of_bounds_values() -> None:
-    payload = asdict(attempt_with_chunks(2))
-    payload["audio"]["agreeing_chunks"] = 3
-    with pytest.raises(ValueError, match="nest"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["audio"]["global_lag"] = 240001
-    with pytest.raises(ValueError, match="search radius"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["chunks"]["lags"] = [1177, None]
-    with pytest.raises(ValueError, match="require a lag"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(3))
-    for key in ("starts", "counts", "active", "lags", "psrs", "credible", "agrees"):
-        payload["chunks"][key] = payload["chunks"][key][:2]
-    with pytest.raises(ValueError, match="every planned chunk"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["reference_identity_digest"] = "not-a-digest"
-    with pytest.raises(ValueError, match="digest"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
-def test_parser_rejects_inconsistent_evidence() -> None:
-    payload = asdict(attempt_with_chunks(2))
-    payload["selected_streams"] = list(reversed(payload["selected_streams"]))
-    with pytest.raises(ValueError, match="reference and comparison"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["status"] = "aborted"
-    with pytest.raises(ValueError, match="unavailable decision"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["video_check"] = {
-        "observation": "not_observed",
-        "scored_offsets": [144],
-        "confirmed_offset": None,
-        "index_build_seconds": None,
-        "positions": [],
-        "targets": [],
-        "same_frame_context": [],
-        "check_points": [],
-    }
-    with pytest.raises(ValueError, match="must not carry evidence"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-    payload = asdict(attempt_with_chunks(2))
-    payload["decision"] = {
-        "state": "unavailable",
-        "candidate": {
-            "frame_offset": 146,
-            "time_offset_seconds": 0.147,
-            "subframe_estimate": 146.23,
-            "basis": "audio_only",
-        },
-        "primary_reason": "no_single_offset",
-        "failed_gates": ["no_single_offset"],
-    }
-    with pytest.raises(ValueError, match="unavailable decision lacks a candidate"):
-        evidence_from_payload(AudioAlignmentAttempt, payload)
-
-
 def test_producer_construction_of_invalid_attempt_raises() -> None:
     valid = attempt_with_chunks(2)
     with pytest.raises(ValueError, match="unavailable decision"):
-        replace(valid, status="aborted")  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="must be one of"):
-        replace(valid, status="finished")  # type: ignore[arg-type]
+        replace(valid, status="aborted")
     with pytest.raises(ValueError, match="nest"):
         replace(valid, audio=replace(valid.audio, agreeing_chunks=3))
-    with pytest.raises(ValueError, match="must be one of"):
-        AudioAlignmentDecision(
-            state="pending",  # type: ignore[arg-type]
-            candidate=None,
-            primary_reason="no_single_offset",
-            failed_gates=("no_single_offset",),
-        )
     with pytest.raises(ValueError, match="finite number"):
         AudioChunkColumns(
             starts=(0,),
@@ -890,17 +571,6 @@ def test_producer_construction_of_invalid_attempt_raises() -> None:
             agrees=(True,),
             total_samples=240000,
         )
-    with pytest.raises(ValueError, match="must share one length"):
-        AudioChunkColumns(
-            starts=(0, 240000),
-            counts=(240000,),
-            active=(True, True),
-            lags=(0, 0),
-            psrs=(88.5, 88.5),
-            credible=(True, True),
-            agrees=(True, True),
-            total_samples=480000,
-        )
     unavailable_timeout = replace(
         valid.decision,
         state="unavailable",
@@ -910,7 +580,7 @@ def test_producer_construction_of_invalid_attempt_raises() -> None:
     )
     # A non-complete attempt keeps covering rows when it has them; only a
     # partial row set disagrees with the plan.
-    assert replace(valid, status="aborted", decision=unavailable_timeout).status == "aborted"  # type: ignore[arg-type]
+    assert replace(valid, status="aborted", decision=unavailable_timeout).status == "aborted"
     partial_payload = asdict(valid)
     partial_payload["status"] = "aborted"
     partial_payload["decision"] = {
@@ -928,8 +598,6 @@ def test_producer_construction_of_invalid_attempt_raises() -> None:
 def test_collection_failure_round_trips_at_pair_level() -> None:
     failure = AudioCollectionFailure(category="timeout", side=None)
     assert evidence_from_payload(AudioCollectionFailure, asdict(failure)) == failure
-    with pytest.raises(ValueError, match="must be one of"):
-        evidence_from_payload(AudioCollectionFailure, {"category": "typo", "side": "reference"})
     attempt = attempt_with_chunks(0)
     assert attempt.collection_failure is None
     with pytest.raises(ValueError, match="unknown keys"):

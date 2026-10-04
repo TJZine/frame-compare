@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +22,12 @@ from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
+
+
+class _ClosableFrame(Protocol):
+    # The repository VS stub omits the runtime frame cleanup method.
+    def close(self) -> None: ...
+
 
 # Skip policy at module level (Docker gate requires zero skips there)
 vs_mod = pytest.importorskip("vapoursynth")
@@ -244,7 +250,7 @@ def test_real_render_and_metric_fallbacks_apply_cache_limit(
     try:
         prepared = prepare_clip_for_render(runtime_clip, "vapoursynth", config)
         assert not isinstance(prepared.prepared_clip, Path)
-        prepared.prepared_clip.get_frame(0).close()
+        cast(_ClosableFrame, prepared.prepared_clip.get_frame(0)).close()
         assert core.max_cache_size == 1024
         core.max_cache_size = original
         metrics = calculate_metrics(

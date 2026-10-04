@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import IO, Any
 from unittest.mock import patch
 
 from frame_compare.services.alignment_manual_overrides import (
@@ -114,24 +115,6 @@ def test_save_manual_override_merges_overwrites_and_orders_keys(tmp_path: Path) 
     assert content.index('["ref:alpha"]') < content.index('["ref:zeta"]')
 
 
-def test_save_manual_override_uses_atomic_bytes_write(tmp_path: Path) -> None:
-    override = _override("comp", 10)
-    calls: list[tuple[Path, bytes]] = []
-
-    def _write(path: Path, content: bytes) -> None:
-        calls.append((path, content))
-        path.write_bytes(content)
-
-    with patch(
-        "frame_compare.services.alignment_manual_overrides.write_bytes_atomic",
-        _write,
-    ):
-        save_manual_override(tmp_path, override)
-
-    assert [path for path, _ in calls] == [tmp_path / MANUAL_OVERRIDES_FILE]
-    assert load_manual_overrides(tmp_path) == {"ref:comp": override}
-
-
 def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> None:
     path = tmp_path / MANUAL_OVERRIDES_FILE
     path.write_text(
@@ -143,10 +126,17 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
     override = _override("comp", 99)
     original_open = Path.open
 
-    def _open_with_read_failure(open_path: Path, mode: str = "r", *args: object, **kwargs: object):
+    def _open_with_read_failure(
+        open_path: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[Any]:
         if open_path == path and "r" in mode:
             raise OSError("stale handle")
-        return original_open(open_path, mode, *args, **kwargs)
+        return original_open(open_path, mode, buffering, encoding, errors, newline)
 
     with (
         patch("pathlib.Path.open", _open_with_read_failure),

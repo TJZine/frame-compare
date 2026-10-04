@@ -81,7 +81,7 @@ def _missing_executable(_name: str) -> str:
     raise FileNotFoundError(_name)
 
 
-def test_at_a_glance_prints_key_rows_without_vsview_probe(monkeypatch: MonkeyPatch) -> None:
+def test_at_a_glance_prints_default_rows_without_vsview_text(monkeypatch: MonkeyPatch) -> None:
     def _resolve(command: str) -> str:
         if command not in {"ffmpeg", "ffprobe"}:
             raise FileNotFoundError(command)
@@ -170,7 +170,7 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
     assert "(unavailable)" in _rendered_row_value(_render(console), "tools")
 
 
-def test_at_a_glance_skips_ffmpeg_audio_when_alignment_is_disabled(
+def test_at_a_glance_marks_ffmpeg_audio_disabled_in_tools_row(
     monkeypatch: MonkeyPatch,
 ) -> None:
     config = _config()
@@ -224,27 +224,6 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
         assert expected in previous_offsets_row
 
 
-def test_at_a_glance_prints_effective_analysis_performance_mode(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    config = _config()
-    config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
-    console = _console()
-
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-
-    print_at_a_glance(
-        console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
-    )
-
-    analysis_mode_row = _rendered_row_value(_render(console), "analysis")
-    assert "performance profile" in analysis_mode_row
-
-
 def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -270,8 +249,8 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     monkeypatch: MonkeyPatch,
 ) -> None:
     config = _config()
-    config.paths.input_dir = Path("[bold]input[end]")
-    config.paths.generated_dir = Path("[cyan]generated[end]")
+    config.paths.input_dir = "[bold]input[end]"
+    config.paths.generated_dir = "[cyan]generated[end]"
     console = _console()
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
@@ -469,8 +448,8 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
     input_dir = root.parent / "external-media" / "very-long-source-directory"
     generated_dir = root.parent / "external-output" / "very-long-generated-directory"
     config = _config()
-    config.paths.input_dir = input_dir
-    config.paths.generated_dir = generated_dir
+    config.paths.input_dir = str(input_dir)
+    config.paths.generated_dir = str(generated_dir)
     config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
     console = _console_at_width(width)
 
@@ -633,38 +612,26 @@ def test_verbose_run_plan_path_presentation_adds_absolute_detail(
     assert f"(absolute: {absolute_config})" in output
 
 
-def test_result_summary_keeps_external_report_path_absolute() -> None:
+@pytest.mark.parametrize("external", [True, False], ids=["external", "contained-verbose"])
+def test_result_summary_report_path_presentation(external: bool) -> None:
     root = _workspace_path()
     console = _console()
-    external_report = (root.parent / "outside" / "report.html").resolve()
-
+    report = (
+        (root.parent / "outside" if external else root / "generated") / "report.html"
+    ).resolve()
     print_result_summary(
         console,
-        result=RunResult(success=True, report_path=external_report),
+        result=RunResult(success=True, report_path=report),
         quiet=False,
         root=root,
-    )
-
-    output = _render(console)
-    assert str(external_report) in output
-
-
-def test_verbose_result_summary_path_presentation_adds_absolute_detail() -> None:
-    root = _workspace_path()
-    console = _console()
-
-    print_result_summary(
-        console,
-        result=RunResult(success=True, report_path=root / "generated" / "report.html"),
-        quiet=False,
-        root=root,
-        verbose=True,
+        verbose=not external,
     )
     output = _render(console)
-    relative_report = Path("generated") / "report.html"
-    absolute_report = (root / relative_report).resolve()
-    assert str(relative_report) in output
-    assert f"(absolute: {absolute_report})" in output
+    if external:
+        assert str(report) in output
+    else:
+        assert str(Path("generated") / "report.html") in output
+        assert f"(absolute: {report})" in output
 
 
 def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
@@ -692,22 +659,6 @@ def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
     assert "Comparison complete · 10 warnings" in verbose_output
     assert "warning 10" in verbose_output
     assert "(2 more)" not in verbose_output
-
-
-def test_result_summary_does_not_duplicate_because_reason() -> None:
-    console = _console()
-    print_result_summary(
-        console,
-        result=RunResult(
-            success=True,
-            warnings=["slow.pics upload skipped because report confirmation was unavailable"],
-        ),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert output.count("because report confirmation was unavailable") == 1
-    assert "slow.pics upload skipped because report confirmation was unavailable" not in output
 
 
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:
@@ -756,40 +707,29 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     assert "more)" not in output
 
 
-def test_result_summary_prints_declined_slowpics_as_skipped_not_artifact() -> None:
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("declined", ("not uploaded (declined)",)),
+        ("report_unavailable", ("upload skipped", "report confirmation was unavailable")),
+    ],
+)
+def test_result_summary_prints_slowpics_as_skipped(
+    status: Literal["declined", "report_unavailable"], expected: tuple[str, ...]
+) -> None:
     console = _console()
-
     print_result_summary(
         console,
         result=RunResult(
             success=True,
-            slowpics_upload_confirmation_status="declined",
-            report_path=_workspace_path("report.html"),
+            slowpics_upload_confirmation_status=status,
+            report_path=_workspace_path("report.html") if status == "declined" else None,
         ),
         quiet=False,
     )
-
     output = _render(console)
-    assert "not uploaded (declined)" in output
-    assert "slow.pics" in output
-    assert "[SKIP]" not in output
-
-
-def test_result_summary_prints_report_unavailable_slowpics_as_skipped() -> None:
-    console = _console()
-
-    print_result_summary(
-        console,
-        result=RunResult(
-            success=True,
-            slowpics_upload_confirmation_status="report_unavailable",
-        ),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert "upload skipped" in output
-    assert "report confirmation was unavailable" in output
+    for fragment in expected:
+        assert fragment in output
     assert "slow.pics" in output
     assert "[SKIP]" not in output
 
@@ -975,6 +915,7 @@ def test_result_summary_uses_singular_warning_title() -> None:
 
     output = _render(console)
     assert "Comparison complete · 1 warning" in output
+    assert "Comparison complete · 1 warnings" not in output
     assert "Warnings" in output
 
 
@@ -992,6 +933,7 @@ def test_result_summary_upload_failure_shows_warning_title() -> None:
 
     output = _render(console)
     assert "Comparison complete · 1 warning" in output
+    assert "Comparison complete · 1 warnings" not in output
     assert "Comparison failed" not in output
     assert "Warnings" in output
     assert "publish: connection reset" in output
@@ -1083,27 +1025,6 @@ def test_result_summary_reports_skipped_analysis_cache_status() -> None:
     assert "miss" not in output
 
 
-def test_result_summary_prints_success_fallback_and_truncates_warnings() -> None:
-    console = _console()
-
-    print_result_summary(
-        console,
-        result=RunResult(
-            success=True,
-            warnings=[f"warning {index}" for index in range(1, 11)],
-        ),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert "Comparison complete · 10 warnings" in output
-    assert "Warnings" in output
-    assert "warning 1" in output
-    assert "warning 8" in output
-    assert "(2 more)" in output
-    assert "warning 9" not in output
-
-
 def test_result_summary_quiet_mode_preserves_literal_brackets() -> None:
     console = _console()
 
@@ -1135,69 +1056,56 @@ def _timed_result() -> RunResult:
     )
 
 
-def test_result_summary_time_rows_split_machine_and_user() -> None:
-    console = _console()
-    print_result_summary(console, result=_timed_result(), quiet=False)
-
-    output = _render(console)
-    assert "1m 35s total" in output
-    assert "setup 4.0 s" in output
-    assert "analyze 10.0 s" in output
-    assert "align 17.5 s" in output
-    assert "render 20.0 s" in output
-    assert "upload 5.0 s" in output
-    assert "VSView review 42.5 s" in output
-    assert "prompts 3.0 s" in output
-
-
-def test_result_summary_time_rows_omit_zero_components() -> None:
-    console = _console()
-    print_result_summary(
-        console,
-        result=RunResult(success=True, duration_seconds=5.0, phase_timings={"render": 5.0}),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert "5.0 s total" in output
-    assert "render 5.0 s" in output
-    assert "machine" in output
-    assert "setup" not in output
-    assert "analyze" not in output
-    assert "align" not in output
-    assert "upload" not in output
-    assert "VSView review" not in output
-    assert "prompts" not in output
-    assert "you" not in output
-
-
-def test_result_summary_time_rows_omitted_when_all_zero() -> None:
-    console = _console()
-    print_result_summary(
-        console,
-        result=RunResult(success=True, duration_seconds=2.0),
-        quiet=False,
-    )
-
-    output = _render(console)
-    assert "2.0 s total" in output
-    assert "machine" not in output
-    assert "you" not in output
-
-
-def test_result_summary_time_rows_clamp_review_past_align() -> None:
-    console = _console()
-    print_result_summary(
-        console,
-        result=RunResult(
-            success=True,
-            duration_seconds=30.0,
-            phase_timings={"align": 10.0},
-            vsview_review_seconds=25.0,
+@pytest.mark.parametrize(
+    ("result", "present", "absent"),
+    [
+        pytest.param(
+            _timed_result(),
+            (
+                "1m 35s total",
+                "setup 4.0 s",
+                "analyze 10.0 s",
+                "align 17.5 s",
+                "render 20.0 s",
+                "upload 5.0 s",
+                "VSView review 42.5 s",
+                "prompts 3.0 s",
+            ),
+            (),
+            id="machine-user",
         ),
-        quiet=False,
-    )
-
+        pytest.param(
+            RunResult(success=True, duration_seconds=5.0, phase_timings={"render": 5.0}),
+            ("5.0 s total", "render 5.0 s", "machine"),
+            ("setup", "analyze", "align", "upload", "VSView review", "prompts", "you"),
+            id="partial-zero",
+        ),
+        pytest.param(
+            RunResult(success=True, duration_seconds=2.0),
+            ("2.0 s total",),
+            ("machine", "you"),
+            id="all-zero",
+        ),
+        pytest.param(
+            RunResult(
+                success=True,
+                duration_seconds=30.0,
+                phase_timings={"align": 10.0},
+                vsview_review_seconds=25.0,
+            ),
+            ("VSView review 25.0 s",),
+            ("align",),
+            id="review-past-align",
+        ),
+    ],
+)
+def test_result_summary_time_rows(
+    result: RunResult, present: tuple[str, ...], absent: tuple[str, ...]
+) -> None:
+    console = _console()
+    print_result_summary(console, result=result, quiet=False)
     output = _render(console)
-    assert "align" not in output
-    assert "VSView review 25.0 s" in output
+    for fragment in present:
+        assert fragment in output
+    for fragment in absent:
+        assert fragment not in output

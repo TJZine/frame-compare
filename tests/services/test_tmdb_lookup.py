@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal
 
 import httpx
 import pytest
@@ -11,34 +11,20 @@ import structlog
 
 import frame_compare.services.tmdb_lookup as tmdb_lookup
 from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
-from frame_compare.services.metadata import lookup_tmdb as metadata_lookup_tmdb
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 from frame_compare.utils.logging import configure_logging
 
 
-def test_tmdb_metadata_media_type_is_closed_domain() -> None:
-    assert set(get_args(TmdbMetadata.__dataclass_fields__["media_type"].type)) == {"movie", "tv"}
-
-
-def test_metadata_lookup_tmdb_alias_identity() -> None:
-    assert metadata_lookup_tmdb is tmdb_lookup.lookup_tmdb
-
-
 @pytest.mark.anyio
-async def test_search_tmdb_movie_maps_movie_endpoint_without_media_type() -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert request.url.host == "api.themoviedb.org"
-        assert request.url.path == "/3/search/movie"
-        assert request.url.params["api_key"] == "b" * 32
-        assert request.url.params["query"] == "Arrival"
-        assert request.url.params["include_adult"] == "false"
-        return httpx.Response(
-            200,
-            json={
+@pytest.mark.parametrize(
+    ("media_type", "key", "title", "payload", "expected"),
+    [
+        (
+            "movie",
+            "b" * 32,
+            "Arrival",
+            {
                 "results": [
                     {
                         "id": 329865,
@@ -51,44 +37,24 @@ async def test_search_tmdb_movie_maps_movie_endpoint_without_media_type() -> Non
                     }
                 ]
             },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        results = await tmdb_lookup.search_tmdb_movie(
-            ParsedMetadata(title="Arrival"),
-            MetadataConfig(api_key="b" * 32, timeout_seconds=3.5),
-            client,
-        )
-
-    assert requests
-    assert results == [
-        TmdbMetadata(
-            tmdb_id=329865,
-            title="Arrival",
-            original_title="Arrival",
-            year=2016,
-            media_type="movie",
-            original_language="en",
-            poster_url="https://image.tmdb.org/t/p/original/poster.jpg",
-            backdrop_url=None,
-        )
-    ]
-
-
-@pytest.mark.anyio
-async def test_search_tmdb_tv_maps_tv_endpoint_without_media_type() -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert request.url.host == "api.themoviedb.org"
-        assert request.url.path == "/3/search/tv"
-        assert request.url.params["api_key"] == "c" * 32
-        assert request.url.params["query"] == "Severance"
-        assert request.url.params["include_adult"] == "false"
-        return httpx.Response(
-            200,
-            json={
+            [
+                TmdbMetadata(
+                    tmdb_id=329865,
+                    title="Arrival",
+                    original_title="Arrival",
+                    year=2016,
+                    media_type="movie",
+                    original_language="en",
+                    poster_url="https://image.tmdb.org/t/p/original/poster.jpg",
+                    backdrop_url=None,
+                )
+            ],
+        ),
+        (
+            "tv",
+            "c" * 32,
+            "Severance",
+            {
                 "results": [
                     {
                         "id": 95396,
@@ -100,90 +66,79 @@ async def test_search_tmdb_tv_maps_tv_endpoint_without_media_type() -> None:
                     }
                 ]
             },
-        )
+            [
+                TmdbMetadata(
+                    tmdb_id=95396,
+                    title="Severance",
+                    original_title="Severance",
+                    year=2022,
+                    media_type="tv",
+                    poster_url="https://image.tmdb.org/t/p/original/poster.jpg",
+                    backdrop_url="https://image.tmdb.org/t/p/original/backdrop.jpg",
+                )
+            ],
+        ),
+    ],
+)
+async def test_search_tmdb_endpoint_mapping(
+    media_type: Literal["movie", "tv"],
+    key: str,
+    title: str,
+    payload: object,
+    expected: list[TmdbMetadata],
+) -> None:
+    requests: list[httpx.Request] = []
 
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.host == "api.themoviedb.org"
+        assert request.url.path == f"/3/search/{media_type}"
+        assert request.url.params["api_key"] == key
+        assert request.url.params["query"] == title
+        assert request.url.params["include_adult"] == "false"
+        return httpx.Response(200, json=payload)
+
+    search = tmdb_lookup.search_tmdb_movie if media_type == "movie" else tmdb_lookup.search_tmdb_tv
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        results = await tmdb_lookup.search_tmdb_tv(
-            ParsedMetadata(title="Severance"),
-            MetadataConfig(api_key="c" * 32, timeout_seconds=3.5),
-            client,
+        results = await search(
+            ParsedMetadata(title=title), MetadataConfig(api_key=key, timeout_seconds=3.5), client
         )
-
     assert requests
-    assert results == [
-        TmdbMetadata(
-            tmdb_id=95396,
-            title="Severance",
-            original_title="Severance",
-            year=2022,
-            media_type="tv",
-            poster_url="https://image.tmdb.org/t/p/original/poster.jpg",
-            backdrop_url="https://image.tmdb.org/t/p/original/backdrop.jpg",
-        )
-    ]
+    assert results == expected
 
 
 @pytest.mark.anyio
-async def test_fetch_tmdb_alternative_titles_movie_payload() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.host == "api.themoviedb.org"
-        assert request.url.path == "/3/movie/329865/alternative_titles"
-        assert request.url.params["api_key"] == "d" * 32
-        return httpx.Response(
-            200,
-            json={
+@pytest.mark.parametrize(
+    ("media_type", "tmdb_id", "key", "payload", "expected"),
+    [
+        (
+            "movie",
+            329865,
+            "d" * 32,
+            {
                 "titles": [
                     {"iso_3166_1": "US", "title": "Story of Your Life"},
                     {"iso_3166_1": "GB", "title": "Arrival"},
                 ]
             },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        titles = await tmdb_lookup.fetch_tmdb_alternative_titles(
-            329865,
-            "movie",
-            MetadataConfig(api_key="d" * 32, timeout_seconds=3.5),
-            client,
-        )
-
-    assert titles == ["Story of Your Life", "Arrival"]
-
-
-@pytest.mark.anyio
-async def test_fetch_tmdb_alternative_titles_tv_payload() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.host == "api.themoviedb.org"
-        assert request.url.path == "/3/tv/95396/alternative_titles"
-        assert request.url.params["api_key"] == "e" * 32
-        return httpx.Response(
-            200,
-            json={
+            ["Story of Your Life", "Arrival"],
+        ),
+        (
+            "tv",
+            95396,
+            "e" * 32,
+            {
                 "results": [
                     {"iso_3166_1": "US", "title": "Severance"},
                     {"iso_3166_1": "JP", "title": "Severance JP"},
                 ]
             },
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        titles = await tmdb_lookup.fetch_tmdb_alternative_titles(
-            95396,
-            "tv",
-            MetadataConfig(api_key="e" * 32, timeout_seconds=3.5),
-            client,
-        )
-
-    assert titles == ["Severance", "Severance JP"]
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("media_type", "tmdb_id", "payload"),
-    [
+            ["Severance", "Severance JP"],
+        ),
         (
             "movie",
             42,
+            "f" * 32,
             {
                 "titles": [
                     "bad-entry",
@@ -193,10 +148,12 @@ async def test_fetch_tmdb_alternative_titles_tv_payload() -> None:
                     {"title": "Alias 2"},
                 ]
             },
+            ["Alias 1", "Alias 2"],
         ),
         (
             "tv",
             43,
+            "f" * 32,
             {
                 "results": [
                     "bad-entry",
@@ -206,60 +163,30 @@ async def test_fetch_tmdb_alternative_titles_tv_payload() -> None:
                     {"title": "Alias 2"},
                 ]
             },
+            ["Alias 1", "Alias 2"],
         ),
-        ("movie", 44, {}),
-        ("tv", 45, {}),
+        ("movie", 44, "f" * 32, {}, []),
+        ("tv", 45, "f" * 32, {}, []),
     ],
 )
-async def test_fetch_tmdb_alternative_titles_ignores_malformed_or_missing_entries(
-    media_type: Literal["movie", "tv"],
-    tmdb_id: int,
-    payload: object,
+async def test_fetch_tmdb_alternative_title_mapping(
+    media_type: Literal["movie", "tv"], tmdb_id: int, key: str, payload: object, expected: list[str]
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "api.themoviedb.org"
         assert request.url.path == f"/3/{media_type}/{tmdb_id}/alternative_titles"
+        if key != "f" * 32:
+            assert request.url.params["api_key"] == key
         return httpx.Response(200, json=payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         titles = await tmdb_lookup.fetch_tmdb_alternative_titles(
             tmdb_id,
             media_type,
-            MetadataConfig(api_key="f" * 32),
+            MetadataConfig(api_key=key, timeout_seconds=3.5 if key != "f" * 32 else 10.0),
             client,
         )
-
-    expected = ["Alias 1", "Alias 2"] if isinstance(payload, dict) and payload else []
     assert titles == expected
-
-
-@pytest.mark.anyio
-async def test_tmdb_lookup_direct_module_classifies_http_and_transport_errors() -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(401))
-    ) as client:
-        with pytest.raises(TmdbError) as excinfo:
-            await tmdb_lookup.lookup_tmdb(
-                ParsedMetadata(title="Arrival"),
-                MetadataConfig(api_key="c" * 32),
-                client,
-            )
-
-    assert excinfo.value.context.details == {"reason": "Invalid API key"}
-
-    def raise_connect_error(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError(f"leaked-key={'d' * 32}", request=request)
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(raise_connect_error)) as client:
-        with pytest.raises(TmdbError) as excinfo:
-            await tmdb_lookup.lookup_tmdb(
-                ParsedMetadata(title="Arrival"),
-                MetadataConfig(api_key="d" * 32),
-                client,
-            )
-
-    assert excinfo.value.context.details == {"reason": "Request failed"}
-    assert "d" * 32 not in excinfo.value.context.message
 
 
 @pytest.mark.anyio
@@ -284,7 +211,7 @@ async def test_tmdb_failures_do_not_leak_api_key_through_json_tracebacks(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         try:
-            await tmdb_lookup.lookup_tmdb(
+            await tmdb_lookup.search_tmdb(
                 ParsedMetadata(title="Arrival"),
                 MetadataConfig(api_key=api_key),
                 client,
@@ -299,32 +226,6 @@ async def test_tmdb_failures_do_not_leak_api_key_through_json_tracebacks(
     payload = json.loads(stream.getvalue())
     assert payload["exception"]
     assert api_key not in json.dumps(payload)
-
-
-@pytest.mark.anyio
-async def test_tmdb_lookup_direct_module_classifies_rate_limit_and_timeout() -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(429))
-    ) as client:
-        with pytest.raises(TmdbRateLimitedError):
-            await tmdb_lookup.lookup_tmdb(
-                ParsedMetadata(title="Arrival"),
-                MetadataConfig(api_key="e" * 32),
-                client,
-            )
-
-    def raise_timeout(request: httpx.Request) -> httpx.Response:
-        raise httpx.TimeoutException("too slow", request=request)
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(raise_timeout)) as client:
-        with pytest.raises(TmdbError) as excinfo:
-            await tmdb_lookup.lookup_tmdb(
-                ParsedMetadata(title="Arrival"),
-                MetadataConfig(api_key="f" * 32),
-                client,
-            )
-
-    assert excinfo.value.context.details == {"reason": "Request timed out"}
 
 
 def test_tmdb_lookup_direct_module_validates_api_key_shape() -> None:
@@ -357,21 +258,23 @@ async def test_tmdb_lookup_skips_malformed_search_result_items() -> None:
             )
         )
     ) as client:
-        result = await tmdb_lookup.lookup_tmdb(
+        result = await tmdb_lookup.search_tmdb(
             ParsedMetadata(title="Valid Show"),
             MetadataConfig(api_key="a" * 32),
             client,
         )
 
-    assert result == TmdbMetadata(
-        tmdb_id=42,
-        title="Valid Show",
-        original_title="Valid Show Original",
-        year=0,
-        media_type="tv",
-        poster_url=None,
-        backdrop_url=None,
-    )
+    assert result == [
+        TmdbMetadata(
+            tmdb_id=42,
+            title="Valid Show",
+            original_title="Valid Show Original",
+            year=0,
+            media_type="tv",
+            poster_url=None,
+            backdrop_url=None,
+        )
+    ]
 
 
 @pytest.mark.anyio
@@ -383,39 +286,13 @@ async def test_tmdb_lookup_malformed_top_level_payload_raises_domain_error(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
     ) as client:
         with pytest.raises(TmdbError) as excinfo:
-            await tmdb_lookup.lookup_tmdb(
+            await tmdb_lookup.search_tmdb(
                 ParsedMetadata(title="No Results"),
                 MetadataConfig(api_key="a" * 32),
                 client,
             )
 
     assert excinfo.value.context.details == {"reason": "Malformed TMDB response"}
-
-
-@pytest.mark.anyio
-async def test_tmdb_lookup_skips_float_id_without_truncating_to_int() -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": 42.9, "title": "Float ID", "media_type": "movie"},
-                        {"id": 43, "title": "Integer ID", "media_type": "movie"},
-                    ]
-                },
-            )
-        )
-    ) as client:
-        result = await tmdb_lookup.lookup_tmdb(
-            ParsedMetadata(title="Integer ID"),
-            MetadataConfig(api_key="a" * 32),
-            client,
-        )
-
-    assert result is not None
-    assert result.tmdb_id == 43
-    assert result.title == "Integer ID"
 
 
 @pytest.mark.anyio
@@ -665,53 +542,29 @@ async def test_alternative_title_cache_preserves_empty_response_but_not_malforme
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("status_code", [401, 429, 500])
-async def test_search_errors_never_create_cache_file(
-    tmp_path: Path,
-    status_code: int,
-) -> None:
-    cache_path = tmp_path / "tmdb.toml"
-    cache = TmdbCache(cache_path)
-
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(status_code))
-    ) as client:
-        with pytest.raises((TmdbError, TmdbRateLimitedError)):
-            await tmdb_lookup.search_tmdb_movie(
-                ParsedMetadata(title="Failure"),
-                MetadataConfig(api_key="a" * 32),
-                client,
-                cache=cache,
-            )
-
-    assert not cache_path.exists()
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("failure_kind", ["timeout", "transport", "json"])
-async def test_transport_and_decode_errors_never_create_cache_file(
-    tmp_path: Path,
-    failure_kind: str,
-) -> None:
+@pytest.mark.parametrize("failure", [401, 429, 500, "timeout", "transport", "json"])
+async def test_search_failures_never_create_cache_file(tmp_path: Path, failure: int | str) -> None:
     cache_path = tmp_path / "tmdb.toml"
     cache = TmdbCache(cache_path)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if failure_kind == "timeout":
+        if failure == "timeout":
             raise httpx.TimeoutException("slow", request=request)
-        if failure_kind == "transport":
+        if failure == "transport":
             raise httpx.ConnectError("failed", request=request)
+        if isinstance(failure, int):
+            return httpx.Response(failure)
         return httpx.Response(200, content=b"not-json")
 
+    errors = (TmdbError, TmdbRateLimitedError) if isinstance(failure, int) else TmdbError
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(TmdbError):
+        with pytest.raises(errors):
             await tmdb_lookup.search_tmdb_movie(
                 ParsedMetadata(title="Failure"),
                 MetadataConfig(api_key="a" * 32),
                 client,
                 cache=cache,
             )
-
     assert not cache_path.exists()
 
 

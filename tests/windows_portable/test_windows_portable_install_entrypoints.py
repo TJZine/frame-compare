@@ -38,9 +38,9 @@ def test_root_install_delegates_to_fail_closed_source_install(repo_root: Path) -
     assert "exit $LASTEXITCODE" in root_install
     assert "uv sync --group dev --frozen" in source_install
     assert "& $buildScript -ManifestPath $manifestFullPath" in source_install
-    assert 'Assert-LastExitCode -Label "build_portable.ps1"' in source_install
     assert '$installScript = Join-Path $outDirFullPath "install.ps1"' in source_install
     assert "& $installScript" in source_install
+    assert 'Assert-LastExitCode -Label "build_portable.ps1"' in source_install
     assert 'Assert-LastExitCode -Label "install.ps1"' in source_install
 
 

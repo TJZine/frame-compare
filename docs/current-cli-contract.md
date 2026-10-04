@@ -909,7 +909,9 @@ recovery requirement.
   previous alignment offsets do not fail `--from-cache-only` by themselves.
   Alignment can compute current-run offsets or use accepted shared previous
   offsets after analysis cache validation succeeds.
-- `--no-cache` and `--from-cache-only` are mutually exclusive.
+- `--no-cache` and `--from-cache-only` are mutually exclusive. Pipeline runs and
+  `--dry-run` reject the pair before runtime work with `CONFIG_VALIDATION_ERROR`
+  (FC-1003) and exit 2. `--write-config` and `--diagnose-paths` ignore cache flags.
 
 ### Report Auto-Open Ownership
 
@@ -1566,6 +1568,10 @@ config table rejects unknown keys, including nested source override and active
 rectangle tables. A misspelled or stale key inside an owned table therefore
 fails config validation instead of silently using a default.
 
+Validation details retain rejected non-secret inputs for diagnostics. Inputs at
+`slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`
+before human, JSON, doctor, preset, or other typed config errors can expose them.
+
 The implemented `[logging]` surface contains only:
 
 - `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
@@ -1622,8 +1628,10 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   source loading, rendering, or report generation.
 - `previous_offsets = "disabled" | "prompt" | "always"` controls opt-in reuse of
   shared interactively confirmed offsets. It is config-only, has no `run` flag, and
-  is not present in the CLI override map. Fresh computed audio candidates are
-  provisional and never authoritative regardless of `previous_offsets`.
+  is not present in the CLI override map. `previous_offsets` never changes the
+  authority of a fresh computed attempt: only a `trusted_automatic` /
+  `audio_video_confirmed` result applies trims, and every other fresh result stays
+  a provisional, unapplied candidate.
   `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
   results may still write to the shared reuse cache when `cache_results = true`.

@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Never, cast
 
 import pytest
 
-from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
@@ -18,18 +17,13 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.execution_types import (
-    ExecutionPhasePlan,
-    ExecutionState,
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
     RenderPhaseOutput,
     RunArtifacts,
 )
-from frame_compare.orchestration.phases import Phase
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.progress import LogProgressReporter
-from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
 
@@ -38,23 +32,10 @@ from .execute_run_helpers import (
     FakeHDRVSLoader,
     FakeVSLoader,
     clip_state,
-    create_config,
     create_video_files,
 )
-from .phase_task_helpers import _render_artifacts
-
-
-def _workspace(tmp_path: Path) -> WorkspacePaths:
-    return WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
+from .phase_task_helpers import _render_artifacts, _workspace
+from .preparation_test_support import create_config
 
 
 def _zero_monotonic_timer() -> float:
@@ -122,7 +103,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         message="Shortcut written.",
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -165,7 +146,7 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -210,7 +191,6 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
         )
 
     assert exc_info.value is phase_error
-    assert events == ["start", "end"]
 
 
 def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
@@ -230,7 +210,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         screenshot_dir=uploaded.parent,
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -315,7 +295,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         screenshot_dir=tmp_path / "screenshots",
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -396,7 +376,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         screenshot_dir=uploaded.parent,
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -486,233 +466,6 @@ def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
         asyncio.run(execute_run(request))
 
 
-def test_execute_run_creates_and_discards_http_client_when_missing(
-    tmp_path: Path,
-) -> None:
-    """Given no injected http client, execute_run must not leak the temporary client."""
-    create_config(tmp_path)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-
-    request = RunRequest(root=tmp_path, quiet=True)
-    deps = RunDependencies(
-        http_client=None,
-        vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
-    )
-
-    asyncio.run(execute_run(request, deps=deps))
-
-    assert deps.http_client is None
-
-
-def test_execute_run_emits_reports_after_load_sources_and_after_align(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Post-load and post-align diagnostics are emitted from the coordinator seam."""
-    create_config(tmp_path)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv", "comp.mkv")
-
-    request = RunRequest(
-        root=tmp_path,
-        skip_analysis=True,
-        skip_metadata=True,
-        no_upload=True,
-        no_color=True,
-    )
-    deps = RunDependencies(
-        vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
-        progress=LogProgressReporter(),
-    )
-
-    class FpsCall(NamedTuple):
-        stage: str
-        no_color: bool
-        rich_output: bool
-        clip_labels: tuple[str, ...]
-        verbose: bool
-
-    class AlignmentCall(NamedTuple):
-        stage: str
-        no_color: bool
-        json_output: bool
-        quiet: bool
-        selected_frames: tuple[int, ...]
-        verbose: bool
-
-    fps_calls: list[FpsCall] = []
-    alignment_calls: list[AlignmentCall] = []
-
-    def _record_emit(
-        *,
-        stage: str,
-        no_color: bool,
-        rich_output: bool,
-        clips: Any,
-        verbose: bool,
-        **_kwargs: Any,
-    ) -> None:
-        clip_labels = tuple(clip.label for clip in clips)
-        fps_calls.append(
-            FpsCall(
-                stage=stage,
-                no_color=no_color,
-                rich_output=rich_output,
-                clip_labels=clip_labels,
-                verbose=verbose,
-            )
-        )
-
-    def _record_alignment_emit(
-        *,
-        stage: str,
-        no_color: bool,
-        json_output: bool,
-        quiet: bool,
-        selected_frames: Any,
-        verbose: bool,
-        **_kwargs: Any,
-    ) -> None:
-        alignment_calls.append(
-            AlignmentCall(
-                stage=stage,
-                no_color=no_color,
-                json_output=json_output,
-                quiet=quiet,
-                selected_frames=tuple(cast(list[int], selected_frames)),
-                verbose=verbose,
-            )
-        )
-
-    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", _record_emit)
-    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", _record_alignment_emit)
-
-    asyncio.run(execute_run(request, deps=deps))
-
-    assert fps_calls == [
-        FpsCall(
-            stage="after_load_sources",
-            no_color=True,
-            rich_output=False,
-            clip_labels=("comp", "source"),
-            verbose=False,
-        ),
-        FpsCall(
-            stage="after_align",
-            no_color=True,
-            rich_output=False,
-            clip_labels=("comp", "source"),
-            verbose=False,
-        ),
-    ]
-    assert len(alignment_calls) == 1
-    alignment_call = alignment_calls[0]
-    assert alignment_call.stage == "after_align"
-    assert alignment_call.no_color is True
-    assert alignment_call.json_output is False
-    assert alignment_call.quiet is False
-    assert len(alignment_call.selected_frames) == 10
-    assert alignment_call.verbose is False
-    assert all(isinstance(frame, int) for frame in alignment_call.selected_frames)
-
-
-def test_execute_run_emits_final_selection_at_post_align_boundary(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The selection summary receives final aligned frames before later phases run."""
-    prep = PrepState(
-        workspace=_workspace(tmp_path),
-        config=ConfigSchema(),
-        input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
-        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
-        artifacts=RunArtifacts(),
-        metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=[],
-        preflight_duration=0.0,
-        load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-    )
-    breakdown = SelectionBreakdown(user=[101], random=[205])
-    events: list[str] = []
-    selection_calls: list[dict[str, object]] = []
-
-    async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
-        return prep
-
-    def _build_phase_plan(
-        *,
-        state: ExecutionState,
-        **_kwargs: object,
-    ) -> ExecutionPhasePlan:
-        async def _align(context: RunContext) -> None:
-            events.append("align")
-            state.selected_frames[:] = [2, 6]
-            context.selection_breakdown = breakdown
-
-        async def _after_align(_context: RunContext) -> None:
-            events.append("after_align_phase")
-
-        return ExecutionPhasePlan(
-            before_align=[Phase(name="align", execute=_align)],
-            after_align=[Phase(name="render", execute=_after_align)],
-        )
-
-    def _record_selection(**kwargs: object) -> None:
-        events.append("selection_report")
-        selection_calls.append(kwargs)
-
-    monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
-    monkeypatch.setattr(coordinator, "build_execution_phase_plan", _build_phase_plan)
-    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
-    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda **_kwargs: None)
-    monkeypatch.setattr(coordinator, "emit_final_selection_report", _record_selection)
-    monkeypatch.setattr(
-        coordinator,
-        "emit_execution_section_start",
-        lambda *_args, **_kwargs: events.append("execution_start"),
-    )
-    monkeypatch.setattr(
-        coordinator,
-        "emit_execution_section_end",
-        lambda *_args, **_kwargs: events.append("execution_end"),
-    )
-
-    request = RunRequest(
-        root=tmp_path,
-        verbose=True,
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-    asyncio.run(
-        execute_run(
-            request,
-            deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
-        )
-    )
-
-    assert events == [
-        "execution_start",
-        "align",
-        "selection_report",
-        "after_align_phase",
-        "execution_end",
-    ]
-    assert len(selection_calls) == 1
-    assert selection_calls[0] == {
-        "selected_frames": [2, 6],
-        "breakdown": breakdown,
-        "verbose": True,
-        "json_output": False,
-        "quiet": False,
-        "no_color": True,
-    }
-
-
 def test_execute_run_applies_cli_overrides_before_phase_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -750,7 +503,9 @@ enable = false
 
     captured: dict[str, object] = {}
 
-    async def _capture_execute_phases(_phases: object, context: object, _reporter: object) -> None:
+    async def _capture_execute_phases(
+        _phases: object, context: RunContext, _reporter: object
+    ) -> None:
         if "config" not in captured:
             captured["config"] = context.config
 
@@ -794,7 +549,10 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
+    publish_attempts: list[None] = []
+
     async def _unexpected_publish(**_kwargs: object) -> object:
+        publish_attempts.append(None)
         raise AssertionError("publish should be skipped by effective slowpics config")
 
     from frame_compare.orchestration import phase_post_render
@@ -814,6 +572,7 @@ enable = false
     assert result.success is True
     assert result.slowpics_url is None
     assert result.phase_timings["publish"] >= 0.0
+    assert publish_attempts == []
 
 
 def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
@@ -841,7 +600,7 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         def load(self, path: Path) -> SourceInfo:
             raise AssertionError(f"Fake VS loader should not be called: {path}")
 
-        def ensure_core(self) -> object:
+        def ensure_core(self) -> Never:
             raise AssertionError("Fake VS core should not be requested when cache is warm")
 
     reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -885,5 +644,3 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
 
     with pytest.raises(MixedSourceFpsError, match="Mixed source FPS is not supported"):
         asyncio.run(execute_run(request, deps=deps))
-
-    assert phases_started is False

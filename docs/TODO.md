@@ -22,8 +22,9 @@ search:
 
 ## Audio Alignment: Release And Performance Follow-Ups
 
-From the [whole-track audio alignment plan](plans/2026-09-25-audio-alignment-whole-track-and-video-check.md)
-closeout (2026-09-30).
+From the whole-track audio alignment plan's closeout (2026-09-30). The plan,
+`docs/plans/2026-09-25-audio-alignment-whole-track-and-video-check.md`, was
+removed in `ec86e357`; read it from git history.
 
 - **Windows portable proof (release gate).** Run the retimed, motion-selected
   alignment path and the new `[runtime] memory_limit_mb` setting in the Windows
@@ -37,9 +38,8 @@ closeout (2026-09-30).
 
 ## Audio Alignment: Region-Limited Automatic Selection
 
-Follow-up to the
-[whole-track audio alignment plan](plans/2026-09-25-audio-alignment-whole-track-and-video-check.md)
-(A4a, V3a, V5a). This is not approved scope: it needs its own plan before
+Follow-up to the whole-track audio alignment plan (A4a, V3a, V5a), which is in
+git history before `ec86e357`. This is not approved scope: it needs its own plan before
 implementation, and it should wait for that plan's U5 real-media results to show how
 often competing offsets occur.
 

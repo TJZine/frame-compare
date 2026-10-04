@@ -8,8 +8,6 @@ from pathlib import Path
 import pytest
 
 from frame_compare.analysis.types import (
-    FrameMetrics,
-    MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
 )
@@ -25,7 +23,6 @@ from frame_compare.orchestration.execution import (
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
-    ConfirmSlowpicsUploadPhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
     MetadataPrefetch,
@@ -37,24 +34,19 @@ from frame_compare.orchestration.execution_types import (
 from frame_compare.orchestration.phase_output_application import apply_phase_output
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.types import WorkspacePaths
 
-from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state
-from .phase_task_helpers import _context, _render_artifacts
+from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state, execution_context
+from .phase_task_helpers import _context, _frame_metrics, _render_artifacts, _workspace
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     tmp_path: Path,
 ) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
 
     config = ConfigSchema()
@@ -116,66 +108,14 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     assert forced_align_phase.warn_only is False
 
 
-def test_build_execution_phase_plan_moves_report_before_publish_for_confirmed_upload(
-    tmp_path: Path,
-) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
-    config = ConfigSchema()
-    config.slowpics.auto_upload = True
-    config.slowpics.confirm_upload_after_report = True
-
-    prep = PrepState(
-        workspace=workspace,
-        config=config,
-        input_videos=[tmp_path / "ref.mkv"],
-        analysis_selection_domain="test-selection-domain",
-        clips=[clip_state(tmp_path / "ref.mkv", label="Reference")],
-        artifacts=RunArtifacts(),
-        metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=[],
-        preflight_duration=0.0,
-        load_sources_start=0.0,
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-    )
-
-    plan = build_execution_phase_plan(
-        request=RunRequest(root=tmp_path),
-        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
-        prep=prep,
-        state=ExecutionState(artifacts=prep.artifacts),
-    )
-
-    assert [phase.name for phase in plan.after_align] == [
-        "render",
-        "metadata",
-        "report",
-        "confirm_slowpics_upload",
-        "publish",
-        "post_report_cleanup",
-    ]
-
-
 def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     tmp_path: Path,
 ) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     state = ExecutionState(artifacts=RunArtifacts())
 
@@ -234,24 +174,18 @@ def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_
 
 
 def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=ConfigSchema(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
     breakdown = SelectionBreakdown(user=[0], random=[66])
@@ -276,24 +210,18 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
 
 
 def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=ConfigSchema(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["preflight warning"]))
     stale_warning = "frame selection: dropped user frame(s) outside trims/windowing: 4"
@@ -310,15 +238,13 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
             selected_frames=[4, 20],
             selection_breakdown=SelectionBreakdown(user=[4], random=[20]),
             metrics_cache_hit=False,
-            analysis_metrics=FrameMetrics(
+            analysis_metrics=_frame_metrics(
                 luminance=[0.5],
                 motion=[0.0],
-                metadata=MetricsMetadata(
-                    frame_count=1,
-                    fps=Fraction(24, 1),
-                    config_fingerprint="test",
-                    clips=[],
-                ),
+                frame_count=1,
+                fps=Fraction(24, 1),
+                config_fingerprint="test",
+                clips=[],
             ),
             warnings=["accepted override warning"],
             replaces_frame_plan_selection=True,
@@ -330,60 +256,19 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
     assert state.frame_plan_warnings == []
 
 
-def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
-    from frame_compare.orchestration.execution_types import ReportPhaseOutput
-
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
-    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
-        config=ConfigSchema(),
-        workspace=workspace,
-        reference=reference,
-        comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-    )
-    state = ExecutionState(artifacts=RunArtifacts())
-    report_path = tmp_path / "report.html"
-
-    apply_phase_output(
-        ctx=ctx,
-        state=state,
-        output=ReportPhaseOutput(report_path=report_path, report_succeeded=True),
-    )
-
-    assert state.artifacts.report_path == report_path
-    assert state.artifacts.report_succeeded is True
-
-
 def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=ConfigSchema(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
     uploaded = tmp_path / "screenshots" / "reference.png"
@@ -414,64 +299,19 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
     assert state.artifacts.post_upload_actions == (shortcut, webhook)
 
 
-def test_apply_phase_output_records_slowpics_confirmation_status_and_warnings(
-    tmp_path: Path,
-) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
-    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
-        config=ConfigSchema(),
-        workspace=workspace,
-        reference=reference,
-        comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-    )
-    state = ExecutionState(artifacts=RunArtifacts())
-
-    apply_phase_output(
-        ctx=ctx,
-        state=state,
-        output=ConfirmSlowpicsUploadPhaseOutput(
-            status="report_unavailable",
-            warnings=["slow.pics upload skipped because report confirmation was unavailable"],
-        ),
-    )
-
-    assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
-    assert state.warnings == [
-        "slow.pics upload skipped because report confirmation was unavailable"
-    ]
-
-
 def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=ConfigSchema(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
     render = _render_artifacts(
@@ -490,25 +330,19 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
 
 
 def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -> None:
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     comparison = clip_state(tmp_path / "encode_b.mkv", label="Encode B")
-    ctx = RunContext(
+    ctx = execution_context(
         config=ConfigSchema(),
         workspace=workspace,
         reference=reference,
         comparisons=[comparison],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
 
@@ -538,29 +372,23 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     class UnknownPhaseOutput:
         pass
 
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir=None,
+        screenshots_subdir="screenshots",
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=ConfigSchema(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     state = ExecutionState(artifacts=RunArtifacts())
 
     with pytest.raises(TypeError, match="UnknownPhaseOutput"):
-        apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]
+        apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]  # Exercise rejection of an unsupported carrier.
 
 
 @pytest.mark.anyio

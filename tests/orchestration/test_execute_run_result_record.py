@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Never
 
 import pytest
 
@@ -14,22 +14,22 @@ from frame_compare.orchestration.errors import NoVideosFoundError
 from frame_compare.services.run_result_record import read_run_result
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
-    create_config,
     create_video_files,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 
 class FailingVSLoader:
     def __init__(self, error: RuntimeError) -> None:
         self.error = error
 
-    def load(self, _path: Path) -> object:
+    def load(self, path: Path) -> Never:
+        del path
         raise self.error
 
-    def ensure_core(self) -> object:
+    def ensure_core(self) -> Never:
         raise AssertionError("not reached")
 
 
@@ -55,15 +55,13 @@ def _request(root: Path) -> RunRequest:
 
 
 def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     result = asyncio.run(
         execute_run(
             _request(tmp_path),
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
-            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
         )
     )
 
@@ -78,7 +76,7 @@ def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
 def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     wall_times = iter(
         (
@@ -93,7 +91,7 @@ def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
             _request(tmp_path),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                ffmpeg_runner=FakeFFmpegRunner(),
                 clock=lambda: next(wall_times),
                 monotonic_timer=AdvancingTimer(step=0.25),
             ),
@@ -115,7 +113,7 @@ def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
 def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identical(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("secret=/Users/private?token=abc")
 
@@ -124,8 +122,8 @@ def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identi
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    vs_loader=FailingVSLoader(original),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )
@@ -146,7 +144,7 @@ def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identi
 def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
     tmp_path: Path,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("loader failed")
     wall_times = iter(
@@ -162,8 +160,8 @@ def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    vs_loader=FailingVSLoader(original),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                     clock=lambda: next(wall_times),
                     monotonic_timer=AdvancingTimer(step=0.5),
                 ),
@@ -187,7 +185,7 @@ def test_failure_before_reservation_creates_no_result(tmp_path: Path) -> None:
 
 
 def test_empty_input_failure_before_reservation_creates_no_result(tmp_path: Path) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     (tmp_path / "comparison_videos").mkdir()
 
     with pytest.raises(NoVideosFoundError):
@@ -196,37 +194,11 @@ def test_empty_input_failure_before_reservation_creates_no_result(tmp_path: Path
     assert list(tmp_path.rglob("run_result.toml")) == []
 
 
+@pytest.mark.parametrize("logger_fails", [False, True], ids=["writer", "writer-and-logger"])
 def test_completed_result_write_failure_is_warning_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, logger_fails: bool
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
-    create_video_files(tmp_path / "comparison_videos", "source.mkv")
-
-    def fail_write(_run_dir: Path, _record: object) -> None:
-        raise PermissionError("secret-path")
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        fail_write,
-    )
-    result = asyncio.run(
-        execute_run(
-            _request(tmp_path),
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
-            ),
-        )
-    )
-
-    assert result.success is True
-    assert result.warnings == ["history: run result could not be recorded"]
-    assert list(tmp_path.rglob("run_result.toml")) == []
-
-
-def test_completed_result_write_and_logger_failure_are_warning_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     def fail_write(_run_dir: Path, _record: object) -> None:
@@ -236,50 +208,58 @@ def test_completed_result_write_and_logger_failure_are_warning_only(
         raise RuntimeError("logger failure")
 
     monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        fail_write,
+        "frame_compare.orchestration.run_result_lifecycle.write_run_result", fail_write
     )
-    monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.log.warning",
-        fail_log,
-    )
-
+    if logger_fails:
+        monkeypatch.setattr(
+            "frame_compare.orchestration.run_result_lifecycle.log.warning", fail_log
+        )
     result = asyncio.run(
         execute_run(
             _request(tmp_path),
             deps=RunDependencies(
-                vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
+                vs_loader=FakeVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
             ),
         )
     )
 
     assert result.success is True
     assert result.warnings == ["history: run result could not be recorded"]
+    assert list(tmp_path.rglob("run_result.toml")) == []
 
 
-@pytest.mark.parametrize("control_error", [KeyboardInterrupt(), SystemExit(2)])
-def test_completed_result_process_control_write_failure_propagates(
+@pytest.mark.parametrize(
+    ("execution_fails", "control_error"),
+    [
+        pytest.param(False, KeyboardInterrupt(), id="completed-interrupt"),
+        pytest.param(False, SystemExit(2), id="completed-exit"),
+        pytest.param(True, KeyboardInterrupt(), id="failed-interrupt"),
+    ],
+)
+def test_result_process_control_write_failure_propagates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    execution_fails: bool,
     control_error: BaseException,
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     def fail_write(_run_dir: Path, _record: object) -> None:
         raise control_error
 
     monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        fail_write,
+        "frame_compare.orchestration.run_result_lifecycle.write_run_result", fail_write
     )
-
+    loader = FailingVSLoader(RuntimeError("original")) if execution_fails else FakeVSLoader()
     with pytest.raises(type(control_error)) as raised:
         asyncio.run(
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FakeVSLoader(), ffmpeg_runner=cast(Any, FakeFFmpegRunner())
+                    vs_loader=loader,
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )
@@ -290,7 +270,7 @@ def test_completed_result_process_control_write_failure_propagates(
 def test_failed_result_write_failure_preserves_original_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("original")
 
@@ -306,8 +286,8 @@ def test_failed_result_write_failure_preserves_original_exception(
             execute_run(
                 _request(tmp_path),
                 deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    vs_loader=FailingVSLoader(original),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )
@@ -315,40 +295,10 @@ def test_failed_result_write_failure_preserves_original_exception(
     assert raised.value is original
 
 
-def test_failed_result_process_control_write_failure_propagates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
-    create_video_files(tmp_path / "comparison_videos", "source.mkv")
-    original = RuntimeError("original")
-    interrupt = KeyboardInterrupt()
-
-    def interrupt_write(_run_dir: Path, _record: object) -> None:
-        raise interrupt
-
-    monkeypatch.setattr(
-        "frame_compare.orchestration.run_result_lifecycle.write_run_result",
-        interrupt_write,
-    )
-
-    with pytest.raises(KeyboardInterrupt) as raised:
-        asyncio.run(
-            execute_run(
-                _request(tmp_path),
-                deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),  # type: ignore[arg-type]
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
-                ),
-            )
-        )
-
-    assert raised.value is interrupt
-
-
 def test_failure_after_alignment_records_known_selected_frame_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("post-alignment failure")
 
@@ -362,7 +312,7 @@ def test_failure_after_alignment_records_known_selected_frame_count(
                 _request(tmp_path),
                 deps=RunDependencies(
                     vs_loader=FakeVSLoader(),
-                    ffmpeg_runner=cast(Any, FakeFFmpegRunner()),
+                    ffmpeg_runner=FakeFFmpegRunner(),
                 ),
             )
         )

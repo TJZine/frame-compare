@@ -1,66 +1,55 @@
 # Engineering Runbook
 
-This is the canonical operating runbook for Frame Compare.
+Specialist verification and release procedures for Frame Compare.
 
 ## Entrypoint
 
-`AGENTS.md` owns the repo entrypoint map.
+Start at [`AGENTS.md`](../AGENTS.md) and the repository profile
+[`.agents/project.md`](../.agents/project.md). The shared `develop-code`,
+`design-code`, `review-code`, and `verify-code` skills own general methodology;
+`maintain-workflow` is for explicitly requested maintenance. These are conditional
+responsibilities, not mandatory sequential stages.
 
-If you land in this document directly, use it as the operating policy, then consult
-`docs/current-architecture.md`, `docs/current-cli-contract.md`, `importlinter.ini`, and
-`pyproject.toml` as needed.
-Use `docs/DECISIONS.md` only for historical context.
+This runbook owns the detailed verification, deployment, and release procedures
+below. Load the applicable section, not the whole document by default.
 
 ## Repo Stance
 
-Frame Compare operates as a CLI-first packaged Python app with some importable modules.
-
-Default public/stability policy:
-
-- CLI commands, flags, exit behavior, and documented config behavior are the public surface.
-- Generated release artifacts and installer/update commands are public surfaces.
-- Importable package modules are convenience-only unless the repo explicitly documents a supported import contract.
-
-If a task needs a broader compatibility promise, the maintainer must confirm it in the task or decision log before implementation.
+Frame Compare is a CLI-first packaged Python application. The repository profile
+owns compatibility scope, product obligations, and local test-design guidance.
+Existing implementation structure may be redesigned within the authorized task;
+preserve or explicitly change the corresponding product contracts and proof.
 
 ## Authority Surfaces
 
-- `AGENTS.md`: short entrypoint map only
-- `.agents/rules/general-guidelines.md`: Antigravity-specific entrypoint shim only
-- `docs/ENGINEERING_RUNBOOK.md`: workflow, verification, planning, review, handoff
-- `docs/current-architecture.md`: present-day architecture truth
-- `docs/current-cli-contract.md`: present-day CLI command, flag, and persistence contract
-- `docs/supported-media-runtime.md`: supported media component matrix, provenance, licensing, and native-runtime update boundary
-- `docs/DECISIONS.md`: decision log and historical exceptions
-- `docs/api.md`: generated reference, not a stability promise by itself
-- `.codex/review-context.md`: repo review profile for `suggestion-review`
-  and `pr-commit-review`
-- `README.md`: product overview, install, quickstart
-- `CONTRIBUTING.md`: contributor onboarding and PR mechanics
-- `docs/plans/**`: reference-only unless the file has the required search-exclusion
-  front matter followed by `Status: Active`
-- `.codex/cache/**`: local cache material only, never current authority
+- `AGENTS.md`: concise agent entrypoint; `CLAUDE.md` imports it.
+- `.agents/project.md`: local product obligations, source routes, common command
+  entry points, and test-policy guidance for the shared skills.
+- Shared skills: general implementation, design, review, diagnosis, and evidence
+  procedures. Install one canonical copy per host.
+- `docs/ENGINEERING_RUNBOOK.md`: complete specialist verification and release
+  procedures; these retain their platform and authorization requirements.
+- `docs/current-architecture.md`: current ownership, runtime flow, and boundaries.
+- `docs/current-cli-contract.md`: documented CLI/config/output behavior.
+- `docs/supported-media-runtime.md`: selected native-runtime matrix, provenance,
+  licensing, and compatibility boundary.
+- `docs/DECISIONS.md`: historical rationale; `docs/api.md`: generated reference,
+  not a compatibility promise by itself.
+- `CONTRIBUTING.md`: contributor setup and PR mechanics; `README.md`: user overview.
+- `docs/plans/**`: task memory activated under Planning And Handoff below.
+- Host configuration: tools, permissions, runtime capabilities, and model settings.
+  It must not recreate the retired repository role/skill policy.
 
-Do not create a second runbook, second architecture summary, or second current CLI contract.
+The old `.codex/review-context.md` and repository skill launchers are retired. Local
+or global review consumers must use `.agents/project.md` through `review-code`.
+Do not assume a legacy global suite can interpret a newly invented redirect schema.
+Observed code describes current behavior; it does not by itself decide intended
+behavior when the task or a supported contract requires something different.
 
 ## Command Canon
 
-Bootstrap:
-
-```bash
-uv sync --group dev --extra vsview --frozen
-```
-
-Core local gates:
-
-```bash
-uv run --no-sync pyright --warnings
-uv run --no-sync ruff check .
-uv run --no-sync ruff format --check .
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-uv run --no-sync pytest -q
-uv run --no-sync lint-imports --config importlinter.ini
-```
+Common contributor setup and Python check entry points are in `.agents/project.md`.
+The recipes below supply the additional documentation, runtime, and release proof.
 
 API documentation regeneration and drift check:
 
@@ -152,11 +141,11 @@ or different fingerprints, before any unsafe dependency override; each refusal
 requires a complete portable bundle reinstall. Crossing a media-runtime
 fingerprint also requires a complete portable bundle reinstall.
 
-Locked runtime dependency audit (PowerShell):
+Locked dependency audit (PowerShell):
 
 ```powershell
 $auditRequirements = Join-Path $env:TEMP "frame-compare-audit-requirements.txt"
-uv export --frozen --no-dev --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
+uv export --frozen --all-groups --all-extras --no-emit-project --format requirements.txt --output-file $auditRequirements
 uv run --no-sync pip-audit --strict --require-hashes --disable-pip --progress-spinner off --timeout 20 --vulnerability-service pypi --requirement $auditRequirements
 Remove-Item -LiteralPath $auditRequirements
 ```
@@ -170,21 +159,18 @@ owner, rationale, expiry, and removal condition; do not add an unrecorded
 
 ## Verification Policy
 
-Choose verification from the behavior and contracts changed, using the paths below
-as discovery aids. Comments, formatting, and demonstrably nonbehavioral edits may
-use Fast Local Sanity even in a hotspot or runtime directory; explain briefly why
-the broader gate adds no relevant proof. Uncertain runtime, public-contract, or
-release impact still requires the matching stronger gate.
+Use `verify-code` and `.agents/project.md` to identify the changed claims and select
+the relevant routes below. Keep proof tied to the actual source, inputs, dependency
+set, and environment. Reuse inspected results while those conditions remain valid;
+do not repeat a clean check solely because another workflow stage began.
 
-Inspect affected owners, callers, contracts, and existing tests before narrowing a
-gate. Read the relevant authority sections first and broaden when dependencies or
-invariants remain unclear. Do not omit a changed boundary to reduce context.
-
-Verification remains current when its output was inspected and the checked code,
-inputs, dependencies, and relevant environment are unchanged. Reuse that evidence,
-including a worker's observed results. Rerun affected checks after integration or
-other changes invalidate it; run additional integration proof for interactions not
-covered by unit results. Do not repeat an unchanged clean gate solely at closeout.
+Full native runs use the measured local count of four workers with `--dist loadgroup`.
+Focused selections, including single-test runs, may stay serial; `addopts` does not
+enable parallelism. Native CI uses `-n auto --dist loadgroup` because runner core
+counts differ. Windows portable CI stays serial. New tests must be parallel-safe:
+use `tmp_path` and `monkeypatch`, avoid fixed paths or ports, and use `xdist_group`
+only with a stated concrete reason. Existing groups serialize browser tests sharing
+a Chrome profile and the alignment-u4 module sharing session-generated media.
 
 ### Fast Local Sanity
 
@@ -220,7 +206,7 @@ uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
 
@@ -286,6 +272,10 @@ owner is outside a listed directory:
 - FFmpeg/ffprobe execution in `src/frame_compare/services/alignment_audio.py`
 - shared process behavior in `src/frame_compare/utils/subproc.py` affecting media calls
 - integration tests that validate real VS/FFmpeg behavior
+- `tests/e2e/` media-tier scenarios
+- behavior changes in `orchestration/`, `services/` or `analysis/` that change what a
+  media-tier scenario observes: run output, selected frames, screenshots, alignment,
+  cache or report payload
 
 Pure calculations or serialization in these owners use the applicable Python gate
 when the native execution contract is unchanged. The test suite may mock missing
@@ -297,9 +287,30 @@ Canonical command for the default Docker media runtime:
 bash tools/verify_docker_integration.sh
 ```
 
+The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
+10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
+Use `--pytest-path tests/e2e` for focused development or scenario proof; it does not
+replace the full gate when the runtime/dependency/media triggers above apply.
+The script builds images by default. After `docker-test` dependency or `uv.lock`
+changes, rebuild before using the new plugin/runtime; `--no-build` reuses only
+known-current images.
+
+The verifier exports `FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache`
+(host `generated/test-media-cache`). Only u4 media is cached, under
+`<cache>/<generator>/<key>/`; E2E media is regenerated. The SHA-256 key includes the
+exact generator source and complete `ffmpeg -version` output, obtained with an
+explicit timeout. Generation publishes by same-filesystem rename and prunes only
+that generator's old keys. Tests consume temporary symlinks so source indexes stay
+outside the cache. Unset the variable to generate in temporary storage as before.
+Run the verifier one at a time from a checkout: overlapping pruning is unsupported.
+No CI cache was added; Docker CI retains `--no-cache` and cold regeneration receives
+no warm-cache speedup.
+
 If this path cannot be run locally, record it as documented-only until an observed
 matching-SHA run of `.github/workflows/docker-integration.yml` supplies the proof.
-Inspect its event/path filters: a PR need not trigger it for every relevant owner.
+On pull requests to any base branch, the job runs when changes
+touch `src/**`, `tests/**`, the project lock/config files, Docker files, verifier
+scripts, or the workflow itself.
 Obtain an authorized manual run when required; an absent or skipped CI job is not
 successful proof.
 
@@ -552,210 +563,41 @@ fully verified.
 
 ### Workflow And Documentation Verification
 
-For `AGENTS.md`, repo-local skills, role config, or workflow-only runbook changes,
-use the smallest structural proof that covers the edited surface:
+For entrypoints, `.agents/project.md`, host configuration, review-tool instructions,
+or workflow-only prose, use structural proof for the edited surface: run
+`git diff --check`, parse edited TOML/YAML/JSON, and resolve changed references.
+Confirm host discovery for a new import or installed shared skill. Exercise
+representative matching and adjacent nonmatching requests when routing changes.
 
-Always run `git diff --check`. Parse edited TOML or YAML with the repo's existing
-tooling, and inspect changed skill, role, and launcher paths or references
-directly. Run `uv run --no-sync pytest -q tests/test_cli_contract_docs.py` when
-`AGENTS.md`, the current CLI authority links, or CLI contract documentation
-changes.
+Run `uv run --no-sync pytest -q tests/test_cli_contract_docs.py` when the CLI
+documentation contract it protects changes. It does not establish every Markdown
+link or skill trigger. Do not run the product suite solely because workflow prose
+changed. Product behavior, executable tooling, and runtime/release changes still
+need their applicable proof; no workflow edit may silently weaken that claim.
 
-Do not create a generalized workflow verifier unless repeated, measured failures
-justify its maintenance cost. Do not run the full product suite solely because
-workflow prose changed. Use full verification when the same change also modifies
-product code, executable tooling, architecture, or a public CLI/config contract.
-Corrections to an ownership description that only reflect existing code use this
-structural route; an intentional architecture or public behavior change still uses
-the stronger gate. For skill edits, validate front matter and references, then check
-representative matching and adjacent nonmatching tasks against the description and
-instructions. Structural validity alone does not establish good task routing.
+## Shared Workflow
 
-## Risk Tiers
+`develop-code` owns task control and integration. Use `design-code` for consequential
+domain/interface decisions, `review-code` for requested or useful independent
+assessment, and `verify-code` for diagnosis and evidence. Do not create extra
+planner, reviewer, or closeout passes solely to satisfy a role catalogue.
 
-### Low Risk
+Run independent investigation, checks, and implementation concurrently when useful.
+Parallel writers require isolated worktrees or explicit disjoint shared-tree write
+ownership, one Git/integration owner, and stable inputs for checks. Serialize real
+dependencies, overlapping edits, and shared-runtime conflicts, including the Docker
+verifier's single-checkout media-cache pruning. Integrate and verify interactions
+that isolated branch results did not cover.
 
-- docs-only updates
-- comments
-- non-behavioral cleanup outside hotspots
-
-No durable plan required. Use fast local sanity.
-
-### Medium Risk
-
-- targeted module changes
-- new tests
-- non-breaking internal refactors
-
-Use a lightweight task plan in the current task or PR. Use logic verification.
-
-### High Risk
-
-- CLI or config behavior changes
-- Docker/runtime changes
-- Windows portable/release-path changes
-- changes to hotspots
-- changes to external integrations
-- architecture or CLI/config contract authority changes tied to product behavior
-
-Require:
-
-- explicit task plan before editing
-- same-pass updates to the relevant authority docs
-- full verification, plus Docker or Windows verification if those surfaces changed
-
-For single-session work, including single-session high-risk work, the default plan can
-live inline in the current task, review, or PR. Activate `docs/plans/` only when the
-work needs a durable cross-session handoff or the maintainer explicitly asks for a
-tracked plan file.
-
-## Orchestration Policy
-
-Use the lightest workflow that still protects the outcome:
-
-- Low risk: one agent, focused proof, and a local diff audit.
-- Medium risk: one agent plans and implements. Add one independent final review
-  only when the change is novel, broad, weakly covered, or hard to validate.
-- High risk: explicit plan, implementation, and risk-matched verification. Add one
-  independent review when a consequential risk needs a second assessment under
-  Review Policy; the tier alone does not require a reviewer.
-- Separate planner: only for ambiguous seams, cross-session work, or genuinely
-  large multi-boundary changes.
-- Repeated evaluator/reviewer loops: only after a material finding or measured
-  evidence that another pass improves the result.
-
-Delegate independent read-heavy exploration, documentation research, log analysis,
-or long waits when useful. Parallel writes require disjoint write boundaries and an
-approved integration plan; require exact file lists only when concurrent writers or
-sensitive shared surfaces need collision protection. Use `worker_luna` by default
-for bounded delegated implementation when the outcome, owner seam, contracts,
-acceptance criteria, and direct proof are clear, including work that needs
-repository comprehension, exact-file discovery, and routine local coding judgment.
-Use `worker` when the same settled bounded unit needs material local design
-judgment, cross-boundary comprehension, complex diagnosis, or proof interpretation.
-Return unresolved product, ownership, public-contract, architecture, or proof
-decisions to planning. Plans describe risk and constraints rather than permanently
-binding a model; the controller selects the current role at dispatch, reviews the
-diff, and confirms current verification under Verification Policy. Keep delegation
-depth shallow. An approved write boundary may be established by the main agent
-within the user's authorized task; it is not a separate user approval gate.
-
-For genuinely large multi-unit work, explicitly use the
-`large-task-orchestration` skill. The main task remains the authoritative
-controller and integrates checkpointed, decision-complete units. Reuse a completed
-worker only for adjacent work with the same owner and contracts; use a fresh worker
-when the seam or assumptions change, and a fresh read-only reviewer for required
-independent final review. Give that reviewer a bounded task/diff/proof/risk packet
-without the implementation transcript. Treat six threads as a cap rather than a
-target and keep delegation depth at one.
-
-## Production Quality Guardrails
-
-Every non-trivial code change should be checked against these criteria before
-closeout. Passing tests are required evidence, not the full definition of done.
-
-- Correctness first: preserve documented CLI/config behavior, exit codes, generated
-  output contracts, filesystem effects, and release/runtime behavior unless the task
-  explicitly changes them.
-- Architecture fit: keep behavior in the current owner when it shares the same
-  invariants, state, lifecycle, and reason to change. Extract only a distinct
-  present-day responsibility; respect `importlinter.ini`, and reject both hotspot
-  accretion and line-count-driven pass-through abstractions.
-- Boundary hygiene: keep config/env interpretation, filesystem persistence, HTTP
-  integrations, subprocess/runtime details, report generation, and packaging policy
-  behind their documented owners.
-- Contract discipline: one public shape per operation, deterministic JSON/TOML/report
-  output, no silent public-surface drift, and same-pass updates to authority docs when
-  public behavior changes.
-- Maintainability: prefer the simplest correct design that matches existing patterns;
-  apply DRY where duplication is harmful, avoid premature abstractions, speculative
-  options, dead code, debug leftovers, commented-out code, misleading names, and
-  unnecessary indirection.
-- YAGNI: every new abstraction, option, fallback, retry, cache, or edge-case branch
-  must serve a current requirement, reachable input, observed failure, or real
-  trust/runtime boundary. Do not encode hypothetical futures.
-- Compatibility restraint: do not add legacy bridges, compatibility shims, fallback API
-  variants, or broad migration paths unless the maintainer explicitly approves them.
-- Test quality: prove behavior through public seams where practical, avoid brittle
-  snapshots and private implementation probes, and add focused regression or contract
-  coverage when existing tests do not protect the changed surface.
-- Runtime and release honesty: Docker, FFmpeg/VapourSynth, browser-open, Windows
-  portable, and updater/signing paths must be verified through the runbook commands
-  when touched; if the local environment cannot run a required path, record it as
-  documented-only and do not claim full verification.
-- Exception records: intentional departures from these guardrails need an owner, a
-  reason, verification evidence, and a removal or revisit trigger.
-
-## Task Routing Matrix
-
-Use this as the default routing shortcut before exploring deeper:
-
-| Task family | Primary authority | Typical owner files | Default tier | Default verification |
-| --- | --- | --- | --- | --- |
-| CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli/entry.py`, `src/frame_compare/config/overrides.py`, focused `tests/cli/test_*.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
-| Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
-| Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
-| Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose*.yml`, `tools/verify_docker_*.sh`, `.github/workflows/docker-integration.yml`, Docker workflow/contract tests, runtime integration tests | High | Full verification plus Docker/runtime verification |
-| Report viewer behavior | `docs/current-architecture.md` Report Viewer section | `services/report/**`, Node harnesses, `tests/browser/` | High | Full verification plus relevant browser/visual proof; reuse browser tests already exercised |
-| Python distribution contents or entry points | this runbook + `pyproject.toml` | build settings, bundled assets, `scripts/verify_distribution.py`, CI `package` job | High | Full verification plus distribution verification; add platform gates only for affected deployments |
-| Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
-| Workflow-only authority change | this runbook | `AGENTS.md`, repo-local skills, `.codex/config.toml`, `.codex/agents/**`, workflow-only runbook sections | Medium | Workflow/documentation verification |
-| Architecture or public contract authority change | affected authority doc | `docs/current-architecture.md`, `docs/current-cli-contract.md`, related product/tests | High | Full verification |
-
-### Continue Or Escalate
-
-Carry authorized work through implementation, applicable verification, and repair
-of failures caused by the change. Resolve routine ownership, implementation, and
-verification questions from current source, tests, relevant authority sections,
-and existing task decisions. Record consequential conclusions briefly.
-
-Ask the maintainer only when investigation leaves a consequential choice outside
-the established task: product intent, a compatibility promise, deployment/runtime
-model, a security or data-loss boundary, or irreconcilable authoritative guidance.
-Existing task authorization remains valid. Explicit release/production approval
-boundaries elsewhere in this runbook still apply.
-
-Skill guidance must not introduce an approval gate that its instructions do not
-require or request authorization already given for the same action. Honor explicit
-user limits, including proposal-only work and approval before editing. If an
-instruction requires a pause, link the exact file, quote the relevant instruction,
-and explain the unresolved decision. Distinguish an explicit requirement from an
-interpretation of guidance before escalating.
-
-Workers return decisions outside their assigned boundary to the main agent. The
-main agent resolves them within the user's authorization before escalating to the
-user. Continue independent work while a genuinely required decision is pending.
-
-Incorporate mid-task corrections into the ongoing objective and preserve completed
-work and still-applicable constraints. A status question does not cancel the task:
-answer it briefly and continue. Replace or stop the objective when the user
-explicitly redirects or cancels it. Continue independent authorized work while
-awaiting necessary input; elapsed time does not supply an answer or approval.
-
-### Task Communication
-
-Lead with outcomes and explain consequential decisions, verification evidence,
-and material limitations in plain language. Keep progress updates focused on new
-findings and decisions rather than routine process narration. Use concise prose
-and add lists, tables, or headings only when they make the information easier to
-understand.
-
-## Discrepancy Handling
-
-- `AGENTS.md` controls entrypoint order.
-- `.agents/rules/general-guidelines.md` is an Antigravity shim and must defer to
-  `AGENTS.md` plus this runbook when instructions conflict.
-- Observed code, config, and successfully executed commands outrank stale prose in
-  `docs/current-architecture.md`, `docs/current-cli-contract.md`, `README.md`,
-  `CONTRIBUTING.md`, `docs/DECISIONS.md`, historical plans, and cached review material.
-- Investigate doc/code mismatches using the task and current evidence. Ask only
-  when a consequential intended contract remains unresolved; stale prose alone
-  does not require confirmation.
-- Correct stale active docs in the same pass once the current-state behavior is clear.
+Model identifiers and effort belong to the installed host configuration, not to
+permanent repository policy. Select capability against the task and available
+allowance; configuration presence is not proof that a capability is available.
 
 ## Planning And Handoff
 
-`docs/plans/` is inactive by default.
+`design-code` owns planning method. The following repository-specific lifecycle
+keeps durable task memory out of user-documentation search. `docs/plans/` is
+inactive by default.
 
 It becomes authoritative only when all of these are true:
 
@@ -786,74 +628,17 @@ Rules:
 - Only one active plan should exist per workstream.
 - When the work closes, change the marker to `Status: Historical` or move the document to historical/reference context in the same pass.
 
-## Review Policy
-
-Review should prioritize:
-
-- behavioral regressions
-- contract drift at the CLI/config/release-artifact surface
-- layer violations
-- filesystem ownership leaks
-- undocumented authority drift
-
-Changes in `orchestration/coordinator.py`, `errors.py`, `services/report/**`, or packaging workflows should receive extra scrutiny because they are current hotspots or blast-radius multipliers.
-
-Production LOC and named hotspots are attention signals. For behavior or ownership
-changes in a large owner, inspect enough of its lifecycle, callers, and invariants
-to judge cohesion; expand to the full owner when needed. Record a brief disposition
-when the change adds or moves responsibilities. Neither the 500/800-line thresholds
-nor a file's name requires an independent review or an extraction by itself.
-
-Use one independent review when requested or when a consequential unresolved risk
-benefits from a second assessment: novel security/data-loss boundaries, complex
-concurrency or native lifetime changes, broad contract migrations, or weak proof
-of changed behavior. State the concrete reason before dispatch. Small, well-proved
-changes do not require a reviewer because of their location or risk label alone.
-Review a plan separately only when its seam or public contract is still expensive
-to get wrong. Do not require both same-reviewer closure and a fresh clean review
-for an unchanged artifact.
-
-## Subagent Transparency
-
-When dispatching a subagent, resolve its `config_file` from `.codex/config.toml`
-and record the selected role and resolved TOML path; role keys need not match file
-names. At task closeout, list each role used with
-the `model` and `model_reasoning_effort` read from that TOML. The child role's
-`CONFIGURED ROLE` opening line is a visible confirmation of the selected role;
-the TOML remains the authoritative configuration and avoids duplicating model
-names in prompts or workflow docs.
-
 ## Documentation Freshness Triggers
 
-Update `docs/current-architecture.md` in the same pass when changing:
+Update `docs/current-architecture.md` when a scoped change alters composition,
+runtime ordering, ownership, persistence, or external integration boundaries.
+Update `docs/current-cli-contract.md` when its documented product behavior changes.
 
-- composition roots
-- runtime phase ordering
-- module boundaries
-- persistence ownership
-- external integrations
-- hotspot file structure in a meaningful way
+Update `.agents/project.md` for changed local facts, common command routes, or
+test-policy decisions. Update this runbook for changed specialist procedures,
+verification requirements, plan-search metadata, or release authorization. Update
+the corresponding host or review-tool adapter when its discovery semantics change.
+Shared methodology belongs in the shared skills, not another repository copy.
 
-Update this runbook in the same pass when changing:
-
-- verification policy
-- risk-tier routing
-- plan activation rules
-- public API stance
-- release-path workflow
-
-Update or remove stale references immediately. Do not leave half-live commands in active docs.
-
-## Repo-Specific Anti-Debt Rules
-
-- Keep config and env-var interpretation inside config, CLI command, and preflight/bootstrap owners.
-- Keep HTTP integration at the current external-boundary owners: TMDB lookup behind
-  the metadata facade, publishing, isolated webhook delivery, and diagnostics.
-  The coordinator owns default shared-client creation; callers own injected clients.
-- Use existing atomic-write owners for config and cache persistence paths.
-- Preserve lazy CLI import boundaries that avoid importing VS-heavy modules at CLI import time.
-- Keep cohesive behavior with its current owner. When a hotspot gains a distinct
-  present-day responsibility, move that responsibility to one focused adjacent owner.
-- Do not create thin wrappers, speculative extension points, or extra modules solely
-  to satisfy a file-length threshold.
-- Do not add compatibility shims or legacy bridges unless explicitly requested.
+Correct stale active references in the same change. Historical plans remain history
+and do not require rewriting to resemble the current workflow.

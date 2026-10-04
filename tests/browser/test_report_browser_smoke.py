@@ -33,6 +33,9 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.vs.types import TonemapSettings
 
+# Chrome launches share a profile; keep this module on one xdist worker.
+pytestmark = pytest.mark.xdist_group("browser")
+
 _ONE_PIXEL_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 )
@@ -1039,7 +1042,9 @@ def test_saved_fit_mode_is_reflected_by_fit_radios_on_page_load(
     parser = _InitializedViewerParser()
     parser.feed(completed.stdout)
     assert parser.document_attributes is not None
-    state = json.loads(parser.document_attributes["data-saved-fit-state"])
+    saved_fit_state = parser.document_attributes["data-saved-fit-state"]
+    assert saved_fit_state is not None
+    state = json.loads(saved_fit_state)
     assert state == {"fitMode": fit_mode, "checked": expected_checked, "tabStops": 1}
 
 

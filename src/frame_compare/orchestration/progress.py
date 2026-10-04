@@ -117,17 +117,13 @@ def select_reporter(
     quiet: bool = False,
     json_output: bool = False,
     no_color: bool = False,
-    force_tty: bool | None = None,
 ) -> ProgressReporter:
     """Select the appropriate progress reporter based on CLI flags and environment.
 
     Selection Priority:
     1. quiet=True -> NullProgressReporter
     2. json_output=True -> LogProgressReporter
-    3. force_tty is not None:
-       - True -> RichProgressReporter(no_color=no_color)
-       - False -> PlainProgressReporter
-    4. TTY detection (sys.stdout/sys.stderr isatty):
+    3. TTY detection (sys.stdout/sys.stderr isatty):
        - Interactive -> RichProgressReporter(no_color=no_color)
        - Non-interactive -> PlainProgressReporter
 
@@ -135,7 +131,6 @@ def select_reporter(
         quiet: If True, suppress all progress output.
         json_output: If True, use structured logging instead of interactive bars.
         no_color: If True, disable color in Rich progress output.
-        force_tty: Override TTY detection. None = auto-detect.
 
     Returns:
         An instance implementing the ProgressReporter protocol.
@@ -145,11 +140,6 @@ def select_reporter(
 
     if json_output:
         return LogProgressReporter()
-
-    if force_tty is not None:
-        if force_tty:
-            return RichProgressReporter(no_color=no_color)
-        return PlainProgressReporter()
 
     if stream_is_tty(sys.stdout) or stream_is_tty(sys.stderr):
         return RichProgressReporter(no_color=no_color)

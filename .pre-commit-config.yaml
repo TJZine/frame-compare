@@ -35,5 +35,6 @@ repos:
         require_serial: true
 
 # Note: Pyright is intentionally NOT included here.
-# Per 08-quality-standards.md, type checking is "CI check, blocking" only.
+# .agents/project.md and docs/ENGINEERING_RUNBOOK.md own applicable type-check gates;
+# .github/workflows/ci.yml runs the blocking Pyright check.
 # Running pyright in pre-commit would slow down commits significantly.

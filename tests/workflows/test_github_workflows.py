@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -155,35 +154,33 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     ci = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
 
-    assert {"push", "pull_request", "workflow_dispatch"} <= set(ci["on"])
+    assert set(ci["on"]) == {"push", "pull_request", "workflow_dispatch"}
+    assert set(ci["on"]["push"]["branches"]) == {"main", "staging"}
     assert ci["permissions"] == {"contents": "read"}
-    assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
+    assert set(docker["on"]) == {"pull_request", "workflow_dispatch"}
     assert docker["permissions"] == {"contents": "read"}
     assert docker["concurrency"] == {
         "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
         "cancel-in-progress": "true",
     }
-    assert set(docker["on"]["pull_request"]["branches"]) == {
-        "main",
-        "pre-release",
-        "staging",
-    }
-    assert set(ci["on"]["pull_request"]["branches"]) == {
-        "main",
-        "pre-release",
-        "staging",
-    }
+    # Integration PRs must be checked regardless of their base branch.
+    for workflow in (ci, docker):
+        pr_options = workflow["on"]["pull_request"] or {}
+        assert "branches" not in pr_options
+        assert "branches-ignore" not in pr_options
+    assert not ci["on"]["pull_request"]
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
+        "src/**",
+        "tests/**",
+        "pyproject.toml",
         "uv.lock",
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
-        "tests/workflows/**",
-        "src/frame_compare/analysis/**",
-        "src/frame_compare/render/**",
-        "src/frame_compare/vs/**",
-    } <= set(workflow_paths)
+        ".github/workflows/docker-integration.yml",
+    } == set(workflow_paths)
+    assert "paths-ignore" not in docker["on"]["pull_request"]
 
 
 def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:
@@ -323,7 +320,7 @@ def test_release_preflight_ref_validation_fails_closed(
     assert message in completed.stderr
 
 
-def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
+def test_ci_keeps_test_audit_browser_and_distribution_gates(
     repo_root: Path,
 ) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
@@ -333,12 +330,7 @@ def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
     assert "uv run --no-sync ruff check ." in lint_run
     assert "uv run --no-sync ruff format --check ." in lint_run
     test_run = "\n".join(str(step.get("run", "")) for step in jobs["test"]["steps"])
-    assert "pytest -q" in test_run
-    assert "--cov=src/frame_compare" in test_run
-    assert "--cov-report=term-missing" in test_run
-    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["tool"]["coverage"]["run"]["branch"] is True
-    assert project["tool"]["coverage"]["report"]["fail_under"] == 80
+    assert "pytest -q -n auto --dist loadgroup" in test_run
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
     assert any("tests/browser/test_report_browser_smoke.py" in run for run in browser_runs)

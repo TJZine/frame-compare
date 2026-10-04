@@ -139,159 +139,144 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
     assert "[bold cyan]" not in captured.err
 
 
-def test_emit_frame_alignment_report_noop_without_material_alignment_info(
+@pytest.mark.parametrize(
+    ("comparison", "selected_frames", "json_output", "quiet", "verbose", "present"),
+    [
+        pytest.param(
+            AlignmentReportComparison(
+                label="Encode",
+                alignment_source=None,
+                relative_offset_frames=None,
+                reference_row_zero_source_frame=0,
+                comparison_row_zero_source_frame=0,
+                reference_trim_range=(0, 99),
+                comparison_trim_range=(0, 99),
+            ),
+            [0, 50, 99],
+            False,
+            False,
+            True,
+            [],
+            id="noop_without_material_alignment_info-0",
+        ),
+        pytest.param(
+            AlignmentReportComparison(
+                label="Encode",
+                alignment_source="manual",
+                relative_offset_frames=0,
+                reference_row_zero_source_frame=0,
+                comparison_row_zero_source_frame=0,
+                reference_trim_range=(0, 99),
+                comparison_trim_range=(0, 99),
+            ),
+            [0, 50, 99],
+            False,
+            False,
+            True,
+            [],
+            id="noop_for_zero_offset_alignment_without_trim_change-0",
+        ),
+        pytest.param(
+            AlignmentReportComparison(
+                label="Encode",
+                alignment_source="manual",
+                relative_offset_frames=0,
+                reference_row_zero_source_frame=12,
+                comparison_row_zero_source_frame=8,
+                reference_trim_range=(12, 90),
+                comparison_trim_range=(8, 86),
+            ),
+            [0, 50],
+            False,
+            False,
+            True,
+            [
+                "Frame Alignment",
+                "+0f",
+                "Reference source 12 <-> Encode source 8",
+                "Reference 12..90, Encode 8..86",
+            ],
+            id="renders_zero_offset_trim_change-0",
+        ),
+        pytest.param(
+            AlignmentReportComparison(
+                label="Encode",
+                alignment_source=None,
+                relative_offset_frames=None,
+                reference_row_zero_source_frame=0,
+                comparison_row_zero_source_frame=0,
+                reference_trim_range=(0, 119),
+                comparison_trim_range=(0, 95),
+            ),
+            [0, 50],
+            False,
+            False,
+            False,
+            [],
+            id="noop_for_unequal_lengths_without_alignment-0",
+        ),
+        pytest.param(
+            AlignmentReportComparison(
+                label="Encode",
+                alignment_source="computed",
+                relative_offset_frames=-4,
+                reference_row_zero_source_frame=0,
+                comparison_row_zero_source_frame=4,
+                reference_trim_range=(0, 95),
+                comparison_trim_range=(4, 99),
+            ),
+            [0],
+            False,
+            True,
+            False,
+            [],
+            id="noop_in_quiet_and_json_modes-0",
+        ),
+        pytest.param(
+            AlignmentReportComparison(
+                label="Encode",
+                alignment_source="computed",
+                relative_offset_frames=-4,
+                reference_row_zero_source_frame=0,
+                comparison_row_zero_source_frame=4,
+                reference_trim_range=(0, 95),
+                comparison_trim_range=(4, 99),
+            ),
+            [0],
+            True,
+            False,
+            False,
+            [],
+            id="noop_in_quiet_and_json_modes-1",
+        ),
+    ],
+)
+def test_emit_frame_alignment_report_material_info(
+    comparison: AlignmentReportComparison,
+    selected_frames: list[int],
+    json_output: bool,
+    quiet: bool,
+    verbose: bool,
+    present: list[str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source=None,
-        relative_offset_frames=None,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(0, 99),
-        comparison_trim_range=(0, 99),
-    )
-
     emit_frame_alignment_report(
         stage="after_align",
         comparisons=[comparison],
-        selected_frames=[0, 50, 99],
+        selected_frames=selected_frames,
         alignment_warnings=[],
-        json_output=False,
-        quiet=False,
+        json_output=json_output,
+        quiet=quiet,
         no_color=True,
-        verbose=True,
+        verbose=verbose,
     )
-
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == ""
-
-
-def test_emit_frame_alignment_report_noop_for_zero_offset_alignment_without_trim_change(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source="manual",
-        relative_offset_frames=0,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(0, 99),
-        comparison_trim_range=(0, 99),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[0, 50, 99],
-        alignment_warnings=[],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-        verbose=True,
-    )
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
-
-
-def test_emit_frame_alignment_report_renders_zero_offset_trim_change(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source="manual",
-        relative_offset_frames=0,
-        reference_row_zero_source_frame=12,
-        comparison_row_zero_source_frame=8,
-        reference_trim_range=(12, 90),
-        comparison_trim_range=(8, 86),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[0, 50],
-        alignment_warnings=[],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-        verbose=True,
-    )
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "Frame Alignment" in captured.err
-    assert "+0f" in captured.err
-    assert "Reference source 12 <-> Encode source 8" in captured.err
-    assert "Reference 12..90, Encode 8..86" in captured.err
-
-
-def test_emit_frame_alignment_report_noop_for_unequal_lengths_without_alignment(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source=None,
-        relative_offset_frames=None,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(0, 119),
-        comparison_trim_range=(0, 95),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[0, 50],
-        alignment_warnings=[],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
-
-
-def test_emit_frame_alignment_report_noop_in_quiet_and_json_modes(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source="computed",
-        relative_offset_frames=-4,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=4,
-        reference_trim_range=(0, 95),
-        comparison_trim_range=(4, 99),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[0],
-        alignment_warnings=[],
-        json_output=False,
-        quiet=True,
-        no_color=True,
-    )
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[0],
-        alignment_warnings=[],
-        json_output=True,
-        quiet=False,
-        no_color=True,
-    )
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == ""
+    if present:
+        for text in present:
+            assert text in captured.err
+    else:
+        assert captured.err == ""
 
 
 def test_emit_frame_alignment_report_caps_selected_frame_list(

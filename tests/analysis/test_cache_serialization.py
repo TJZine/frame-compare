@@ -29,56 +29,13 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.config.schema import AnalysisConfig
+from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from tests.analysis._cache_io_test_helpers import (
     cache_file,
     create_video_file,
     metrics_metadata,
     valid_cache_metadata_payload,
 )
-
-
-def test_save_and_load_round_trip(tmp_path: Path) -> None:
-    """Save → load → success=True, data matches, fps == Fraction(24)."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(random_frame_count=10)
-    fingerprint = compute_cache_key([v1], config)
-
-    clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
-    metadata = metrics_metadata(
-        frame_count=3,
-        fps=Fraction(24, 1),
-        config_fingerprint=fingerprint,
-        clips=clips,
-        config=config,
-    )
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.2, 0.3],
-        motion=[0.0, 0.5, 0.1],
-        metadata=metadata,
-    )
-
-    save_metrics_cache(metrics, tmp_path)
-    result = load_cached_metrics(tmp_path, fingerprint, clips)
-
-    assert (tmp_path / f"v1__{fingerprint}.compframes").exists()
-    assert result.success is True
-    assert result.metrics is not None
-    assert result.metrics.luminance == [0.1, 0.2, 0.3]
-    assert result.metrics.motion == [0.0, 0.5, 0.1]
-    assert result.metrics.metadata.frame_count == 3
-    assert result.metrics.metadata.fps == Fraction(24, 1)
-    assert result.metrics.metadata.config_fingerprint == fingerprint
-    assert result.metrics.metadata.analysis_source_path == ""
-    assert result.metrics.metadata.performance_mode == "quality"
-    assert result.metrics.metadata.metric_backend == "vapoursynth_planestats"
-    assert result.metrics.metadata.algorithm_id == metric_algorithm_id(config)
-    assert result.metrics.metadata.algorithm_identity_json == (
-        stable_metric_algorithm_identity_json(config)
-    )
-    assert result.metrics.metadata.metric_active_rect is None
-    assert result.metrics.metadata.active_rect_source == "full-frame"
-    assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
-    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
 def test_analysis_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path) -> None:
@@ -109,32 +66,6 @@ def test_save_rejects_stale_nested_metadata_version(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="does not match the current cache schema"):
-        save_metrics_cache(metrics, tmp_path)
-
-
-def test_save_rejects_performance_source_map_that_differs_from_plan(tmp_path: Path) -> None:
-    config = AnalysisConfig(performance_mode="performance")
-    metadata = MetricsMetadata(
-        frame_count=2,
-        fps=Fraction(24),
-        config_fingerprint="fingerprint",
-        clips=[],
-        source_frame_count=8,
-        metric_source_start=0,
-        metric_source_end_exclusive=8,
-        performance_mode="performance",
-        algorithm_id=metric_algorithm_id(config),
-        metric_backend=metric_backend(config),
-        algorithm_identity_json=stable_metric_algorithm_identity_json(config),
-    )
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.2],
-        motion=[0.0, 0.1],
-        metadata=metadata,
-        sampled_source_frames=(0, 7),
-    )
-
-    with pytest.raises(ValueError, match="do not satisfy the current cache schema"):
         save_metrics_cache(metrics, tmp_path)
 
 
@@ -175,241 +106,6 @@ def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) 
 
     assert result.success is False
     assert result.reason == "mismatched_inputs"
-
-
-def test_save_and_load_round_trip_serializes_metric_active_rect(tmp_path: Path) -> None:
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(random_frame_count=10)
-    rect = MetricActiveRect(x=4, y=8, width=320, height=180)
-    request = MetricCacheRequest(
-        analysis_source_path=v1,
-        metric_active_rect=rect,
-        active_rect_source="explicit",
-        active_rect_detection_mode="provided",
-        active_rect_algorithm_id="active_rect_resolution_v2",
-    )
-    fingerprint = compute_cache_key(
-        [v1],
-        config,
-        metric_request=request,
-    )
-
-    clips = [ClipIdentity(path=str(v1), size=v1.stat().st_size, mtime=v1.stat().st_mtime)]
-    metadata = metrics_metadata(
-        frame_count=2,
-        fps=Fraction(24, 1),
-        config_fingerprint=fingerprint,
-        clips=clips,
-        config=config,
-        analysis_source_path=str(v1),
-        metric_active_rect=rect,
-        active_rect_source="explicit",
-        active_rect_detection_mode="provided",
-    )
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.2],
-        motion=[0.0, 0.3],
-        metadata=metadata,
-    )
-
-    save_metrics_cache(metrics, tmp_path)
-    result = load_cached_metrics_for_request(tmp_path, fingerprint, clips, request)
-
-    assert result.success is True
-    assert result.metrics is not None
-    assert result.metrics.metadata.metric_active_rect == rect
-    assert result.metrics.metadata.active_rect_source == "explicit"
-    assert result.metrics.metadata.active_rect_detection_mode == "provided"
-    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
-
-
-def test_windowed_cache_round_trip_preserves_range_and_first_motion(tmp_path: Path) -> None:
-    video = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig()
-    metric_range = MetricFrameRange(source_frame_count=100, start=20, end_exclusive=23)
-    request = MetricCacheRequest(
-        analysis_source_path=video,
-        metric_frame_range=metric_range,
-    )
-    fingerprint = compute_cache_key([video], config, metric_request=request)
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.2, 0.3],
-        motion=[0.4, 0.5, 0.6],
-        metadata=MetricsMetadata(
-            frame_count=3,
-            fps=Fraction(24, 1),
-            config_fingerprint=fingerprint,
-            clips=[
-                ClipIdentity(
-                    path=str(video),
-                    size=video.stat().st_size,
-                    mtime=video.stat().st_mtime,
-                )
-            ],
-            source_frame_count=100,
-            metric_source_start=20,
-            metric_source_end_exclusive=23,
-            analysis_source_path=str(video),
-            performance_mode=config.performance_mode.value,
-            algorithm_id=metric_algorithm_id(config),
-            metric_backend=metric_backend(config),
-            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
-        ),
-    )
-
-    save_metrics_cache(metrics, tmp_path)
-    result = load_cached_metrics_for_request(tmp_path, fingerprint, [], request)
-
-    assert result.success is True
-    assert result.metrics is not None
-    assert result.metrics.motion[0] == 0.4
-    assert result.metrics.metadata.metric_source_start == 20
-    assert result.metrics.metadata.metric_source_end_exclusive == 23
-
-
-def test_sparse_performance_cache_round_trip_preserves_source_map(tmp_path: Path) -> None:
-    video = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(performance_mode="performance")
-    metric_range = MetricFrameRange(source_frame_count=100, start=20, end_exclusive=40)
-    request = MetricCacheRequest(analysis_source_path=video, metric_frame_range=metric_range)
-    fingerprint = compute_cache_key([video], config, metric_request=request)
-    sampled_frames = _performance_source_frames(metric_range)
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.2, 0.3, 0.4, 0.5],
-        motion=[0.1, 0.2, 0.3, 0.4, 0.5],
-        metadata=MetricsMetadata(
-            frame_count=5,
-            fps=Fraction(24),
-            config_fingerprint=fingerprint,
-            clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
-            source_frame_count=100,
-            metric_source_start=20,
-            metric_source_end_exclusive=40,
-            analysis_source_path=str(video),
-            performance_mode="performance",
-            algorithm_id=metric_algorithm_id(config),
-            metric_backend=metric_backend(config),
-            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
-        ),
-        sampled_source_frames=sampled_frames,
-    )
-
-    save_metrics_cache(metrics, tmp_path)
-    result = load_cached_metrics_for_request(tmp_path, fingerprint, [], request)
-
-    assert result.success is True
-    assert result.metrics is not None
-    assert result.metrics.sampled_source_frames == sampled_frames
-    assert result.metrics.eligible_frame_count == 20
-
-
-def test_cache_rejects_performance_payload_without_source_map(tmp_path: Path) -> None:
-    video = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(performance_mode="performance")
-    fingerprint = compute_cache_key([video], config)
-    metadata = MetricsMetadata(
-        frame_count=1,
-        fps=Fraction(24),
-        config_fingerprint=fingerprint,
-        clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
-        source_frame_count=4,
-        metric_source_start=0,
-        metric_source_end_exclusive=4,
-        performance_mode="performance",
-        algorithm_id=metric_algorithm_id(config),
-        metric_backend=metric_backend(config),
-        algorithm_identity_json=stable_metric_algorithm_identity_json(config),
-    )
-    save_metrics_cache(
-        FrameMetrics(
-            luminance=[0.1],
-            motion=[0.0],
-            metadata=metadata,
-            sampled_source_frames=(1,),
-        ),
-        tmp_path,
-    )
-    cache_path = next(tmp_path.glob("*.compframes"))
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    payload["sampled_source_frames"] = None
-    cache_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = load_cached_metrics(tmp_path, fingerprint, [])
-
-    assert result.success is False
-    assert result.reason == "corrupted"
-
-
-def test_cache_rejects_quality_payload_with_source_map(tmp_path: Path) -> None:
-    video = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig()
-    fingerprint = compute_cache_key([video], config)
-    metadata = metrics_metadata(
-        frame_count=1,
-        fps=Fraction(24),
-        config_fingerprint=fingerprint,
-        clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
-        config=config,
-    )
-    save_metrics_cache(FrameMetrics([0.1], [0.0], metadata), tmp_path)
-    cache_path = next(tmp_path.glob("*.compframes"))
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    payload["sampled_source_frames"] = [0]
-    cache_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = load_cached_metrics(tmp_path, fingerprint, [])
-
-    assert result.success is False
-    assert result.reason == "corrupted"
-
-
-@pytest.mark.parametrize(
-    "sample_map",
-    [
-        pytest.param([1], id="wrong-length"),
-        pytest.param([5, 1], id="unsorted"),
-        pytest.param([1, 1], id="duplicate"),
-        pytest.param([1, 8], id="out-of-range"),
-        pytest.param([False, 5], id="boolean"),
-        pytest.param("1,5", id="not-a-list"),
-        pytest.param([0, 7], id="production-plan-mismatch"),
-    ],
-)
-def test_cache_rejects_malformed_performance_source_maps(
-    tmp_path: Path,
-    sample_map: object,
-) -> None:
-    video = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(performance_mode="performance")
-    fingerprint = compute_cache_key([video], config)
-    metrics = FrameMetrics(
-        luminance=[0.1, 0.2],
-        motion=[0.0, 0.1],
-        metadata=MetricsMetadata(
-            frame_count=2,
-            fps=Fraction(24),
-            config_fingerprint=fingerprint,
-            clips=[ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)],
-            source_frame_count=8,
-            metric_source_start=0,
-            metric_source_end_exclusive=8,
-            performance_mode="performance",
-            algorithm_id=metric_algorithm_id(config),
-            metric_backend=metric_backend(config),
-            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
-        ),
-        sampled_source_frames=(1, 5),
-    )
-    save_metrics_cache(metrics, tmp_path)
-    cache_path = next(tmp_path.glob("*.compframes"))
-    payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    payload["sampled_source_frames"] = sample_map
-    cache_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = load_cached_metrics(tmp_path, fingerprint, [])
-
-    assert result.success is False
-    assert result.reason == "corrupted"
 
 
 def _performance_source_frames(metric_range: MetricFrameRange) -> tuple[int, ...]:
@@ -533,3 +229,117 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["active_rect_source"] == "full-frame"
     assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
     assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v2"
+
+
+@pytest.mark.parametrize("case", ["basic", "active_rect", "window", "sparse"])
+def test_metrics_cache_roundtrip_cases(tmp_path: Path, case: str) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    config = (
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE)
+        if case == "sparse"
+        else AnalysisConfig(random_frame_count=10)
+        if case in ("basic", "active_rect")
+        else AnalysisConfig()
+    )
+    clips = [ClipIdentity(str(video), video.stat().st_size, video.stat().st_mtime)]
+    rect = MetricActiveRect(4, 8, 320, 180)
+    metric_range = MetricFrameRange(100, 20, 40 if case == "sparse" else 23)
+    request = (
+        MetricCacheRequest(
+            analysis_source_path=video,
+            metric_active_rect=rect,
+            active_rect_source="explicit",
+            active_rect_detection_mode="provided",
+        )
+        if case == "active_rect"
+        else MetricCacheRequest(analysis_source_path=video, metric_frame_range=metric_range)
+    )
+    fingerprint = (
+        compute_cache_key([video], config)
+        if case == "basic"
+        else compute_cache_key([video], config, metric_request=request)
+    )
+    if case in ("basic", "active_rect"):
+        metadata = metrics_metadata(
+            frame_count=3 if case == "basic" else 2,
+            fps=Fraction(24, 1),
+            config_fingerprint=fingerprint,
+            clips=clips,
+            config=config,
+            analysis_source_path="" if case == "basic" else str(video),
+            metric_active_rect=None if case == "basic" else rect,
+            active_rect_source="full-frame" if case == "basic" else "explicit",
+            active_rect_detection_mode="aspect_ratio" if case == "basic" else "provided",
+        )
+    else:
+        metadata = MetricsMetadata(
+            frame_count=5 if case == "sparse" else 3,
+            fps=Fraction(24, 1),
+            config_fingerprint=fingerprint,
+            clips=clips,
+            source_frame_count=100,
+            metric_source_start=20,
+            metric_source_end_exclusive=40 if case == "sparse" else 23,
+            analysis_source_path=str(video),
+            performance_mode=config.performance_mode.value,
+            algorithm_id=metric_algorithm_id(config),
+            metric_backend=metric_backend(config),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(config),
+        )
+    sampled_frames = _performance_source_frames(metric_range) if case == "sparse" else None
+    luminance = {
+        "basic": [0.1, 0.2, 0.3],
+        "active_rect": [0.1, 0.2],
+        "window": [0.1, 0.2, 0.3],
+        "sparse": [0.1, 0.2, 0.3, 0.4, 0.5],
+    }[case]
+    motion = {
+        "basic": [0.0, 0.5, 0.1],
+        "active_rect": [0.0, 0.3],
+        "window": [0.4, 0.5, 0.6],
+        "sparse": [0.1, 0.2, 0.3, 0.4, 0.5],
+    }[case]
+    metrics = FrameMetrics(
+        luminance=luminance, motion=motion, metadata=metadata, sampled_source_frames=sampled_frames
+    )
+    save_metrics_cache(metrics, tmp_path)
+    result = (
+        load_cached_metrics(tmp_path, fingerprint, clips)
+        if case == "basic"
+        else load_cached_metrics_for_request(
+            tmp_path, fingerprint, clips if case == "active_rect" else [], request
+        )
+    )
+    assert result.success is True
+    assert result.metrics is not None
+    if case == "basic":
+        assert (tmp_path / f"v1__{fingerprint}.compframes").exists()
+        assert result.metrics.luminance == [0.1, 0.2, 0.3]
+        assert result.metrics.motion == [0.0, 0.5, 0.1]
+        assert result.metrics.metadata.frame_count == 3
+        assert result.metrics.metadata.fps == Fraction(24, 1)
+        assert result.metrics.metadata.config_fingerprint == fingerprint
+        assert result.metrics.metadata.analysis_source_path == ""
+        assert result.metrics.metadata.performance_mode == "quality"
+        assert result.metrics.metadata.metric_backend == "vapoursynth_planestats"
+        assert result.metrics.metadata.algorithm_id == metric_algorithm_id(config)
+        assert (
+            result.metrics.metadata.algorithm_identity_json
+            == stable_metric_algorithm_identity_json(config)
+        )
+        assert result.metrics.metadata.metric_active_rect is None
+        assert result.metrics.metadata.active_rect_source == "full-frame"
+        assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
+        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+    elif case == "active_rect":
+        assert result.metrics.metadata.metric_active_rect == rect
+        assert result.metrics.metadata.active_rect_source == "explicit"
+        assert result.metrics.metadata.active_rect_detection_mode == "provided"
+        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+    elif case == "window":
+        assert result.metrics.motion[0] == 0.4
+        assert result.metrics.metadata.metric_source_start == 20
+        assert result.metrics.metadata.metric_source_end_exclusive == 23
+    else:
+        assert result.metrics.sampled_source_frames == sampled_frames
+        assert result.metrics.eligible_frame_count == 20

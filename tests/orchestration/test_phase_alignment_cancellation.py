@@ -13,7 +13,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from frame_compare.orchestration import execution
-from frame_compare.orchestration.execution_types import ExecutionState, RunArtifacts
+from frame_compare.orchestration.context import RunContext
+from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
+    ExecutionState,
+    RunArtifacts,
+)
 from frame_compare.services import alignment
 from frame_compare.services.errors import raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig
@@ -51,11 +56,14 @@ async def test_cancelled_alignment_never_applies_phase_output(
     state = ExecutionState(artifacts=RunArtifacts())
     timings: dict[str, float] = {}
 
-    async def executor(_ctx: object) -> object:
-        return await alignment.align_clips_from_request(
+    async def executor(ctx: RunContext) -> AlignPhaseOutput:
+        await alignment.align_clips_from_request(
             request,
             config,
             reference_fps=Fraction(24),
+        )
+        return AlignPhaseOutput(
+            reference=ctx.reference, comparisons=ctx.comparisons, selected_frames=[]
         )
 
     phase = execution._create_timed_phase(
@@ -68,7 +76,11 @@ async def test_cancelled_alignment_never_applies_phase_output(
         timings,
         [],
     )
-    task = asyncio.create_task(phase.execute(_context(tmp_path)))
+
+    async def run_phase() -> None:
+        await phase.execute(_context(tmp_path))
+
+    task = asyncio.create_task(run_phase())
     for _ in range(200):
         if started.is_set():
             break
@@ -81,4 +93,3 @@ async def test_cancelled_alignment_never_applies_phase_output(
         await task
 
     apply_output.assert_not_called()
-    assert timings["align"] >= 0

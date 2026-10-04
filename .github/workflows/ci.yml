@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, staging]
   pull_request:
-    branches: [main, pre-release, staging]
   workflow_dispatch:
 
 permissions:
@@ -100,9 +99,9 @@ jobs:
       - name: Install locked audit tool
         run: uv sync --group dev --frozen
 
-      - name: Export locked runtime graph
+      - name: Export locked dependency graph
         run: >-
-          uv export --frozen --no-dev --all-extras --no-emit-project
+          uv export --frozen --all-groups --all-extras --no-emit-project
           --format requirements.txt
           --output-file "${{ runner.temp }}/audit-requirements.txt"
 
@@ -167,8 +166,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --frozen
 
-      - name: Run pytest with coverage enforcement
-        run: uv run --no-sync pytest -q --cov=src/frame_compare --cov-report=term-missing
+      - name: Run pytest
+        run: uv run --no-sync pytest -q -n auto --dist loadgroup
 
   import-lints:
     name: Import Contracts

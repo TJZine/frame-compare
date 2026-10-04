@@ -6,6 +6,7 @@ import asyncio
 import json
 from fractions import Fraction
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -15,72 +16,102 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
-    MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cache_errors import CacheVersionMismatchError
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
-    create_config,
     create_video_files,
-    metric_cache_request_for_cache_inputs,
+    metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
+from .phase_task_helpers import _frame_metrics
+from .preparation_test_support import create_config
 
 
-def test_execute_run_no_cache_deletes_only_matching_shared_metrics_cache(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    create_config(
-        tmp_path,
-        content="""\
-[paths]
+def _cache_config(*, analysis: str, audio_alignment: str, screenshots: str, report: str) -> str:
+    return f"""[paths]
 input_dir = "comparison_videos"
 generated_dir = "generated"
 config_dir = "config"
 
 [analysis]
-random_frame_count = 0
-dark_frame_count = 1
+{analysis}
 
 [audio_alignment]
-enable = false
+{audio_alignment}
 
 [screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
+{screenshots}
 
 [report]
-enable = false
-""",
+{report}
+"""
+
+
+@pytest.mark.parametrize("performance", [False, True], ids=["quality", "performance"])
+def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    performance: bool,
+) -> None:
+    create_config(
+        tmp_path,
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     config = load_config(tmp_path / "config" / "config.toml")
 
+    if performance:
+        config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
+        config_path = tmp_path / "config" / "config.toml"
+        config_path.write_text(
+            config_path.read_text().replace(
+                "dark_frame_count = 1", 'dark_frame_count = 1\nperformance_mode = "performance"'
+            )
+        )
     analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
     source_path = input_dir / "source.mkv"
     write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
-    analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
-    assert analysis_cache_path is not None
+    analysis_cache_path = cast(
+        Path, cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
+    )
 
-    other_cache_path = analysis_cache_dir / "other__other.compframes"
-    other_cache_path.write_text("{}", encoding="utf-8")
+    if performance:
+        quality_config = config.model_copy(
+            update={
+                "analysis": config.analysis.model_copy(
+                    update={"performance_mode": AnalysisPerformanceMode.QUALITY}
+                )
+            }
+        )
+        write_metrics_cache(analysis_cache_dir, source_path=source_path, config=quality_config)
+        other_fingerprint = metric_cache_fingerprint(
+            video_paths=[source_path], config=quality_config, selection_domain=selection_domain
+        )
+        other_cache_path = cast(
+            Path, cache_io.find_metrics_cache_file(analysis_cache_dir, other_fingerprint)
+        )
+    else:
+        other_cache_path = analysis_cache_dir / "other__other.compframes"
+        other_cache_path.write_text("{}", encoding="utf-8")
 
     alignment_reuse_path = (
         tmp_path / "generated" / "cache" / "alignment" / alignment_reuse_cache.CACHE_FILE_NAME
@@ -100,22 +131,20 @@ enable = false
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        return FrameMetrics(
+        return _frame_metrics(
             luminance=[0.1] * 100,
             motion=[0.0] * 100,
-            metadata=MetricsMetadata(
-                frame_count=100,
-                fps=Fraction(24, 1),
-                config_fingerprint="fingerprint",
-                clips=[
-                    ClipIdentity(
-                        path=str(source_path),
-                        size=source_path.stat().st_size,
-                        mtime=source_path.stat().st_mtime,
-                        sha1=None,
-                    )
-                ],
-            ),
+            frame_count=100,
+            fps=Fraction(24, 1),
+            config_fingerprint="fingerprint",
+            clips=[
+                ClipIdentity(
+                    path=str(source_path),
+                    size=source_path.stat().st_size,
+                    mtime=source_path.stat().st_mtime,
+                    sha1=None,
+                )
+            ],
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
@@ -128,129 +157,17 @@ enable = false
     assert alignment_reuse_path.exists()
 
 
-def test_execute_run_no_cache_deletes_only_current_performance_mode_metrics_cache(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    create_config(
-        tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-performance_mode = "performance"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
-    )
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-    config = load_config(tmp_path / "config" / "config.toml")
-    quality_config = config.model_copy(
-        update={
-            "analysis": config.analysis.model_copy(
-                update={"performance_mode": AnalysisPerformanceMode.QUALITY}
-            )
-        }
-    )
-    analysis_cache_dir = tmp_path / "generated" / "cache" / "analysis"
-    source_path = input_dir / "source.mkv"
-    write_metrics_cache(analysis_cache_dir, source_path=source_path, config=quality_config)
-    write_metrics_cache(analysis_cache_dir, source_path=source_path, config=config)
-
-    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    quality_fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        quality_config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], quality_config),
-    )
-    performance_fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
-    )
-    quality_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, quality_fingerprint)
-    performance_cache_path = cache_io.find_metrics_cache_file(
-        analysis_cache_dir, performance_fingerprint
-    )
-    assert quality_cache_path is not None
-    assert performance_cache_path is not None
-
-    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        return FrameMetrics(
-            luminance=[0.1] * 100,
-            motion=[0.0] * 100,
-            metadata=MetricsMetadata(
-                frame_count=100,
-                fps=Fraction(24, 1),
-                config_fingerprint="fingerprint",
-                clips=[
-                    ClipIdentity(
-                        path=str(source_path),
-                        size=source_path.stat().st_size,
-                        mtime=source_path.stat().st_mtime,
-                        sha1=None,
-                    )
-                ],
-            ),
-        )
-
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    request = RunRequest(
-        root=tmp_path,
-        no_cache=True,
-        skip_analysis=False,
-        skip_metadata=True,
-        no_upload=True,
-    )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
-
-    asyncio.run(execute_run(request, deps=deps))
-
-    assert quality_cache_path.exists()
-    assert not performance_cache_path.exists()
-
-
-def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
+def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
     tmp_path: Path,
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -273,27 +190,12 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-performance_mode = "performance"
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis='random_frame_count = 0\ndark_frame_count = 1\nperformance_mode = "performance"',
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -325,129 +227,87 @@ enable = false
         asyncio.run(execute_run(request, deps=deps))
 
 
-def test_execute_run_from_cache_only_uses_cache_for_explicit_reference_effective_fps_equal_to_source(
+@pytest.mark.parametrize(
+    ("source_config", "filenames", "analysis_filename"),
+    [
+        pytest.param(
+            '[sources.overrides."source.mkv"]\neffective_fps = "24/1"\n',
+            ("source.mkv",),
+            "source.mkv",
+            id="effective-fps",
+        ),
+        pytest.param(
+            '[sources]\nreference = "reference.mkv"\nanalysis_source = "analysis.mkv"\n',
+            ("reference.mkv", "analysis.mkv"),
+            "analysis.mkv",
+            id="analysis-source",
+        ),
+        pytest.param(
+            '[sources.overrides."source.mkv"]\nactive_rect = { x = 10, y = 20, width = 300, height = 200 }\n',
+            ("source.mkv",),
+            "source.mkv",
+            id="active-rect",
+        ),
+    ],
+)
+def test_execute_run_from_cache_only_uses_scoped_cache(
     tmp_path: Path,
+    source_config: str,
+    monkeypatch: pytest.MonkeyPatch,
+    filenames: tuple[str, ...],
+    analysis_filename: str,
 ) -> None:
-    config_content = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[sources.overrides."source.mkv"]
-effective_fps = "24/1"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
+    config_content = (
+        _cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        )
+        + source_config
+    )
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
+    create_video_files(input_dir, *filenames)
     config = load_config(tmp_path / "config" / "config.toml")
-    source_path = input_dir / "source.mkv"
+    paths = [input_dir / filename for filename in filenames]
     write_metrics_cache(
         tmp_path / "generated" / "cache" / "analysis",
-        source_path=source_path,
+        source_path=paths[0],
         config=config,
+        video_paths=paths,
+        analysis_source_path=input_dir / analysis_filename,
     )
-
     request = RunRequest(
-        root=tmp_path,
-        from_cache_only=True,
-        skip_analysis=False,
-        skip_metadata=True,
-        no_upload=True,
+        root=tmp_path, from_cache_only=True, skip_analysis=False, skip_metadata=True, no_upload=True
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
-
-    result = asyncio.run(execute_run(request, deps=deps))
-
-    assert result.success is True
-    assert result.cache_hit is True
-
-
-def test_execute_run_from_cache_only_uses_cache_for_configured_analysis_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_content = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[sources]
-reference = "reference.mkv"
-analysis_source = "analysis.mkv"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
-    create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "reference.mkv", "analysis.mkv")
-    config = load_config(tmp_path / "config" / "config.toml")
-    reference_path = input_dir / "reference.mkv"
-    analysis_path = input_dir / "analysis.mkv"
-    write_metrics_cache(
-        tmp_path / "generated" / "cache" / "analysis",
-        source_path=reference_path,
-        config=config,
-        video_paths=[reference_path, analysis_path],
-        analysis_source_path=analysis_path,
-    )
-
-    request = RunRequest(
-        root=tmp_path,
-        from_cache_only=True,
-        skip_analysis=False,
-        skip_metadata=True,
-        no_upload=True,
-    )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
     diagnostics_by_stage: dict[str, list[str]] = {}
 
     def _record_emit(
-        *,
-        stage: str,
-        diagnostics: list[str] | tuple[str, ...] = (),
-        **_kwargs: object,
+        *, stage: str, diagnostics: list[str] | tuple[str, ...] = (), **_kwargs: object
     ) -> None:
         diagnostics_by_stage[stage] = list(diagnostics)
 
     monkeypatch.setattr(
-        "frame_compare.orchestration.coordinator.emit_consolidated_fps_report",
-        _record_emit,
+        "frame_compare.orchestration.coordinator.emit_consolidated_fps_report", _record_emit
     )
-
-    result = asyncio.run(execute_run(request, deps=deps))
+    result = asyncio.run(
+        execute_run(
+            request,
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+    )
 
     assert result.success is True
     assert result.cache_hit is True
-    assert diagnostics_by_stage["after_load_sources"] == [
-        "Analysis source: Comparison 1 | selected by configured policy"
-    ]
+
+    if analysis_filename == "analysis.mkv":
+        assert diagnostics_by_stage["after_load_sources"] == [
+            "Analysis source: Comparison 1 | selected by configured policy"
+        ]
 
 
 def test_execute_run_from_cache_only_rejects_full_frame_cache_for_active_rect_source(
@@ -509,150 +369,17 @@ enable = false
         asyncio.run(execute_run(request, deps=deps))
 
 
-def test_execute_run_from_cache_only_uses_active_rect_specific_cache(
-    tmp_path: Path,
-) -> None:
-    config_content = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[sources.overrides."source.mkv"]
-active_rect = { x = 10, y = 20, width = 300, height = 200 }
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
-    create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-    config = load_config(tmp_path / "config" / "config.toml")
-    source_path = input_dir / "source.mkv"
-    write_metrics_cache(
-        tmp_path / "generated" / "cache" / "analysis",
-        source_path=source_path,
-        config=config,
-    )
-    active_rect_fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=analysis_selection_domain_for_cache_inputs([source_path], config),
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
-    )
-    assert cache_io.find_metrics_cache_file(
-        tmp_path / "generated" / "cache" / "analysis",
-        active_rect_fingerprint,
-    )
-
-    request = RunRequest(
-        root=tmp_path,
-        from_cache_only=True,
-        skip_analysis=False,
-        skip_metadata=True,
-        no_upload=True,
-    )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
-
-    result = asyncio.run(execute_run(request, deps=deps))
-
-    assert result.success is True
-    assert result.cache_hit is True
-
-
-def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
-    tmp_path: Path,
-) -> None:
-    create_config(
-        tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
-    )
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-
-    cache_dir = tmp_path / "generated" / "cache" / "analysis"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    config = load_config(tmp_path / "config" / "config.toml")
-    source_path = input_dir / "source.mkv"
-    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
-    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
-    )
-    cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
-    cache_path.write_text("{not-json", encoding="utf-8")
-
-    request = RunRequest(
-        root=tmp_path,
-        from_cache_only=True,
-        skip_analysis=False,
-        skip_metadata=True,
-        no_upload=True,
-    )
-    deps = RunDependencies(vs_loader=FakeVSLoader())
-
-    with pytest.raises(CacheCorruptionError):
-        asyncio.run(execute_run(request, deps=deps))
-
-
 def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     tmp_path: Path,
 ) -> None:
     create_config(
         tmp_path,
-        content="""\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = false
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-""",
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -663,11 +390,8 @@ enable = false
     source_path = input_dir / "source.mkv"
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
     cache_payload = {
@@ -708,26 +432,12 @@ enable = false
 def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_alignment_enabled(
     tmp_path: Path,
 ) -> None:
-    config_content = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 0
-dark_frame_count = 1
-
-[audio_alignment]
-enable = true
-
-[screenshots]
-use_ffmpeg = true
-active_rect_detection = "aspect_ratio"
-
-[report]
-enable = false
-"""
+    config_content = _cache_config(
+        analysis="random_frame_count = 0\ndark_frame_count = 1",
+        audio_alignment="enable = true",
+        screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+        report="enable = false",
+    )
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")

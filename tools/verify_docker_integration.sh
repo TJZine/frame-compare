@@ -6,12 +6,12 @@ usage() {
 Usage: bash tools/verify_docker_integration.sh [--service NAME] [--no-build] [--no-cache] [--pytest-path PATH]
 
 Runs integration tests inside the Docker image where VapourSynth + FFmpeg are installed.
-Fails if any tests are skipped (the “real deps work” gate).
+Fails if any tests are skipped, xfailed, or xpassed (the “real deps work” gate).
 
 Defaults:
   --service frame-compare-test
-  Runs: pytest -v --ignore=tests/integration/test_alignment_streaming_resources.py \
-    tests/integration/ tests/vs/
+  Runs: pytest -n 10 --dist loadgroup -v --ignore=tests/integration/test_alignment_streaming_resources.py \
+    tests/e2e/ tests/integration/ tests/vs/
 
 Environment:
   FRAME_COMPARE_REQUIRE_LIBPLACEBO=1  Require app-level libplacebo tonemap to succeed.
@@ -133,7 +133,19 @@ docker_cmd=(
   --rm
 )
 
-docker_env_args=()
+if ! test_host_uid="$(id -u)" || ! test_host_gid="$(id -g)"; then
+  echo "ERROR: unable to determine the invoking user's UID/GID for the Docker test run" >&2
+  exit 2
+fi
+docker_cmd+=(--user "$test_host_uid:$test_host_gid")
+
+docker_env_args=(
+  -e HOME=/tmp/framecompare-home
+  -e PYTHONUSERBASE=/home/framecompare/.local
+  -e FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+  -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e
+  -e FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache
+)
 if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
   docker_env_args+=(-e FRAME_COMPARE_REQUIRE_LIBPLACEBO=1)
 fi
@@ -144,7 +156,7 @@ fi
 
 pytest_cli_args=()
 if [[ "${#pytest_paths[@]}" -eq 0 ]]; then
-  pytest_paths=(tests/integration/ tests/vs/)
+  pytest_paths=(tests/e2e/ tests/integration/ tests/vs/)
   pytest_cli_args+=(--ignore=tests/integration/test_alignment_streaming_resources.py)
 fi
 pytest_cli_args+=("${pytest_paths[@]}")
@@ -749,14 +761,16 @@ print("DOCKER_PROOF doctor_json=ok")
 print(f"DOCKER_PROOF generated_fixture_matrix=ok fixtures={';'.join(fixture_results)}")
 print("DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo")
 PY
-python -c "import pytest, pytest_mock" >/dev/null 2>&1 || {
-  echo "ERROR: pytest and pytest-mock are missing from the Docker runtime image" >&2
+python -c "import pytest, pytest_mock, xdist" >/dev/null 2>&1 || {
+  echo "ERROR: pytest, pytest-mock, or pytest-xdist is missing from the Docker runtime image" >&2
   exit 13
 }
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 EOF
 )
-container_cmd+=$'\n'"python -m pytest -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
+container_cmd+=$'\n'"python -m pytest -n 10 --dist loadgroup -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
+
+rm -rf -- generated/e2e
 
 set +e
 "${docker_cmd[@]}" "$container_cmd" 2>&1 | tee "$tmp_log"
@@ -768,8 +782,8 @@ if [[ "$exit_code" != "0" ]]; then
   exit "$exit_code"
 fi
 
-if grep -Eq '([1-9][0-9]* skipped|skipped=[1-9][0-9]*)' "$tmp_log"; then
-  echo "ERROR: docker integration tests reported skipped tests; this gate requires zero skips" >&2
+if grep -Eq '([1-9][0-9]* (skipped|xfailed|xpassed)|(skipped|xfailed|xpassed)=[1-9][0-9]*)' "$tmp_log"; then
+  echo "ERROR: docker integration tests reported skipped, xfailed, or xpassed tests; this gate requires zero non-passing outcomes" >&2
   exit 3
 fi
 

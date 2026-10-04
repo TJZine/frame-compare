@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from frame_compare.analysis.metric_strategies import calculate_metric_strategy
-from frame_compare.config.schema import AnalysisConfig
+from frame_compare.config.schema import AnalysisConfig, AnalysisPerformanceMode
+from frame_compare.vs.types import SourceInfo
 
 vs = pytest.importorskip("vapoursynth")
 if isinstance(vs, MagicMock):
     pytest.skip("vapoursynth is mocked", allow_module_level=True)
 
 
-def _source(clip: object) -> SimpleNamespace:
-    return SimpleNamespace(clip=clip)
+def _source(clip: object) -> SourceInfo:
+    # This strategy only reads clip; the real VS node is the integration boundary.
+    return cast(SourceInfo, SimpleNamespace(clip=clip))
 
 
 @pytest.mark.vs_required
@@ -23,7 +26,7 @@ def test_performance_strategy_black_clip_has_zero_luminance_and_motion() -> None
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="performance"),
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
         reporter=None,
     )
 
@@ -38,7 +41,7 @@ def test_performance_strategy_one_frame_clip_uses_real_planestats() -> None:
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="performance"),
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
         reporter=None,
     )
 
@@ -53,7 +56,7 @@ def test_performance_strategy_white_clip_has_full_luminance_and_zero_motion() ->
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="performance"),
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
         reporter=None,
     )
 
@@ -70,7 +73,7 @@ def test_performance_strategy_black_to_white_motion_is_at_current_frame() -> Non
 
     result = calculate_metric_strategy(
         _source(clip),
-        AnalysisConfig(performance_mode="performance"),
+        AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
         reporter=None,
     )
 
@@ -82,7 +85,7 @@ def test_performance_strategy_black_to_white_motion_is_at_current_frame() -> Non
 @pytest.mark.vs_required
 def test_performance_strategy_repeated_runs_are_identical() -> None:
     clip = vs.core.std.BlankClip(width=16, height=16, length=4, format=vs.GRAY8, color=64)
-    config = AnalysisConfig(performance_mode="performance")
+    config = AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE)
 
     first = calculate_metric_strategy(_source(clip), config, reporter=None)
     second = calculate_metric_strategy(_source(clip), config, reporter=None)

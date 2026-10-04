@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tests.workflow_helpers import read_text_or_fail as _read_text_or_fail
@@ -48,67 +49,22 @@ def test_gpu_override_keeps_default_services_unchanged(repo_root: Path) -> None:
         )
 
 
-def test_verify_docker_gpu_script_emits_compose_version_fallback(
-    repo_root: Path, tmp_path: Path
+@pytest.mark.parametrize("version", ["2.29.7", "2.30.0-desktop.1"])
+def test_verify_docker_gpu_compose_version_route(
+    repo_root: Path, tmp_path: Path, version: str
 ) -> None:
     bash = _bash_executable_or_skip()
-    bash_env = tmp_path / "docker-fallback.env"
+    bash_env = tmp_path / "docker-compose-version.env"
     _write_bash_env(
         bash_env,
         """
 docker() {
   if [[ "$1" == "compose" && "$2" == "version" && "${3:-}" == "--short" ]]; then
-    printf '2.29.7\\n'
+    printf '{version}\\n'
     return 0
   fi
   if [[ "$1" == "compose" && "$2" == "version" ]]; then
-    printf 'Docker Compose version v2.29.7\\n'
-    return 0
-  fi
-  if [[ "$1" == "info" ]]; then
-    return 0
-  fi
-  echo "unexpected docker invocation: $*" >&2
-  return 99
-}
-""",
-    )
-
-    result = subprocess.run(
-        [bash, "tools/verify_docker_gpu.sh", "--no-build"],
-        cwd=repo_root,
-        env=_with_bash_env({}, bash_env),
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
-    )
-
-    combined = result.stdout + result.stderr
-    assert result.returncode == 27
-    assert "Docker Compose 2.30.0 or later is required" in combined
-    assert "DOCKER_GPU_FALLBACK command_begin" in combined
-    assert "docker run --rm --gpus all" in combined
-    assert "--entrypoint /bin/bash frame-compare:test" in combined
-    assert "NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics" in combined
-    assert "bash tools/verify_docker_gpu.sh --inside-container" in combined
-
-
-def test_verify_docker_gpu_script_accepts_suffixed_compose_version(
-    repo_root: Path, tmp_path: Path
-) -> None:
-    bash = _bash_executable_or_skip()
-    bash_env = tmp_path / "docker-suffixed-version.env"
-    _write_bash_env(
-        bash_env,
-        """
-docker() {
-  if [[ "$1" == "compose" && "$2" == "version" && "${3:-}" == "--short" ]]; then
-    printf '2.30.0-desktop.1\\n'
-    return 0
-  fi
-  if [[ "$1" == "compose" && "$2" == "version" ]]; then
-    printf 'Docker Compose version v2.30.0-desktop.1\\n'
+    printf 'Docker Compose version v{version}\\n'
     return 0
   fi
   if [[ "$1" == "info" ]]; then
@@ -121,7 +77,7 @@ docker() {
   echo "unexpected docker invocation: $*" >&2
   return 99
 }
-""",
+""".replace("{version}", version),
     )
 
     result = subprocess.run(
@@ -135,14 +91,30 @@ docker() {
     )
 
     combined = result.stdout + result.stderr
-    assert result.returncode == 0
-    assert "Docker Compose 2.30.0 or later is required" not in combined
-    assert "DOCKER_GPU_FALLBACK command_begin" not in combined
-    assert "compose run ok" in combined
+    if version == "2.29.7":
+        assert result.returncode == 27
+        assert "Docker Compose 2.30.0 or later is required" in combined
+        assert "DOCKER_GPU_FALLBACK command_begin" in combined
+        assert "docker run --rm --gpus all" in combined
+        assert "--entrypoint /bin/bash frame-compare:test" in combined
+        assert "NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics" in combined
+        assert "bash tools/verify_docker_gpu.sh --inside-container" in combined
+    else:
+        assert result.returncode == 0
+        assert "Docker Compose 2.30.0 or later is required" not in combined
+        assert "DOCKER_GPU_FALLBACK command_begin" not in combined
+        assert "compose run ok" in combined
 
 
-def test_verify_docker_gpu_script_rejects_mixed_software_selected_device(
-    repo_root: Path, tmp_path: Path
+@pytest.mark.parametrize(
+    "selected, secondary",
+    [
+        ("llvmpipe (LLVM 17.0.0, 256 bits)", "NVIDIA RTX 6000 Ada Generation"),
+        ("NVIDIA RTX 6000 Ada Generation", "lavapipe (LLVM 17.0.0, 256 bits)"),
+    ],
+)
+def test_verify_docker_gpu_selected_device_route(
+    repo_root: Path, tmp_path: Path, selected: str, secondary: str
 ) -> None:
     bash = _bash_executable_or_skip()
     icd_dir = tmp_path / "icd"
@@ -159,10 +131,10 @@ nvidia-smi() {
 }
 
 vulkaninfo() {
-  printf 'GPU0 : llvmpipe (LLVM 17.0.0, 256 bits)\\n'
-  printf 'GPU1 : NVIDIA RTX 6000 Ada Generation\\n'
+  printf 'GPU0 : {selected}\\n'
+  printf 'GPU1 : {secondary}\\n'
 }
-""",
+""".replace("{selected}", selected).replace("{secondary}", secondary),
     )
 
     result = subprocess.run(
@@ -182,65 +154,23 @@ vulkaninfo() {
     )
 
     combined = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert "DOCKER_GPU_PROOF nvidia_visible=ok" in combined
-    assert "DOCKER_GPU_PROOF vulkan_icd=" in combined
-    assert "nvidia_icd.json" in combined
-    assert "DOCKER_GPU_PROOF vulkan_device=llvmpipe (LLVM 17.0.0, 256 bits)" in combined
-    assert "DOCKER_GPU_PROOF vulkan_hardware=ok" not in combined
-    assert "DOCKER_GPU_PROOF placebo_tonemap=ok" not in combined
-    assert "software-backed" in combined
-
-
-def test_verify_docker_gpu_script_accepts_selected_nvidia_device(
-    repo_root: Path, tmp_path: Path
-) -> None:
-    bash = _bash_executable_or_skip()
-    icd_dir = tmp_path / "icd"
-    icd_dir.mkdir()
-    nvidia_icd = icd_dir / "nvidia_icd.json"
-    _write_nvidia_icd(nvidia_icd)
-    bash_icd_dir = _bash_path_or_skip(bash, icd_dir)
-
-    bash_env = tmp_path / "docker-selected-nvidia.env"
-    _write_bash_env(
-        bash_env,
-        """
-nvidia-smi() {
-  printf 'GPU 0: NVIDIA RTX 6000 Ada Generation (UUID: GPU-1234)\\n'
-}
-
-vulkaninfo() {
-  printf 'GPU0 : NVIDIA RTX 6000 Ada Generation\\n'
-  printf 'GPU1 : lavapipe (LLVM 17.0.0, 256 bits)\\n'
-}
-""",
-    )
-
-    result = subprocess.run(
-        [bash, "tools/verify_docker_gpu.sh", "--inside-container"],
-        cwd=repo_root,
-        env=_with_bash_env(
-            {
-                "FRAME_COMPARE_GPU_ICD_SEARCH_DIRS": bash_icd_dir,
-                "FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD": "printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'",
-            },
-            bash_env,
-        ),
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
-    )
-
-    combined = result.stdout + result.stderr
-    assert result.returncode == 0
-    assert "DOCKER_GPU_PROOF nvidia_visible=ok" in combined
-    assert "DOCKER_GPU_PROOF vulkan_icd=" in combined
-    assert "nvidia_icd.json" in combined
-    assert "DOCKER_GPU_PROOF vulkan_device=NVIDIA RTX 6000 Ada Generation" in combined
-    assert "DOCKER_GPU_PROOF vulkan_hardware=ok" in combined
-    assert "DOCKER_GPU_PROOF placebo_tonemap=ok" in combined
+    if selected.startswith("llvmpipe"):
+        assert result.returncode != 0
+        assert "DOCKER_GPU_PROOF nvidia_visible=ok" in combined
+        assert "DOCKER_GPU_PROOF vulkan_icd=" in combined
+        assert "nvidia_icd.json" in combined
+        assert "DOCKER_GPU_PROOF vulkan_device=llvmpipe (LLVM 17.0.0, 256 bits)" in combined
+        assert "DOCKER_GPU_PROOF vulkan_hardware=ok" not in combined
+        assert "DOCKER_GPU_PROOF placebo_tonemap=ok" not in combined
+        assert "software-backed" in combined
+    else:
+        assert result.returncode == 0
+        assert "DOCKER_GPU_PROOF nvidia_visible=ok" in combined
+        assert "DOCKER_GPU_PROOF vulkan_icd=" in combined
+        assert "nvidia_icd.json" in combined
+        assert "DOCKER_GPU_PROOF vulkan_device=NVIDIA RTX 6000 Ada Generation" in combined
+        assert "DOCKER_GPU_PROOF vulkan_hardware=ok" in combined
+        assert "DOCKER_GPU_PROOF placebo_tonemap=ok" in combined
 
 
 def test_verify_docker_gpu_script_fails_closed_without_nvidia_icd(

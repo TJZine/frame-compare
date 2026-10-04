@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -25,8 +24,6 @@ _WINDOWS_RESERVED_FILENAMES = {
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WHITESPACE_RE = re.compile(r"\s+")
 
-type ShortcutTextWriter = Callable[[Path, str], None]
-
 
 @dataclass(frozen=True)
 class SlowpicsShortcutResult:
@@ -42,7 +39,6 @@ def create_slowpics_url_shortcut(
     workspace: WorkspacePaths,
     slowpics_url: str,
     collection_title: str,
-    text_writer: ShortcutTextWriter = write_text_atomic,
 ) -> SlowpicsShortcutResult:
     """Create a deterministic Windows InternetShortcut-style file."""
     try:
@@ -64,7 +60,7 @@ def create_slowpics_url_shortcut(
     )
     content = f"[InternetShortcut]\nURL={slowpics_url}\n"
     try:
-        text_writer(shortcut_path, content)
+        write_text_atomic(shortcut_path, content)
     except OSError as exc:
         return SlowpicsShortcutResult(
             success=False,

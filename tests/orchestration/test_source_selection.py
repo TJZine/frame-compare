@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,7 @@ def test_source_selection_rejects_missing_reference_selector(tmp_path: Path) -> 
             config=SourcesConfig(reference="missing"),
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["reason"] == "no matching source"
 
 
@@ -103,6 +105,7 @@ def test_source_selection_rejects_duplicate_stems_before_matching(tmp_path: Path
             config=SourcesConfig(reference="source"),
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["stem"] == "source"
 
 
@@ -112,7 +115,7 @@ def test_source_selection_resolves_overrides_by_selector(tmp_path: Path) -> None
     override = SourceOverrideConfig(
         trim_start_frames=12,
         trim_end_frames=2,
-        effective_fps="24000/1001",
+        effective_fps=Fraction(24000, 1001),
     )
 
     selection = resolve_source_selection(
@@ -142,4 +145,6 @@ def test_source_selection_rejects_duplicate_override_selectors_for_same_source(
             ),
         )
 
+    assert exc_info.value.context.details is not None
+    assert isinstance(exc_info.value.context.details["reason"], str)
     assert "duplicates override selector" in exc_info.value.context.details["reason"]

@@ -1,3 +1,5 @@
+import pytest
+
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
 
 
@@ -11,10 +13,15 @@ class _InteractiveTTY:
         return True
 
 
-def test_no_color_requested_respects_explicit_flag_and_env_mapping() -> None:
-    assert no_color_requested(explicit_no_color=True, environ={}) is True
-    assert no_color_requested(environ={"NO_COLOR": ""}) is True
-    assert no_color_requested(environ={}) is False
+def test_no_color_requested_respects_explicit_flag_and_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert no_color_requested(explicit_no_color=True) is True
+    monkeypatch.setenv("NO_COLOR", "")
+    assert no_color_requested() is True
+    monkeypatch.delenv("NO_COLOR")
+    assert no_color_requested() is False
 
 
 def test_stream_is_tty_handles_missing_and_broken_streams() -> None:

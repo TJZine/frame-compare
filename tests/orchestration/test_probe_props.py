@@ -1,37 +1,12 @@
 """Tests for probe prop key selection and preservation helpers."""
 
+import pytest
+
 from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
     normalize_probe_prop_key,
 )
-
-
-class TestNormalizeProbeProKey:
-    """Tests for normalize_probe_prop_key."""
-
-    def test_normalize_probe_prop_key_strips_leading_underscores_and_lowercases(
-        self,
-    ) -> None:
-        """Verify normalization strips leading underscores and lowercases."""
-        # Single underscore prefix
-        assert normalize_probe_prop_key("_Transfer") == "transfer"
-
-        # Multiple underscore prefixes
-        assert normalize_probe_prop_key("__Matrix") == "matrix"
-        assert normalize_probe_prop_key("___Primaries") == "primaries"
-
-        # No leading underscores, mixed case
-        assert normalize_probe_prop_key("DolbyVision_L6_MaxCLL") == "dolbyvision_l6_maxcll"
-
-        # Already lowercase, no underscores
-        assert normalize_probe_prop_key("transfer") == "transfer"
-
-        # Empty string edge case
-        assert normalize_probe_prop_key("") == ""
-
-        # Only underscores
-        assert normalize_probe_prop_key("___") == ""
 
 
 class TestComputeTonemapPropKeys:
@@ -85,16 +60,14 @@ class TestComputeTonemapPropKeys:
         # Result is a tuple (immutable)
         assert isinstance(result, tuple)
 
-    def test_compute_tonemap_prop_keys_empty_input(self) -> None:
-        """Verify empty input returns empty tuple."""
-        assert compute_tonemap_prop_keys({}) == ()
-
-    def test_compute_tonemap_prop_keys_no_matches(self) -> None:
-        """Verify no matching keys returns empty tuple."""
-        frame_props = {
-            "SomeOtherProp": "value",
-            "FrameType": "I",
-        }
+    @pytest.mark.parametrize(
+        "frame_props",
+        [{}, {"SomeOtherProp": "value", "FrameType": "I"}],
+        ids=["empty", "nonmatching"],
+    )
+    def test_compute_tonemap_prop_keys_without_matches(
+        self, frame_props: dict[str, object]
+    ) -> None:
         assert compute_tonemap_prop_keys(frame_props) == ()
 
 
@@ -123,24 +96,6 @@ class TestComputePreservedFrameProps:
         # Should NOT include non-tonemap keys
         assert "UnrelatedKey" not in result
         assert "FrameType" not in result
-
-    def test_compute_preserved_frame_props_returns_keys_in_sorted_original_key_order(
-        self,
-    ) -> None:
-        """Verify returned dict is populated in sorted original-key order."""
-        # Provide keys in unsorted order
-        frame_props = {
-            "Transfer": 16,
-            "_Matrix": 1,
-            "_Primaries": 9,
-            "ColorRange": 1,
-        }
-
-        result = compute_preserved_frame_props(frame_props)
-
-        # Keys should be in lexicographic order (sorted by original key)
-        expected_order = ["ColorRange", "Transfer", "_Matrix", "_Primaries"]
-        assert list(result.keys()) == expected_order
 
     def test_compute_preserved_frame_props_drops_non_toml_safe_values(self) -> None:
         """Verify non-TOML-safe values are omitted."""

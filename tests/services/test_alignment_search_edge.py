@@ -20,9 +20,7 @@ from frame_compare.services.alignment_decision import (
 
 @pytest.mark.parametrize("lag", [-7990, 7990])
 @pytest.mark.parametrize("chunk_count", [1, 2, 3])
-def test_consistent_search_edge_is_stable_but_not_authoritative(
-    lag: int, chunk_count: int
-) -> None:
+def test_consistent_search_edge_is_stable_but_not_authoritative(lag: int, chunk_count: int) -> None:
     chunk_samples = 40_000
     fps = Fraction(24)
     observations = tuple(

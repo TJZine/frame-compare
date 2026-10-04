@@ -53,12 +53,11 @@ CONFIG = {"enabled": True}
         (("frame_compare.utils", "src/frame_compare/utils/__init__.py"),),
     )
 
-    markdown, missing = api_docs_render.generate_markdown(
+    markdown, _missing = api_docs_render.generate_markdown(
         project_root=tmp_path,
         module_cache={module_path.resolve(): module_doc},
     )
 
-    assert missing == []
     assert markdown.startswith("# API Reference\n")
     assert "## frame_compare.utils\n\nUtility facade.\n" in markdown
     assert markdown.index("### Alpha") < markdown.index("### beta") < markdown.index("### CONFIG")

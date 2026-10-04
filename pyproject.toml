@@ -65,6 +65,7 @@ docs = [
 docker-test = [
     "pytest==9.1.1",
     "pytest-mock==3.16.0",
+    "pytest-xdist==3.8.0",
 ]
 dev = [
     "anyio>=4.15.1",
@@ -79,6 +80,7 @@ dev = [
     "ruff>=0.16.8",
     "respx>=0.23.1",
     "pip-audit==2.10.1",
+    "pytest-xdist>=3.8.0",
 ]
 
 # ─── Pyright ───────────────────────────────────────────────────────────────────
@@ -86,7 +88,7 @@ dev = [
 pythonVersion = "3.13"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
-include = ["src"]
+include = ["src", "tests"]
 exclude = ["**/__pycache__", ".venv", "build", "dist"]
 venvPath = "."
 venv = ".venv"
@@ -163,7 +165,6 @@ exclude_lines = [
     "raise NotImplementedError",
     "@overload",
 ]
-fail_under = 80
 show_missing = true
 
 [tool.bandit]

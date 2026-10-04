@@ -29,7 +29,7 @@ def test_geometry_contains_active_picture_and_is_immutable() -> None:
     )
     assert facts.active_picture.provenance == "dolby_vision_l5"
     with pytest.raises(FrozenInstanceError):
-        facts.is_noop = True  # type: ignore[misc]
+        facts.is_noop = True  # type: ignore[misc]  # Exercise the frozen assignment guard.
 
 
 def test_geometry_rejects_active_picture_outside_source() -> None:

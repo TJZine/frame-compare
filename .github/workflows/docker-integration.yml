@@ -2,35 +2,15 @@ name: Docker Integration (VS + FFmpeg)
 
 on:
   pull_request:
-    branches: [main, pre-release, staging]
     paths:
-      - Dockerfile
-      - docker-compose*.yml
+      - src/**
+      - tests/**
       - pyproject.toml
       - uv.lock
+      - Dockerfile
+      - docker-compose*.yml
       - tools/verify_docker_*.sh
-      - tests/workflows/**
-      - src/frame_compare/analysis/**
-      - src/frame_compare/render/**
-      - src/frame_compare/vs/**
       - .github/workflows/docker-integration.yml
-      - src/frame_compare/services/alignment*.py
-      - src/frame_compare/services/errors.py
-      - src/frame_compare/services/types.py
-      - src/frame_compare/orchestration/phase_alignment.py
-      - src/frame_compare/orchestration/execution.py
-      - src/frame_compare/orchestration/execution_types.py
-      - src/frame_compare/orchestration/context.py
-      - src/frame_compare/utils/subproc.py
-      - src/frame_compare/utils/types.py
-      - src/frame_compare/utils/alignment_evidence.py
-      - tests/services/test_alignment*.py
-      - tests/services/alignment_request_test_support.py
-      - tests/orchestration/test_phase_alignment*.py
-      - tests/orchestration/test_phase_tasks_alignment.py
-      - tests/orchestration/phase_task_helpers.py
-      - tests/integration/**
-      - tests/vs/**
   workflow_dispatch:
 
 permissions:
@@ -51,6 +31,15 @@ jobs:
 
       - name: Run canonical Docker verification
         run: bash tools/verify_docker_integration.sh --no-cache
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docker-e2e-artifacts
+          path: generated/e2e
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run opt-in alignment resource proof
         run: >-

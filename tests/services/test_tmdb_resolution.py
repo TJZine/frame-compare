@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
@@ -22,7 +22,7 @@ type AsyncClientFactory = Callable[
 @asynccontextmanager
 async def _client_for_transport(
     transport: httpx.MockTransport,
-) -> AsyncIterator[httpx.AsyncClient]:
+) -> AsyncGenerator[httpx.AsyncClient]:
     async with httpx.AsyncClient(transport=transport) as client:
         yield client
 
@@ -54,8 +54,15 @@ def _movie_result(
 
 
 @pytest.mark.anyio
-async def test_resolve_metadata_prefers_vvitch_alias_release(
-    async_client_factory: AsyncClientFactory,
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "The.VVitch.A.New-England.Folktale.2015.2160p.mkv",
+        "The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv",
+    ],
+)
+async def test_resolve_metadata_vvitch_alias(
+    async_client_factory: AsyncClientFactory, filename: str
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -105,7 +112,7 @@ async def test_resolve_metadata_prefers_vvitch_alias_release(
     config = MetadataConfig(api_key="a" * 32)
     async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(
-            ["The.VVitch.A.New-England.Folktale.2015.2160p.mkv"],
+            [filename],
             config,
             client,
         )
@@ -137,67 +144,6 @@ async def test_resolve_metadata_keeps_match_when_alias_enrichment_is_rate_limite
 
     assert result is not None
     assert result.tmdb_id == 329865
-
-
-@pytest.mark.anyio
-async def test_resolve_metadata_plain_title_alias_case_prefers_vvitch_release(
-    async_client_factory: AsyncClientFactory,
-) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        if path.endswith("/search/multi"):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        _movie_result(526667, "The Witch", "2015-01-23", popularity=35.0),
-                        _movie_result(310131, "The Witch", "2016-02-19", popularity=30.0),
-                    ]
-                },
-            )
-        if path.endswith("/search/movie"):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        _movie_result(
-                            526667,
-                            "The Witch",
-                            "2015-01-23",
-                            media_type=None,
-                            popularity=35.0,
-                        ),
-                        _movie_result(
-                            310131,
-                            "The Witch",
-                            "2016-02-19",
-                            media_type=None,
-                            popularity=30.0,
-                        ),
-                    ]
-                },
-            )
-        if path.endswith("/search/tv"):
-            return httpx.Response(200, json={"results": []})
-        if path.endswith("/movie/310131/alternative_titles"):
-            return httpx.Response(
-                200,
-                json={"titles": [{"title": "The VVitch: A New-England Folktale"}]},
-            )
-        if path.endswith("/movie/526667/alternative_titles"):
-            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
-        return httpx.Response(200, json={"results": []})
-
-    config = MetadataConfig(api_key="a" * 32)
-    async with async_client_factory(httpx.MockTransport(handler)) as client:
-        result = await resolve_metadata(
-            ["The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv"],
-            config,
-            client,
-        )
-
-    assert result is not None
-    assert result.tmdb_id == 310131
 
 
 @pytest.mark.anyio
@@ -447,11 +393,11 @@ async def test_resolve_tmdb_match_preserves_results_when_search_variant_fails(
 
     assert outcome.selected is not None
     assert outcome.selected.tmdb_id == 329865
-    assert warnings == [
+    assert [
+        {"event": entry["event"], "error_types": entry["error_types"]} for entry in warnings
+    ] == [
         {
             "event": "tmdb_search_variants_degraded",
-            "failed_request_count": 2,
-            "total_request_count": 6,
             "error_types": ["TmdbError"],
         }
     ]

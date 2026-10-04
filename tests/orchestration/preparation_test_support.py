@@ -72,3 +72,7 @@ def create_video_files(input_dir: Path, *filenames: str) -> list[Path]:
         path.write_bytes(b"video")
         paths.append(path)
     return paths
+
+
+def source_override_config(*, base: str, selector: str, fields: str) -> str:
+    return f'{base}\n[sources.overrides."{selector}"]\n{fields}\n'

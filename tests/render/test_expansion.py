@@ -10,7 +10,6 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import OverlayMode
 from frame_compare.render.batch.expansion import (
     expand_batch_render_requests,
-    render_batch_results_by_label,
     validate_batch_requests,
 )
 from frame_compare.render.types import PreparedRenderSource, ScreenshotBatchRequest
@@ -155,12 +154,3 @@ def test_expansion_rejects_out_of_range_source_frame(mock_prepare: MagicMock) ->
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
         )
-
-
-def test_render_batch_results_by_label_slices_expansion_ranges() -> None:
-    requests = [_request("a"), _request("b")]
-    paths = [Path("a0"), Path("a1"), Path("b0"), Path("b1")]
-    assert render_batch_results_by_label(requests, paths, {"a": range(0, 2), "b": range(2, 4)}) == {
-        "a": paths[:2],
-        "b": paths[2:],
-    }

@@ -265,29 +265,6 @@ def _render_batch_parallel(
         raise first_exception[1]
 
 
-def render_batch(
-    requests: list[RenderRequest], parallelism: int = 1, reporter: ProgressReporter | None = None
-) -> list[Path]:
-    """
-    Execute a batch of render requests.
-
-    Args:
-        requests: List of requests to process
-        parallelism: Number of concurrent threads
-        reporter: Optional progress reporter
-
-    Returns:
-        List of paths to rendered files in input order
-
-    Raises:
-        Exception: The exception from the lowest-index failed work unit
-            (fail-fast). Once a failure occurs, no new tasks are scheduled. Any
-            work already submitted to the executor is allowed to finish before
-            the deterministic exception is re-raised.
-    """
-    return [result.path for result in render_batch_detailed(requests, parallelism, reporter)]
-
-
 def render_batch_detailed(
     requests: list[RenderRequest],
     parallelism: int = 1,
@@ -354,28 +331,6 @@ def render_batch_detailed(
             raise RuntimeError("render batch completed without a rendered result")
         completed.append(result)
     return completed
-
-
-def render_screenshots_from_batch(
-    batch_requests: list[ScreenshotBatchRequest],
-    output_dir: Path,
-    config: ConfigSchema,
-    options: BatchRenderOptions | None = None,
-) -> dict[str, list[Path]]:
-    """Render screenshots from batch requests, choosing FFmpeg or VapourSynth path accordingly.
-
-    Args:
-        batch_requests: List of ScreenshotBatchRequest
-        output_dir: Output directory
-        config: Configuration
-        options: Renderer, overlay, FFmpeg, and progress options
-
-    Returns:
-        Dict mapping label -> list of rendered screenshot paths
-    """
-    return render_screenshots_from_batch_detailed(
-        batch_requests, output_dir, config, options
-    ).screenshots_by_label
 
 
 def render_screenshots_from_batch_detailed(

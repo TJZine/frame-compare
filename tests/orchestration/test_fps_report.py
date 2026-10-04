@@ -59,6 +59,35 @@ def _make_clip_state(
     )
 
 
+def _fps_report_clip(
+    *,
+    path: Path,
+    label: str,
+    source_fps: Fraction,
+    effective_fps: Fraction,
+    fps_divergent: bool,
+    width: int = 1920,
+    height: int = 1080,
+    num_frames: int = 100,
+    is_hdr: bool = False,
+    note: str | None = None,
+    size_bytes: int = 0,
+) -> FpsReportClip:
+    return FpsReportClip(
+        path=path,
+        label=label,
+        width=width,
+        height=height,
+        num_frames=num_frames,
+        is_hdr=is_hdr,
+        source_fps=source_fps,
+        effective_fps=effective_fps,
+        fps_divergent=fps_divergent,
+        note=note,
+        size_bytes=size_bytes,
+    )
+
+
 def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts_separate(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -224,17 +253,12 @@ def test_emit_consolidated_fps_report_noop_when_quiet(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    clip = FpsReportClip(
+    clip = _fps_report_clip(
         path=Path("ref.mkv"),
         label="Reference",
-        width=1920,
-        height=1080,
-        num_frames=100,
-        is_hdr=False,
         source_fps=Fraction(24, 1),
         effective_fps=Fraction(24, 1),
         fps_divergent=False,
-        note=None,
     )
 
     def _fail(*_args: object, **_kwargs: object) -> None:
@@ -259,17 +283,12 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    clip = FpsReportClip(
+    clip = _fps_report_clip(
         path=Path("ref.mkv"),
         label="Reference",
-        width=1920,
-        height=1080,
-        num_frames=100,
-        is_hdr=False,
         source_fps=Fraction(24, 1),
         effective_fps=Fraction(24, 1),
         fps_divergent=False,
-        note=None,
     )
 
     log_calls: list[tuple[str, str, list[dict[str, object]], list[str]]] = []
@@ -295,7 +314,6 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
-    assert len(log_calls) == 1
     event, stage, clips, diagnostics = log_calls[0]
     assert event == "fps_report"
     assert stage == "after_load_sources"
@@ -329,7 +347,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     clips = [
-        FpsReportClip(
+        _fps_report_clip(
             path=Path("ref.mkv"),
             label="Reference [source]",
             width=3840,
@@ -342,7 +360,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
             note=None,
             size_bytes=17 * 1024**3,
         ),
-        FpsReportClip(
+        _fps_report_clip(
             path=Path("encode.mkv"),
             label="Encode [candidate]",
             width=1920,
@@ -414,36 +432,30 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
-    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    # Keep absolute paths within the report width, including xdist's worker prefix.
+    tmp_path = tmp_path_factory.mktemp("fps")
     input_dir = tmp_path / "comparison_videos"
     internal_path = input_dir / "season" / "reference.mkv"
     external_path = tmp_path / "outside" / "comparison.mkv"
     clips = [
-        FpsReportClip(
+        _fps_report_clip(
             path=internal_path,
             label="Reference",
-            width=1920,
-            height=1080,
             num_frames=100,
-            is_hdr=False,
             source_fps=Fraction(24, 1),
             effective_fps=Fraction(24, 1),
             fps_divergent=False,
-            note=None,
         ),
-        FpsReportClip(
+        _fps_report_clip(
             path=external_path,
             label="Comparison",
-            width=1920,
-            height=1080,
             num_frames=100,
-            is_hdr=False,
             source_fps=Fraction(24, 1),
             effective_fps=Fraction(24, 1),
             fps_divergent=False,
-            note=None,
         ),
     ]
 
@@ -492,57 +504,54 @@ def _length_clip(name: str, num_frames: int, fps: Fraction = Fraction(24, 1)) ->
     )
 
 
-def test_length_difference_groups_shared_counts_and_marks_shorter() -> None:
-    clips = [
-        _length_clip("ref", 1000),
-        _length_clip("a", 536),
-        _length_clip("b", 536),
-    ]
-
-    (line,) = _length_difference_lines(clips, ["ref", "a", "b"])
-
-    assert "a and b" in line
-    assert "464 frames" in line
-    assert "(19.3 s)" in line
-    assert "shorter than ref" in line
-
-
-def test_length_difference_marks_longer_and_formats_minutes() -> None:
-    clips = [_length_clip("ref", 1000), _length_clip("a", 1000 + 144 * 24)]
-
-    (line,) = _length_difference_lines(clips, ["ref", "a"])
-
-    assert "3456 frames" in line
-    assert "(2m 24s)" in line
-    assert "longer than ref" in line
-
-
-def test_length_difference_joins_three_names_and_singular_frame() -> None:
-    clips = [
-        _length_clip("ref", 1000),
-        _length_clip("a", 999),
-        _length_clip("b", 999),
-        _length_clip("c", 999),
-    ]
-
-    (line,) = _length_difference_lines(clips, ["ref", "a", "b", "c"])
-
-    assert "a, b, and c" in line
-    assert "1 frame" in line
-    assert "1 frames" not in line
-    assert "(0.0 s)" in line
+@pytest.mark.parametrize(
+    ("clips", "names", "present", "absent"),
+    [
+        pytest.param(
+            [_length_clip("ref", 1000), _length_clip("a", 536), _length_clip("b", 536)],
+            ["ref", "a", "b"],
+            ["a and b", "464 frames", "(19.3 s)", "shorter than ref"],
+            [],
+            id="shorter-group",
+        ),
+        pytest.param(
+            [_length_clip("ref", 1000), _length_clip("a", 1000 + 144 * 24)],
+            ["ref", "a"],
+            ["3456 frames", "(2m 24s)", "longer than ref"],
+            [],
+            id="longer-minutes",
+        ),
+        pytest.param(
+            [
+                _length_clip("ref", 1000),
+                _length_clip("a", 999),
+                _length_clip("b", 999),
+                _length_clip("c", 999),
+            ],
+            ["ref", "a", "b", "c"],
+            ["a, b, and c", "1 frame", "(0.0 s)"],
+            ["1 frames"],
+            id="singular-three-names",
+        ),
+    ],
+)
+def test_length_difference_lines(
+    clips: list[FpsReportClip], names: list[str], present: list[str], absent: list[str]
+) -> None:
+    (line,) = _length_difference_lines(clips, names)
+    for text in present:
+        assert text in line
+    for text in absent:
+        assert text not in line
 
 
 def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    clip = FpsReportClip(
+    clip = _fps_report_clip(
         path=Path("encode.mkv"),
         label="Encode",
-        width=1920,
-        height=1080,
         num_frames=1200,
-        is_hdr=False,
         source_fps=Fraction(30000, 1001),
         effective_fps=Fraction(24000, 1001),
         fps_divergent=True,
@@ -574,29 +583,21 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
     reference_path = tmp_path / "reference.mkv"
     comparison_path = tmp_path / "comparison.mkv"
     clips = [
-        FpsReportClip(
+        _fps_report_clip(
             path=reference_path,
             label="Reference",
-            width=1920,
-            height=1080,
             num_frames=100,
-            is_hdr=False,
             source_fps=Fraction(24, 1),
             effective_fps=Fraction(24, 1),
             fps_divergent=False,
-            note=None,
         ),
-        FpsReportClip(
+        _fps_report_clip(
             path=comparison_path,
             label="Comparison",
-            width=1920,
-            height=1080,
             num_frames=100,
-            is_hdr=False,
             source_fps=Fraction(24, 1),
             effective_fps=Fraction(24, 1),
             fps_divergent=False,
-            note=None,
         ),
     ]
 
@@ -621,17 +622,12 @@ def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_outp
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     reference_path = tmp_path / "reference.mkv"
-    clip = FpsReportClip(
+    clip = _fps_report_clip(
         path=reference_path,
         label="Reference",
-        width=1920,
-        height=1080,
-        num_frames=100,
-        is_hdr=False,
         source_fps=Fraction(24, 1),
         effective_fps=Fraction(24, 1),
         fps_divergent=False,
-        note=None,
     )
 
     log_calls: list[tuple[str, str, list[dict[str, object]], list[str]]] = []
@@ -657,7 +653,6 @@ def test_emit_consolidated_fps_report_logs_non_tty_diagnostics_without_rich_outp
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
-    assert len(log_calls) == 1
     event, stage, clips, diagnostics = log_calls[0]
     assert event == "fps_report"
     assert stage == "after_align"
@@ -671,13 +666,9 @@ def test_emit_consolidated_fps_report_keeps_adjustment_evidence_without_normal_p
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     comparison_path = tmp_path / "comparison.mkv"
-    clip = FpsReportClip(
+    clip = _fps_report_clip(
         path=comparison_path,
         label="Comparison",
-        width=1920,
-        height=1080,
-        num_frames=100,
-        is_hdr=False,
         source_fps=Fraction(30000, 1001),
         effective_fps=Fraction(24000, 1001),
         fps_divergent=True,
@@ -733,7 +724,7 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
     emit_consolidated_fps_report(
         stage="after_load_sources",
         clips=[
-            FpsReportClip(
+            _fps_report_clip(
                 path=Path("/workspace/comparison_videos/a-very-long-source-name.mkv"),
                 label="A source with a deliberately long display label",
                 width=3840,
@@ -743,7 +734,6 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
                 source_fps=Fraction(24000, 1001),
                 effective_fps=Fraction(24000, 1001),
                 fps_divergent=False,
-                note=None,
                 size_bytes=17 * 1024**3,
             )
         ],

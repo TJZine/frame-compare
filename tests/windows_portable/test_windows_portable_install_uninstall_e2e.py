@@ -73,7 +73,8 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
     tmp_path: Path, repo_root: Path
 ) -> None:
     exe = _powershell_exe()
-    assert exe is not None, "Windows PowerShell is required for the portable installer"
+    if exe is None:
+        pytest.fail("Windows PowerShell is required for the portable installer")
 
     source_dir = repo_root / "tools" / "windows_portable"
     bundle_dir = tmp_path / "bundle"
@@ -177,7 +178,10 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         for filename in managed_bin_files:
             assert (bin_dir / filename).is_file()
         assert (state_dir / "config.json").is_file()
-        assert _get_user_path(exe).split(";") == [
+        reinstalled_user_path = _get_user_path(exe)
+        if reinstalled_user_path is None:
+            pytest.fail("Reinstalled user PATH is missing")
+        assert reinstalled_user_path.split(";") == [
             controlled_user_path,
             expected_bin_path,
         ]

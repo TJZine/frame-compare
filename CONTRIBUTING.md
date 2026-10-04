@@ -1,9 +1,10 @@
 # Contributing to Frame Compare
 
 Thank you for improving Frame Compare. This guide covers contributor setup and pull
-request mechanics. The [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) is the
-canonical source for risk classification, verification, release gates, and handoff
-requirements.
+request mechanics. The [repository profile](.agents/project.md) owns local contracts
+and command routes. Shared skills own agent methodology; the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) preserves complete specialist
+verification, platform, release, and durable-plan procedures.
 
 ## Prerequisites
 
@@ -28,8 +29,8 @@ uv sync --group dev --extra vsview --frozen
 A pip-only editable installation can run the application, but it does not reproduce the
 complete contributor or CI toolchain.
 
-Use the runbook command canon to confirm the environment is healthy before changing
-code.
+Use the repository profile and relevant runbook recipe to establish the capabilities
+needed for the task. Do not run unrelated gates merely to begin an edit.
 
 ### Optional Codanna setup
 
@@ -57,8 +58,9 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
    ```
 
 3. Keep the change bounded to one coherent outcome.
-4. Add or update tests and documentation for public behavior.
-5. Run risk-matched verification from the runbook.
+4. Select meaningful evidence for the changed behavior and update affected product
+   documentation. Reuse sufficient proof; do not add tests merely to satisfy a step.
+5. Run applicable verification from the repository profile and specialist runbook.
 6. Open a pull request against the intended integration branch.
 
 Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
@@ -113,7 +115,7 @@ uv run --no-sync ruff format .
 uv run --no-sync pyright --warnings
 ```
 
-All production code must pass the configured strict Pyright policy.
+Pyright checks both `src/` and `tests/` under their configured typing policies.
 
 ## Tests and verification
 
@@ -123,8 +125,8 @@ Test markers include:
 | --- | --- |
 | `unit` | Fast isolated coverage |
 | `integration` | Module interaction |
-| `e2e` | End-to-end CLI behavior |
-| `vs_required` | Requires a VapourSynth runtime |
+| `e2e` | End-to-end CLI behavior in `tests/e2e/`; includes the runtime-free CLI tier and media tier |
+| `vs_required` | Media-tier E2E scenarios that require a VapourSynth runtime |
 | `slow` | Long-running proof |
 | `network` | Requires external network access |
 | `tier_a` | Contract/security tests without VS or network |
@@ -132,11 +134,38 @@ Test markers include:
 Examples:
 
 ```bash
-uv run --no-sync pytest -q
+uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync pytest -m unit
 uv run --no-sync pytest -m "not vs_required"
+uv run --no-sync pytest -q tests/e2e/ -m "e2e and not vs_required"  # CLI tier
+bash tools/verify_docker_integration.sh --pytest-path tests/e2e  # focused media scenarios
 uv run --no-sync pytest --cov=src/frame_compare --cov-report=term-missing
 ```
+
+The CLI tier runs without a media runtime. The media tier is Docker-only: the gate
+sets `FRAME_COMPARE_E2E_REQUIRE_MEDIA=1` and `FRAME_COMPARE_E2E_ARTIFACTS` for the
+pinned media runtime and its inspectable scenario artifacts.
+
+The full Docker gate is `bash tools/verify_docker_integration.sh`: it runs E2E,
+integration and VS tests with ten workers and `--dist loadgroup`, plus runtime and
+production-image proofs. The focused media command above is for development and
+scenario proof; use the full gate for the runbook's runtime, dependency and media
+boundary triggers. Images build by default; rebuild after `docker-test` dependency
+or `uv.lock` changes before using the new plugin. Use `--no-build` only with
+known-current images.
+
+The verifier sets `FRAME_COMPARE_TEST_MEDIA_CACHE` to
+`/workspace/generated/test-media-cache` (host `generated/test-media-cache`) for u4
+media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact generator
+source and complete FFmpeg version output. Tests use temporary symlinks, keeping
+indexes outside the cache; unset the variable for temporary generation. Run the
+verifier one at a time from a checkout because cache pruning cannot overlap.
+CI starts cold, adds no media cache, and retains Docker `--no-cache`.
+
+New tests must be parallel-safe: use `tmp_path` and `monkeypatch`, avoid fixed paths
+or ports, and use `xdist_group` only with a stated concrete reason. The local full
+native count is four; focused runs may stay serial. Native CI uses
+`-n auto --dist loadgroup`; Windows portable CI stays serial.
 
 These examples do not replace the runbook. Changes to CLI/config contracts, runtime
 owners, Docker, Windows portable packaging, release workflows, or architectural

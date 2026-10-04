@@ -49,17 +49,6 @@ class RawConfigDocument:
     config: ConfigSchema
 
 
-def _env_only_settings_sources(
-    cls: type[BaseSettings],
-    settings_cls: type[BaseSettings],
-    init_settings: PydanticBaseSettingsSource,
-    env_settings: PydanticBaseSettingsSource,
-    dotenv_settings: PydanticBaseSettingsSource,
-    file_secret_settings: PydanticBaseSettingsSource,
-) -> tuple[PydanticBaseSettingsSource, ...]:
-    return (init_settings, env_settings)
-
-
 def _defaults_only_settings_sources(
     cls: type[BaseSettings],
     settings_cls: type[BaseSettings],
@@ -125,19 +114,6 @@ def load_config(
         raise ConfigParseError(config_path or Path("config/config.toml"), str(exc)) from exc
     except ValidationError as exc:
         # pydantic errors are compatible with our normalizer but require a cast for strict typing
-        normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
-        raise ConfigValidationError(normalized) from exc
-
-
-def load_config_from_env() -> ConfigSchema:
-    """Load config from environment variables only (no TOML file)."""
-    env_only_schema = _toml_suppressed_settings_schema(
-        "EnvOnlySchema",
-        _env_only_settings_sources,
-    )
-    try:
-        return env_only_schema()
-    except ValidationError as exc:
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(normalized) from exc
 

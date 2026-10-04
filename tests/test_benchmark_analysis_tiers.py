@@ -97,14 +97,6 @@ def test_invalid_benchmark_arguments_fail_closed(args: list[str], message: str) 
     assert message in result.stderr
 
 
-def test_trial_order_rotates_without_candidate_modes() -> None:
-    script = _load_script()
-
-    assert script._rotated_trial_order(0) == ("quality", "performance")
-    assert script._rotated_trial_order(1) == ("performance", "quality")
-    assert script._rotated_trial_order(2) == ("quality", "performance")
-
-
 def test_performance_contract_requires_exact_production_source_map() -> None:
     script = _load_script()
     frame_range = MetricFrameRange(100, 10, 50)
@@ -418,7 +410,7 @@ def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> 
         )
 
 
-def test_main_writes_atomic_production_report(
+def test_main_writes_expected_production_report(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

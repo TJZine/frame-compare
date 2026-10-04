@@ -44,7 +44,7 @@ from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 from .run_contracts import (
     report_confirmed_slowpics_enabled,
-    validate_dry_run_cache_contract,
+    validate_cache_flag_contract,
     validate_dry_run_mode_contract,
     validate_run_contracts,
     validate_write_config_contracts,
@@ -298,7 +298,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         validate_dry_run_mode_contract(args)
         if args.dry_run:
             validate_run_contracts(args, deps, normalized_config)
-            validate_dry_run_cache_contract(args)
+            validate_cache_flag_contract(args)
             handle_dry_run(args, normalized_config, console)
             return
 
@@ -320,6 +320,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             return
 
         validate_run_contracts(args, deps, normalized_config)
+        validate_cache_flag_contract(args)
         request = build_run_request_from_cli(run_options)
 
         if not args.json_output and not args.quiet:

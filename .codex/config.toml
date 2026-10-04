@@ -1,44 +1,5 @@
-[features]
-multi_agent = true
-# Codex currently ignores agents.max_depth under the V2 runtime.
-multi_agent_v2 = false
-
-[agents]
-max_threads = 6
-max_depth = 1
-
-[agents.explorer]
-description = "Read-only Frame Compare codebase explorer for gathering evidence before changes are proposed."
-config_file = "agents/explorer.toml"
-
-[agents.reviewer]
-description = "Default read-only reviewer (standard depth) focused on correctness, regressions, security, architecture fit, maintainability, and missing tests. Use deep_reviewer for high-risk or broad changes."
-config_file = "agents/reviewer.toml"
-
-[agents.deep_reviewer]
-description = "Deep read-only reviewer for high-risk, broad, or hard-to-prove changes; same focus as reviewer with more reasoning depth."
-config_file = "agents/deep-reviewer.toml"
-
-[agents.docs_researcher]
-description = "Read-only documentation specialist for verifying API, runtime, packaging, and tool behavior from official sources."
-config_file = "agents/docs-researcher.toml"
-
-[agents.planner]
-description = "Planning-focused writer for bounded discovery, execution-ready plans, and durable handoffs."
-config_file = "agents/planner.toml"
-
-[agents.worker]
-description = "Sol escalation implementer for bounded units with settled decisions that still need material local design judgment, cross-boundary comprehension, complex diagnosis, or proof interpretation."
-config_file = "agents/worker.toml"
-
-[agents.worker_luna]
-description = "Cost-efficient autonomous implementer for bounded units with clear outcomes, established owner seams and contracts, and direct verification."
-config_file = "agents/worker-luna.toml"
-
-[agents.monitor]
-description = "Long-running command and polling role for status checks, verification waits, and runtime/release gate monitoring."
-config_file = "agents/monitor.toml"
-
+# Project executor presets are discovered from .codex/agents/*.toml.
+# Feature selection and concurrency limits inherit host configuration.
 [mcp_servers.codanna]
 url = "http://127.0.0.1:8081/mcp"
 http_headers = { Authorization = "Bearer mcp-access-token-dummy" }
