@@ -174,7 +174,15 @@ the user-documentation search index. Do not activate old plans merely because
 they exist. Record material decisions and remaining evidence gaps once.
 
 Host-specific model identifiers, effort settings, permissions, and tool mappings
-belong in host configuration. They are not repository architecture rules. A missing
+belong in host configuration. Optional executor presets in `.codex/agents/*.toml`
+retain the `explorer`, `docs_researcher`, `monitor`, `planner`, `worker_luna`,
+`worker`, `reviewer`, and `deep_reviewer` shortcuts. Read the selected TOML for
+its exact model and reasoning; these presets do not require an agent pipeline.
+For user-requested separate-chat delegation, use `orchestrate-implementation-chats`
+and pass the preset's model/effort explicitly to `create_thread`. A new chat does
+not automatically apply a subagent role or its permission settings.
+
+These settings are not repository architecture rules. A missing
 old global review suite does not prevent the new shared review skill from using
 this profile and the available source/evidence.
 
