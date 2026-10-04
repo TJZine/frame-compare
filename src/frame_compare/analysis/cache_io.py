@@ -181,7 +181,7 @@ def read_cache_version(cache_path: Path) -> str | None:
     """Read the top-level version from a cache payload for error reporting."""
     try:
         raw_data: object = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         return None
     if not isinstance(raw_data, Mapping):
         return None
@@ -200,12 +200,8 @@ def _sanitize_cache_label(value: str) -> str:
 def load_cached_metrics(
     cache_dir: Path,
     fingerprint: str,
-    clips: list[ClipIdentity],
 ) -> CacheLoadResult:
-    """Load analysis metrics when the cache file matches the expected schema.
-
-    The `clips` parameter is reserved for future validation; currently ignored.
-    """
+    """Load analysis metrics when the cache file matches the expected schema."""
     cache_path = find_metrics_cache_file(cache_dir, fingerprint)
     if cache_path is None:
         return CacheLoadResult(success=False, reason="not_found")
@@ -215,7 +211,7 @@ def load_cached_metrics(
     try:
         with cache_path.open("r", encoding="utf-8") as f:
             raw_data: object = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         return CacheLoadResult(success=False, reason="corrupted")
 
     try:
@@ -241,11 +237,10 @@ def load_cached_metrics(
 def load_cached_metrics_for_request(
     cache_dir: Path,
     fingerprint: str,
-    clips: list[ClipIdentity],
     request: MetricCacheRequest,
 ) -> CacheLoadResult:
     """Load metrics only when stored metadata matches the complete request identity."""
-    result = load_cached_metrics(cache_dir, fingerprint, clips)
+    result = load_cached_metrics(cache_dir, fingerprint)
     if not (result.success and result.metrics is not None):
         return result
     if not _metrics_metadata_matches_request(result.metrics.metadata, request):

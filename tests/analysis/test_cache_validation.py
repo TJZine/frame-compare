@@ -3,7 +3,11 @@
 import json
 from pathlib import Path
 
-from frame_compare.analysis.cache_io import CACHE_VERSION, load_cached_metrics
+from frame_compare.analysis.cache_io import (
+    CACHE_VERSION,
+    load_cached_metrics,
+    read_cache_version,
+)
 from tests.analysis._cache_io_test_helpers import cache_file
 
 
@@ -20,7 +24,7 @@ def test_load_version_mismatch(tmp_path: Path) -> None:
             }
         )
     )
-    result = load_cached_metrics(tmp_path, "fp", [])
+    result = load_cached_metrics(tmp_path, "fp")
     assert result.success is False
     assert result.reason == "version_mismatch"
 
@@ -48,7 +52,7 @@ def test_load_mismatched_inputs(tmp_path: Path) -> None:
             }
         )
     )
-    result = load_cached_metrics(tmp_path, "fp2", [])
+    result = load_cached_metrics(tmp_path, "fp2")
     assert result.success is False
     assert result.reason == "mismatched_inputs"
 
@@ -75,7 +79,18 @@ def test_load_same_version_cache_without_analysis_source_path_is_corrupted(
         encoding="utf-8",
     )
 
-    result = load_cached_metrics(tmp_path, "fp", [])
+    result = load_cached_metrics(tmp_path, "fp")
 
     assert result.success is False
     assert result.reason == "corrupted"
+
+
+def test_load_invalid_utf8_cache_is_corrupted_and_has_no_version(tmp_path: Path) -> None:
+    path = cache_file(tmp_path, "fp")
+    path.write_bytes(b"\xff")
+
+    result = load_cached_metrics(tmp_path, "fp")
+
+    assert result.success is False
+    assert result.reason == "corrupted"
+    assert read_cache_version(path) is None

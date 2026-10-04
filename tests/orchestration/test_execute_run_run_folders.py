@@ -22,6 +22,7 @@ from frame_compare.analysis.types import (
     MetricActiveRect,
     MetricCacheRequest,
     MetricFrameRange,
+    MetricsAcquisition,
     MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
@@ -137,21 +138,24 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         no_upload=True,
     )
 
-    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        return _frame_metrics(
-            luminance=[0.1] * 100,
-            motion=[0.0] * 100,
-            frame_count=100,
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[
-                ClipIdentity(
-                    path=str(source_path),
-                    size=source_path.stat().st_size,
-                    mtime=source_path.stat().st_mtime,
-                    sha1=None,
-                )
-            ],
+    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+        return MetricsAcquisition(
+            metrics=_frame_metrics(
+                luminance=[0.1] * 100,
+                motion=[0.0] * 100,
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint="fingerprint",
+                clips=[
+                    ClipIdentity(
+                        path=str(source_path),
+                        size=source_path.stat().st_size,
+                        mtime=source_path.stat().st_mtime,
+                        sha1=None,
+                    )
+                ],
+            ),
+            disposition="computed",
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
@@ -457,7 +461,7 @@ enable = false
         metric_frame_range: MetricFrameRange | None = None,
         selection_domain: str | None = None,
         **_kwargs: object,
-    ) -> FrameMetrics:
+    ) -> MetricsAcquisition:
         resolved_analysis_source_path = (
             video_paths[0] if analysis_source_path is None else analysis_source_path
         )
@@ -505,7 +509,7 @@ enable = false
             ),
         )
         cache_io.save_metrics_cache(metrics, cache_dir)
-        return metrics
+        return MetricsAcquisition(metrics=metrics, disposition="computed")
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
 

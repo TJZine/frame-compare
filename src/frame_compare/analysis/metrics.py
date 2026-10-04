@@ -29,6 +29,7 @@ from frame_compare.analysis.types import (
     MetricActiveRect,
     MetricCacheRequest,
     MetricFrameRange,
+    MetricsAcquisition,
     MetricsMetadata,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -67,13 +68,12 @@ def _clip_identities(video_paths: list[Path]) -> list[ClipIdentity]:
 def _cached_metrics(
     cache_dir: Path,
     fingerprint: str,
-    clips: list[ClipIdentity],
     reporter: ProgressReporter | None,
     request: MetricCacheRequest,
     timing_recorder: AnalysisTimingRecorder | None,
 ) -> FrameMetrics | None:
     with record_span(timing_recorder, "cache_lookup"):
-        cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
+        cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, request)
     if not (cache_result.success and cache_result.metrics):
         if timing_recorder is not None:
             timing_recorder.cache_state = "miss"
@@ -188,9 +188,9 @@ def calculate_metrics(
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
     timing_recorder: AnalysisTimingRecorder | None = None,
     memory_limit_mb: int | None = None,
-) -> FrameMetrics:
+) -> MetricsAcquisition:
     """
-    Calculate frame metrics for the given clips.
+    Acquire frame metrics for the given clips.
 
     Uses cached values if valid cache exists and config matches.
     Only the selected analysis source is analyzed.
@@ -223,7 +223,7 @@ def calculate_metrics(
             ``"active_rect_resolution_v2"``.
 
     Returns:
-        FrameMetrics with luminance and motion arrays
+        Metrics with the actual cache-hit or computed acquisition disposition
 
     Raises:
         MetricsCalculationError (FC-4002): If frame extraction or metric
@@ -250,18 +250,17 @@ def calculate_metrics(
         selection_domain=selection_domain,
         metric_request=cache_request,
     )
-    clips = _clip_identities(video_paths)
-
     cached = _cached_metrics(
         cache_dir,
         fingerprint,
-        clips,
         reporter,
         cache_request,
         timing_recorder,
     )
     if cached:
-        return cached
+        return MetricsAcquisition(metrics=cached, disposition="hit")
+
+    clips = _clip_identities(video_paths)
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     with record_span(timing_recorder, "source_load"):
@@ -296,7 +295,7 @@ def calculate_metrics(
 
     if reporter:
         reporter.advance(1)
-    return metrics
+    return MetricsAcquisition(metrics=metrics, disposition="computed")
 
 
 def _resolved_metric_frame_range(

@@ -82,7 +82,8 @@ def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
     mock_load.return_value = MagicMock(success=True, metrics=metrics)
 
     result = calculate_metrics(video_paths, config, tmp_path)
-    assert result == metrics
+    assert result.disposition == "hit"
+    assert result.metrics == metrics
     mock_load.assert_called_once()
 
 
@@ -113,7 +114,8 @@ def test_calculate_metrics_records_proven_cache_hit(mock_key, mock_load, tmp_pat
         timing_recorder=recorder,
     )
 
-    assert result == metrics
+    assert result.disposition == "hit"
+    assert result.metrics == metrics
     assert recorder.cache_state == "hit"
     assert recorder.as_dict()["cache_lookup"] >= 0.0
 
@@ -163,7 +165,7 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
         metric_frame_range=MetricFrameRange(1, 0, 1),
         timing_recorder=None,
     )
-    assert mock_load.call_args.args[3] == MetricCacheRequest(
+    assert mock_load.call_args.args[2] == MetricCacheRequest(
         analysis_source_path=video_path,
         effective_fps=None,
         metric_active_rect=rect,
@@ -172,10 +174,10 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
         active_rect_algorithm_id="active_rect_resolution_v2",
     )
     mock_save.assert_called_once()
-    assert result.metadata.metric_active_rect == rect
-    assert result.metadata.active_rect_source == "explicit"
-    assert result.metadata.active_rect_detection_mode == "provided"
-    assert result.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+    assert result.metrics.metadata.metric_active_rect == rect
+    assert result.metrics.metadata.active_rect_source == "explicit"
+    assert result.metrics.metadata.active_rect_detection_mode == "provided"
+    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
 
 
 def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> None:
@@ -219,8 +221,9 @@ def test_calculate_metrics_computes_on_cache_miss(
 
     result = calculate_metrics(video_paths, config, tmp_path)
 
-    assert len(result.luminance) == 10
-    assert len(result.motion) == 10
+    assert result.disposition == "computed"
+    assert len(result.metrics.luminance) == 10
+    assert len(result.metrics.motion) == 10
     mock_strategy.assert_called_once_with(
         mock_source,
         config,
@@ -358,7 +361,7 @@ def test_calculate_metrics_uses_effective_fps_in_metadata(
         effective_fps=Fraction(24000, 1001),
     )
 
-    assert result.metadata.fps == Fraction(24000, 1001)
+    assert result.metrics.metadata.fps == Fraction(24000, 1001)
     mock_save.assert_called_once()
 
 
@@ -395,9 +398,10 @@ def test_calculate_metrics_cache_save_is_best_effort(
         timing_recorder=recorder,
     )
 
-    assert isinstance(result, FrameMetrics)
-    assert len(result.luminance) == 10
-    assert len(result.motion) == 10
+    assert isinstance(result.metrics, FrameMetrics)
+    assert result.disposition == "computed"
+    assert len(result.metrics.luminance) == 10
+    assert len(result.metrics.motion) == 10
     assert recorder.cache_write_state == "failed"
     assert recorder.as_dict()["cache_write"] >= 0.0
     mock_save.assert_called_once()
@@ -457,7 +461,7 @@ def test_calculate_metrics_analyzes_selected_analysis_source(
     )
 
     mock_loader.load.assert_called_once_with(video_paths[1])
-    assert result.metadata.analysis_source_path == str(video_paths[1])
+    assert result.metrics.metadata.analysis_source_path == str(video_paths[1])
 
 
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
@@ -576,12 +580,12 @@ def test_calculate_metrics_range_cases(
     )
     assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2, 3, 4, 5]
     assert mock_strategy.call_args.kwargs["metric_frame_range"] == requested_range
-    assert result.luminance == luminance
-    assert len(result.motion) == requested_range.frame_count
-    assert result.metadata.frame_count == requested_range.frame_count
+    assert result.metrics.luminance == luminance
+    assert len(result.metrics.motion) == requested_range.frame_count
+    assert result.metrics.metadata.frame_count == requested_range.frame_count
     if interior:
-        assert result.motion == [0.12, 0.23, 0.34]
-        assert result.metadata.source_frame_count == 6
-        assert result.metadata.metric_source_start == 2
-        assert result.metadata.metric_source_end_exclusive == 5
+        assert result.metrics.motion == [0.12, 0.23, 0.34]
+        assert result.metrics.metadata.source_frame_count == 6
+        assert result.metrics.metadata.metric_source_start == 2
+        assert result.metrics.metadata.metric_source_end_exclusive == 5
         mock_save.assert_called_once()

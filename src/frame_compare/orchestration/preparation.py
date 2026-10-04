@@ -298,7 +298,6 @@ def _validate_cache_state(
         cache_result = cache_io.load_cached_metrics_for_request(
             workspace.cache_dir,
             fingerprint,
-            clips=[],
             request=metric_request,
         )
         if not cache_result.success:

@@ -102,7 +102,7 @@ def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) 
     )
     save_metrics_cache(metrics, tmp_path)
 
-    result = load_cached_metrics_for_request(tmp_path, fingerprint, clips, request)
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, request)
 
     assert result.success is False
     assert result.reason == "mismatched_inputs"
@@ -151,7 +151,7 @@ def test_windowed_cache_request_rejects_different_range(tmp_path: Path) -> None:
         metric_frame_range=MetricFrameRange(100, 21, 24),
     )
 
-    result = load_cached_metrics_for_request(tmp_path, fingerprint, [], mismatched_request)
+    result = load_cached_metrics_for_request(tmp_path, fingerprint, mismatched_request)
 
     assert result.success is False
     assert result.reason == "mismatched_inputs"
@@ -180,7 +180,7 @@ def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: 
         encoding="utf-8",
     )
 
-    result = load_cached_metrics(tmp_path, "fp", [])
+    result = load_cached_metrics(tmp_path, "fp")
 
     assert result.success is True
     assert result.metrics is not None
@@ -304,11 +304,9 @@ def test_metrics_cache_roundtrip_cases(tmp_path: Path, case: str) -> None:
     )
     save_metrics_cache(metrics, tmp_path)
     result = (
-        load_cached_metrics(tmp_path, fingerprint, clips)
+        load_cached_metrics(tmp_path, fingerprint)
         if case == "basic"
-        else load_cached_metrics_for_request(
-            tmp_path, fingerprint, clips if case == "active_rect" else [], request
-        )
+        else load_cached_metrics_for_request(tmp_path, fingerprint, request)
     )
     assert result.success is True
     assert result.metrics is not None

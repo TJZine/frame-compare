@@ -296,28 +296,27 @@ def _run_analyze_phase_once(
         selection_window=ctx.selection_window,
         fallback_detection_mode=ctx.config.screenshots.active_rect_detection.value,
     )
-    fingerprint = cache_io.compute_cache_key(
-        input_videos,
-        ctx.config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_request,
-    )
-    cache_result = cache_io.load_cached_metrics_for_request(
-        workspace.cache_dir,
-        fingerprint,
-        clips=[],
-        request=metric_request,
-    )
-    metrics_cache_hit = cache_result.success and cache_result.metrics is not None
     if require_cache_only:
+        fingerprint = cache_io.compute_cache_key(
+            input_videos,
+            ctx.config.analysis,
+            selection_domain=selection_domain,
+            metric_request=metric_request,
+        )
+        cache_result = cache_io.load_cached_metrics_for_request(
+            workspace.cache_dir,
+            fingerprint,
+            request=metric_request,
+        )
         metrics = _require_cached_metrics(
             cache_result=cache_result,
             cache_dir=workspace.cache_dir,
             input_videos=input_videos,
             fingerprint=fingerprint,
         )
+        metrics_cache_hit = True
     else:
-        metrics = calculate_metrics(
+        acquisition = calculate_metrics(
             video_paths=input_videos,
             analysis_source_path=ctx.analysis_clip.path,
             config=ctx.config.analysis,
@@ -333,6 +332,8 @@ def _run_analyze_phase_once(
             active_rect_detection_mode=metric_request.active_rect_detection_mode,
             active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
         )
+        metrics = acquisition.metrics
+        metrics_cache_hit = acquisition.disposition == "hit"
     selection = _select_frames_for_selection_domain(
         metrics=metrics,
         reference=ctx.reference,

@@ -15,7 +15,7 @@ import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import (
     ClipIdentity,
-    FrameMetrics,
+    MetricsAcquisition,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
@@ -130,21 +130,24 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         no_upload=True,
     )
 
-    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        return _frame_metrics(
-            luminance=[0.1] * 100,
-            motion=[0.0] * 100,
-            frame_count=100,
-            fps=Fraction(24, 1),
-            config_fingerprint="fingerprint",
-            clips=[
-                ClipIdentity(
-                    path=str(source_path),
-                    size=source_path.stat().st_size,
-                    mtime=source_path.stat().st_mtime,
-                    sha1=None,
-                )
-            ],
+    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+        return MetricsAcquisition(
+            metrics=_frame_metrics(
+                luminance=[0.1] * 100,
+                motion=[0.0] * 100,
+                frame_count=100,
+                fps=Fraction(24, 1),
+                config_fingerprint="fingerprint",
+                clips=[
+                    ClipIdentity(
+                        path=str(source_path),
+                        size=source_path.stat().st_size,
+                        mtime=source_path.stat().st_mtime,
+                        sha1=None,
+                    )
+                ],
+            ),
+            disposition="computed",
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)

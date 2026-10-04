@@ -130,7 +130,10 @@ def _load_fps(entry: Mapping[str, object]) -> Fraction:
     fps_den = _require_int(entry, "fps_den")
     if fps_den == 0:
         raise ValueError("fps_den must be non-zero")
-    return Fraction(fps_num, fps_den)
+    fps = Fraction(fps_num, fps_den)
+    if fps <= 0:
+        raise ValueError("fps must be positive")
+    return fps
 
 
 def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
@@ -142,9 +145,15 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
     entry = entry_raw
 
     try:
+        path = entry["path"]
+        if not isinstance(path, str):
+            raise TypeError("path must be a string")
+        size_bytes = _require_int(entry, "size_bytes")
+        if size_bytes < 0:
+            raise ValueError("size_bytes must be non-negative")
         fingerprint = ClipFingerprint(
-            path=Path(str(entry["path"])),
-            size_bytes=_require_int(entry, "size_bytes"),
+            path=Path(path),
+            size_bytes=size_bytes,
             mtime_ns=_require_int(entry, "mtime_ns"),
         )
 
@@ -161,9 +170,9 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         return _CacheEntryLoadOutcome(
             snapshot=ClipProbeSnapshot(
                 fingerprint=fingerprint,
-                width=_require_int(entry, "width"),
-                height=_require_int(entry, "height"),
-                num_frames=_require_int(entry, "num_frames"),
+                width=_positive_int(entry, "width"),
+                height=_positive_int(entry, "height"),
+                num_frames=_positive_int(entry, "num_frames"),
                 fps=_load_fps(entry),
                 is_hdr=is_hdr,
                 hdr_metadata=hdr_metadata,
@@ -175,6 +184,13 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         )
     except (KeyError, TypeError, ValueError) as e:
         return _CacheEntryLoadOutcome(snapshot=None, warning=str(e))
+
+
+def _positive_int(entry: Mapping[str, object], field: str) -> int:
+    value = _require_int(entry, field)
+    if value <= 0:
+        raise ValueError(f"{field} must be positive")
+    return value
 
 
 def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
@@ -213,7 +229,7 @@ def _load_clip_probe_cache(
         if abort_on_read_error:
             raise _ProbeCacheReadError from e
         return {}
-    except tomllib.TOMLDecodeError as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
         if abort_on_read_error:
             raise _ProbeCacheReadError("Malformed shared probe cache") from e
@@ -240,6 +256,15 @@ def _load_clip_probe_cache(
         outcome = _load_cache_entry(entry_raw)
         if outcome.snapshot is None:
             log.warning("probe_cache_invalid_entry", key=key, error=outcome.warning)
+            continue
+
+        expected_key = compute_probe_cache_key(outcome.snapshot.fingerprint)
+        if key != expected_key:
+            log.warning(
+                "probe_cache_invalid_entry",
+                key=key,
+                error="entry key does not match persisted fingerprint",
+            )
             continue
 
         snapshots[key] = outcome.snapshot

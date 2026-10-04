@@ -18,7 +18,7 @@ from tests.analysis._cache_io_test_helpers import cache_file, metrics_metadata
 
 def test_load_not_found(tmp_path: Path) -> None:
     """Empty dir → reason="not_found"."""
-    result = load_cached_metrics(tmp_path, "some-fingerprint", [])
+    result = load_cached_metrics(tmp_path, "some-fingerprint")
     assert result.success is False
     assert result.reason == "not_found"
 
@@ -27,7 +27,7 @@ def test_load_ignores_legacy_single_cache_filename(tmp_path: Path) -> None:
     """Legacy run-folder cache filename is not a shared-cache hit."""
     (tmp_path / "cache.compframes").write_text("invalid json", encoding="utf-8")
 
-    result = load_cached_metrics(tmp_path, "some-fingerprint", [])
+    result = load_cached_metrics(tmp_path, "some-fingerprint")
 
     assert result.success is False
     assert result.reason == "not_found"

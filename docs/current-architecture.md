@@ -92,6 +92,11 @@ identity in schema v8 payload metadata, and orchestration only passes the effect
 analysis config, active-rect-aware selection-domain token, analysis-owned metric
 active rectangle, active-rect provenance, and exact source-frame metric range into
 the analysis/cache owner.
+`frame_compare.analysis.metrics.calculate_metrics` owns normal cache acquisition
+and returns a `MetricsAcquisition` containing the metrics and the actual `hit` or
+`computed` disposition. Analyze presentation consumes that result without a
+predictive cache read. Cache-only preparation still validates before reserving
+output, and cache-only analysis reads again without permission to compute.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
