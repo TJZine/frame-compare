@@ -1165,7 +1165,6 @@ def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) 
     request = alignment_request(
         reference=reference,
         comparisons=[alpha, beta],
-        config=AlignmentConfig(),
         generated_dir=tmp_path,
     )
     request = replace(
@@ -1179,8 +1178,8 @@ def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) 
         f"{reference.stem}:{comparison.stem}": AlignmentResult(
             reference.name,
             comparison.name,
-            None,
-            None,
+            0 if applied else None,
+            0.0 if applied else None,
             0.0,
             None,
             "computed",
@@ -1263,7 +1262,6 @@ def test_opening_vsview_review_lines_frozen_verbatim(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     asyncio.run(
@@ -1289,7 +1287,6 @@ def _request_for(tmp_path: Path, config: AlignmentConfig) -> tuple[Path, Path, A
         alignment_request(
             reference=reference,
             comparisons=[comparison],
-            config=config,
             generated_dir=tmp_path,
         ),
     )

@@ -13,6 +13,7 @@ from frame_compare.services.alignment_reuse_prompt import (
     previous_offset_prompt_input_from_rows,
     prompt_for_previous_offset_reuse,
 )
+from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
@@ -38,8 +39,8 @@ def _alignment_key_from_request(
     return alignment_key(request.reference.path, comparison.path)
 
 
-def validate_previous_offsets_policy(config: AlignmentConfig) -> None:
-    if config.previous_offsets == "disabled":
+def validate_previous_offsets_policy(request: AlignmentRequest, config: AlignmentConfig) -> None:
+    if request.previous_offsets == "disabled":
         return
     if not config.cache_results:
         raise AudioAlignmentError(
@@ -61,8 +62,8 @@ def _shared_reuse_prompt_input(
     for comparison in unresolved_comparisons:
         entry = reusable_entries[comparison_cache_key(comparison)]
         result = entry.result
-        if result.frame_offset is None or result.time_offset_seconds is None:
-            raise AudioAlignmentError("Reusable alignment offset is missing required values.")
+        assert result.frame_offset is not None
+        assert result.time_offset_seconds is not None
         rows.append(
             PreviousOffsetPromptRow(
                 label=comparison.label,
@@ -91,6 +92,7 @@ def _apply_cached_alignment_result(
     provenances: dict[str, AlignmentProvenance],
     computed_cache_hit: bool,
 ) -> None:
+    require_current_alignment_sources(request)
     key = _alignment_key_from_request(request, comparison)
     comparison_key = comparison_cache_key(comparison)
     results_map[key] = result
@@ -217,11 +219,7 @@ def shared_write_is_service_eligible(
             "interactive_confirmed_this_run",
         }:
             return False
-        if (
-            not provenance.result.applied
-            or provenance.result.frame_offset is None
-            or provenance.result.time_offset_seconds is None
-        ):
+        if not provenance.result.applied:
             return False
     return has_current_run_write
 

@@ -12,6 +12,7 @@ import structlog
 
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
+from frame_compare.services.alignment_sources import require_current_alignment_clips
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -406,6 +407,8 @@ def maybe_launch_alignment_vsview(
             return AlignmentVSViewOutcome(None, "rejected_result")
 
         confirmed_offsets = _confirmed_offsets(result)
+        if confirmed_offsets:
+            require_current_alignment_clips([reference, *comparisons])
         _save_confirmed_offsets(
             reference=reference_path,
             comparisons=comparison_paths,

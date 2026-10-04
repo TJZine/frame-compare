@@ -440,7 +440,17 @@ per-source display strings as optional primitives for the reuse prompt; alignmen
 services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
-`ClipIdentity`, or `ClipFingerprint`.
+`ClipIdentity`, or `ClipFingerprint`. The request is the sole owner of computation
+and cache facts: offset bounds, channel strategy, selected streams, and previous
+offset reuse policy. `AlignmentConfig` carries execution and presentation
+preferences rather than a second copy of those facts.
+
+Prepared identities remain frozen. Cached acceptance and persistence validate
+current path, size, and mtime against them; prompts and native review do not permit
+changed sources to authorize trims or newly saved offsets. Applied
+`AlignmentResult` values require both an integer frame offset and a finite time
+offset; unapplied results carry neither. Zero remains a valid applied offset,
+and historical cached/manual evidence remains distinct from fresh computation.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
 precedence and carries the immutable original audio attempt and diagnostic-only

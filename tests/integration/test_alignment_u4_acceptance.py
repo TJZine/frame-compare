@@ -613,11 +613,10 @@ def _align_pair(
         if name == "multipath"
         else media.references.get(name, media.reference)
     )
-    config = AlignmentConfig(cache_results=False, max_offset_seconds=30.0)
+    config = AlignmentConfig(cache_results=False)
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=generated_dir,
         fps_num=_FPS,
     )

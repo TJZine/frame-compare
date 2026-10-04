@@ -127,7 +127,6 @@ def test_outer_cancellation_reaches_collection_and_blocks_post_work(
     request = alignment_request(
         reference=reference,
         comparisons=comparisons,
-        config=config,
         generated_dir=tmp_path,
     )
     pair_reached = threading.Event()
@@ -185,7 +184,6 @@ async def test_repeated_cancellation_waits_for_worker_cleanup_and_preserves_canc
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     started = threading.Event()
@@ -226,7 +224,6 @@ async def test_worker_error_racing_outer_cancellation_does_not_replace_cancellat
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     started = threading.Event()
@@ -260,7 +257,6 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     started = threading.Event()
@@ -462,9 +458,8 @@ def test_pair_failure_precedence(
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
     comparison.touch()
-    config = AlignmentConfig(cache_results=False)
     request = alignment_request(
-        reference=reference, comparisons=[comparison], config=config, generated_dir=tmp_path
+        reference=reference, comparisons=[comparison], generated_dir=tmp_path
     )
     monkeypatch.setattr(alignment_audio, "probe_streams", lambda _path, **_kwargs: _probe())
 
@@ -483,7 +478,7 @@ def test_pair_failure_precedence(
         alignment._estimate_audio_pair(
             reference,
             comparison,
-            config=config,
+            cache_settings=request.settings,
             fps_reference=Fraction(24),
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
@@ -522,7 +517,6 @@ config = AlignmentConfig(cache_results=False)
 request = alignment_request(
     reference=reference,
     comparisons=[comparison],
-    config=config,
     generated_dir=reference.parent,
 )
 

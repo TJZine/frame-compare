@@ -43,7 +43,11 @@ from frame_compare.services.alignment_previous_offsets import (
     shared_write_is_service_eligible,
     validate_previous_offsets_policy,
 )
-from frame_compare.services.alignment_reuse_cache import comparison_cache_key, save_reusable_offsets
+from frame_compare.services.alignment_reuse_cache import (
+    comparison_cache_key,
+    save_reusable_offsets,
+)
+from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.alignment_streaming import (
     CollectionCleanup,
     CollectionFacts,
@@ -79,7 +83,7 @@ from frame_compare.utils.alignment_evidence import (
     audio_attempt_payload,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
-from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
+from frame_compare.utils.types import AlignmentCacheSettings, AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 if TYPE_CHECKING:
@@ -294,16 +298,6 @@ def _source_identity(path: Path) -> tuple[int, int]:
     return stat.st_size, stat.st_mtime_ns
 
 
-def _request_identity_matches(path: Path, request: AlignmentClipRequest) -> bool:
-    try:
-        return path.resolve() == request.identity.path.resolve() and _source_identity(path) == (
-            request.identity.size_bytes,
-            request.identity.mtime_ns,
-        )
-    except OSError:
-        return False
-
-
 def _computed_result(
     *,
     reference: Path,
@@ -393,7 +387,6 @@ def _build_audio_attempt(
     reference_selection: alignment_audio.AudioStreamSelection,
     comparison_selection: alignment_audio.AudioStreamSelection,
     decided: DecidedAudioStage,
-    config: AlignmentConfig,
     fps_reference: Fraction,
     collection: tuple[AudioCollectionFacts, ...],
     collection_observation: AudioCollectionObservation,
@@ -417,7 +410,7 @@ def _build_audio_attempt(
                 reference_selection.stream,
                 role="reference",
                 source_identity_digest=_clip_identity_digest(reference),
-                explicit_override=config.reference_stream is not None,
+                explicit_override=reference.selected_audio_stream is not None,
                 video_start=reference_selection.video_start,
                 timeline_scale=reference.timeline_scale,
             ),
@@ -425,7 +418,7 @@ def _build_audio_attempt(
                 comparison_selection.stream,
                 role="comparison",
                 source_identity_digest=_clip_identity_digest(comparison),
-                explicit_override=config.comparison_streams.get(comparison.path.stem) is not None,
+                explicit_override=comparison.selected_audio_stream is not None,
                 video_start=comparison_selection.video_start,
                 timeline_scale=comparison.timeline_scale,
                 reference_stream=reference_selection.stream,
@@ -473,7 +466,7 @@ def _rejected_result(
     *,
     reference: Path,
     comparison: Path,
-    config: AlignmentConfig,
+    cache_settings: AlignmentCacheSettings,
     reason: str,
     reference_request: AlignmentClipRequest,
     comparison_request: AlignmentClipRequest,
@@ -494,7 +487,7 @@ def _rejected_result(
         reference_audio_start = reference_video_start = None
         comparison_audio_start = comparison_video_start = None
     decided = alignment_decision.decide_rejected_stage(
-        max_offset_seconds=config.max_offset_seconds,
+        max_offset_seconds=cache_settings.max_offset_seconds,
         reason=reason,
         reference_audio_start=reference_audio_start,
         reference_video_start=reference_video_start,
@@ -510,7 +503,6 @@ def _rejected_result(
             reference_selection=reference_selection,
             comparison_selection=comparison_selection,
             decided=decided,
-            config=config,
             fps_reference=fps_reference,
             collection=(),
             collection_observation="not_observed",
@@ -562,7 +554,7 @@ def _plan_audio_pair(
     reference: Path,
     comparison: Path,
     *,
-    config: AlignmentConfig,
+    cache_settings: AlignmentCacheSettings,
     fps_reference: Fraction,
     reference_probe_loader: Callable[[], alignment_audio.ProbedStreams] | None,
     reference_request: AlignmentClipRequest,
@@ -574,15 +566,16 @@ def _plan_audio_pair(
     raise_if_alignment_cancelled(cancellation)
     frozen_identities: tuple[tuple[int, int], tuple[int, int]] | None = None
     try:
-        if _request_identity_matches(reference, reference_request) and _request_identity_matches(
-            comparison, comparison_request
-        ):
-            frozen_identities = (_source_identity(reference), _source_identity(comparison))
+        if reference_request.identity_is_current() and comparison_request.identity_is_current():
+            frozen_identities = (
+                (reference_request.identity.size_bytes, reference_request.identity.mtime_ns),
+                (comparison_request.identity.size_bytes, comparison_request.identity.mtime_ns),
+            )
     except OSError:
         frozen_identities = None
     if frozen_identities is None:
         decided = alignment_decision.decide_rejected_stage(
-            max_offset_seconds=config.max_offset_seconds,
+            max_offset_seconds=cache_settings.max_offset_seconds,
             reason="source_identity_changed",
         )
         return _computed_result(
@@ -602,8 +595,8 @@ def _plan_audio_pair(
         comparison_probe,
         reference_path=reference,
         comparison_path=comparison,
-        reference_override=config.reference_stream,
-        comparison_override=config.comparison_streams.get(comparison.stem),
+        reference_override=reference_request.selected_audio_stream,
+        comparison_override=comparison_request.selected_audio_stream,
     )
     reference_duration = reference_selection.stream.timeline.duration
     comparison_duration = comparison_selection.stream.timeline.duration
@@ -611,7 +604,7 @@ def _plan_audio_pair(
         return _rejected_result(
             reference=reference,
             comparison=comparison,
-            config=config,
+            cache_settings=cache_settings,
             reason="selected_audio_timeline_unavailable",
             reference_request=reference_request,
             comparison_request=comparison_request,
@@ -632,13 +625,13 @@ def _plan_audio_pair(
         plan = plan_audio_chunks(
             reference_samples,
             comparison_samples,
-            config.max_offset_seconds,
+            cache_settings.max_offset_seconds,
         )
     except AudioAlignmentError as exc:
         return _rejected_result(
             reference=reference,
             comparison=comparison,
-            config=config,
+            cache_settings=cache_settings,
             reason=exc.category,
             reference_request=reference_request,
             comparison_request=comparison_request,
@@ -660,7 +653,7 @@ def _plan_audio_pair(
         return _rejected_result(
             reference=reference,
             comparison=comparison,
-            config=config,
+            cache_settings=cache_settings,
             reason="selected_audio_timeline_unavailable",
             reference_request=reference_request,
             comparison_request=comparison_request,
@@ -684,7 +677,7 @@ def _collect_and_decide_audio_pair(
     reference: Path,
     comparison: Path,
     *,
-    config: AlignmentConfig,
+    cache_settings: AlignmentCacheSettings,
     fps_reference: Fraction,
     planned: _PlannedAudioPair,
     reference_request: AlignmentClipRequest,
@@ -719,7 +712,6 @@ def _collect_and_decide_audio_pair(
             reference_selection=reference_selection,
             comparison_selection=comparison_selection,
             decided=decided,
-            config=config,
             fps_reference=fps_reference,
             collection=collection_facts,
             collection_observation=collection_observation,
@@ -748,7 +740,6 @@ def _collect_and_decide_audio_pair(
                 reference_selection=reference_selection,
                 comparison_selection=comparison_selection,
                 decided=decided,
-                config=config,
                 fps_reference=fps_reference,
                 collection=collection_facts,
                 collection_observation=collection_observation,
@@ -768,7 +759,7 @@ def _collect_and_decide_audio_pair(
     ) -> AlignmentResult:
         decided = alignment_decision.decide_aborted_stage(
             plan=plan,
-            max_offset_seconds=config.max_offset_seconds,
+            max_offset_seconds=cache_settings.max_offset_seconds,
             reason="source_identity_changed",
             reference_audio_start=reference_audio_start,
             reference_video_start=reference_video_start,
@@ -786,13 +777,13 @@ def _collect_and_decide_audio_pair(
         alignment_audio.collection_argv(
             reference,
             reference_selection.stream,
-            channel_strategy=config.channel_strategy,
+            channel_strategy=cache_settings.channel_strategy,
             timeline_scale=reference_request.timeline_scale,
         ),
         alignment_audio.collection_argv(
             comparison,
             comparison_selection.stream,
-            channel_strategy=config.channel_strategy,
+            channel_strategy=cache_settings.channel_strategy,
             timeline_scale=comparison_request.timeline_scale,
         ),
         chunks=plan.chunks,
@@ -823,7 +814,7 @@ def _collect_and_decide_audio_pair(
             return aborted_for_identity_change("observed", facts, pair_failure)
         decided = alignment_decision.decide_aborted_stage(
             plan=plan,
-            max_offset_seconds=config.max_offset_seconds,
+            max_offset_seconds=cache_settings.max_offset_seconds,
             reason=collection.category,
             reference_audio_start=reference_audio_start,
             reference_video_start=reference_video_start,
@@ -841,7 +832,7 @@ def _collect_and_decide_audio_pair(
     decided = alignment_decision.decide_completed_stage(
         estimate=estimate,
         plan=plan,
-        max_offset_seconds=config.max_offset_seconds,
+        max_offset_seconds=cache_settings.max_offset_seconds,
         reference_audio_start=reference_audio_start,
         reference_video_start=reference_video_start,
         comparison_audio_start=comparison_audio_start,
@@ -856,7 +847,7 @@ def _estimate_audio_pair(
     reference: Path,
     comparison: Path,
     *,
-    config: AlignmentConfig,
+    cache_settings: AlignmentCacheSettings,
     fps_reference: Fraction,
     reference_probe_loader: Callable[[], alignment_audio.ProbedStreams] | None = None,
     reference_request: AlignmentClipRequest,
@@ -869,7 +860,7 @@ def _estimate_audio_pair(
     planned = _plan_audio_pair(
         reference,
         comparison,
-        config=config,
+        cache_settings=cache_settings,
         fps_reference=fps_reference,
         reference_probe_loader=reference_probe_loader,
         reference_request=reference_request,
@@ -882,7 +873,7 @@ def _estimate_audio_pair(
     return _collect_and_decide_audio_pair(
         reference,
         comparison,
-        config=config,
+        cache_settings=cache_settings,
         fps_reference=fps_reference,
         planned=planned,
         reference_request=reference_request,
@@ -897,7 +888,6 @@ def _compute_requested_alignments(
     *,
     request: AlignmentRequest,
     requested_comparisons: list[AlignmentClipRequest],
-    config: AlignmentConfig,
     results_map: dict[str, AlignmentResult],
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
@@ -927,7 +917,7 @@ def _compute_requested_alignments(
         res = _estimate_audio_pair(
             reference.path,
             comp.path,
-            config=config,
+            cache_settings=request.settings,
             fps_reference=resolved_fps,
             reference_probe_loader=load_reference_probe,
             reference_request=reference,
@@ -960,7 +950,6 @@ async def _await_audio_computation(
     *,
     request: AlignmentRequest,
     requested_comparisons: list[AlignmentClipRequest],
-    config: AlignmentConfig,
     results_map: dict[str, AlignmentResult],
     provenances: dict[str, AlignmentProvenance],
     fps_reference: Fraction | None,
@@ -983,7 +972,6 @@ async def _await_audio_computation(
             _compute_requested_alignments,
             request=request,
             requested_comparisons=requested_comparisons,
-            config=config,
             results_map=results_map,
             provenances=provenances,
             fps_reference=fps_reference,
@@ -1200,9 +1188,7 @@ async def align_clips_from_request(
     reference = request.reference.path
     comparisons = [comparison.path for comparison in request.comparisons]
     _check_duplicate_stems(comparisons)
-    if request.previous_offsets != config.previous_offsets:
-        raise AudioAlignmentError("Alignment request previous_offsets does not match config.")
-    validate_previous_offsets_policy(config)
+    validate_previous_offsets_policy(request, config)
 
     if progress:
         progress.set_description("ALIGN | Checking saved offsets")
@@ -1217,6 +1203,8 @@ async def align_clips_from_request(
         provenances=provenances,
         fps_reference=reference_fps,
     )
+    if results_map:
+        require_current_alignment_sources(request)
     unresolved_comparisons = [
         comparison
         for comparison in request.comparisons
@@ -1248,7 +1236,6 @@ async def align_clips_from_request(
         fps_reference = await _await_audio_computation(
             request=request,
             requested_comparisons=requested_comparisons,
-            config=config,
             results_map=results_map,
             provenances=provenances,
             fps_reference=fps_reference,
@@ -1270,6 +1257,9 @@ async def align_clips_from_request(
             provenances=provenances,
             cached_audio_evidence_only=True,
         )
+
+    if any(result.applied for result in results_map.values()):
+        require_current_alignment_sources(request)
 
     initial_outcome: AlignmentReviewOutcome = (
         "pending"
@@ -1302,6 +1292,7 @@ async def align_clips_from_request(
         diagnostics_written=bool(diagnostic_keys),
     )
     if completed_confirmed_reuse and not requested_comparisons:
+        require_current_alignment_sources(request)
         return [
             results_map[alignment_key(reference, comparison.path)]
             for comparison in request.comparisons
@@ -1331,6 +1322,8 @@ async def align_clips_from_request(
         review_summary=review_summary,
     )
     confirmed_offsets = review.confirmed_offsets
+    if confirmed_offsets:
+        require_current_alignment_sources(request)
     fps_reference = _apply_confirmed_vsview_offsets(
         reference=reference,
         comparisons=comparisons,
@@ -1358,6 +1351,8 @@ async def align_clips_from_request(
         if review_summary is not None and not review_summary.review_ran:
             review_summary.review_unresolved = True
 
+    if any(result.applied for result in results_map.values()):
+        require_current_alignment_sources(request)
     if config.cache_results and shared_write_is_service_eligible(
         request=request,
         provenances=provenances,

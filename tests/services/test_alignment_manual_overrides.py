@@ -50,6 +50,12 @@ def test_load_manual_overrides_corrupt_file_is_empty(tmp_path: Path) -> None:
     assert load_manual_overrides(tmp_path) == {}
 
 
+def test_load_manual_overrides_invalid_utf8_file_is_empty(tmp_path: Path) -> None:
+    (tmp_path / MANUAL_OVERRIDES_FILE).write_bytes(b"\xff")
+
+    assert load_manual_overrides(tmp_path) == {}
+
+
 def test_load_manual_overrides_unsupported_version_is_empty(tmp_path: Path) -> None:
     (tmp_path / MANUAL_OVERRIDES_FILE).write_text(
         'version = "999"\n["ref:comp"]\nframe_offset = 4\n',
@@ -145,6 +151,16 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
         save_manual_override(tmp_path, override)
 
     assert warning.call_args.args[0] == "manual_overrides_read_existing_error"
+    assert load_manual_overrides(tmp_path) == {"ref:comp": override}
+
+
+def test_save_manual_override_invalid_utf8_replaces_stale_file(tmp_path: Path) -> None:
+    path = tmp_path / MANUAL_OVERRIDES_FILE
+    path.write_bytes(b"\xff")
+    override = _override("comp", 99)
+
+    save_manual_override(tmp_path, override)
+
     assert load_manual_overrides(tmp_path) == {"ref:comp": override}
 
 

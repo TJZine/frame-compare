@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from typing import Literal
 
 from frame_compare.utils.alignment_evidence import (
@@ -51,6 +52,15 @@ class AlignmentResult:
 
     def __post_init__(self) -> None:
         _require_int("frame_offset", self.frame_offset)
+        if self.applied:
+            if self.frame_offset is None or self.time_offset_seconds is None:
+                raise ValueError("applied alignment requires frame and time offsets")
+            if isinstance(self.time_offset_seconds, bool) or not math.isfinite(
+                self.time_offset_seconds
+            ):
+                raise ValueError("applied alignment requires a finite time offset")
+        elif self.frame_offset is not None or self.time_offset_seconds is not None:
+            raise ValueError("unapplied alignment cannot carry offsets")
         if self.audio_attempt is None or self.source != "computed":
             return
         decision = self.audio_attempt.decision
@@ -67,7 +77,7 @@ class AlignmentResult:
             not self.applied
             or candidate is None
             or self.frame_offset != candidate.frame_offset
-            or self.time_offset_seconds is None
+            or self.time_offset_seconds != candidate.time_offset_seconds
         ):
             raise ValueError("trusted automatic evidence must match the applied result")
 
@@ -116,14 +126,9 @@ class AlignmentConfig:
     """Configuration for audio alignment."""
 
     enable: bool = True
-    max_offset_seconds: float = 30.0
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
-    previous_offsets: PreviousOffsetReusePolicy = "disabled"
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix"
-    reference_stream: int | None = None
-    comparison_streams: dict[str, int] = field(default_factory=dict[str, int])
     memory_limit_mb: int | None = None
     no_color: bool = False
 

@@ -817,6 +817,11 @@ recovery requirement.
   VapourSynth and L-SMASH-Works decoder identity. In the managed Windows portable and
   Debian/Docker profiles, a selected supported FFmpeg or decoder lineage change cannot
   reuse an offset computed under the previous build.
+- Alignment cache acceptance and offset persistence recheck prepared source path,
+  size, and mtime. A source change after preparation cannot authorize cached trims
+  or newly saved offsets; the typed alignment failure requires a fresh run rather
+  than silently replacing the prepared fingerprint. The existing same-path,
+  same-size, same-mtime cache reuse policy remains unchanged.
 - Successful low-level TMDB search and alternative-title responses are reused from
   `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
   is cached rather than the final ranked match, so current resolver policy always

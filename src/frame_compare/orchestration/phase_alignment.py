@@ -83,14 +83,9 @@ async def run_align_phase(
     alignment_config = AlignmentConfig(
         enable=ctx.config.audio_alignment.enable,
         memory_limit_mb=ctx.config.runtime.memory_limit_mb,
-        max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
         use_vsview=ctx.config.audio_alignment.use_vsview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
-        channel_strategy=ctx.config.audio_alignment.channel_strategy,
-        reference_stream=ctx.config.audio_alignment.reference_stream,
-        comparison_streams=dict(ctx.config.audio_alignment.comparison_streams),
-        previous_offsets=ctx.config.audio_alignment.previous_offsets,
         no_color=ctx.no_color,
     )
     alignment_request = _alignment_request_from_context(ctx)
@@ -124,8 +119,7 @@ async def run_align_phase(
         alignment = None
         if result.applied:
             frame_offset = result.frame_offset
-            if frame_offset is None:
-                raise AudioAlignmentError("Applied alignment result is missing frame offset.")
+            assert frame_offset is not None
             alignment = ClipAlignmentState(
                 reference_stem=Path(result.reference_clip).stem,
                 comparison_stem=Path(result.comparison_clip).stem,

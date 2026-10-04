@@ -46,10 +46,15 @@ from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def _clip(path: Path, *, frame_count: int = 200) -> AlignmentClipRequest:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(exist_ok=True)
+    stat = path.stat()
     return AlignmentClipRequest(
         path=path,
         label=path.stem,
-        identity=AlignmentClipIdentity(path=path, size_bytes=1, mtime_ns=1),
+        identity=AlignmentClipIdentity(
+            path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns
+        ),
         trim_start_frames=0,
         trim_end_frame_inclusive=None,
         effective_fps_num=24,
@@ -320,7 +325,6 @@ def test_pending_review_without_launch_marks_review_unresolved(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     summary = AlignmentReviewSummary()
@@ -584,3 +588,30 @@ def test_native_review_never_reads_terminal_input(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         {}, "keep_current"
     )
+
+
+@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
+def test_source_changed_during_review_cannot_save_new_manual_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_role: str,
+) -> None:
+    _set_interactive(monkeypatch)
+
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(ConfirmedAlignmentReviewDecision("ref:comparison", 120, 108),),
+            ),
+        )
+        changed = tmp_path / ("ref.mkv" if changed_role == "reference" else "comparison.mkv")
+        changed.write_bytes(b"changed after frozen request")
+        return session, 0.0
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        _call(tmp_path, config=AlignmentConfig(use_vsview=True))
+    assert load_manual_overrides(tmp_path) == {}

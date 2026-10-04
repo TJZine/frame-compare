@@ -155,12 +155,12 @@ def _probe_starts(path: Path) -> tuple[Fraction, Fraction]:
 
 
 def _align_pair(reference: Path, comparison: Path, generated_dir: Path) -> AlignmentResult:
-    config = AlignmentConfig(cache_results=False, max_offset_seconds=1.0)
+    config = AlignmentConfig(cache_results=False)
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=generated_dir,
+        max_offset_seconds=1.0,
         fps_num=_FPS_NUM,
         fps_den=_FPS_DEN,
     )

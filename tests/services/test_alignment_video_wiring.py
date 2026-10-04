@@ -54,7 +54,6 @@ def test_missing_loader_is_a_video_unavailable_provisional_result(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path / "generated",
     )
 

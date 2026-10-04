@@ -39,7 +39,6 @@ async def test_cancelled_alignment_never_applies_phase_output(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     started = threading.Event()
