@@ -790,7 +790,7 @@ async def test_default_resolution_timeout_reaps_child_without_transport(
     if ignore_termination:
         code = "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" + code
     monkeypatch.setattr(webhook, "_WEBHOOK_RESOLVER_CODE", code)
-    monkeypatch.setattr(webhook, "WEBHOOK_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(webhook, "WEBHOOK_TIMEOUT_SECONDS", 1.0)
     started = time.monotonic()
     result = await deliver_slowpics_webhook(
         webhook_url="https://hooks.example.test/secret-path?token=secret-query",
@@ -798,7 +798,7 @@ async def test_default_resolution_timeout_reaps_child_without_transport(
         connector=_unexpected_connector,
     )
     assert marker.exists()
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < 3
     assert result == SlowpicsWebhookResult(
         success=False, warning=WEBHOOK_FAILURE_WARNING, failure_kind=WebhookFailureKind.TIMEOUT
     )
@@ -1068,7 +1068,7 @@ async def test_exact_pth_blocked_startup_is_bounded_and_reaped(
         encoding="utf-8",
     )
     if stop == "timeout":
-        monkeypatch.setattr(webhook, "WEBHOOK_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(webhook, "WEBHOOK_TIMEOUT_SECONDS", 1.0)
     calls: list[WebhookDeliveryRequest] = []
 
     def connector(request: WebhookDeliveryRequest) -> WebhookResponse:

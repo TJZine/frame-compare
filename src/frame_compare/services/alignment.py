@@ -565,14 +565,11 @@ def _plan_audio_pair(
     """Select streams and plan chunks; return a rejection result or a plan."""
     raise_if_alignment_cancelled(cancellation)
     frozen_identities: tuple[tuple[int, int], tuple[int, int]] | None = None
-    try:
-        if reference_request.identity_is_current() and comparison_request.identity_is_current():
-            frozen_identities = (
-                (reference_request.identity.size_bytes, reference_request.identity.mtime_ns),
-                (comparison_request.identity.size_bytes, comparison_request.identity.mtime_ns),
-            )
-    except OSError:
-        frozen_identities = None
+    if reference_request.identity_is_current() and comparison_request.identity_is_current():
+        frozen_identities = (
+            (reference_request.identity.size_bytes, reference_request.identity.mtime_ns),
+            (comparison_request.identity.size_bytes, comparison_request.identity.mtime_ns),
+        )
     if frozen_identities is None:
         decided = alignment_decision.decide_rejected_stage(
             max_offset_seconds=cache_settings.max_offset_seconds,
