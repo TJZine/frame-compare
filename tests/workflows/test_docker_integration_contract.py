@@ -239,7 +239,7 @@ def test_workflow_uploads_e2e_artifacts_after_verification(repo_root: Path) -> N
     assert upload_index > verification_index
     assert upload_step["if"] == "always()"
     assert upload_step["uses"] == (
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
     )
     assert upload_step["with"] == {
         "name": "docker-e2e-artifacts",

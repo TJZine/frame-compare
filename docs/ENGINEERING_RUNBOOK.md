@@ -353,7 +353,7 @@ Current capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSView GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
 | Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof. The R81 dependency refresh has Linux-container offscreen proof on macOS Docker Desktop; the Linux X11 host wrapper and visible launch remain unverified |
 | Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
 
 When documenting or reviewing optional Docker GPU/profile work, cite the official
@@ -397,10 +397,12 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.11.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
-all three outputs, and round-trip/validate the sibling result sidecar. This feature run has
-static contract proof only; execution remains unavailable/unverified until a
-compatible Linux/X11 host runs it. The contract does not prove a visible X11 desktop
+0.12.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+all three outputs, and round-trip/validate the sibling result sidecar. The R81
+dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
+see the [Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)
+for its evidence and limits. The Linux X11 host wrapper remains unverified.
+The contract does not prove a visible X11 desktop
 launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.
 
 If the local machine cannot run the GUI proof command, record GUI support as
@@ -428,7 +430,7 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R80/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.11.0,
+   verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.12.0,
    PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before

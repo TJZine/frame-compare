@@ -307,7 +307,7 @@ assert_true(
 loader_paths = os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
 assert_true(
     "/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth" in loader_paths,
-    "VapourSynth R80 wheel native-library path missing from LD_LIBRARY_PATH",
+    "VapourSynth R81 wheel native-library path missing from LD_LIBRARY_PATH",
 )
 assert_true("/usr/local/lib" in loader_paths, "/usr/local/lib missing from LD_LIBRARY_PATH")
 
@@ -364,10 +364,10 @@ plugin_dir = Path(vs.get_plugin_dir())
 extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
 plugin_namespaces = sorted(plugin.namespace for plugin in core.plugins())
 
-assert_true(VAPOURSYNTH_RELEASE == "R80", "application runtime contract is not R80")
+assert_true(VAPOURSYNTH_RELEASE == "R81", "application runtime contract is not R81")
 assert_true(
-    release_major == 80 and release_minor == 0,
-    f"expected VapourSynth R80, got {version!r}",
+    release_major == 81 and release_minor == 0,
+    f"expected VapourSynth R81, got {version!r}",
 )
 assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_major!r}")
 assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_minor!r}")
@@ -694,7 +694,7 @@ assert_true(
 payload = json.loads(doctor_path.read_text(encoding="utf-8"))
 assert_true(payload.get("success") is True, f"doctor failed: {payload}")
 doctor = payload["doctor"]
-assert_true(doctor["baseline_version"] == VAPOURSYNTH_RELEASE, "doctor R80 baseline mismatch")
+assert_true(doctor["baseline_version"] == VAPOURSYNTH_RELEASE, "doctor R81 baseline mismatch")
 assert_true(
     doctor["media_runtime"]["fingerprints"]["full"] == expected_fingerprint,
     "doctor runtime fingerprint mismatch",
@@ -714,7 +714,7 @@ for required_check in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):
         checks[required_check]["status"] == "pass",
         f"doctor check failed: {required_check}",
     )
-assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R80", "doctor VS release")
+assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R81", "doctor VS release")
 assert_true(checks["vapoursynth"]["details"]["api_major"] == 4, "doctor VS API")
 assert_true(
     checks["lsmas"]["details"]["expected_native_release"] == LSMASH_WORKS_RELEASE,
@@ -790,7 +790,7 @@ fi
 required_proof_markers=(
   "DOCKER_PROOF cli=ok"
   "DOCKER_PROOF non_root=ok"
-  "DOCKER_PROOF vapoursynth_import=ok version=R80 api=4.3"
+  "DOCKER_PROOF vapoursynth_import=ok version=R81 api=4.3"
   "DOCKER_PROOF plugin_dir="
   "DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins"
   "DOCKER_PROOF core_plugins="

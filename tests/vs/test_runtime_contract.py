@@ -259,7 +259,7 @@ def test_alignment_identity_includes_decoder_and_standalone_ffmpeg() -> None:
     assert set(cast(_RuntimeComponents, identity["components"])) == {"decoder", "standalone_ffmpeg"}
     assert (
         cast(_RuntimeComponents, identity["components"])["decoder"]["vapoursynth"]["release"]
-        == "R80"
+        == "R81"
     )
     assert "l_smash_works" in cast(_RuntimeComponents, identity["components"])["decoder"]
     assert (
@@ -353,7 +353,7 @@ def test_supported_report_contains_observable_component_contract() -> None:
     report = supported_media_runtime_report(profile="debian-trixie")
 
     assert (
-        cast(_RuntimeComponents, report["components"])["decoder"]["vapoursynth"]["release"] == "R80"
+        cast(_RuntimeComponents, report["components"])["decoder"]["vapoursynth"]["release"] == "R81"
     )
     assert cast(_RuntimeComponents, report["components"])["decoder"]["l_smash_works"][
         "native_release"
@@ -470,9 +470,9 @@ def test_docker_provenance_derives_vapoursynth_release_from_build_arg(
 ) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "ARG VAPOURSYNTH_VERSION=80" in dockerfile
+    assert "ARG VAPOURSYNTH_VERSION=81" in dockerfile
     assert '\\"version\\":\\"R${VAPOURSYNTH_VERSION}\\"' in dockerfile
-    assert '\\"version\\":\\"R80\\"' not in dockerfile
+    assert '\\"version\\":\\"R81\\"' not in dockerfile
 
 
 def test_docker_lsmash_works_meson_rewrite_fails_closed(repo_root: Path, tmp_path: Path) -> None:
@@ -539,4 +539,4 @@ def test_docker_uses_verified_tracked_source_tree_digests(repo_root: Path) -> No
 def test_docker_runtime_reads_release_and_api_identities_separately(repo_root: Path) -> None:
     script = (repo_root / "tools/verify_docker_integration.sh").read_text(encoding="utf-8")
 
-    assert "DOCKER_PROOF vapoursynth_import=ok version=R80 api=4.3" in script
+    assert "DOCKER_PROOF vapoursynth_import=ok version=R81 api=4.3" in script

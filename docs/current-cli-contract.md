@@ -835,8 +835,8 @@ recovery requirement.
   Deleting this file clears durable TMDB history and forces fresh successful lookups.
 - Frame Compare-owned L-SMASH-Works indexes use
   `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1310-097c1b9d605b` on managed/portable Windows,
-  `lsw1310-d594aa1352e2` on unmanaged Windows, and `lsw1310-8a3ed7348dea`
+  profile scoped (currently `lsw1310-f125953022b6` on managed/portable Windows,
+  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
@@ -1373,7 +1373,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.11.0 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.12.0 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with
@@ -1948,7 +1948,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - Python compatibility remains enforced by package metadata, runtime manifests, and build
   validation; `doctor` does not emit a separate Python-version check.
-- `doctor.baseline_version` is the supported VapourSynth release (`R80`).
+- `doctor.baseline_version` is the supported VapourSynth release (`R81`).
   `doctor.media_runtime` contains the code-owned component contract, scoped
   fingerprints, and index token. `doctor.runtime_environment` reports the
   deployment kind, expected and declared full fingerprints, declaration syntax,

@@ -626,11 +626,11 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 
-  # R80 wheels carry the runtime DLL inside the vapoursynth package directory.
+  # R81 wheels carry the runtime DLL inside the vapoursynth package directory.
   # The launcher and validation PATH include this directory for Windows DLL lookup.
   $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
   if (!(Test-Path -LiteralPath $vsDllPackage)) {
-    throw "libvapoursynth.dll not found after wheel install in expected R80 package layout: $vsDllPackage"
+    throw "libvapoursynth.dll not found after wheel install in expected R81 package layout: $vsDllPackage"
   }
 
   Install-ProjectDistributionMetadata -BundleRoot $BundleRoot
@@ -961,16 +961,16 @@ def prove_package_imports() -> None:
 
 def prove_vsview_distribution_contract() -> None:
     expected = {
-        "jetpytools": "3.1.1",
+        "jetpytools": "3.1.2",
         "pyside6": "6.11.2",
         "pyside6-addons": "6.11.2",
         "pyside6-essentials": "6.11.2",
         "shiboken6": "6.11.2",
         "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
-        "vspackrgb": "1.4.0",
-        "vsview": "0.11.0",
-        "vsview-cli": "1.2.0",
+        "vspackrgb": "2.0.0",
+        "vsview": "0.12.0",
+        "cyclopts": "5.2.0",
         "vsjetengine": "1.8.0",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
@@ -1090,7 +1090,7 @@ def prove_vapoursynth_environment() -> None:
     plugins = list(core.plugins())
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
-    assert_true(version_major == 80 and version_minor == 0, f"expected VapourSynth R80, got {version!r}")
+    assert_true(version_major == 81 and version_minor == 0, f"expected VapourSynth R81, got {version!r}")
     assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
     assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_version!r}")
     assert_true(plugin_dir.is_dir(), f"vapoursynth.get_plugin_dir() is not a directory: {plugin_dir}")
@@ -1434,13 +1434,13 @@ def prove_vsview_runtime(media_path: Path) -> None:
     assert_true(app.exec() == 0, "controlled Qt event loop failed")
     proof("pyside6_event_loop=ok platform=offscreen")
 
-    import vspackrgb.cython  # noqa: F401
+    import vspackrgb.rust  # noqa: F401
     import vsview  # noqa: F401
-    import vsview.main  # noqa: F401
-    import vsview_cli._cli  # noqa: F401
+    import vsview.app.main  # noqa: F401
+    import vsview.cli  # noqa: F401
     from vsview import set_output  # noqa: F401
 
-    proof("vsview_deep_imports=ok modules=vsview.main,vsview_cli._cli,vspackrgb.cython")
+    proof("vsview_deep_imports=ok modules=vsview.app.main,vsview.cli,vspackrgb.rust")
     site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
     qt_ffmpeg_dlls = [site_packages / "PySide6" / name for name in ("avcodec-61.dll", "avformat-61.dll", "avutil-59.dll")]
     assert_true(all(path.is_file() for path in qt_ffmpeg_dlls), f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}")

@@ -193,7 +193,7 @@ It is retained until the run folder is deleted.
 
 ## Native VSView alignment review
 
-VSView 0.11.0 and the Frame Compare alignment panel are included in the Windows
+VSView 0.12.0 and the Frame Compare alignment panel are included in the Windows
 portable bundle and are optional in native installations through the
 `frame-compare[vsview]` extra. The panel entry point and VSView runtime must be
 installed in the same Python environment; a PATH-only VSView executable is not
