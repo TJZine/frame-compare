@@ -66,7 +66,6 @@ class _ProcessTracker:
         self._real_popen = real_popen
         self.terminate_requests = 0
         self.kill_requests = 0
-        self.child_started = threading.Event()
 
     def popen(self, *args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
         process = self._real_popen(*args, **kwargs)
@@ -88,7 +87,6 @@ class _ProcessTracker:
             with self._lock:
                 self._processes.append(process)
                 self._commands_by_pid[process.pid] = tuple(str(part) for part in argv)
-            self.child_started.set()
         return process
 
     def active_pids(self) -> tuple[int, ...]:
@@ -416,16 +414,21 @@ def test_paired_mid_run_cancellation_reaps_both_children(
     reference, comparison = paired_long_media
     tracker = _install_tracker(monkeypatch)
     cancellation = threading.Event()
-    consumer = _CountingConsumer()
     lag_samples = _PAIRED_CHUNK_SECONDS * _PAIRED_SAMPLE_RATE
 
-    def cancel_soon() -> None:
-        assert tracker.child_started.wait(timeout=60)
-        time.sleep(2.0)
-        cancellation.set()
+    class CancelOnFirstChunk(_CountingConsumer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.live_pids_at_cancellation: tuple[int, ...] = ()
 
-    waiter = threading.Thread(target=cancel_soon, daemon=True)
-    waiter.start()
+        def __call__(self, index: int, reference: Any, window: Any) -> None:
+            super().__call__(index, reference, window)
+            assert self.count == 1
+            self.live_pids_at_cancellation = tracker.active_pids()
+            assert len(self.live_pids_at_cancellation) == 2
+            cancellation.set()
+
+    consumer = CancelOnFirstChunk()
     started = time.monotonic()
     result = _paired_call(
         reference,
@@ -435,10 +438,10 @@ def test_paired_mid_run_cancellation_reaps_both_children(
         cancellation=cancellation,
     )
     elapsed = time.monotonic() - started
-    waiter.join(timeout=10)
 
     assert isinstance(result, PairedAudioCollectionFailure)
     assert result.category == "cancelled"
+    assert consumer.count == 1
     assert result.reference_cleanup.completed
     assert result.comparison_cleanup.completed
     assert elapsed < 60
@@ -448,6 +451,8 @@ def test_paired_mid_run_cancellation_reaps_both_children(
         {
             "case": "paired-cancellation",
             "elapsed_seconds": elapsed,
+            "chunks_delivered": consumer.count,
+            "live_pids_at_cancellation": consumer.live_pids_at_cancellation,
             "terminate_requests": tracker.terminate_requests,
             "kill_requests": tracker.kill_requests,
         }
