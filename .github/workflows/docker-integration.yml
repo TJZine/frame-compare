@@ -10,6 +10,8 @@ on:
       - Dockerfile
       - docker-compose*.yml
       - tools/verify_docker_*.sh
+      - tools/checkout_source_commit.sh
+      - .dockerignore
       - .github/workflows/docker-integration.yml
   workflow_dispatch:
 

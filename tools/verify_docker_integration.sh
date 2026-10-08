@@ -99,6 +99,14 @@ fi
 # Linux daemons that otherwise create a missing bind source as root.
 mkdir -p generated
 
+# Each invocation owns one fresh artifact directory.  Keep previous runs
+# available for debugging and let the workflow upload the complete retained
+# tree after the verifier exits, including when the test command fails.
+mkdir -p generated/e2e
+e2e_artifact_dir="$(mktemp -d generated/e2e/run.XXXXXX)"
+e2e_artifact_name="$(basename "$e2e_artifact_dir")"
+echo "Docker E2E artifacts: $e2e_artifact_dir"
+
 build_args=()
 if [[ "$no_cache" == "1" ]]; then
   build_args+=(--no-cache)
@@ -143,7 +151,7 @@ docker_env_args=(
   -e HOME=/tmp/framecompare-home
   -e PYTHONUSERBASE=/home/framecompare/.local
   -e FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
-  -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e
+  -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e/$e2e_artifact_name
   -e FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache
 )
 if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
@@ -769,8 +777,6 @@ pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 EOF
 )
 container_cmd+=$'\n'"python -m pytest -n 10 --dist loadgroup -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
-
-rm -rf -- generated/e2e
 
 set +e
 "${docker_cmd[@]}" "$container_cmd" 2>&1 | tee "$tmp_log"
