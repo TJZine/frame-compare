@@ -640,6 +640,7 @@ def test_render_ffmpeg_batch_wraps_output_failure_with_active_request(
         output_dir: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        abort: object = None,
     ) -> list[RenderedFrameFacts]:
         _ = geometry_plan
         for index in range(len(frame_nums)):

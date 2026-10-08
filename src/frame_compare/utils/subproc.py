@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import site
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 from shutil import which
-from subprocess import CompletedProcess, run
+from subprocess import PIPE, CompletedProcess, Popen, TimeoutExpired, run
+from time import monotonic
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
@@ -124,6 +126,7 @@ def run_subprocess(
     timeout_seconds: float | None = None,
     cwd: Path | None = None,
     check: bool = True,
+    abort: Callable[[], bool] | None = None,
 ) -> CompletedProcess[bytes]:
     """
     Execute a command with explicit argv validation and captured output.
@@ -133,9 +136,12 @@ def run_subprocess(
         timeout_seconds: Maximum execution time in seconds
         cwd: Working directory
         check: Whether to raise CalledProcessError on non-zero exit code
+        abort: Optional owner-provided check for stopping and reaping the child
     """
     resolved_cwd = _resolve_cwd(cwd)
     normalized_argv = _normalize_argv(argv, resolved_cwd)
+    if abort is not None:
+        return _run_abortable(normalized_argv, resolved_cwd, timeout_seconds, check, abort)
     return run(
         normalized_argv,
         cwd=resolved_cwd,
@@ -146,4 +152,68 @@ def run_subprocess(
     )
 
 
-__all__ = ["prepare_python_child", "resolve_executable", "run_subprocess"]
+class SubprocessAborted(Exception):
+    """The owner stopped a process; incomplete output is not a successful result."""
+
+
+def _reap_stopped_process(process: Popen[bytes]) -> None:
+    # Keep the original failure, including a repeated interrupt, during cleanup.
+    with suppress(BaseException):
+        process.terminate()
+    try:
+        process.wait(timeout=2.0)
+        return
+    except BaseException:
+        pass
+    with suppress(BaseException):
+        process.kill()
+    with suppress(BaseException):
+        process.wait(timeout=2.0)
+
+
+def _run_abortable(
+    argv: list[str],
+    cwd: Path | None,
+    timeout_seconds: float | None,
+    check: bool,
+    abort: Callable[[], bool],
+) -> CompletedProcess[bytes]:
+    if abort():
+        raise SubprocessAborted()
+    process = Popen(argv, cwd=cwd, stdout=PIPE, stderr=PIPE, shell=False)
+    deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
+    last_timeout: TimeoutExpired | None = None
+    try:
+        while True:
+            if abort():
+                raise SubprocessAborted()
+            remaining = None if deadline is None else deadline - monotonic()
+            if timeout_seconds is not None and remaining is not None and remaining <= 0:
+                raise TimeoutExpired(
+                    argv,
+                    timeout_seconds,
+                    output=None if last_timeout is None else last_timeout.output,
+                    stderr=None if last_timeout is None else last_timeout.stderr,
+                )
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=0.1 if remaining is None else min(0.1, remaining)
+                )
+                break
+            except TimeoutExpired as exc:
+                last_timeout = exc
+    except BaseException:
+        _reap_stopped_process(process)
+        raise
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+    result = CompletedProcess(argv, process.returncode, stdout, stderr)
+    if check:
+        result.check_returncode()
+    return result
+
+
+__all__ = ["SubprocessAborted", "prepare_python_child", "resolve_executable", "run_subprocess"]

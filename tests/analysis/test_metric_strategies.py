@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+from contextlib import suppress
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -494,3 +496,37 @@ def test_metric_strategies_reject_empty_clip(
                 AnalysisConfig(performance_mode=AnalysisPerformanceMode.PERFORMANCE),
                 reporter=None,
             )
+
+
+@pytest.mark.parametrize("mode", list(AnalysisPerformanceMode))
+def test_metric_loop_stops_before_next_frame_after_task_cancel(
+    monkeypatch: pytest.MonkeyPatch, mode: AnalysisPerformanceMode
+) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
+    requested: list[int] = []
+    original_get_frame = FakePlaneStatsClip.get_frame
+
+    def get_frame(clip: FakePlaneStatsClip, n: int) -> FakePlaneStatsFrame:
+        requested.append(n)
+        if len(requested) == 3:
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+        return original_get_frame(clip, n)
+
+    monkeypatch.setattr(FakePlaneStatsClip, "get_frame", get_frame)
+    source = MagicMock()
+    source.clip = FakeBalancedClip([0.2] * 100)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    async def analyze() -> None:
+        with suppress(_RunInterrupt):
+            calculate_metric_strategy(source, AnalysisConfig(performance_mode=mode), reporter)
+        assert len(requested) == 3
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(analyze())
+    reporter.complete_phase.assert_called_with(ProgressPhaseStatus.FAILED)

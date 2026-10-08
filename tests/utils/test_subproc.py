@@ -4,11 +4,13 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from time import monotonic
 
 import pytest
 
 import frame_compare.utils.subproc as subproc_module
 from frame_compare.utils.subproc import (
+    SubprocessAborted,
     prepare_python_child,
     resolve_executable,
     run_subprocess,
@@ -123,6 +125,7 @@ def test_prepare_python_child_real_disabled_user_site_child_uses_no_user_site(
     assert not marker.exists()
 
 
+@pytest.mark.parametrize("abortable", [False, True])
 @pytest.mark.parametrize(
     ("script", "check", "expected_code", "expected_stdout"),
     [
@@ -132,17 +135,22 @@ def test_prepare_python_child_real_disabled_user_site_child_uses_no_user_site(
     ],
 )
 def test_run_subprocess_exit_handling(
-    script: str, check: bool, expected_code: int | None, expected_stdout: bytes | None
+    script: str,
+    check: bool,
+    expected_code: int | None,
+    expected_stdout: bytes | None,
+    abortable: bool,
 ) -> None:
     argv = [sys.executable, "-c", script]
+    abort = (lambda: False) if abortable else None
     if expected_code is None:
         with pytest.raises(subprocess.CalledProcessError):
-            run_subprocess(argv, timeout_seconds=10)
+            run_subprocess(argv, timeout_seconds=10, abort=abort)
     else:
         result = (
-            run_subprocess(argv, timeout_seconds=10)
+            run_subprocess(argv, timeout_seconds=10, abort=abort)
             if check
-            else run_subprocess(argv, check=False, timeout_seconds=10)
+            else run_subprocess(argv, check=False, timeout_seconds=10, abort=abort)
         )
         assert result.returncode == expected_code
         if expected_stdout is not None:
@@ -247,3 +255,45 @@ def test_resolve_executable_media_overrides(
     else:
         with pytest.raises(FileNotFoundError, match=message):
             resolve_executable(requested)
+
+
+@pytest.mark.parametrize("stop", ["abort", "timeout", "abort-kill"])
+def test_run_subprocess_abort_path_reaps_real_child(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stop: str
+) -> None:
+    ready = tmp_path / "ready"
+    processes: list[subprocess.Popen[bytes]] = []
+    original_popen = subprocess.Popen
+
+    def popen(
+        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
+    ) -> subprocess.Popen[bytes]:
+        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subproc_module, "Popen", popen)
+    argv = [
+        sys.executable,
+        "-c",
+        "import pathlib,signal,sys,time; "
+        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if stop == "abort-kill" else "")
+        + "pathlib.Path(sys.argv[1]).touch(); "
+        "print('started', flush=True); time.sleep(30)",
+        str(ready),
+    ]
+    began = monotonic()
+    with pytest.raises(
+        subprocess.TimeoutExpired if stop == "timeout" else SubprocessAborted
+    ) as error:
+        run_subprocess(
+            argv,
+            timeout_seconds=0.4 if stop == "timeout" else 5,
+            abort=lambda: stop.startswith("abort") and ready.exists(),
+        )
+    assert monotonic() - began < (4.5 if stop == "abort-kill" else 3)
+    if isinstance(error.value, subprocess.TimeoutExpired):
+        assert error.value.output is not None and b"started" in error.value.output
+    assert len(processes) == 1
+    assert processes[0].returncode is not None
+    assert ready.exists()

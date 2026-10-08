@@ -18,6 +18,7 @@ from frame_compare.orchestration.context import (
     ClipActiveRect,
     ClipState,
 )
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.run_warnings import RunWarning
 
 if TYPE_CHECKING:
@@ -88,6 +89,7 @@ class VSActiveRectFrameSampler:
                 else float((1 << node.format.bits_per_sample) - 1)
             )
             for index in source_frame_indices:
+                raise_if_cancelling()
                 frame = node.get_frame(index)
                 try:
                     normalized = np.asarray(frame[0], dtype=np.float32) / max_value

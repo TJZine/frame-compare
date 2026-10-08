@@ -12,6 +12,7 @@ from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.errors import FastestAnalysisSourceError
 from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.source_selection import resolve_source_selector
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.run_warnings import RunWarning
 
 if TYPE_CHECKING:
@@ -114,6 +115,7 @@ def _benchmark_clip(*, clip: ClipState, vs_loader: VSLoader) -> float | None:
 
             started = perf_counter()
             for frame in frames:
+                raise_if_cancelling()
                 benchmark_node.get_frame(frame)
             return (perf_counter() - started) / len(frames)
         finally:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -30,6 +30,7 @@ from frame_compare.render.types import (
     RenderRequest,
 )
 from frame_compare.utils.media_facts import RenderedFrameFacts, normalize_picture_type
+from frame_compare.utils.subproc import SubprocessAborted
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import props_indicate_limited_range
 
@@ -124,7 +125,9 @@ def is_ffmpeg_batch_compatible(
     )
 
 
-def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[RenderedFrameResult]:
+def render_ffmpeg_batch_detailed(
+    requests: list[RenderRequest], *, abort: Callable[[], bool] | None = None
+) -> list[RenderedFrameResult]:
     """Render one clip's ordered FFmpeg requests through a single decode pass."""
     if not requests:
         return []
@@ -154,12 +157,15 @@ def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[Rendered
                 [request.frame_number for request in requests],
                 staging_dir,
                 geometry_plan=first.geometry_plan,
+                abort=abort,
             )
             if len(facts) != len(requests):
                 raise FrameExtractionError(first.frame_number, str(clip))
 
             rendered: list[RenderedFrameResult] = []
             for index, (request, frame_facts) in enumerate(zip(requests, facts, strict=True)):
+                if abort is not None and abort():
+                    raise SubprocessAborted()
                 active_request = request
                 staged_path = staging_dir / f"{index:09d}.png"
                 if not staged_path.is_file():
@@ -169,7 +175,7 @@ def render_ffmpeg_batch_detailed(requests: list[RenderRequest]) -> list[Rendered
                     apply_overlay_to_file(request.output_path, request.overlay, frame_facts)
                 rendered.append(RenderedFrameResult(path=request.output_path, facts=frame_facts))
             return rendered
-    except (EncodingError, FrameExtractionError, RenderError, SourceLoadError):
+    except (SubprocessAborted, EncodingError, FrameExtractionError, RenderError, SourceLoadError):
         raise
     except Exception as exc:
         details = _render_error_details(active_request, "auto", False)
