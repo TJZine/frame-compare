@@ -81,6 +81,7 @@ const Viewport = {
         this.viewer.state.fitMode = 'custom';
         this.updateFitButtons();
         this.viewer.dom.stage.classList.add('is-panning');
+        this.viewer.updateBlinkControls();
     },
 
     updatePinchFromTrackedPointers() {
@@ -123,7 +124,7 @@ const Viewport = {
         pointer.pinchGridAnchor = null;
         this.viewer.dom.stage.classList.remove('is-panning');
         this.viewer.persistViewerState();
-        if (this.viewer.state.mode === 'blink') this.viewer.state.blinkPaused = false;
+        this.viewer.updateBlinkControls();
     },
 
     updateSliderFromPointer(e) {
@@ -153,6 +154,7 @@ const Viewport = {
             : null;
         this.captureStagePointer(e);
         this.viewer.dom.stage.classList.add('is-panning');
+        this.viewer.updateBlinkControls();
     },
 
     updatePanFromPointer(e) {
@@ -199,7 +201,7 @@ const Viewport = {
             pointer.panMoved = false;
             if (pointer.activePointerId === e.pointerId) pointer.activePointerId = null;
             this.viewer.dom.stage.classList.remove('is-panning');
-            if (this.viewer.state.mode === 'blink') this.viewer.state.blinkPaused = false;
+            this.viewer.updateBlinkControls();
             return;
         }
 
@@ -219,11 +221,11 @@ const Viewport = {
         }
         pointer.panMoved = false;
         this.viewer.dom.stage.classList.remove('is-panning');
-        if (this.viewer.state.mode === 'blink') this.viewer.state.blinkPaused = false;
         if (completedDrag) this.updateSliderFromPointer(e);
         const acquiredLensPoint = pointer.lensPointHandled;
         pointer.lensPointHandled = false;
         pointer.lensTouchStart = null;
+        this.viewer.updateBlinkControls();
         if (completedPan) {
             this.viewer.persistViewerState();
             if (

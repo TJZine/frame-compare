@@ -102,6 +102,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert single_mode["emptyStateClearsAlignment"] is True
     assert single_mode["emptyStateClearsLensTransient"] is True
 
+    assert summary["blinkGesturePause"] == {
+        "combinations": 30,
+        "timerAndControlsAgree": True,
+    }
     assert summary["blinkControls"]["reducedMotionPaused"] is True
     assert summary["blinkControls"]["intervalAfterSteps"] == 700
     assert summary["keyboardGuard"] == {

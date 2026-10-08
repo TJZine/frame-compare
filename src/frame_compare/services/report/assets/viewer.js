@@ -20,7 +20,7 @@ const ReportViewer = {
         alignY: 0,
         pairAlignments: {},
         blinkInterval: null,
-        blinkPaused: false,
+        blinkPauseRequested: false,
         blinkIntervalMs: 700,
         storageKey: null,
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
@@ -641,7 +641,6 @@ const ReportViewer = {
                 this.pointerInteraction.lensPointHandled = false;
                 this.pointerInteraction.lensTouchStart = null;
                 this.viewport.startPinchFromTrackedPointers();
-                if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
                 return;
             }
@@ -651,12 +650,12 @@ const ReportViewer = {
                     clientX: e.clientX,
                     clientY: e.clientY,
                 };
+                this.updateBlinkControls();
                 e.preventDefault();
                 return;
             }
             if (this.viewport.shouldPanFromPointer(e)) {
                 this.viewport.startPanFromPointer(e);
-                if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
             } else if (this.state.mode === 'slider') {
                 this.pointerInteraction.isDragging = true;
@@ -743,7 +742,6 @@ const ReportViewer = {
             clientX: start.clientX,
             clientY: start.clientY,
         };
-        if (this.state.mode === 'blink') this.state.blinkPaused = true;
         if (this.viewport.shouldPanFromPointer(e)) {
             this.viewport.startPanFromPointer(origin);
             this.viewport.updatePanFromPointer(e);
@@ -841,7 +839,7 @@ const ReportViewer = {
     },
 
     bindBlinkEvents() {
-        this.dom.btnBlinkPause.addEventListener('click', () => this.setBlinkPaused(!this.state.blinkPaused));
+        this.dom.btnBlinkPause.addEventListener('click', () => this.setBlinkPaused(!this.state.blinkPauseRequested));
         this.dom.blinkSpeed.addEventListener('change', (e) => this.setBlinkIntervalMs(Number(e.target.value)));
     },
 
@@ -1342,8 +1340,19 @@ const ReportViewer = {
         if (options.save !== false) this.persistViewerState();
     },
 
+    blinkGestureActive() {
+        const pointer = this.pointerInteraction;
+        return Boolean(pointer && (
+            pointer.isPanning || pointer.pinchActive || pointer.lensPointHandled
+        ));
+    },
+
+    isBlinkPaused() {
+        return this.state.blinkPauseRequested || this.blinkGestureActive();
+    },
+
     setBlinkPaused(paused) {
-        this.state.blinkPaused = Boolean(paused);
+        this.state.blinkPauseRequested = Boolean(paused);
         this.updateBlinkControls();
     },
 
@@ -1356,18 +1365,19 @@ const ReportViewer = {
 
     updateBlinkControls() {
         const isBlink = this.state.mode === 'blink';
+        const paused = this.isBlinkPaused();
         this.dom.blinkControls.hidden = !isBlink;
-        this.dom.btnBlinkPause.disabled = !isBlink;
+        this.dom.btnBlinkPause.disabled = !isBlink || this.blinkGestureActive();
         this.dom.blinkSpeed.disabled = !isBlink;
         this.dom.blinkSpeed.value = String(this.state.blinkIntervalMs);
-        this.dom.btnBlinkPause.textContent = this.state.blinkPaused ? 'Resume' : 'Pause';
-        this.dom.btnBlinkPause.setAttribute('aria-pressed', this.state.blinkPaused ? 'true' : 'false');
+        this.dom.btnBlinkPause.textContent = paused ? 'Resume' : 'Pause';
+        this.dom.btnBlinkPause.setAttribute('aria-pressed', paused ? 'true' : 'false');
         this.dom.btnBlinkPause.setAttribute(
             'aria-label',
-            this.state.blinkPaused ? 'Resume blink' : 'Pause blink'
+            paused ? 'Resume blink' : 'Pause blink'
         );
         this.dom.blinkStatus.textContent = isBlink
-            ? (this.state.blinkPaused ? 'Blink paused' : `Blink ${this.state.blinkIntervalMs / 1000}s`)
+            ? (paused ? 'Blink paused' : `Blink ${this.state.blinkIntervalMs / 1000}s`)
             : '';
     },
 
@@ -1564,7 +1574,7 @@ const ReportViewer = {
         if (this.state.mode === 'blink') {
             if (e.key === ' ') {
                 e.preventDefault();
-                this.setBlinkPaused(!this.state.blinkPaused);
+                this.setBlinkPaused(!this.state.blinkPauseRequested);
                 return;
             }
             if (e.key === '[') {
@@ -1662,11 +1672,11 @@ const ReportViewer = {
         // Start blink if entering
         if (mode === 'blink' && !this.state.blinkInterval) {
             if (this.reducedMotionActive()) {
-                this.state.blinkPaused = true;
+                this.state.blinkPauseRequested = true;
             }
             this.startBlink();
         } else if (mode !== 'blink') {
-            this.state.blinkPaused = false;
+            this.state.blinkPauseRequested = false;
         }
 
         this.dom.modeBtns.forEach(btn => {
@@ -1697,7 +1707,7 @@ const ReportViewer = {
 
     startBlink() {
         this.state.blinkInterval = setInterval(() => {
-            if (this.state.blinkPaused) return;
+            if (this.isBlinkPaused()) return;
 
             this.state.activeClipIdx = this.state.activeClipIdx === this.state.leftClipIdx
                 ? this.state.rightClipIdx

@@ -259,6 +259,26 @@ async function main() {
     dom.reviewImportApply.click();
     assert.equal(controller.model.all().map(item => item.frame_ordinal).join(','), '2');
 
+    // Production File API handlers must display the delta that their Apply handler commits.
+    for (const mode of ['merge', 'replace']) {
+        for (const conflict of ['keep-local', 'use-imported']) {
+            controller.model.mutate(2, { note: 'controller local note' });
+            const before = JSON.stringify(controller.model.all());
+            await dom.reviewImport.fire('change', { files: [file('conflict.json', exported([record(2, 'incoming')]))] });
+            modeMerge.checked = mode === 'merge';
+            modeReplace.checked = mode === 'replace';
+            conflictLocal.checked = conflict === 'keep-local';
+            conflictImported.checked = conflict === 'use-imported';
+            dom.reviewPreview.fire('change');
+            const changed = mode === 'replace' || conflict === 'use-imported';
+            assert.equal(dom.reviewPreviewCounts.textContent, `Add 0 · Change ${changed ? 1 : 0} · Remove 0 · Unchanged ${changed ? 0 : 1}`);
+            assert.equal(announcements.at(-1), `Import preview: add 0, change ${changed ? 1 : 0}, remove 0, unchanged ${changed ? 0 : 1}.`);
+            dom.reviewImportApply.click();
+            assert.equal(JSON.stringify(controller.model.all()) !== before, changed);
+            assert.equal(controller.model.get(2).note, changed ? 'incoming' : 'controller local note');
+        }
+    }
+
     viewer.state.currentFrameIdx = 3;
     controller.model.mutate(3, { note: '<img src=x onerror=alert(1)>' });
     controller.render();

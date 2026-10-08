@@ -462,6 +462,7 @@ function loadViewer({ clipCount, savedState = null }) {
     return {
         viewer,
         format: context.__ViewerFormat,
+        lensFactory: context.__Lens,
         storage,
         storageKey: viewer.state.storageKey,
         document: context.document,
@@ -491,6 +492,63 @@ function keyboardEvent(key) {
 }
 
 const summary = {};
+
+// Exercise the production pointer handlers and interval callback, including cancellation.
+for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
+    for (const gesture of ['pan', 'pinch', 'lens', 'lens-pan', 'lens-pinch']) {
+        for (const ending of ['pointerup', 'pointercancel']) {
+            const fixture = loadViewer({ clipCount: 2 });
+            const { viewer } = fixture;
+            fixture.window.addEventListener = () => {};
+            for (const name of ['btnZoomOut', 'btnZoomIn', 'btnZoomReset', 'btnFullscreen']) {
+                viewer.dom[name] = fakeElement();
+            }
+            viewer.dom.stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1920, height: 1080 });
+            viewer.bindViewportEvents();
+            if (pauseCause === 'reduced-motion') viewer.reducedMotionActive = () => true;
+            viewer.setMode('blink');
+            if (pauseCause === 'explicit') viewer.setBlinkPaused(true);
+            if (gesture.startsWith('lens')) {
+                const lensElement = { ...fakeElement(), style: { setProperty() {} } };
+                fixture.document.getElementById = id => id === 'rv-lens' ? lensElement : null;
+                fixture.document.querySelector = () => null;
+                fixture.document.querySelectorAll = () => [];
+                viewer.lens = fixture.lensFactory.create(viewer);
+                viewer.lens.state.report.enabled = true;
+                for (const image of [viewer.dom.leftImg, viewer.dom.rightImg]) {
+                    image.getBoundingClientRect = viewer.dom.stage.getBoundingClientRect;
+                }
+            }
+            const event = {
+                pointerId: 1, pointerType: gesture === 'pan' ? 'mouse' : 'touch',
+                button: 0, clientX: 100, clientY: 100, preventDefault() {},
+            };
+            viewer.dom.stage.dispatch('pointerdown', { ...event });
+            if (gesture.endsWith('pinch')) viewer.dom.stage.dispatch('pointerdown', { ...event, pointerId: 2, clientX: 200 });
+            if (gesture === 'lens-pan') viewer.dom.stage.dispatch('pointermove', { ...event, clientX: 120 });
+            if (gesture.endsWith('pinch')) assert.equal(viewer.pointerInteraction.pinchActive, true);
+            else if (gesture === 'lens') assert.equal(viewer.pointerInteraction.lensPointHandled, true);
+            else assert.equal(viewer.pointerInteraction.isPanning, true);
+            const during = viewer.state.activeClipIdx;
+            viewer.state.blinkInterval.callback();
+            assert.equal(viewer.state.activeClipIdx, during, `${pauseCause}/${gesture}: suspended timer`);
+            assert.equal(viewer.dom.blinkStatus.textContent, 'Blink paused');
+            assert.equal(viewer.dom.btnBlinkPause.disabled, true);
+            viewer.dom.stage.dispatch(ending, { ...event });
+            if (gesture.endsWith('pinch')) viewer.dom.stage.dispatch(ending, { ...event, pointerId: 2, clientX: 200 });
+            if (gesture.startsWith('lens')) assert.equal(viewer.lens.state.touchPending, null);
+            const before = viewer.state.activeClipIdx;
+            viewer.state.blinkInterval.callback();
+            const paused = pauseCause !== 'running';
+            assert.equal(viewer.state.activeClipIdx === before, paused, `${pauseCause}/${gesture}/${ending}: pause intent`);
+            assert.equal(viewer.dom.btnBlinkPause.disabled, false);
+            assert.equal(viewer.dom.btnBlinkPause.textContent, paused ? 'Resume' : 'Pause');
+            assert.equal(viewer.dom.btnBlinkPause.getAttribute('aria-pressed'), String(paused));
+            assert.equal(viewer.dom.blinkStatus.textContent, paused ? 'Blink paused' : 'Blink 0.7s');
+        }
+    }
+}
+summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 
 {
     const { viewer, format } = loadViewer({ clipCount: 4 });
@@ -717,7 +775,7 @@ const summary = {};
     assert.equal(viewer.state.inspectorOpen, true);
     assert.equal(viewer.state.inspectorTab, 'align');
     assert.equal(viewer.state.blinkIntervalMs, 1200);
-    assert.equal(viewer.state.blinkPaused, false);
+    assert.equal(viewer.state.blinkPauseRequested, false);
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
     viewer.inspector.setOpen(false, { focus: false, save: false });
 
@@ -780,6 +838,7 @@ const summary = {};
     assert.equal(saved.pixelLensEnabled, undefined);
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
+    assert.equal(saved.blinkPauseRequested, undefined);
     summary.inspectorBlinkKeyboardState = {
         currentFrameIdx: saved.currentFrameIdx,
         inspectorOpen: saved.inspectorOpen,
@@ -955,7 +1014,7 @@ const summary = {};
     viewer.reducedMotionActive = () => true;
     viewer.setMode('blink');
     assert.equal(viewer.state.mode, 'blink');
-    assert.equal(viewer.state.blinkPaused, true);
+    assert.equal(viewer.state.blinkPauseRequested, true);
     assert.equal(viewer.dom.blinkStatus.textContent, 'Blink paused');
     viewer.setBlinkPaused(false);
     viewer.stepBlinkInterval(1);

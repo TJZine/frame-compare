@@ -989,7 +989,8 @@ sequence rendering.
 
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
-V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
+V1 JSON export, strict import validation, a selected merge/replace candidate shared by
+preview and atomic apply, stale-preview rejection, and
 the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
 created on first visible Review use, keeps form rendering stable across unrelated viewer
 refreshes, and routes transition announcements through the existing shared polite live
@@ -1008,7 +1009,8 @@ that owner. Viewer modules use `ViewerFormat` for shared display formatting.
 Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
-paused.
+paused. The root viewer derives effective Blink pause from user intent and active
+viewport or Lens gestures; gesture completion or cancellation preserves user intent.
 
 #### Browser-Local State
 
