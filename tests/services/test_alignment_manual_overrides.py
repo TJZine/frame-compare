@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import IO, Any
 from unittest.mock import patch
 
+import pytest
+
 from frame_compare.services.alignment_manual_overrides import (
     MANUAL_OVERRIDES_FILE,
     ManualOverride,
@@ -175,3 +177,34 @@ def test_save_manual_override_write_error_is_warning_only(tmp_path: Path) -> Non
         save_manual_override(tmp_path, _override("comp", 10))
 
     assert warning.call_args.args[0] == "manual_overrides_write_error"
+
+
+def test_pending_interrupt_prevents_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    target = tmp_path / MANUAL_OVERRIDES_FILE
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            save_manual_override(tmp_path, _override("comp", 2))
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert not target.exists()
+    assert list(target.parent.glob(f".{target.name}.*")) == []

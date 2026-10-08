@@ -18,6 +18,7 @@ from frame_compare.services.run_result_record import (
     failed_record,
     write_run_result,
 )
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -33,6 +34,7 @@ def record_completed_run_result(
     completed_at: datetime,
 ) -> RunResult:
     """Persist a completed outcome without turning persistence failure into run failure."""
+    raise_if_cancelling()
     if workspace is None or workspace.run_dir is None:
         return result
     try:

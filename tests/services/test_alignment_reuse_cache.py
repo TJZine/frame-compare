@@ -805,7 +805,8 @@ def test_repeated_accepted_cache_writes_have_identical_bytes(
     request = _request(tmp_path)
     calls: list[tuple[Path, bytes]] = []
 
-    def _fake_write(path: Path, content: bytes) -> None:
+    def _fake_write(path: Path, content: bytes, *, publish_guard: Callable[[], None]) -> None:
+        publish_guard()
         calls.append((path, content))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
@@ -831,7 +832,8 @@ def test_shared_reuse_cache_locks_entire_read_modify_write(
     events: list[str] = []
 
     @contextmanager
-    def _fake_lock(path: Path) -> Generator[None]:
+    def _fake_lock(path: Path, *, abort_check: Callable[[], None]) -> Generator[None]:
+        abort_check()
         assert path == cache_file.with_name(f"{cache_file.name}.lock")
         events.append("lock_enter")
         try:
@@ -845,7 +847,8 @@ def test_shared_reuse_cache_locks_entire_read_modify_write(
         events.append("read")
         return {"version": CACHE_VERSION, "source_sets": {}}
 
-    def _fake_write(path: Path, content: bytes) -> None:
+    def _fake_write(path: Path, content: bytes, *, publish_guard: Callable[[], None]) -> None:
+        publish_guard()
         assert path == cache_file
         assert events == ["lock_enter", "read"]
         parsed = tomllib.loads(content.decode("utf-8"))
@@ -876,7 +879,7 @@ def test_shared_reuse_cache_write_boundary_failure_warns_without_raising(
     request = _request(tmp_path)
     warnings: list[str] = []
 
-    def fail(*_args: object) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
         raise error
 
     def warning(event: str, **_kwargs: object) -> None:
@@ -1050,3 +1053,79 @@ def test_computed_result_requires_matching_current_time_but_cached_evidence_is_h
         audio_attempt=attempt,
     )
     assert result.applied and result.frame_offset == 0
+
+
+def test_pending_interrupt_prevents_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    request = _request(tmp_path)
+    target = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            _write_computed(request)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert not target.exists()
+    assert list(target.parent.glob(f".{target.name}.*")) == []
+
+
+def test_owned_lock_wait_aborts_without_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from frame_compare.utils import file_lock
+    from frame_compare.utils.cancellation import (
+        _RunInterrupt,
+        cancellation_checkpoint,
+        raise_if_cancelling,
+    )
+
+    path = tmp_path / "cache.lock"
+    real_acquire = file_lock._acquire_platform_lock
+    blocked: list[bool] = []
+
+    def acquire(fd: int) -> None:
+        try:
+            real_acquire(fd)
+        except BlockingIOError:
+            blocked.append(True)
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            raise
+
+    async def wait_for_lock() -> None:
+        with (
+            pytest.raises(_RunInterrupt),
+            file_lock.exclusive_file_lock(path, abort_check=raise_if_cancelling),
+        ):
+            raise AssertionError("contended lock was acquired")
+        await cancellation_checkpoint()
+
+    with file_lock.exclusive_file_lock(path):
+        monkeypatch.setattr(file_lock, "_acquire_platform_lock", acquire)
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(wait_for_lock())
+    assert blocked == [True]
+    with file_lock.exclusive_file_lock(path):
+        pass

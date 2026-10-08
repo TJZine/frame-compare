@@ -6,6 +6,7 @@ See docs/current-architecture.md for the canonical phase ordering semantics.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,6 +19,10 @@ from frame_compare.orchestration.progress import (
     phase_display_label,
     start_phase_progress,
     uses_rich_progress,
+)
+from frame_compare.utils.cancellation import (
+    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
+    cancellation_checkpoint,
 )
 from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
@@ -80,6 +85,7 @@ async def execute_phases(
         Exception: Propagates any exception from a required phase.
     """
     for phase in phases:
+        await cancellation_checkpoint()
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
             skip_detail = (
@@ -119,7 +125,12 @@ async def execute_phases(
         )
         phase_progress_status = ProgressPhaseStatus.COMPLETED
         try:
-            await phase.execute(context)
+            try:
+                await phase.execute(context)
+            except (_RunInterrupt, asyncio.CancelledError):
+                await cancellation_checkpoint()
+                raise asyncio.CancelledError() from None
+            await cancellation_checkpoint()
         except Exception as exc:
             if not phase.warn_only or isinstance(exc, phase.fatal_exceptions):
                 phase.status = PhaseStatus.FAILED

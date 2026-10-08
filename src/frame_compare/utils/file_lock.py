@@ -7,7 +7,7 @@ import importlib
 import os
 import sys
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
@@ -81,6 +81,7 @@ def exclusive_file_lock(
     *,
     timeout_seconds: float = 30.0,
     poll_interval_seconds: float = 0.05,
+    abort_check: Callable[[], None] | None = None,
 ) -> Generator[None]:
     """Hold an exclusive cross-process lock for the lifetime of the context."""
     if timeout_seconds < 0:
@@ -97,6 +98,8 @@ def exclusive_file_lock(
     acquired = False
     try:
         while True:
+            if abort_check is not None:
+                abort_check()
             try:
                 _acquire_platform_lock(fd)
                 acquired = True

@@ -368,7 +368,10 @@ gate above. Use the exact steps in `NEEDS-OBSERVATION.md`.
 - O-03 (reframed by D-03): a fresh-directory reinstall; an old identity-less or
   mismatched backup is refused by `rollback` before any change (U6).
 - O-09: real first and repeated Ctrl+C during native review, VS render, and
-  FFmpeg render, natively and on Windows portable (U1).
+  FFmpeg render, natively and on Windows portable (U1). Include Windows console
+  prompts, exact handler restoration and EOF behavior; measure native drain
+  latency under the controller-confirmed exception. A killable indexing child
+  remains a separately authorized follow-up if that latency is unacceptable.
 - O-10: physical gestures, reduced motion, and the native file picker in the report (U7).
 - O-11: native libplacebo capability probe from a hostile cwd (U2), plus the
   GPU/X11 items when a host is available.
@@ -394,15 +397,15 @@ same local checkout, disjoint ownership, and no Git mutations.
 
 | Unit | Chat ID | Preset | Explicit model / effort | Status |
 | --- | --- | --- | --- | --- |
-| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | Dispatched; design checkpoint pending |
-| U2 | `01a11cac-4d5d-7192-9f2d-dd94c22eae4d` | worker_luna | gpt-5.6-luna / xhigh | Integrated `01fc3af5` |
+| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | Controller-confirmed implementation integrated; wave review pending |
+| U2 | `01a11cac-4d5d-7192-9f2d-dd94c22eae4d` | worker_luna | gpt-5.6-luna / xhigh | `01fc3af5`; controller-directed R-A01 correction `f8dcc3b8` |
 | U3 | `01a11cac-553a-7262-952f-dcdd9e4fb429` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ca432635` |
-| U4 | `01a11cac-5eab-7a01-8ce9-b67a09d1677a` | worker_luna | gpt-5.6-luna / xhigh | Dispatched |
+| U4 | `01a11cac-5eab-7a01-8ce9-b67a09d1677a` | worker_luna | gpt-5.6-luna / xhigh | Integrated `fbc59eb3` |
 | U5 | `01a11cac-699d-76f2-ac02-972093943961` | worker_luna | gpt-5.6-luna / xhigh | Integrated `e49cb87d` |
 | U6 | `01a11cac-735c-7731-8bc6-6f12ff7edde9` | worker | gpt-6.1-sol / medium | Integrated `2350cf48` |
 | U7 | `01a11cac-7d6e-7920-a020-daad3bf50043` | worker | gpt-6.1-sol / medium | Integrated `25b15ae8` |
 | U8 | `01a11cac-8813-7f92-979a-64534fcb4c27` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ee1d674f` |
-| U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Verified; commit follows |
+| U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Integrated `05adff41` |
 
 Models and efforts above are the explicit creation settings; terminal reports
 will reconcile actual execution. Preset aliases were resolved from their TOML
@@ -461,3 +464,408 @@ children and the design challenger. No U1 production design was approved.
 - U7 architecture wording now records effective Blink pause ownership and
   selected-candidate preview/apply ownership. The actual Chrome smoke and O-10
   remain outstanding. Heavy gates have not started.
+
+Wave A review chat: `01a11cb4-9d57-7a11-8b34-94df0d21a2b1`, `reviewer` / `gpt-6.1-sol` /
+`high`. Its first bounded review covers `a7dffd6e..05adff41` (seven integrated
+units); U1 and U4 will be sent to the same reviewer after their commits. This
+early review does not establish completion of wave A. U1 awaits the human's
+controller decision. U4's clarification established six pre-change failures in
+the new oversized history/cache regressions and added real oversized-cache
+cache-only refusal without invoking a loader. Integration ran the complete
+seven-test-file selection: 141 passed in 2.27 test seconds (2.85 wall seconds).
+Whole-tree pyright, Ruff check/format, bandit medium/high, both import contracts,
+scoped diff, and all applicable explicit-path pre-commit hooks passed. One local
+commit, `fbc59eb3` — `fix(cache): recover oversized persisted numeric entries`, includes only
+U4's two parsers and six focused test files. The same wave reviewer receives
+that commit; U1's writer overlap remains paused until controller confirmation.
+No heavy gates have started.
+
+### Bounded wave A review adjudication
+
+Reviewer inspected `a7dffd6e..fbc59eb3` (eight integrated units), excluding the
+dirty plan and U1 regression-only work. Fresh focused evidence: 540 passed,
+32 Windows/PowerShell skips, plus one deliberately failing scratch regression.
+No other material correctness or maintenance finding was established. This
+does not finish wave A or approve U1's design.
+
+R-A01 (P2/S2, accepted): U2's isolation excludes Docker's legitimate packaged
+user site. Dockerfile installs VapourSynth/vs-placebo with `pip --user` under
+`/home/framecompare/.local/lib/python3.13/site-packages`; `-I`,
+`PYTHONNOUSERSITE=1`, and stripped `PYTHONUSERBASE` hide those dependencies.
+Preserving native-loader variables does not restore Python import paths.
+The clean-versus-hostile control can return false twice and miss this regression;
+the require-libplacebo override bypasses the probe and cannot prove preservation.
+Orchestrator reran the review's real-child positive-layout control: baseline
+capability true, current capability false with `ModuleNotFoundError`, one
+expected failure in 0.19 test seconds. This is import-boundary fixture evidence
+plus Docker-layout source evidence, not an actual container/native-frame run.
+
+U2 correction needs an explicitly trusted installed-dependency route while
+retaining cwd/inherited-PYTHONPATH/user-site isolation. Arbitrary caller paths
+must not be restored, and Docker/runtime-layout changes remain out of owner
+scope. Per human steering, the import-policy decision is routed through the
+human to their controller. U2's Luna worker was told to make no production
+changes or policy choice until that decision arrives. U2's original commit
+already exists; correction commit allocation must respect the one-unit-commit
+instruction and prohibition on amendment.
+
+Review deviations retained with evidence: explicit-path manual hooks avoid
+forbidden stashing while preserving all hooks; early bounded review finds
+defects before heavy gates and will be reused for the remaining range. U7's
+private candidate/revision protection serves exact preview/apply and stale-state
+obligations; U5's fake-Docker success protocol is necessary for its real verifier
+success path. No material shim, redundant harness, orphan consumer, upward
+import, or ownership violation was found in settled units. Static ignore/path
+and skipped Windows controls remain supporting evidence. Real Docker sentinel,
+capability, browser, native, docs, and physical gates remain outstanding.
+
+### Provisional controller decision for U1 (2026-10-08)
+
+The human relayed the controller's provisional decision. Production edits resume
+only after deep-review evidence is relayed to the controller and confirmed.
+U1 remains paused. This later human instruction governs the checkpoint decision;
+the ownership transfers below do not yet permit production implementation.
+
+Direction: keep main-task checkpoints; no pipeline rewrite. Blanket thread
+offload lacks established VapourSynth-environment and terminal-input contracts;
+an all-sync or process-isolated pipeline would widen implementation and platform
+acceptance. Use one lowest-layer primitive based on the current asyncio task's
+`cancelling()` count, no per-owner flags or new run-state field, and no effect
+when no task is running. `raise_if_cancelling()` raises `CancelledError` so the
+existing failure-record path and Runner exit-130 behavior remain authoritative.
+
+Check phase admission, executor return before output application, completed
+record admission, render-unit admission, and the actual durable-write owners.
+Main-thread blocking waits use bounded polling (at most about 250 ms), including
+render futures and VSView wait. Stop unstarted render futures, drain admitted
+work, and preserve an earlier real failure. VSView retains its bounded
+terminate/kill/reap and rejects post-interrupt sidecars. Native calls already
+blocking the main thread observe cancellation when they return; latency remains
+O-09. Native indexing/probing process isolation is a follow-up candidate only if
+physical acceptance finds the latency unacceptable.
+
+The proposed silent first-interrupt prompt limitation is not accepted. One
+interrupt-aware helper in `utils/terminal.py` covers upload confirmation,
+full-window retry confirmation, and alignment-reuse `stdin.readline()`. On the
+main thread with a TTY, temporarily install `signal.default_int_handler` during
+input; on `KeyboardInterrupt` or its Click `Abort`, invoke the saved Runner
+handler and raise `CancelledError`; always restore the saved handler. Interrupt
+must not become an answer, decline, or warn-only ordinary exception. Only if the
+deep reviewer establishes unsafe handler swapping may the controller accept the
+post-return checkpoint fallback, discarded answer, unchanged second-interrupt
+behavior, and explicit contract wording.
+
+Conditional U1 ownership transfers, limited to checkpoints/polling/prompts:
+
+- `utils/terminal.py` or one new utils module;
+- `services/alignment_previous_offsets.py`, `alignment_reuse_cache.py`,
+  `alignment_manual_overrides.py`, `alignment_vsview.py`;
+- `services/alignment_reuse_prompt.py`, `cli/run_command.py`;
+- `orchestration/phase_alignment.py` before U10;
+- `analysis/cache_io.py` writers only after U4's parser commit.
+
+Proof includes the pre-change real-runner regression; no later phase/unit,
+failed record, reaped child, exit 130; pending-cancellation tests at each
+persistence owner; a real PTY prompt interruption/restoration test; unchanged
+audio/webhook/VSView reaping obligations; final native and Docker gates.
+Return evidence to the controller if a scoped main-thread wait cannot poll,
+handler swapping misbehaves on Windows/Python 3.13, or scoped persistence runs
+on a worker thread where the current-task primitive cannot observe the run.
+
+Deep review returned three unresolved gaps, relayed to the human for confirmation:
+
+1. Direct synchronous `CancelledError` leaves Runner's queued task cancellation
+   available to interrupt a later awaited cleanup. Local CPython 3.13.16 plus
+   actual HTTPX and simulated delayed-close transport probes observed close
+   start without completion, even with HTTPcore's shield. This establishes a
+   scheduling mechanism, not a leaked real socket. Deliver pending cancellation
+   at the async boundary or own a bounded shielded drain; preserve cancellation
+   authority, caller-owned clients, and earliest failures.
+2. Writer-entry checkpoints precede lock waits, merging, serialization, fsync,
+   and atomic replacement. The last logical publication boundary must be
+   explicit, with temporary-file cleanup on `BaseException`. Failure-record
+   persistence must bypass success/cache rejection while the task is cancelling.
+   Minimal additional atomic/probe/diagnostic owner transfers require controller
+   confirmation; an OS operation already admitted cannot be rolled back by a
+   checkpoint.
+3. Native VS `get_frame()` and some writes have no established finite deadline;
+   executor shutdown waits for running threads. Scheduler polling does not
+   establish a finite native drain. The controller must reconcile its accepted
+   native-call limitation with the original strict bound, or authorize a proven
+   narrower lifetime design. No native hang was observed.
+
+The same `deep_reviewer` is supplying a read-only supplement on the proposed
+prompt-handler swap, remaining owner files, and these conditions. No production
+code or design approval followed either evidence package.
+
+U1 worker independently reproduced queued cancellation interrupting actual
+HTTPX delayed-close transport cleanup (local no-network probe): close started,
+but close completion was absent. It also identified `utils/file_lock.py`'s
+existing 50 ms polling without run-cancellation checks, the shared success/failure
+record writer, audio-worker admission and diagnostic writes in
+`services/alignment.py`, and preparation's run-local/shared probe-cache writes
+after native source loading. Those additional owners need controller routing;
+no ownership expansion or exclusion of probe-cache persistence was approved.
+
+### U1 focused controller-evidence supplement
+
+The deep reviewer verified the human's attachment authorization (turn
+`01a11cb5-a194-7533-a647-285fe0e58403`, user message
+`01a11cb5-a7c5-7fe1-9be2-f38554a1993c`) and returned evidence only. Production
+remains paused until human/controller confirmation.
+
+- Prompt prototype: seven bounded actual-PTY cases on macOS / CPython 3.13.16
+  completed in 1.77 seconds. Real alignment-reuse, Typer/Click upload input,
+  and retry-confirmation input produced first-interrupt cancellation count 1,
+  restored the exact saved Runner handler and final default handler, and exited
+  130. Answer/EOF/ordinary-error controls preserved zero cancellation and
+  restoration. A second-signal control observed Runner count 2 and exit 130.
+  No fixed sleeps, production edits, or network requests were used. This is
+  prototype/input-path evidence, not landed helper or Windows-console acceptance.
+- Prompt conditions: restore the same handler object within synchronous input
+  scope, before async cleanup. Click `Abort` wraps both EOF and Ctrl+C; inspect
+  its hidden exception context so EOF is not counted as an interrupt. Check
+  pending cancellation before input and after successful reads. Do not assume
+  foreign handlers/non-TTY/no-loop execution use the callable Runner handler.
+  Invoking Runner then manually raising still leaves queued cancellation for
+  the next await; owned cleanup needs the previously reported solution.
+- Native exception needs precise controller wording: already-admitted native
+  operations, including render/audio worker native calls, have no guaranteed
+  finite drain deadline. Default FFmpeg extraction retains its timeout. Native
+  indexing caches and artifacts produced by admitted work can finish with that
+  work; current-task checkpoints cannot stop those worker writes. No renderer
+  isolation/rewrite was selected or authorized.
+- Minimum additional owners beyond original U1 and the provisional list:
+  `utils/atomic_write.py`, `orchestration/preparation.py`,
+  `services/alignment.py`, `services/alignment_diagnostics.py`,
+  `orchestration/probing/probe_cache.py`; also `utils/file_lock.py` for run
+  cancellation during its existing 50 ms lock polling. Original U1 already owns
+  coordinator cleanup and run-record writers after U4. No evidence requires
+  adding `analysis/metrics.py` solely for cache publication or
+  `full_window_retry.py` solely for prompt conversion.
+- New explicit return-to-controller trigger: `TmdbCache.store_search` and
+  `store_alternative_titles` dispatch `_store` via `asyncio.to_thread`. Metadata
+  preparation and post-render metadata can reach this shared response cache.
+  `_store` locks, merges, serializes, then atomically publishes on the worker.
+  A no-network actual-store/Runner probe with a simulated handshake lock and
+  publication observed worker_has_task=False, main_task_cancelling=1, and
+  publication_after_interrupt=True. This is a scheduling/publication mechanism
+  with simulated lock/publication, not a live request or real persisted cache.
+  If the prohibition includes shared TMDB responses, the controller must settle
+  task-owned publication versus an explicit cross-thread cancellation contract,
+  with narrow `services/tmdb_cache.py` ownership. If excluded, record the precise
+  exception. Neither option was chosen here.
+
+Still required after confirmation: queued-cancellation-safe awaited close,
+last-publication checks with BaseException temp cleanup, early reservation
+capture, diagnostic/probe-cache coverage, bounded polling including VSView
+startup-readiness wait if covered, result-acceptance gates, failure progress
+status, failure-record bypass, and the TMDB-worker decision. U1's worker and all
+Luna chats retain the human/controller decision boundary.
+
+### Confirmed controller decisions (2026-10-08)
+
+The human relayed the final controller decisions in turn
+`01a11cd3-d2f2-7151-8968-4fc50e0c8e4a`, user message
+`01a11cd3-d31b-7862-a990-9bcf404b6bec`, and explicitly stated maintainer approval.
+They supersede provisional decisions and the original U1/U2 specification where
+amended; remaining constraints stay in force. U1 may resume production work.
+U2 receives one newly authorized correction commit without amendment. Its
+correction integrates before U1 changes the adapter; the sibling investigation
+is read-only. The exact controller decision follows.
+
+**Controller decisions: U1 confirmed with amendments; U2 import policy (2026-10-08).** The maintainer has approved these decisions, including the TMDB exception and the VSView sibling check. Record them in the execution record. U1 production work may resume under these terms. The return-to-controller conditions from the provisional decision still apply.
+
+## U1: run cancellation (confirmed)
+
+The direction is unchanged: main-task checkpoints, bounded polling, no pipeline rewrite. The deep-review evidence amends four details.
+
+**1. Prompt helper: approved.** The deep reviewer's conditions are requirements:
+
+- Act only on the main thread, with a TTY, when the current SIGINT handler is the callable asyncio Runner handler. Otherwise do nothing and leave foreign handlers untouched.
+- Check for a pending interrupt before reading input and again after a successful read.
+- Restore the exact saved handler object inside the synchronous input scope, before any async cleanup.
+- Treat click's `Abort` as an interrupt only when its exception context is a KeyboardInterrupt. EOF stays EOF, with an interrupt count of zero.
+- On a real interrupt, call the saved Runner handler, so the interrupt is counted and the main task cancelled. Then raise the private interrupt marker from point 2, not `CancelledError`.
+
+The seven macOS PTY cases are accepted as prototype evidence. Add Windows console behavior to physical acceptance item O-09.
+
+**2. Queued cancellation during cleanup: deliver it at the async boundary.**
+
+When synchronous code raises `CancelledError`, the Runner's cancellation stays queued and fires at the first `await` inside cleanup. The rule has two levels:
+
+- **Async checkpoints** (phase admission, executor return, and completed-record admission in `execution.py`, `phases.py` and `coordinator.py`) take the queued cancellation with an `await`, using the primitive's async form (`await asyncio.sleep(0)`). The real `CancelledError` arrives there and is consumed before any cleanup await.
+- **Synchronous checkpoints and the prompt helper** raise one private `BaseException` subclass meaning "run interrupt requested". It must not subclass `Exception`, or `warn_only` phases would swallow it.
+  - Every place where async code calls into synchronous owners converts the marker by awaiting the async checkpoint, which delivers the real `CancelledError`. At minimum that means the phase-executor wrapper and the coordinator's preparation call.
+  - The marker never escapes the run.
+  - With no running task, the primitive does nothing, so the marker is never raised.
+- Keep the existing shields and bounds on owned cleanup. Add no new shields elsewhere.
+- **Proof:** turn the HTTPX delayed-close transport probe into a regression where close completes after the first interrupt. It must fail on the current code first.
+
+**3. Publication boundary and generic utilities.** Generic utilities never consult the ambient task; their owners decide.
+
+- `utils/atomic_write.py`:
+  - add an optional `publish_guard` callable, invoked immediately before the atomic replace, after locking, merging, serialization and fsync;
+  - remove the temporary file on any `BaseException`.
+- `utils/file_lock.py`: add an optional abort check, called on each iteration of the existing 50 ms poll.
+- Result, cache, probe-cache and diagnostic owners pass the run's synchronous checkpoint as the guard.
+- **Failure-record and failure-progress paths pass no guard**, so they still persist while the task is cancelling.
+- A replace that has already started cannot be rolled back. This is accepted.
+
+**Ownership transfers approved**, for checkpoint, guard, polling and early-reservation placement only:
+
+- `utils/atomic_write.py` and `utils/file_lock.py`;
+- `orchestration/preparation.py` (early reservation capture, and probe-cache writes after native source loading);
+- `services/alignment.py` (audio-worker admission) and `services/alignment_diagnostics.py`;
+- `orchestration/probing/probe_cache.py`.
+
+These add to the provisional list. `analysis/metrics.py` and `orchestration/full_window_retry.py` are not transferred. The bounded-polling rule covers VSView's startup-readiness wait inside the already-owned `vsview/adapter.py`.
+
+**4. Native limit: exception confirmed.** Use this exact wording for the contract:
+
+> After the first Ctrl+C, Frame Compare starts no new phase, render unit or audio work, and publishes no new result, cache or diagnostic entry except the failure record. Native operations already admitted (VapourSynth frame requests, render and audio worker native calls, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. FFmpeg frame extraction keeps its existing timeout. A second Ctrl+C keeps its existing behavior.
+
+Physical acceptance item O-09 measures the real latency. If it proves unacceptable, the targeted follow-up is to move L-SMASH indexing (and possibly probing) into a killable child process. That is not part of U1.
+
+O-09 also includes Windows console behavior of the interrupt-aware prompt helper,
+as required by this confirmed controller decision.
+
+**5. TMDB response cache: exception, no new ownership.**
+
+When a response is already in flight, `TmdbCache` may finish publishing it on its `asyncio.to_thread` worker after the first Ctrl+C. It is excluded from the no-publication rule because:
+
+- it records a validated upstream response keyed by a privacy-safe request identity;
+- it carries no run, selection, alignment or cache authority;
+- its writer is locked and atomic;
+- the CLI drains the executor before exit.
+
+No new TMDB request may start after the interrupt. The metadata phase's admission checkpoint and the cancellation of in-flight HTTP awaits must guarantee that; add one test asserting it. `services/tmdb_cache.py` is not transferred.
+
+**Proof additions**, beyond the provisional list:
+
+- the HTTPX close regression (point 2);
+- `atomic_write` removes its temporary file on `BaseException`, and the guard fires after serialization but before the replace;
+- a lock-wait abort test;
+- the failure record persists while the task is cancelling;
+- preparation's probe-cache writes and the alignment diagnostic writes are skipped after the interrupt;
+- no new TMDB request after the interrupt;
+- a `warn_only` phase does not swallow the interrupt marker.
+
+## U2: trusted-dependency import policy
+
+R-A01 is accepted. The probe launches its child Python with `-I` and `PYTHONNOUSERSITE`, which hide Docker's `pip --user` packages, so the probe wrongly reports libplacebo as unavailable.
+
+Policy: the capability child trusts exactly the import locations the parent interpreter's installation trusts. It never trusts the working directory, the script directory, or an inherited `PYTHONPATH` or `PYTHONSTARTUP`.
+
+- Do not use `-I`. Use safe-path mode (`-P` or `PYTHONSAFEPATH=1`) and strip the injection variables.
+- The child's user site follows the parent's:
+  - If the parent runs with user site enabled (`site.ENABLE_USER_SITE` is true and `sys.flags.no_user_site` is not set), keep it, along with the parent's `PYTHONUSERBASE`.
+  - If the parent runs without it, launch the child with `-s`.
+  - The parent already imports itself and its dependencies from that location, so the child gains no new trust.
+- Keep the native-loader variables.
+- No hard-coded Docker paths, no restoring arbitrary caller paths, and no changes to the Docker or runtime layout.
+- Put the policy in one helper in `utils/subproc.py`, which U2 owns.
+- **Proof:**
+  - the reviewer's real-child positive-layout control passes: a dependency installed in user site is visible to the child;
+  - the hostile cwd and hostile `PYTHONPATH` markers are still never imported;
+  - when the parent runs without user site, so does the child;
+  - the end-of-run Docker gate supplies the real packaged capability proof.
+- Make a new commit, not an amend, for example `fix(vs): keep trusted user-site dependencies in the tonemap probe`.
+
+**VSView sibling check, before U1 edits `vsview/adapter.py`.** `_build_vsview_child_env` applies the same `PYTHONNOUSERSITE=1` policy, and the `gui-linux` image installs VSView with `pip --user`. Yet the 2026-10-07 GUI proof passed.
+
+- Determine from `tools/verify_docker_gui.sh` and its inside-container route how the adapter's child found VSView.
+- If the adapter's policy would hide user-site packages, U1 adopts U2's shared helper in `_build_vsview_child_env`, with a positive-layout control.
+- If it would not, record why. Do not change the adapter's import policy without that evidence.
+- Sequence: U2's correction lands before U1 touches the adapter.
+
+Dispatch after confirmation: existing U1 and U2 chats received the complete
+controller decision and explicit scope/sequence. U1 may implement its confirmed
+owners while leaving the adapter untouched until U2 integrates. U2 implements
+the decided shared helper and investigates the GUI sibling without editing it.
+The exact native-limit wording and shared-TMDB exception were added to the CLI
+contract as an orchestrator delta; its three documentation guards pass.
+
+End-gate preparation: a scratch-only Compose override sets both test and
+production verifier containers to `network_mode: none`, preventing the default
+doctor health check from contacting a live service while retaining the canonical
+verifier command. Resolved Compose configuration confirms both services are
+network-isolated. No runtime gate has run yet, and no Docker/Compose source
+configuration or dependency was changed.
+
+### U2 controller-directed correction integrated
+
+Corrective commit `f8dcc3b82576ff42ed0d4f83c749e55dc8911e13` —
+`fix(vs): keep trusted user-site dependencies in the tonemap probe` — changes
+only the shared process helper, tonemap probe and their two existing test files.
+The shared helper uses safe-path mode and strips Python injection variables;
+user-site availability follows the parent exactly. No Docker/runtime layout or
+native-loader configuration changes. A real user-site positive dependency
+control now passes, hostile cwd/PYTHONPATH controls remain intact, and the
+disabled-site proof starts a real parent with `-s` rather than assuming the
+ambient venv's site policy. Integration: 54 passed in 0.90 test seconds; scoped
+pyright has zero errors/warnings; all applicable explicit-path hooks pass.
+Whole-tree bandit medium/high and both import contracts pass. Whole-tree
+pyright/Ruff/format also ran, but encountered unfinished U1 source and test
+edits; those transient failures are not claimed as final passes. They will be
+rerun on settled wave A code.
+
+Sibling evidence: `gui-linux` installs VSView and dependencies with `pip --user`.
+The historical verifier imports availability in the parent, runs direct
+`python -m vsview --help`, then generates a session with
+`VSViewConfig(enabled=False)` (`tools/verify_docker_gui.sh`). It never exercises
+the adapter's isolated startup probe or enabled launcher. Its prior success
+therefore does not prove that `PYTHONNOUSERSITE=1` can find those dependencies.
+Under the controller's explicit conditional authorization, U1 now adopts the
+landed shared helper for both adapter child commands and adds a positive-layout
+control. Adapter ownership is released only after the corrective commit above.
+R-A01 awaits the same independent wave reviewer and the final real packaged
+capability gate; the extra corrective commit was explicitly controller-approved.
+
+Independent corrective review of `fbc59eb3..f8dcc3b8`: R-A01 is resolved at
+import-boundary fixture level, with no new material finding. Reviewer reran
+29 cases (0.74 seconds, no skips), scoped pyright/Ruff/format and range
+diff-check successfully. The unchanged enabled-user-site positive control fails
+against the previous committed probe with `ModuleNotFoundError: vapoursynth`
+(one expected failure, 0.21 seconds), then passes against the correction. Its
+minimal fake native interface proves real parent/child import behavior, not
+native plugin acceptance. Separate enabled-site, disabled-site and hostile-path
+proofs have distinct obligations; no material redundant harness, shim or
+ownership issue was found. The controller-approved helper placement and extra
+corrective commit are retained. The reviewer independently confirms the GUI
+sibling explanation in source. Actual Docker/libplacebo proof remains open,
+and active U1 code was excluded; this does not complete wave A.
+
+### U1 integration under the confirmed amendments
+
+Inspected all changed owners against the approved transfer list. No executor
+thread migration, new run-state flag, generic ambient-task policy, new shield,
+TMDB-cache ownership change or dependency change was introduced. The private
+marker is converted at async boundaries before cleanup; queued cancellation no
+longer interrupts the first HTTPX close await. Atomic guards run after fsync and
+before replace, clean temporary files on `BaseException`, and exempt failed
+records. Render polls at 100 ms, stops new units, cancels unstarted futures,
+drains admitted workers and preserves a previously observed real failure.
+VSView readiness and review waits use the shared import helper, poll at most
+100 ms, and retain bounded terminate/kill/reap ownership. Preparation captures
+the reservation before publication, blocks later source/probe admission, and
+guards run/shared probe caches. Alignment blocks audio admission and guards
+manual/reuse/diagnostic publication. The approved native and TMDB exceptions
+remain explicit in the CLI contract and O-09 handoff.
+
+Before-change evidence is retained in the child's ignored U1 scratch logs:
+real SIGINT VSView/render regressions persisted `completed_with_warnings`;
+the HTTPX delayed-close regression did not complete close; all three real PTY
+prompts timed out on first SIGINT. Integration reran the complete focused
+23-file selection: **435 passed, no skips, 22.22 test seconds**. It includes
+unchanged audio/webhook repeated-cancellation, owned adapter reaping, failure
+precedence, real contended-lock abort, fsync-triggered guarded publishers,
+failed-record publication while cancelling, preparation probe admission,
+warning-only marker propagation and zero/new-in-flight TMDB admission proofs.
+CLI documentation guards: 3 passed in 0.08 seconds. Whole-tree pyright:
+0 errors/warnings; Ruff check and format: pass (519 files); bandit medium/high:
+pass (22 low findings); both import contracts: kept (180 files, 738 dependencies).
+API regeneration produced no diff because the changed utility signatures are
+outside its locked module list. Physical Windows console and actual native
+drain latency remain unverified. Audio collector cleanup was unchanged, so the
+conditional streaming-resource heavy proof is not required by this unit.

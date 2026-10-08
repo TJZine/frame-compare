@@ -1,6 +1,7 @@
 """Cache persistence contract tests."""
 
 import json
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 
@@ -76,7 +77,10 @@ def test_save_metrics_cache_uses_atomic_text_write(
     metrics = FrameMetrics(luminance=[0.5] * 10, motion=[0.0] * 10, metadata=metadata)
     calls: list[tuple[Path, str, str]] = []
 
-    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    def _fake_write(
+        path: Path, content: str, *, encoding: str = "utf-8", publish_guard: Callable[[], None]
+    ) -> None:
+        publish_guard()
         calls.append((path, content, encoding))
         path.write_text(content, encoding=encoding)
 
@@ -88,3 +92,36 @@ def test_save_metrics_cache_uses_atomic_text_write(
     assert calls[0][0] == tmp_path / "analysis__fp.compframes"
     assert calls[0][2] == "utf-8"
     assert json.loads(calls[0][1])["fingerprint"] == "fp"
+
+
+def test_pending_interrupt_prevents_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    metadata = MetricsMetadata(frame_count=1, fps=Fraction(24), config_fingerprint="fp", clips=[])
+    metrics = FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata)
+    target = tmp_path / "analysis__fp.compframes"
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            save_metrics_cache(metrics, tmp_path)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert not target.exists()
+    assert list(target.parent.glob(f".{target.name}.*")) == []

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import signal
+import site
 import subprocess
 import sys
 import types
@@ -100,12 +101,15 @@ def test_child_environment_isolated_and_preserves_warning_policy(
 
     assert child_env["PYTHONWARNINGS"] == "error::ResourceWarning"
     assert child_env["PYTHONSAFEPATH"] == "1"
-    assert child_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONNOUSERSITE" not in child_env
     assert "PYTHONPATH" not in child_env
     assert "PYTHONHOME" not in child_env
     assert "PYTHONSTARTUP" not in child_env
     assert "PYTHONINSPECT" not in child_env
-    assert "PYTHONUSERBASE" not in child_env
+    if site.ENABLE_USER_SITE and not sys.flags.no_user_site:
+        assert child_env["PYTHONUSERBASE"] == "/caller/user-base"
+    else:
+        assert "PYTHONUSERBASE" not in child_env
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
 
@@ -225,7 +229,7 @@ def test_run_vsview_command_returns_measured_wait_with_fake_clock(
 ) -> None:
     import frame_compare.vsview.adapter as adapter
 
-    clock = iter([100.0, 142.5])
+    clock = iter([100.0, 100.0, 142.5])
     monkeypatch.setattr(adapter, "monotonic", lambda: next(clock))
 
     class _FakeProcess:
@@ -320,7 +324,7 @@ def test_startup_probe_failure_reports_reason_and_redacted_stderr(
             )
         )
     )
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", failure)
+    monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", failure)
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.Popen",
         MagicMock(side_effect=AssertionError("Failed startup checks must not launch VSView")),
@@ -345,7 +349,7 @@ def test_launch_uses_managed_launcher(
     monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
     monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
     mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
+    monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", mock_run)
     process = MagicMock()
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
@@ -356,8 +360,10 @@ def test_launch_uses_managed_launcher(
         VSViewConfig(enabled=True),
     )
 
+    flags = ["-P"] if site.ENABLE_USER_SITE and not sys.flags.no_user_site else ["-P", "-s"]
     assert popen.call_args.args[0] == [
         sys.executable,
+        *flags,
         "-m",
         "frame_compare.vsview.launcher",
         str(session.script_path),
@@ -366,7 +372,7 @@ def test_launch_uses_managed_launcher(
     assert "PYTHONPATH" not in launch_env
     assert "PYTHONHOME" not in launch_env
     assert launch_env["PYTHONSAFEPATH"] == "1"
-    assert launch_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONNOUSERSITE" not in launch_env
     process.terminate.assert_not_called()
     process.kill.assert_not_called()
 
@@ -411,8 +417,9 @@ def test_launch_timeout_terminates_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr("frame_compare.vsview.adapter._REVIEW_PROCESS_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
+        "frame_compare.vsview.adapter._run_startup_probe",
         MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
     )
     process = MagicMock()
@@ -436,8 +443,9 @@ def test_launch_timeout_kills_child_when_terminate_does_not_reap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr("frame_compare.vsview.adapter._REVIEW_PROCESS_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
+        "frame_compare.vsview.adapter._run_startup_probe",
         MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
     )
     process = MagicMock()
@@ -934,3 +942,57 @@ def test_write_vsview_session_script_retries_uuid_path_collision(
     )
 
     assert script.name.endswith(f"_{'2' * 32}.py")
+
+
+def test_adapter_children_preserve_trusted_parent_user_site(tmp_path: Path) -> None:
+    """Both readiness and review subprocesses can see an installed user-site dependency."""
+    import textwrap
+
+    import structlog
+
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "PYTHONUSERBASE": str(tmp_path / "userbase"),
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(Path(__file__).parents[2] / "src"),
+                    str(Path(structlog.__file__).resolve().parent.parent),
+                )
+            ),
+        }
+    )
+    script = textwrap.dedent("""
+        import site, sys
+        from pathlib import Path
+        from frame_compare.vsview.adapter import (
+            _build_vsview_child_env, _run_startup_probe, _run_vsview_command,
+        )
+        assert site.ENABLE_USER_SITE and not sys.flags.no_user_site
+        user_site = Path(site.getusersitepackages())
+        user_site.mkdir(parents=True, exist_ok=True)
+        (user_site / "vsview.py").write_text("INSTALLED = True\\n", encoding="utf-8")
+        env = _build_vsview_child_env(no_color=True)
+        command = [sys.executable, "-c", "import vsview; assert vsview.INSTALLED"]
+        assert _run_startup_probe(command, env=env).returncode == 0
+        assert _run_vsview_command(command, env=env)[0] == 0
+    """)
+    result = subprocess.run(  # noqa: S603 - selected Python interpreter and owned fixture
+        [getattr(sys, "_base_executable", sys.executable), "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr

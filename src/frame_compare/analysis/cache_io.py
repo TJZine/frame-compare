@@ -27,6 +27,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
@@ -698,7 +699,9 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
         },
     }
 
-    write_text_atomic(cache_path, json.dumps(data, indent=2), encoding="utf-8")
+    write_text_atomic(
+        cache_path, json.dumps(data, indent=2), encoding="utf-8", publish_guard=raise_if_cancelling
+    )
 
 
 def _serialize_metric_active_rect(rect: MetricActiveRect | None) -> dict[str, int] | None:

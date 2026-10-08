@@ -16,6 +16,7 @@ import tomli_w
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 from frame_compare.vs.types import HDRMetadata
@@ -291,7 +292,7 @@ def _load_shared_clip_probe_cache_for_update(
 def _write_cache_file(cache_path: Path, output: Mapping[str, Any]) -> _CacheWriteOutcome:
     try:
         content = tomli_w.dumps(output).encode("utf-8")
-        write_bytes_atomic(cache_path, content)
+        write_bytes_atomic(cache_path, content, publish_guard=raise_if_cancelling)
     except OSError as e:
         return _CacheWriteOutcome(error=str(e))
 
@@ -382,7 +383,7 @@ def merge_shared_clip_probe_cache(
     """Merge current entries into a shared cache under one locked transaction."""
     lock_path = cache_path.with_name(f"{cache_path.name}.lock")
     try:
-        with exclusive_file_lock(lock_path):
+        with exclusive_file_lock(lock_path, abort_check=raise_if_cancelling):
             entries_by_key = _load_shared_clip_probe_cache_for_update(cache_path)
             entries_by_key.update(current_entries)
             save_clip_probe_cache(cache_path, entries_by_key)

@@ -86,6 +86,18 @@ Current phase-family owners are intentionally explicit:
   overlay diagnostic metadata mapping
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
+Run cancellation stays on the main task. `utils.cancellation` supplies synchronous
+admission/publication checks and asynchronous checkpoints; synchronous owners raise
+a private control-flow marker, and their async boundaries deliver task cancellation
+before awaited cleanup. `utils.terminal` temporarily restores interruptible input
+only for a main-thread TTY using the asyncio Runner's SIGINT handler, then restores
+that exact handler. Persistence owners pass guards to atomic writes and abort checks
+to lock polling; generic utilities do not inspect the ambient task. Failure records
+remain writable. Render and VSView owners poll their blocking waits, stop new
+admission, and drain or reap owned work. Already-admitted native calls have no
+guaranteed finite drain deadline; see the CLI contract's Run Interruption section
+for that limit and the separately owned shared-TMDB response-cache exception.
+
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v8 payload metadata, and orchestration only passes the effective

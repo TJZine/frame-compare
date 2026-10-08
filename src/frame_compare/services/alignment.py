@@ -82,6 +82,10 @@ from frame_compare.utils.alignment_evidence import (
     analysis_stream_start,
     audio_attempt_payload,
 )
+from frame_compare.utils.cancellation import (
+    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
+    cancellation_checkpoint,
+)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentCacheSettings, AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
@@ -953,6 +957,7 @@ async def _await_audio_computation(
     progress: ProgressReporter | None,
     vs_loader: VSLoader | None,
 ) -> Fraction:
+    await cancellation_checkpoint()
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
     analysis_descriptions = _request_analysis_progress_descriptions(request)
@@ -1182,180 +1187,186 @@ async def align_clips_from_request(
     vs_loader: VSLoader | None = None,
 ) -> list[AlignmentResult]:
     """Align clips from the typed request seam with shared previous-offset reuse."""
-    reference = request.reference.path
-    comparisons = [comparison.path for comparison in request.comparisons]
-    _check_duplicate_stems(comparisons)
-    validate_previous_offsets_policy(request, config)
+    try:
+        await cancellation_checkpoint()
+        reference = request.reference.path
+        comparisons = [comparison.path for comparison in request.comparisons]
+        _check_duplicate_stems(comparisons)
+        validate_previous_offsets_policy(request, config)
 
-    if progress:
-        progress.set_description("ALIGN | Checking saved offsets")
+        if progress:
+            progress.set_description("ALIGN | Checking saved offsets")
 
-    results_map: dict[str, AlignmentResult] = {}
-    provenances: dict[str, AlignmentProvenance] = {}
-    fps_reference = _apply_manual_overrides_with_provenance(
-        reference=reference,
-        comparisons=request.comparisons,
-        cache_dir=request.generated_dir,
-        results_map=results_map,
-        provenances=provenances,
-        fps_reference=reference_fps,
-    )
-    if results_map:
-        require_current_alignment_sources(request)
-    unresolved_comparisons = [
-        comparison
-        for comparison in request.comparisons
-        if alignment_key(reference, comparison.path) not in results_map
-    ]
-
-    completed_confirmed_reuse = apply_shared_reuse(
-        request=request,
-        unresolved_comparisons=unresolved_comparisons,
-        results_map=results_map,
-        provenances=provenances,
-        cache_results=config.cache_results,
-        progress=progress,
-        no_color=config.no_color,
-    )
-
-    requested_comparisons = [
-        comparison
-        for comparison in request.comparisons
-        if alignment_key(reference, comparison.path) not in results_map
-    ]
-    if requested_comparisons:
-        _record_resolved_alignment_request_progress(
-            progress=progress,
-            request=request,
+        results_map: dict[str, AlignmentResult] = {}
+        provenances: dict[str, AlignmentProvenance] = {}
+        fps_reference = _apply_manual_overrides_with_provenance(
+            reference=reference,
+            comparisons=request.comparisons,
+            cache_dir=request.generated_dir,
             results_map=results_map,
             provenances=provenances,
+            fps_reference=reference_fps,
         )
-        fps_reference = await _await_audio_computation(
+        if results_map:
+            require_current_alignment_sources(request)
+        unresolved_comparisons = [
+            comparison
+            for comparison in request.comparisons
+            if alignment_key(reference, comparison.path) not in results_map
+        ]
+
+        completed_confirmed_reuse = apply_shared_reuse(
             request=request,
-            requested_comparisons=requested_comparisons,
+            unresolved_comparisons=unresolved_comparisons,
             results_map=results_map,
             provenances=provenances,
-            fps_reference=fps_reference,
-            progress=progress,
-            vs_loader=vs_loader,
-        )
-        descriptions = _request_progress_descriptions(request)
-        for comparison in requested_comparisons:
-            _record_alignment_progress(
-                progress=progress,
-                result=results_map[alignment_key(reference, comparison.path)],
-                description=descriptions[comparison.path],
-            )
-    else:
-        _record_resolved_alignment_request_progress(
-            progress=progress,
-            request=request,
-            results_map=results_map,
-            provenances=provenances,
-            cached_audio_evidence_only=True,
-        )
-
-    if any(result.applied for result in results_map.values()):
-        require_current_alignment_sources(request)
-
-    initial_outcome: AlignmentReviewOutcome = (
-        "pending"
-        if (config.use_vsview or config.force_interactive) and not completed_confirmed_reuse
-        else "not_requested"
-    )
-    diagnostic_keys = _write_run_diagnostics(
-        request=request,
-        results_map=results_map,
-        provenances=provenances,
-        review_outcome=initial_outcome,
-        emit_success_log=json_output,
-    )
-    if initial_outcome == "pending" and not quiet and not json_output:
-        print_pre_review_summary(
-            request=request,
-            results_map=results_map,
+            cache_results=config.cache_results,
             progress=progress,
             no_color=config.no_color,
         )
-    present_alignment_evidence(
-        request=request,
-        results_map=results_map,
-        provenances=provenances,
-        config=config,
-        progress=progress,
-        verbose=verbose,
-        quiet=quiet,
-        json_output=json_output,
-        diagnostics_written=bool(diagnostic_keys),
-    )
-    if completed_confirmed_reuse and not requested_comparisons:
-        require_current_alignment_sources(request)
+
+        requested_comparisons = [
+            comparison
+            for comparison in request.comparisons
+            if alignment_key(reference, comparison.path) not in results_map
+        ]
+        if requested_comparisons:
+            _record_resolved_alignment_request_progress(
+                progress=progress,
+                request=request,
+                results_map=results_map,
+                provenances=provenances,
+            )
+            fps_reference = await _await_audio_computation(
+                request=request,
+                requested_comparisons=requested_comparisons,
+                results_map=results_map,
+                provenances=provenances,
+                fps_reference=fps_reference,
+                progress=progress,
+                vs_loader=vs_loader,
+            )
+            descriptions = _request_progress_descriptions(request)
+            for comparison in requested_comparisons:
+                _record_alignment_progress(
+                    progress=progress,
+                    result=results_map[alignment_key(reference, comparison.path)],
+                    description=descriptions[comparison.path],
+                )
+        else:
+            _record_resolved_alignment_request_progress(
+                progress=progress,
+                request=request,
+                results_map=results_map,
+                provenances=provenances,
+                cached_audio_evidence_only=True,
+            )
+
+        if any(result.applied for result in results_map.values()):
+            require_current_alignment_sources(request)
+
+        initial_outcome: AlignmentReviewOutcome = (
+            "pending"
+            if (config.use_vsview or config.force_interactive) and not completed_confirmed_reuse
+            else "not_requested"
+        )
+        diagnostic_keys = _write_run_diagnostics(
+            request=request,
+            results_map=results_map,
+            provenances=provenances,
+            review_outcome=initial_outcome,
+            emit_success_log=json_output,
+        )
+        if initial_outcome == "pending" and not quiet and not json_output:
+            print_pre_review_summary(
+                request=request,
+                results_map=results_map,
+                progress=progress,
+                no_color=config.no_color,
+            )
+        present_alignment_evidence(
+            request=request,
+            results_map=results_map,
+            provenances=provenances,
+            config=config,
+            progress=progress,
+            verbose=verbose,
+            quiet=quiet,
+            json_output=json_output,
+            diagnostics_written=bool(diagnostic_keys),
+        )
+        if completed_confirmed_reuse and not requested_comparisons:
+            require_current_alignment_sources(request)
+            return [
+                results_map[alignment_key(reference, comparison.path)]
+                for comparison in request.comparisons
+            ]
+
+        offsets_by_key = _build_offsets_map(
+            reference=reference,
+            comparisons=comparisons,
+            results_map=results_map,
+        )
+        audio_review_by_key = _build_audio_review_map(
+            reference=reference,
+            comparisons=comparisons,
+            results_map=results_map,
+            provenances=provenances,
+        )
+        review = maybe_launch_alignment_vsview(
+            reference=request.reference,
+            comparisons=request.comparisons,
+            offsets_by_key=offsets_by_key,
+            audio_review_by_key=audio_review_by_key,
+            cache_dir=request.generated_dir,
+            config=config,
+            progress=progress,
+            frame_props_by_stem=frame_props_by_stem,
+            verbose=verbose,
+            review_summary=review_summary,
+        )
+        confirmed_offsets = review.confirmed_offsets
+        if confirmed_offsets:
+            require_current_alignment_sources(request)
+        fps_reference = _apply_confirmed_vsview_offsets(
+            reference=reference,
+            comparisons=comparisons,
+            confirmed_offsets_by_key=confirmed_offsets,
+            results_map=results_map,
+            fps_reference=fps_reference,
+        )
+        _record_interactive_provenance(
+            request=request,
+            confirmed_offsets_by_key=confirmed_offsets,
+            results_map=results_map,
+            provenances=provenances,
+        )
+
+        if initial_outcome == "pending":
+            _write_run_diagnostics(
+                request=request,
+                results_map=results_map,
+                provenances=provenances,
+                review_outcome=review.review_outcome,
+                emit_success_log=json_output,
+                only_keys=diagnostic_keys,
+                confirmed_frame_pairs=review.confirmed_frame_pairs,
+            )
+            if review_summary is not None and not review_summary.review_ran:
+                review_summary.review_unresolved = True
+
+        if any(result.applied for result in results_map.values()):
+            require_current_alignment_sources(request)
+        if config.cache_results and shared_write_is_service_eligible(
+            request=request,
+            provenances=provenances,
+        ):
+            save_reusable_offsets(request, list(provenances.values()))
+
         return [
             results_map[alignment_key(reference, comparison.path)]
             for comparison in request.comparisons
         ]
-
-    offsets_by_key = _build_offsets_map(
-        reference=reference,
-        comparisons=comparisons,
-        results_map=results_map,
-    )
-    audio_review_by_key = _build_audio_review_map(
-        reference=reference,
-        comparisons=comparisons,
-        results_map=results_map,
-        provenances=provenances,
-    )
-    review = maybe_launch_alignment_vsview(
-        reference=request.reference,
-        comparisons=request.comparisons,
-        offsets_by_key=offsets_by_key,
-        audio_review_by_key=audio_review_by_key,
-        cache_dir=request.generated_dir,
-        config=config,
-        progress=progress,
-        frame_props_by_stem=frame_props_by_stem,
-        verbose=verbose,
-        review_summary=review_summary,
-    )
-    confirmed_offsets = review.confirmed_offsets
-    if confirmed_offsets:
-        require_current_alignment_sources(request)
-    fps_reference = _apply_confirmed_vsview_offsets(
-        reference=reference,
-        comparisons=comparisons,
-        confirmed_offsets_by_key=confirmed_offsets,
-        results_map=results_map,
-        fps_reference=fps_reference,
-    )
-    _record_interactive_provenance(
-        request=request,
-        confirmed_offsets_by_key=confirmed_offsets,
-        results_map=results_map,
-        provenances=provenances,
-    )
-
-    if initial_outcome == "pending":
-        _write_run_diagnostics(
-            request=request,
-            results_map=results_map,
-            provenances=provenances,
-            review_outcome=review.review_outcome,
-            emit_success_log=json_output,
-            only_keys=diagnostic_keys,
-            confirmed_frame_pairs=review.confirmed_frame_pairs,
-        )
-        if review_summary is not None and not review_summary.review_ran:
-            review_summary.review_unresolved = True
-
-    if any(result.applied for result in results_map.values()):
-        require_current_alignment_sources(request)
-    if config.cache_results and shared_write_is_service_eligible(
-        request=request,
-        provenances=provenances,
-    ):
-        save_reusable_offsets(request, list(provenances.values()))
-
-    return [
-        results_map[alignment_key(reference, comparison.path)] for comparison in request.comparisons
-    ]
+    except _RunInterrupt:
+        await cancellation_checkpoint()
+        raise asyncio.CancelledError() from None

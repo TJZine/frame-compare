@@ -21,6 +21,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     ReusableAlignmentEntry,
 )
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 
@@ -92,6 +93,7 @@ def _apply_cached_alignment_result(
     provenances: dict[str, AlignmentProvenance],
     computed_cache_hit: bool,
 ) -> None:
+    raise_if_cancelling()
     require_current_alignment_sources(request)
     key = _alignment_key_from_request(request, comparison)
     comparison_key = comparison_cache_key(comparison)

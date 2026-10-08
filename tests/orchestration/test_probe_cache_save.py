@@ -208,3 +208,35 @@ def test_save_clip_probe_cache_creates_parent_directories(
     save_clip_probe_cache(nested_path, {key: sample_snapshot})
 
     assert nested_path.exists()
+
+
+def test_pending_interrupt_prevents_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hdr_snapshot: ClipProbeSnapshot,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    target = tmp_path / "probe.toml"
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            save_clip_probe_cache(target, {"key": hdr_snapshot})
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert not target.exists()
+    assert list(target.parent.glob(f".{target.name}.*")) == []

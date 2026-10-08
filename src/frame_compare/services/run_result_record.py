@@ -15,6 +15,7 @@ import tomli_w
 from frame_compare.errors import FrameCompareError
 from frame_compare.services.errors import HistoryAccessError, HistoryOpenError
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.types import WorkspacePaths
 
 RUN_RESULT_FILENAME = "run_result.toml"
@@ -384,7 +385,12 @@ def write_run_result(run_dir: Path, record: RunResultRecord) -> None:
     """Atomically write one run outcome below an existing reserved run folder."""
     if not run_dir.is_dir():
         raise FileNotFoundError("reserved run folder is unavailable")
-    write_text_atomic(run_dir / RUN_RESULT_FILENAME, serialize_run_result(record), encoding="utf-8")
+    write_text_atomic(
+        run_dir / RUN_RESULT_FILENAME,
+        serialize_run_result(record),
+        encoding="utf-8",
+        publish_guard=None if record.status == "failed" else raise_if_cancelling,
+    )
 
 
 def _require_keys(table: dict[str, object], allowed: set[str], required: set[str]) -> None:

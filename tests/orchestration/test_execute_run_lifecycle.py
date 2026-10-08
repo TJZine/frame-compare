@@ -644,3 +644,343 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
 
     with pytest.raises(MixedSourceFpsError, match="Mixed source FPS is not supported"):
         asyncio.run(execute_run(request, deps=deps))
+
+
+def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
+    """Child entry point: real CLI, runner signals, owners and failed-record writer."""
+    import json
+    import os
+    import signal
+    import subprocess
+    import sys
+    import threading
+    import time
+    from typing import Any
+
+    import httpx
+    from typer.testing import CliRunner
+
+    from frame_compare.cli.entry import app
+    from frame_compare.orchestration import execution
+    from frame_compare.orchestration.execution_types import ExecutionState, PhaseOutput
+    from frame_compare.orchestration.types import ReservedRunCapture
+    from frame_compare.render.batch import orchestrator as batch
+    from frame_compare.render.errors import RenderError
+    from frame_compare.render.types import EncoderSettings, RenderedFrameResult, RenderRequest
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
+    from frame_compare.utils.media_facts import RenderedFrameFacts
+    from frame_compare.vsview import adapter
+
+    create_config(root)
+    workspace = _workspace(root)
+    assert workspace.run_dir is not None
+    workspace.run_dir.mkdir(parents=True)
+    config = ConfigSchema()
+    config.audio_alignment.enable = False
+    config.report.enable = True
+    artifacts = RunArtifacts()
+    ready = threading.Event()
+    interrupted = threading.Event()
+    release_render = threading.Event()
+    close_completed: list[bool] = []
+    calls: list[int] = []
+    applied: list[str] = []
+    children: list[subprocess.Popen[Any]] = []
+    later: list[str] = []
+
+    async def prep(_request: RunRequest, deps: RunDependencies) -> PrepState:
+        assert deps.capture_reserved_run is not None
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=workspace,
+                clip_count=1,
+                preflight_duration=0.0,
+                preflight_warnings=(),
+                run_warnings=artifacts.warnings,
+            )
+        )
+        return PrepState(
+            workspace=workspace,
+            config=config,
+            input_videos=[root / "reference.mkv"],
+            clips=[clip_state(root / "reference.mkv", label="Reference")],
+            artifacts=artifacts,
+            metadata_prefetch=MetadataPrefetch(None, False),
+            preflight_warnings=[],
+            preflight_duration=0.0,
+            load_sources_start=time.monotonic(),
+            analysis_selection_domain="test",
+            selection_window=SelectionWindow(0, 100),
+        )
+
+    def interrupt() -> None:
+        assert ready.wait(3)
+        os.kill(os.getpid(), signal.SIGINT)
+        interrupted.set()
+        release_render.set()
+
+    class DelayedCloseTransport(httpx.AsyncBaseTransport):
+        async def aclose(self) -> None:
+            await asyncio.sleep(0)
+            close_completed.append(True)
+
+    def render_frame(request: RenderRequest) -> RenderedFrameResult:
+        calls.append(request.frame_number)
+        if owner == "failure" and request.frame_number == 0:
+            raise RenderError("render failed before interrupt")
+        ready.set()
+        assert release_render.wait(3)
+        return RenderedFrameResult(
+            request.output_path,
+            RenderedFrameFacts(
+                source_frame=request.frame_number,
+            ),
+        )
+
+    real_popen = adapter.subprocess.Popen
+
+    def popen(command: list[str], **kwargs: Any) -> subprocess.Popen[Any]:
+        child = real_popen(command, **kwargs)
+        children.append(child)
+        ready.set()
+        return child
+
+    def render(*_args: object, **_kwargs: object) -> RenderPhaseOutput:
+        if owner == "httpx":
+            ready.set()
+            assert interrupted.wait(3)
+            raise asyncio.CancelledError()
+        if owner == "startup":
+            adapter._run_startup_probe(
+                [sys.executable, "-c", "import threading; threading.Event().wait(0.5)"],
+                env=os.environ.copy(),
+            )
+        elif owner == "vsview":
+            adapter._run_vsview_command(
+                [sys.executable, "-c", "import threading; threading.Event().wait(0.5)"],
+                env=os.environ.copy(),
+            )
+        else:
+            requests = [
+                RenderRequest(
+                    clip=root / "reference.mkv",
+                    diagnostic_source=root / "reference.mkv",
+                    frame_number=index,
+                    output_path=root / f"{index}.png",
+                    overlay=None,
+                    encoder_settings=EncoderSettings(),
+                )
+                for index in range(6)
+            ]
+            batch.render_batch_detailed(requests, parallelism=2)
+        return RenderPhaseOutput(
+            _render_artifacts(
+                screenshots_by_label={},
+                screenshot_dir=workspace.screenshots_dir,
+            )
+        )
+
+    real_wait = batch.wait
+    failure_interrupted: list[bool] = []
+
+    def wait_for_failure(*args: Any, **kwargs: Any) -> Any:
+        done, pending = real_wait(*args, **kwargs)
+        if done and not failure_interrupted:
+            failure_interrupted.append(True)
+            os.kill(os.getpid(), signal.SIGINT)
+            release_render.set()
+        return done, pending
+
+    real_apply = execution.apply_phase_output
+
+    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
+        if isinstance(output, RenderPhaseOutput):
+            applied.append("render")
+        real_apply(ctx=ctx, state=state, output=output)
+
+    def report(*_args: object, **_kwargs: object) -> Never:
+        later.append("report")
+        raise AssertionError("later phase admitted")
+
+    sender = threading.Thread(target=interrupt)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(coordinator, "execute_prep", prep)
+        patch.setattr(execution, "run_render_phase", render)
+        patch.setattr(execution, "run_report_phase", report)
+        patch.setattr(execution, "apply_phase_output", apply)
+        patch.setattr(batch, "render_frame_detailed", render_frame)
+        patch.setattr(adapter.subprocess, "Popen", popen)
+        if owner in {"httpx", "failure"}:
+            client = httpx.AsyncClient(transport=DelayedCloseTransport())
+            patch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+        if owner == "failure":
+            patch.setattr(batch, "wait", wait_for_failure)
+        else:
+            sender.start()
+        result = CliRunner().invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--quiet",
+                "--skip-analysis",
+                "--skip-metadata",
+                "--no-upload",
+            ],
+        )
+        if owner != "failure":
+            sender.join(3)
+    record = read_run_result(workspace.run_dir / RUN_RESULT_FILENAME)
+    print(
+        json.dumps(
+            {
+                "exit": result.exit_code,
+                "status": record.status,
+                "calls": sorted(calls),
+                "later": later,
+                "applied": applied,
+                "reaped": all(child.poll() is not None for child in children),
+                "children": len(children),
+                "close_completed": close_completed,
+            }
+        )
+    )
+    raise SystemExit(result.exit_code)
+
+
+@pytest.mark.parametrize("owner", ["vsview", "startup", "render", "httpx"])
+def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner: str) -> None:
+    import json
+    import subprocess
+    import sys
+
+    code = (
+        "from pathlib import Path; import sys; "
+        "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
+        "first_sigint_lifecycle_probe(Path(sys.argv[1]), sys.argv[2])"
+    )
+    result = subprocess.run(  # noqa: S603 - explicit interpreter and test-owned arguments
+        [sys.executable, "-c", code, str(tmp_path), owner],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 130, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["status"] == "failed"
+    assert observed["later"] == []
+    assert observed["applied"] == []
+    assert observed["reaped"] is True
+    if owner in {"vsview", "startup"}:
+        assert observed["children"] == 1
+    elif owner == "render":
+        assert observed["calls"] in ([0], [0, 1])
+    else:
+        assert observed["close_completed"] == [True]
+
+
+def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(
+    tmp_path: Path,
+) -> None:
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
+
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv", "comparison.mkv")
+    calls: list[Path] = []
+
+    class InterruptedLoader(FakeVSLoader):
+        def load(self, path: Path) -> SourceInfo:
+            source = super().load(path)
+            calls.append(path)
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            return source
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    quiet=True,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                RunDependencies(vs_loader=InterruptedLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            )
+        )
+    assert len(calls) == 1
+    assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
+    records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"
+
+
+def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    code = (
+        "from pathlib import Path; import sys; "
+        "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
+        "first_sigint_lifecycle_probe(Path(sys.argv[1]), 'failure')"
+    )
+    result = subprocess.run(  # noqa: S603 - explicit interpreter and test-owned arguments
+        [sys.executable, "-c", code, str(tmp_path)],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    from frame_compare.cli.errors import ExitCode
+
+    assert result.returncode == int(ExitCode.PROCESSING_ERROR), result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["status"] == "failed"
+    assert observed["later"] == []
+    assert observed["applied"] == []
+    assert observed["close_completed"] == [True]
+    assert observed["calls"] in ([0], [0, 1])
+
+
+def test_reservation_is_captured_before_interrupted_run_info_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.orchestration import preparation
+    from frame_compare.services.run_info import RunInfo
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
+    from frame_compare.utils.cancellation import raise_if_cancelling
+
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    write_info = preparation.write_run_info
+
+    def interrupted_write(path: Path, info: RunInfo) -> None:
+        write_info(path, info)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        raise_if_cancelling()
+
+    monkeypatch.setattr(preparation, "write_run_info", interrupted_write)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    quiet=True,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            )
+        )
+    records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"

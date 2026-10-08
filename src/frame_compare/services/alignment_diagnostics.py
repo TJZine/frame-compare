@@ -15,6 +15,7 @@ from frame_compare.utils.alignment_evidence import (
     audio_attempt_payload,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_immediate_child
 
 _SCHEMA_VERSION = 4
@@ -134,7 +135,7 @@ def write_alignment_diagnostic(
     size = len(content.encode("utf-8"))
     if size > MAX_ALIGNMENT_EVIDENCE_BYTES:
         raise ValueError(f"audio alignment diagnostic exceeds the 2 MiB limit: {size} bytes")
-    write_text_atomic(path, content, encoding="utf-8")
+    write_text_atomic(path, content, encoding="utf-8", publish_guard=raise_if_cancelling)
     return path, digest, size
 
 

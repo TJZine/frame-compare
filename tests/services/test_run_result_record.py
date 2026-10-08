@@ -494,3 +494,52 @@ def test_history_ignores_contained_directory_symlink_alias(tmp_path: Path) -> No
     assert [entry.name for entry in list_history(generated)] == ["target"]
     with pytest.raises(HistoryAccessError):
         resolve_run_directory(generated, "alias")
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_run_record_interrupt_guard_allows_only_failure_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed: bool,
+) -> None:
+    import asyncio
+
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    run_dir = tmp_path / "generated" / "run"
+    run_dir.mkdir(parents=True)
+    record = _record(tmp_path, run_dir)
+    if failed:
+        record = failed_record(
+            error=asyncio.CancelledError(),
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+            facts=FailedRunFacts(),
+            workspace=_workspace(tmp_path, run_dir),
+        )
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        if failed:
+            write_run_result(run_dir, record)
+        else:
+            with pytest.raises(_RunInterrupt):
+                write_run_result(run_dir, record)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    target = run_dir / RUN_RESULT_FILENAME
+    assert target.exists() is failed
+    if failed:
+        assert read_run_result(target).status == "failed"
+    assert list(run_dir.glob(f".{RUN_RESULT_FILENAME}.*")) == []

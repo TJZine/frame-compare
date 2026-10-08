@@ -26,6 +26,7 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
+from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 if TYPE_CHECKING:
@@ -155,6 +156,7 @@ def _render_batch_sequential(
 ) -> None:
     next_progress_index = 0
     for unit in _render_work_units(requests, work_unit_ranges):
+        raise_if_cancelling()
         _store_work_unit_results(
             unit,
             _render_work_unit(unit[1], on_progress),
@@ -209,11 +211,13 @@ def _render_batch_parallel(
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
         while next_unit_index < min(parallelism, len(units)):
+            if is_cancelling():
+                break
             _submit_render_work_unit(executor, units, futures, next_unit_index, on_progress)
             next_unit_index += 1
 
         while futures:
-            done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
+            done, _ = wait(futures.keys(), timeout=0.1, return_when=FIRST_COMPLETED)
             completed: list[tuple[_RenderWorkUnit, list[RenderedFrameResult]]] = []
             for future in done:
                 unit = futures.pop(future)
@@ -242,7 +246,7 @@ def _render_batch_parallel(
                     next_progress_index,
                 )
 
-            if first_exception is not None:
+            if first_exception is not None or is_cancelling():
                 # Do not start new work after a failure. Cancel any futures that
                 # have not begun; running renders are allowed to finish so the
                 # executor has one deterministic cleanup path.
@@ -251,6 +255,7 @@ def _render_batch_parallel(
 
             while (
                 first_exception is None
+                and not is_cancelling()
                 and next_unit_index < len(units)
                 and len(futures) < parallelism
             ):
@@ -263,6 +268,7 @@ def _render_batch_parallel(
                 if results[index] is not None:
                     _record_render_progress(reporter, requests[index])
         raise first_exception[1]
+    raise_if_cancelling()
 
 
 def render_batch_detailed(
@@ -318,7 +324,7 @@ def render_batch_detailed(
                 work_unit_ranges,
                 completion_callback,
             )
-    except Exception:
+    except BaseException:
         phase_status = ProgressPhaseStatus.FAILED
         raise
     finally:

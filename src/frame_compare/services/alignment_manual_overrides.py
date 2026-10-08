@@ -15,6 +15,7 @@ import structlog
 import tomli_w
 
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 
 MANUAL_OVERRIDES_VERSION = "1"
 MANUAL_OVERRIDES_FILE = "manual_overrides.toml"
@@ -191,7 +192,9 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
         ordered[k] = data[k]
 
     try:
-        write_bytes_atomic(cache_path, tomli_w.dumps(ordered).encode("utf-8"))
+        write_bytes_atomic(
+            cache_path, tomli_w.dumps(ordered).encode("utf-8"), publish_guard=raise_if_cancelling
+        )
     except OSError as e:
         log.warning(
             "manual_overrides_write_error",

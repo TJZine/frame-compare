@@ -25,6 +25,7 @@ from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
@@ -586,12 +587,14 @@ def save_reusable_offsets(
     }
 
     try:
-        with exclusive_file_lock(_cache_lock_path(cache_path)):
+        with exclusive_file_lock(_cache_lock_path(cache_path), abort_check=raise_if_cancelling):
             data = _initial_write_data(cache_path)
             source_sets = cast(dict[str, object], data["source_sets"])
             source_sets[source_set_key] = source_set
             require_current_alignment_sources(request)
-            write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+            write_bytes_atomic(
+                cache_path, tomli_w.dumps(data).encode("utf-8"), publish_guard=raise_if_cancelling
+            )
     except OSError as exc:
         log.warning(
             "alignment_reuse_cache_write_failed",

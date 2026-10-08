@@ -90,6 +90,7 @@ from frame_compare.services.run_info import (
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cancellation import cancellation_checkpoint, raise_if_cancelling
 from frame_compare.utils.paths import (
     require_managed_descendant,
     require_managed_immediate_child,
@@ -127,6 +128,7 @@ async def _resolve_run_directory(
     preflight_warnings: tuple[str, ...],
     run_warnings: list[str],
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
+    await cancellation_checkpoint()
     metadata = None
     was_attempted = False
     tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
@@ -160,6 +162,7 @@ async def _resolve_run_directory(
             )
 
     filenames = [video.name for video in input_videos]
+    raise_if_cancelling()
     run_dir = reserve_run_folder(
         generated_root=workspace.generated_root,
         filenames=filenames,
@@ -181,6 +184,17 @@ async def _resolve_run_directory(
     except (OSError, RuntimeError) as exc:
         _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
         raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
+    if deps.capture_reserved_run is not None:
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=new_workspace,
+                clip_count=len(input_videos),
+                preflight_duration=preflight_duration,
+                preflight_warnings=preflight_warnings,
+                run_warnings=run_warnings,
+            )
+        )
+    raise_if_cancelling()
     try:
         write_run_info(
             run_info_path,
@@ -195,16 +209,6 @@ async def _resolve_run_directory(
     except OSError as exc:
         _cleanup_empty_reserved_run_dir(resolved_run_dir, original_error=exc)
         raise
-    if deps.capture_reserved_run is not None:
-        deps.capture_reserved_run(
-            ReservedRunCapture(
-                workspace=new_workspace,
-                clip_count=len(input_videos),
-                preflight_duration=preflight_duration,
-                preflight_warnings=preflight_warnings,
-                run_warnings=run_warnings,
-            )
-        )
     return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
 
 
@@ -326,6 +330,7 @@ def _cached_probe_snapshots_for_cache_only(
     entries_by_key = dict(cached_entries)
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
+        raise_if_cancelling()
         stats = path.stat()
         fingerprint = ClipFingerprint(
             path=path,
@@ -374,10 +379,12 @@ def _persist_probe_snapshots_for_run(
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
 
+    raise_if_cancelling()
     # Run-local cache gets only this run's entries.
     save_clip_probe_cache(run_cache_path, current_entries)
 
     # Shared cache merges current entries on top of any existing entries.
+    raise_if_cancelling()
     merge_shared_clip_probe_cache(shared_cache_path, current_entries)
 
 
@@ -397,6 +404,7 @@ def _probe_input_videos(
     snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
 
     for path in input_videos:
+        raise_if_cancelling()
         stats = path.stat()
         fingerprint = ClipFingerprint(
             path=path,
