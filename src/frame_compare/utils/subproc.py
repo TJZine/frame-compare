@@ -9,8 +9,10 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
 from shutil import which
-from subprocess import PIPE, CompletedProcess, Popen, TimeoutExpired, run
+from subprocess import CompletedProcess, Popen, TimeoutExpired, run
+from tempfile import TemporaryFile
 from time import monotonic
+from typing import BinaryIO
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
@@ -171,6 +173,12 @@ def _reap_stopped_process(process: Popen[bytes]) -> None:
         process.wait(timeout=2.0)
 
 
+def _read_captured_output(stream: BinaryIO) -> bytes:
+    size = os.fstat(stream.fileno()).st_size
+    stream.seek(0)
+    return stream.read(size)
+
+
 def _run_abortable(
     argv: list[str],
     cwd: Path | None,
@@ -180,36 +188,33 @@ def _run_abortable(
 ) -> CompletedProcess[bytes]:
     if abort():
         raise SubprocessAborted()
-    process = Popen(argv, cwd=cwd, stdout=PIPE, stderr=PIPE, shell=False)
-    deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
-    last_timeout: TimeoutExpired | None = None
-    try:
-        while True:
-            if abort():
-                raise SubprocessAborted()
-            remaining = None if deadline is None else deadline - monotonic()
-            if timeout_seconds is not None and remaining is not None and remaining <= 0:
-                raise TimeoutExpired(
-                    argv,
-                    timeout_seconds,
-                    output=None if last_timeout is None else last_timeout.output,
-                    stderr=None if last_timeout is None else last_timeout.stderr,
-                )
-            try:
-                stdout, stderr = process.communicate(
-                    timeout=0.1 if remaining is None else min(0.1, remaining)
-                )
-                break
-            except TimeoutExpired as exc:
-                last_timeout = exc
-    except BaseException:
-        _reap_stopped_process(process)
-        raise
-    finally:
-        if process.stdout is not None:
-            process.stdout.close()
-        if process.stderr is not None:
-            process.stderr.close()
+
+    # Files avoid Windows pipe-reader threads, whose read/close can outlive a
+    # drain deadline when a descendant retains an inherited write handle.
+    with TemporaryFile() as stdout_file, TemporaryFile() as stderr_file:
+        process = Popen(argv, cwd=cwd, stdout=stdout_file, stderr=stderr_file, shell=False)
+        try:
+            deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
+            while True:
+                if abort():
+                    raise SubprocessAborted()
+                remaining = None if deadline is None else deadline - monotonic()
+                if timeout_seconds is not None and remaining is not None and remaining <= 0:
+                    raise TimeoutExpired(argv, timeout_seconds)
+                try:
+                    process.wait(timeout=0.1 if remaining is None else min(0.1, remaining))
+                    break
+                except TimeoutExpired:
+                    pass
+        except BaseException as exc:
+            _reap_stopped_process(process)
+            if isinstance(exc, TimeoutExpired):
+                with suppress(BaseException):
+                    exc.stdout = _read_captured_output(stdout_file)
+                    exc.stderr = _read_captured_output(stderr_file)
+            raise
+        stdout = _read_captured_output(stdout_file)
+        stderr = _read_captured_output(stderr_file)
     result = CompletedProcess(argv, process.returncode, stdout, stderr)
     if check:
         result.check_returncode()

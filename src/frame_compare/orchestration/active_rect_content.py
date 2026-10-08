@@ -78,6 +78,7 @@ class VSActiveRectFrameSampler:
     ) -> Iterator[npt.NDArray[np.float32]]:
         import vapoursynth as vs
 
+        raise_if_cancelling()
         source = self._loader.load(Path(clip.path))
         try:
             node = source.clip

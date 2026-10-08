@@ -730,7 +730,7 @@ const ReportViewer = {
     },
 
     isViewerChromeEvent(e) {
-        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens, .rv-lens-settings'));
+        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens, .rv-lens-settings, .rv-empty-state'));
     },
 
     handleViewportDoubleClick(e) {
@@ -2359,9 +2359,18 @@ const ReportViewer = {
             { attempt, force: true, deferSrc: true },
         );
         const retryRequest = this.state.mainImageRequests[side];
+        const sizerImage = side === 'left'
+            && this.dom.sizerImg?.getAttribute('src') === retryRequest.src
+            ? this.dom.sizerImg
+            : null;
         retryRequest.image.removeAttribute('src');
+        sizerImage?.removeAttribute('src');
         const assign = () => {
-            if (this.state.mainImageRequests[side] !== retryRequest) return;
+            if (
+                this.state.mainImageRequests[side] !== retryRequest
+                || retryRequest.token !== this.state.imageRequestToken
+            ) return;
+            if (sizerImage) sizerImage.src = retryRequest.src;
             retryRequest.image.src = retryRequest.src;
             if (
                 retryRequest.image.complete === true

@@ -103,6 +103,7 @@ def _select_fastest_clip(
 
 def _benchmark_clip(*, clip: ClipState, vs_loader: VSLoader) -> float | None:
     try:
+        raise_if_cancelling()
         source = vs_loader.load(clip.path)
         node: _FrameReadable | None = None
         benchmark_node: _FrameReadable | None = None
