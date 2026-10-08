@@ -1,4 +1,8 @@
 import asyncio
+import json
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, Future
 from concurrent.futures import wait as real_wait
@@ -1031,3 +1035,117 @@ def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
     assert processes[0].returncode is not None
     assert not any(request.output_path.exists() for request in requests)
     assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX SIGINT injection; Windows console behavior requires physical acceptance",
+)
+def test_real_sigint_stops_frame_admission_within_150ms() -> None:
+    script = textwrap.dedent(
+        """
+        import asyncio
+        import json
+        import os
+        import signal
+        import sys
+        import time
+        from concurrent.futures import wait as real_wait
+        from contextlib import suppress
+        from pathlib import Path
+        from threading import Event, Lock, Thread
+        from unittest.mock import MagicMock
+
+        from frame_compare.render.batch import orchestrator
+        from frame_compare.render.types import EncoderSettings, RenderedFrameResult, RenderRequest
+        from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+        from frame_compare.utils.media_facts import RenderedFrameFacts
+
+        slow_poll = sys.argv[1] == 'slow'
+        entered_wait = Event()
+        started = [Event(), Event()]
+        lock = Lock()
+        admissions = []
+        signal_time = []
+        interrupt_observed = []
+        sender_errors = []
+        requests = [
+            RenderRequest(clip=MagicMock(), diagnostic_source=Path('probe.mkv'),
+                          frame_number=i, output_path=Path(f'{i}.png'), overlay=None,
+                          encoder_settings=EncoderSettings())
+            for i in range(120)
+        ]
+
+        def render(request):
+            with lock:
+                admissions.append(time.monotonic())
+            if request.frame_number in (0, 60):
+                started[request.frame_number // 60].set()
+            time.sleep(0.02)
+            return RenderedFrameResult(path=request.output_path,
+                                       facts=RenderedFrameFacts(source_frame=request.frame_number))
+
+        def poll(futures, *, timeout, return_when):
+            entered_wait.set()
+            return real_wait(futures, timeout=0.25 if slow_poll else timeout,
+                             return_when=return_when)
+
+        def send_interrupt():
+            try:
+                assert entered_wait.wait(2)
+                assert all(event.wait(2) for event in started)
+                time.sleep(0.005)
+                signal_time.append(time.monotonic())
+                os.kill(os.getpid(), signal.SIGINT)
+            except BaseException as error:
+                sender_errors.append(repr(error))
+
+        async def run():
+            sender = Thread(target=send_interrupt)
+            sender.start()
+            try:
+                with suppress(_RunInterrupt):
+                    orchestrator.render_batch_detailed(
+                        requests, parallelism=2, work_unit_ranges=[range(60), range(60, 120)]
+                    )
+            finally:
+                sender.join(timeout=2)
+                assert not sender.is_alive()
+            task = asyncio.current_task()
+            assert task is not None and task.cancelling() > 0
+            interrupt_observed.append(time.monotonic())
+            await cancellation_checkpoint()
+
+        orchestrator.render_frame_detailed = render
+        orchestrator.wait = poll
+        try:
+            asyncio.run(run())
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        else:
+            raise AssertionError('Expected Runner cancellation')
+        assert len(interrupt_observed) == 1, "Runner did not cancel the main task"
+        assert not sender_errors, sender_errors
+        assert len(signal_time) == 1
+        last_start_seconds = max(admissions) - signal_time[0]
+        print(json.dumps({'last_start_seconds': last_start_seconds,
+                          'signal_to_exit_seconds': time.monotonic() - signal_time[0]}))
+        """
+    )
+    # The bound is the approved 50 ms plus 100 ms slack, independent of the
+    # production constant or mutation: a slower poll cannot relax the assertion.
+    for mode in ("slow", "production"):
+        completed = subprocess.run(
+            [sys.executable, "-c", script, mode],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=8,
+        )
+        measured = json.loads(completed.stdout)
+        last_start = measured["last_start_seconds"]
+        print(f"{mode}: {measured}")
+        if mode == "slow":
+            assert last_start > 0.150, "250 ms mutation did not violate the admission bound"
+        else:
+            assert last_start <= 0.150, measured

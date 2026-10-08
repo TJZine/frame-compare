@@ -34,6 +34,9 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
 
 
+_RENDER_POLL_INTERVAL_SECONDS = 0.05
+
+
 def _render_description(request: RenderRequest) -> str:
     """Build a consistent progress description for a render request."""
     label = request.progress_label
@@ -246,7 +249,9 @@ def _render_batch_parallel(
         while futures:
             if is_cancelling():
                 stop.set()
-            done, _ = wait(futures.keys(), timeout=0.1, return_when=FIRST_COMPLETED)
+            done, _ = wait(
+                futures.keys(), timeout=_RENDER_POLL_INTERVAL_SECONDS, return_when=FIRST_COMPLETED
+            )
             if is_cancelling():
                 stop.set()
             completed: list[tuple[_RenderWorkUnit, list[RenderedFrameResult]]] = []
