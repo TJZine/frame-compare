@@ -131,7 +131,38 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
         timeout=30,
         check=False,
     )
-    assert proc.returncode != 0
+    diagnostics: dict[str, object] = {"stdout": proc.stdout, "stderr": proc.stderr}
+    if proc.returncode == 0:
+        discovery = subprocess.run(
+            [str(tmp_path / "where.exe"), "pwsh"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        effective_program_files = subprocess.run(
+            [env["COMSPEC"], "/d", "/c", 'echo "%PROGRAMFILES%"'],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        diagnostics.update(
+            installer_invoked=marker.exists(),
+            wrapper_bytes=wrapper.stat().st_size,
+            inherited_errorlevel=env.get("ERRORLEVEL"),
+            discovery=(discovery.returncode, discovery.stdout, discovery.stderr),
+            program_files=(
+                effective_program_files.returncode,
+                effective_program_files.stdout,
+                effective_program_files.stderr,
+            ),
+        )
+    assert proc.returncode != 0, diagnostics
     assert "PowerShell 7 or newer is required" in proc.stdout + proc.stderr
     assert not marker.exists()
 
