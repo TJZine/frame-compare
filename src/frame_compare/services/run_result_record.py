@@ -169,7 +169,10 @@ def _nonnegative_int(value: object, field: str) -> int:
 def _nonnegative_float(value: object, field: str) -> float:
     if type(value) not in (int, float):
         raise ValueError(f"{field} must be a number")
-    result = float(cast(int | float, value))
+    try:
+        result = float(cast(int | float, value))
+    except OverflowError as exc:
+        raise ValueError(f"{field} must be a finite nonnegative number") from exc
     if result < 0 or result != result or result in (float("inf"), float("-inf")):
         raise ValueError(f"{field} must be a finite nonnegative number")
     return result

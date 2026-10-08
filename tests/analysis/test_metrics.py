@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -10,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from vapoursynth import VideoFormat, VideoNode
 
+from frame_compare.analysis.cache_io import CACHE_VERSION
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_strategies import MetricComputationResult
 from frame_compare.analysis.metrics import calculate_metrics, slice_frame_metrics
@@ -24,6 +26,7 @@ from frame_compare.analysis.types import (
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.types import SourceInfo
+from tests.analysis._cache_io_test_helpers import cache_file, valid_cache_metadata_payload
 
 
 class _SliceClip:
@@ -232,6 +235,47 @@ def test_calculate_metrics_computes_on_cache_miss(
         metric_frame_range=MetricFrameRange(10, 0, 10),
         timing_recorder=None,
     )
+    mock_save.assert_called_once()
+
+
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.compute_cache_key")
+def test_calculate_metrics_recomputes_after_oversized_cache_entry(
+    mock_key,
+    mock_loader_cls,
+    mock_strategy,
+    mock_save,
+    tmp_path: Path,
+) -> None:
+    mock_key.return_value = "fp"
+    video_path = tmp_path / "v1.mkv"
+    video_path.write_bytes(b"")
+    config = AnalysisConfig()
+    metadata = valid_cache_metadata_payload(config, frame_count=1)
+    cache_file(tmp_path, "fp").write_text(
+        json.dumps(
+            {
+                "version": CACHE_VERSION,
+                "fingerprint": "fp",
+                "luminance": [10**400],
+                "motion": [0.0],
+                "sampled_source_frames": None,
+                "metadata": metadata,
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = mock_loader_cls.return_value.load.return_value
+    source.clip.num_frames = 1
+    source.fps = Fraction(24, 1)
+    mock_strategy.return_value = _quality_strategy_result(frame_count=1)
+
+    result = calculate_metrics([video_path], config, tmp_path)
+
+    assert result.disposition == "computed"
+    mock_strategy.assert_called_once()
     mock_save.assert_called_once()
 
 

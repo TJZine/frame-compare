@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from frame_compare.services.errors import HistoryAccessError, HistoryOpenError
 from frame_compare.services.run_result_record import (
@@ -118,6 +119,8 @@ def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
         ("report_path", "/tmp/report.html"),
         ("report_path", "C:\\reports\\report.html"),
         ("report_path", "\\\\server\\share\\report.html"),
+        ("duration_seconds", True),
+        ("phase_timings", {"render": True}),
         ("slowpics.url", "http://slow.pics/c/nope"),
         ("slowpics.url", "https://example.com/c/nope"),
         ("slowpics.url", "https://slow.pics:444/c/nope"),
@@ -246,6 +249,31 @@ def test_history_lists_supported_and_malformed_records_independently(tmp_path: P
     assert entries[1].warning == "A run result record is unreadable or unsupported."
     assert not (legacy / "run_result.toml").exists()
     assert (broken / "run_result.toml").read_text(encoding="utf-8") == "version = 99\n"
+
+
+@pytest.mark.parametrize("field", ["duration_seconds", "phase_timings"])
+def test_history_isolates_oversized_numeric_record(tmp_path: Path, field: str) -> None:
+    generated = tmp_path / "generated"
+    valid = generated / "valid"
+    broken = generated / "broken"
+    valid.mkdir(parents=True)
+    broken.mkdir()
+    write_run_result(valid, _record(tmp_path, valid))
+
+    payload = tomllib.loads(serialize_run_result(_record(tmp_path, broken)))
+    if field == "duration_seconds":
+        payload[field] = 10**400
+    else:
+        payload[field] = {"render": 10**400}
+    (broken / "run_result.toml").write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    entries = list_history(generated)
+
+    assert [(entry.name, entry.status) for entry in entries] == [
+        ("valid", "completed_with_warnings"),
+        ("broken", "unavailable"),
+    ]
+    assert entries[1].warning == "A run result record is unreadable or unsupported."
 
 
 def test_history_report_remains_available_when_screenshots_are_missing(tmp_path: Path) -> None:
