@@ -57,6 +57,34 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   `refinement_mode`, `refinement_sample_rate`) now fail validation as unknown
   keys; delete each such key.
 
+### Fixed
+
+- Report malformed UTF-8 configuration and presets, invalid filesystem paths,
+  and nonfinite lead/trail windows as typed validation errors. Recover from
+  oversized numeric values in persisted run history and caches while retaining
+  valid entries and requiring recomputation when cache authority is unavailable.
+- Observe the first Ctrl+C before admitting another phase, render unit or audio
+  job, and before publishing results, caches or diagnostics. Interrupted runs
+  retain their failure record and exit 130. Already-admitted native operations
+  drain without a guaranteed finite deadline; FFmpeg extraction retains its
+  timeout and repeated Ctrl+C retains its existing behavior.
+- Preserve an explicitly paused report Blink mode through viewport and Lens
+  gestures, and apply the exact review-import file and conflict choices shown
+  in its preview.
+- Keep warning source, severity and details independent of clip-label wording,
+  preserve complete labels in messages, and describe every applied alignment as
+  applied, including manual and cached results.
+- Isolate the libplacebo capability probe from caller-controlled import paths
+  while retaining dependencies in the trusted runtime's user site. CLI help,
+  version and prompts use the declared Typer dependency without requiring Click.
+- Retain separate Docker-verifier artifacts for successful and failed runs, and
+  select Docker CI when its source-checkout helper or build exclusions change.
+- Read Windows install state as UTF-8 under PowerShell 5.1. Source installation
+  now refuses early without PowerShell 7; published-bundle installation continues
+  to support PowerShell 5.1. Rollback refuses backups with missing or incompatible
+  runtime identity before changing files. Reinstall full bundles into a fresh,
+  empty folder rather than overlaying an existing bundle.
+
 ## [0.6.0]
 
 ### Fixed

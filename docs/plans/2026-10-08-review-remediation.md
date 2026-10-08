@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Implementation complete; physical acceptance open
 Scope: Implement the accepted findings of the 2026-10-08 comprehensive review.
 The maintainer authorizes separate Codex implementation chats, local commits on
 the current branch, and the decisions recorded below. Pushes, PRs, releases,
@@ -397,7 +397,7 @@ same local checkout, disjoint ownership, and no Git mutations.
 
 | Unit | Chat ID | Preset | Explicit model / effort | Status |
 | --- | --- | --- | --- | --- |
-| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | Integrated `ec2fc6ca`; wave A review complete |
+| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | `ec2fc6ca`; controller-directed packaging correction `a5a232f8` |
 | U2 | `01a11cac-4d5d-7192-9f2d-dd94c22eae4d` | worker_luna | gpt-5.6-luna / xhigh | `01fc3af5`; controller-directed R-A01 correction `f8dcc3b8` |
 | U3 | `01a11cac-553a-7262-952f-dcdd9e4fb429` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ca432635` |
 | U4 | `01a11cac-5eab-7a01-8ce9-b67a09d1677a` | worker_luna | gpt-5.6-luna / xhigh | Integrated `fbc59eb3` |
@@ -405,7 +405,7 @@ same local checkout, disjoint ownership, and no Git mutations.
 | U6 | `01a11cac-735c-7731-8bc6-6f12ff7edde9` | worker | gpt-6.1-sol / medium | Integrated `2350cf48` |
 | U7 | `01a11cac-7d6e-7920-a020-daad3bf50043` | worker | gpt-6.1-sol / medium | Integrated `25b15ae8` |
 | U8 | `01a11cac-8813-7f92-979a-64534fcb4c27` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ee1d674f` |
-| U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Integrated `05adff41` |
+| U9 | Orchestrator directly | Direct option permitted by plan | gpt-6.1-sol / high; no child preset | Integrated `05adff41` |
 | U10 | `01a11cf6-2e2c-7ef3-bf8b-553b6f039d4e` | worker | gpt-6.1-sol / medium | Integrated `12b2eee1`; wave B review complete |
 | U11 | `01a11d39-822d-72f2-b67d-ccdec2195b67` | worker_luna | gpt-5.6-luna / xhigh | Integrated `9bccc330`; wave C review complete |
 
@@ -1447,3 +1447,231 @@ Python files), Bandit 0 medium/high issues, both import contracts kept, and
 passed; YAML skipped because no YAML file changed. The same previously reviewed
 ephemeral hook override is used for the commit after manual hooks, avoiding the
 forbidden automatic stash of the unrelated untracked/dirty work.
+
+Correction commit: `a5a232f8d42083c044cdc0fd891e636922290de0` —
+`fix(cli): handle Typer prompt aborts without importing Click`. It includes
+the three owned source/test paths and execution record, explicitly staged.
+The existing wave A reviewer received `9bccc330..a5a232f8` with explicit
+`reviewer`/`gpt-6.1-sol`/`high` settings before Docker, as required.
+
+The native rerun using scratch basetemp `native-corrected-tmp` finished in
+51.35 seconds: 3,222 passed, 99 skipped, one failure in unchanged
+`test_fps_report.py::test_emit_consolidated_fps_report_uses_relative_input_and_external_paths`.
+The longer scratch path wrapped in Rich output and broke its full-path substring
+assertion. This is the FPS sibling of U9's scoped alignment-report portability
+test; neither that FPS test nor its production owner changed in this correction.
+A long-path focused control failed in 0.14 seconds; the identical test with
+short owned basetemp passed in 0.11 seconds. The failed log/JUnit remain retained.
+No out-of-scope source/test fix is made under the controller's Click-only rule.
+The full native gate is rerun with short owned basetemp
+`.tmp/remediation-2026-10-08/native-final`. Record this test portability limitation
+alongside final results; it is not a product regression or a waived test.
+
+### U1 correction review and corrected native acceptance
+
+The reused wave A reviewer inspected `9bccc330..a5a232f8` read-only and
+retrieved both original human callback authorization and the correction
+decision. No material defect, contract contradiction or unresolved design
+choice was found. Actual Typer source exports its own Abort; confirm preserves
+KeyboardInterrupt/EOF exception context when raising Abort from None. The
+helper still distinguishes these and preserves all approved signal/pending
+conditions. No production Click import remains.
+
+Fresh reviewer proof: both owned test modules, 44 passes/no skips in 5.77
+seconds. Independent bounded subprocess replay of exact pre-correction
+terminal source failed for both CLI entries at the direct Click import.
+Its proof map covers blocked-Click help/version, all three real PTY prompts,
+EOF/answer/error, foreign handlers and queued cancellation. No source/test
+over-engineering burden or new unauthorized deviation; redundant library-only
+EOF fixture retirement is strictly better with actual owner evidence. Typed
+signal behavior remains a single owner, without a compatibility shim or added
+dependency. Physical and fresh-distribution limits remain explicit.
+
+Adjudication: accept the review; no correction required. Full native final
+command: `uv run --no-sync pytest -q -n4 --dist loadgroup
+--junitxml=.tmp/remediation-2026-10-08/controller/final-gates/native-final.xml
+--basetemp=.tmp/remediation-2026-10-08/native-final -p no:cacheprovider`.
+It passed in 44.08 seconds: 3,223 passed, 99 skipped, no failure/error. The
+99 skip reasons/counts exactly match the first native gate's explicit list.
+The test-count change is two new blocked-Click cases minus one duplicate EOF
+case. Chrome remains 17 passes/no skips in 15.75 seconds; viewer files did not
+change. Docker starts only after this correction review and native gate.
+
+### Executor reconciliation from local run metadata
+
+The controller inspected only model/effort fields in each task's local
+`turn_context` records, retaining the compact result in
+`controller/final-gates/model-contexts.json` under remediation scratch.
+These actual recorded execution settings match the explicit dispatch settings
+for every implementation and review turn, including both corrections:
+
+- U1, U6, U7, U10: `worker`, `gpt-6.1-sol`, `medium`;
+- U2, U3, U4, U5, U8, U11: `worker_luna`, `gpt-5.6-luna`, `xhigh`;
+- U9: direct orchestrator, no child preset, `gpt-6.1-sol`, `high` in the
+  initial turn (commit timestamp 14:08:34 EDT, preceding the next turn);
+- wave A/B/C reviewers and U1 correction review: `reviewer`,
+  `gpt-6.1-sol`, `high`;
+- U1 design challenge: `deep_reviewer`, `gpt-6.1-sol`, `xhigh`.
+
+The initial orchestrator turn used `gpt-6.1-sol`/`high`; subsequent controller
+turns are recorded as `gpt-6.1-sol`/`xhigh`. Earlier child statements that actual
+sampler metadata was unavailable are supplemented by these local run records.
+This reconciliation reports the recorded model/effort, not inaccessible
+backend deployment details, pricing or measured cost savings.
+
+### Docker, production-image and documentation gates
+
+Final Docker command: `env -u FRAME_COMPARE_REQUIRE_LIBPLACEBO
+COMPOSE_FILE=/Users/tristan/Software/frame-compare/docker-compose.yml:/Users/tristan/Software/frame-compare/.tmp/remediation-2026-10-08/controller/compose.offline.yml
+bash tools/verify_docker_integration.sh`. The scratch override disables networking
+on both runtime services; tracked Compose stays unchanged. This prevents product
+live-service access under the user's constraints. Build registry/package reads
+use the existing pinned build recipe. Host bypass flag is unset.
+
+Passed in 192.90 seconds wall; 281 tests passed in 173.08 seconds with zero
+skips/xfails/xpasses. Required real preflight markers include non-root CLI/version,
+doctor JSON, R81 import/API, L-SMASH/FFMS2/plugin frame requests, shared native
+libraries/OBUParse/source provenance, software Vulkan, six generated-media
+fixture categories and app-level libplacebo tonemapping. Production markers
+confirm development tooling absent, an actual application run, and generated
+report/screenshots/run records/analysis and probe caches on the generated mount.
+The excluded streaming-resource module is unchanged and its conditional proof
+is not required. No GPU/X11/physical/Windows acceptance is inferred.
+
+Images are Linux/arm64, with cached native producer layers:
+
+- production `sha256:0df290c4dd7e5151d40205a9410206aee8e390c364ed2a3eb2af1b9ae1158d22`;
+- test `sha256:63a59636685a6107e3a7b69b48894c978984c6ba504bb510b1bf22578e44a7f7`.
+
+Artifacts `generated/e2e/run.lpK2FZ` are retained; the earlier failed invocation
+`generated/e2e/run.EUKo2F` remains present. No previous artifacts were removed.
+The production-image follow-up used `docker run --rm --network none` with
+no source bind, the declared trusted pip-user base and software Vulkan. It
+confirmed `.tmp/review-output.bin` absent from image and present on host,
+trusted user-site enabled, actual `probe_libplacebo_runtime()` successful from
+a hostile cwd/PYTHONPATH/PYTHONSTARTUP, and no malicious module marker.
+`FRAME_COMPARE_REQUIRE_LIBPLACEBO` was unset; no capability result was forced.
+It passed in 1.15 seconds. This is actual packaged software-runtime evidence;
+native GPU/Windows hostile-cwd acceptance remains open.
+
+API reference: `uv run --no-sync python scripts/generate_api_docs.py --check`
+passed in 0.13 seconds. Docs group is installed; `uv run --no-sync zensical
+build --clean --strict` passed with no issues in 1.66 seconds wall (1.29 seconds
+reported build time). Logs are in the existing `final-gates` scratch directory.
+
+### Fresh distribution gate
+
+The first invocation of the existing `uv build` recipe from this populated
+checkout stalled while traversing local ignored scratch-directory symlinks.
+Hatchling's source-archive walker follows directory symlinks and does not prune
+VCS-excluded directories by default. A one-second process sample observed
+`scandir`/`readdir`, not product execution; task scratch contains 5,115 directory
+symlinks. The partial archive stopped growing at about 3 MiB. After 384.31
+seconds, the controller terminated only the verified owned builder and `uv`
+processes (exit 143), retaining the log, sample and partial archive. No completed
+distribution or installed-runtime pass is claimed for this attempt.
+
+The same recipe then ran from a temporary `git archive` of committed
+`a5a232f8d42083c044cdc0fd891e636922290de0`, with no `.git` or worktree.
+Before building, the controller compared every tracked product source/asset
+and the build metadata, lockfile, README, license and verifier bytes against the
+active checkout; all matched. This strictly better verification-input isolation
+avoids unrelated local scratch/untracked work without changing the product,
+build configuration, dependencies or active Git checkout. No existing file was
+removed. The build still produced both required artifacts, including building
+the wheel from the source distribution.
+
+Final distribution gate passed in 3.91 seconds wall: fresh wheel and sdist,
+fresh CPython 3.13.16 venv, `scripts/verify_distribution.py`, and installation
+of the wheel with runtime dependencies constrained by the exact frozen base
+export. All 32 installed packages comprise the application and its runtime
+closure; no development group or optional native/GUI extra was installed.
+From a cwd outside the checkout, with PYTHONPATH/PYTHONHOME unset, the package
+resolved inside the fresh venv, Click was absent, and installed `--help` and
+`version` both exited successfully (`frame-compare 0.6.0`). This proves these
+installed entry routes independently of the development environment, not all
+optional packaged features or physical native behavior.
+
+Artifacts are retained at
+`/var/folders/rf/11m0f89d0g707yph15nj5wqw0000gn/T/frame-compare-remediation-dist.KFjH8b`:
+
+- wheel SHA256 `2e6a0a1a7b729c84b7348c0cdff68275f40393c570261c722a763aa674688c17`;
+- sdist SHA256 `ed65be336fc966e604bc4779991a85298a4d3a5d6afff5f0bea42549d3bf8953`.
+
+Exact staging, build, verifier, install and outside-checkout commands are
+retained in `controller/final-gates/verify_distribution_final.sh`; source SHA,
+temporary paths and `distribution-final.log` accompany the existing gate logs.
+No release, signing, publication or installed-user-environment mutation occurred.
+
+### Completion and acceptance handoff
+
+All U1–U11 units, both explicitly controller-authorized corrective commits,
+all wave reviews, and required final gates are complete. No accepted review
+finding remains unresolved. CHANGELOG Unreleased now records config validation,
+recoverable persisted numerics, first-interrupt boundaries/native-drain limits,
+viewer fixes, warning labels/applied summaries, trusted-runtime import policy,
+Docker artifact retention/CI selection and Windows PS7/backup identity behavior.
+
+Final code HEAD is `a5a232f8d42083c044cdc0fd891e636922290de0` on
+`agent/e2e-test-strategy`: fourteen local Conventional Commits, comprising the
+initial docs commit, eleven unit commits and exactly the two authorized U2/U1
+corrections. No push/PR, branch switch, worktree, rebase/amend/reset/stash,
+project dependency/lockfile change, release/signing or product live-service
+request was made. All staging was explicit-path. The final post-gate CHANGELOG
+and execution-record updates remain unstaged: the original commit allocation
+does not authorize a further docs commit or amendment. The unrelated untracked
+documentation-planning prompt remains untouched and excluded.
+
+Final evidence: static gates and hooks passed; native 3,223 passes/99 explicitly
+explained skips in 44.08 seconds; retained Chrome 17 passes/no skips in 15.75
+seconds; Docker 281 passes/zero nonpassing outcomes in 192.90 seconds plus
+production-image proof in 1.15 seconds; API check 0.13 seconds; strict site 1.66
+seconds; fresh distribution/installed CLI 3.91 seconds. Counts overlap and are
+not summed. Streaming-resource proof is correctly conditional and not required
+because audio collector cleanup did not change; live probes remain unauthorized.
+
+Review adjudications/deviations: wave A R-A01 was accepted and corrected under
+the controller's trusted-user-site policy; U1 packaging defect was accepted and
+corrected under the explicit Typer amendment. Independent final A/B/C and U1
+correction reviews found no material unresolved issue or over-engineering burden.
+Controller amendments settle the U1 native/TMDB exception and U10 typed warning
+owner/source/action semantics, including exact adversarial-label substitution.
+Retained bounded deviations are early reuse of the wave reviewer, manual
+identical hooks with an ephemeral commit-only override to avoid forbidden stash,
+U9 deterministic path fixtures and duplicate nonproduction EOF-fixture removal.
+Final verification additionally records the unchanged FPS-report test's long
+scratch-path sensitivity (short-path full run passes without changing that test)
+and byte-verified temporary source staging for the distribution recipe. Neither
+changes product behavior or hides the retained failed/terminated evidence.
+
+Physical acceptance is open. Use the original handoff above and the exact
+steps/controls in `docs/reviews/comprehensive-review-2026-10-08/NEEDS-OBSERVATION.md`:
+
+- O-01: real Windows PowerShell 5.1/non-ASCII bundle path, version/list-backups;
+- O-02: source CMD refuses before work without PS7; actual PS7 source build;
+- O-03, reframed by D-03: fresh-directory reinstall and authentic old/mismatched
+  backup refusal before mutation; full overlay remains unsupported;
+- O-09: native and Windows first/repeated Ctrl+C during VS/FFmpeg render and
+  visible review, Windows console prompts/EOF/exact handler restoration and
+  measured admitted-native drain latency. No finite drain deadline is promised;
+- O-10: physical gestures, reduced motion, accessibility/storage/focus and native
+  file picker with exact review-import preview/application;
+- O-11: native hostile-cwd libplacebo plus physical GPU/X11/visible GUI and
+  Windows portable import isolation; Docker software Vulkan does not settle it;
+- O-13: actual hosted CI selection and separately authorized protected release
+  or product live-service observation;
+- O-14: authenticated current Windows artifact, physical GPU/visible interaction,
+  updater/install acceptance, signing, corresponding-source/license inventory
+  and release authorization.
+
+O-04–O-08 remain parked hypotheses, not accepted remediation. Docker evidence is
+Linux/arm64 with cached native layers; no current amd64/cold-build or physical
+platform pass is inferred. Historical offscreen/Windows evidence remains useful
+context, not current-SHA authentication. Implementation stops at this handoff.
+
+Final documentation hygiene: explicit-path pre-commit passed all applicable
+hooks; YAML and both Ruff hooks skipped because only Markdown changed.
+`git diff --check` passed. The index is empty, the active branch is unchanged,
+and `pyproject.toml`/`uv.lock` bytes match the baseline. Only CHANGELOG and this
+execution record are task-owned unstaged changes; the unrelated prompt remains
+untracked. No further unit work or gate is pending under this plan.
