@@ -105,6 +105,7 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
     tmp_path: Path, repo_root: Path
 ) -> None:
     import os
+    import shutil
     import subprocess
 
     if os.name != "nt":
@@ -117,10 +118,13 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env["PATH"] = str(Path(env["SYSTEMROOT"]) / "System32")
+    # Keep real command discovery, without exposing host executables or its working directory.
+    shutil.copyfile(Path(env["SYSTEMROOT"]) / "System32/where.exe", tmp_path / "where.exe")
+    env["PATH"] = str(tmp_path)
     env["PROGRAMFILES"] = str(tmp_path / "no-powershell")
     proc = subprocess.run(
         [env["COMSPEC"], "/d", "/c", str(wrapper), "-SkipSync"],
+        cwd=tmp_path,
         env=env,
         capture_output=True,
         text=True,
