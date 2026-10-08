@@ -50,6 +50,7 @@ from frame_compare.utils.cancellation import (
     cancellation_checkpoint,
     is_cancelling,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
@@ -60,7 +61,7 @@ def _assemble_run_result(
     artifacts: RunArtifacts,
     selected_frames: list[int],
     context: RunContext,
-    preflight_warnings: list[str],
+    preflight_warnings: list[RunWarning],
     phase_timings: dict[str, float],
     duration_seconds: float,
     vsview_review_seconds: float = 0.0,
@@ -80,7 +81,15 @@ def _assemble_run_result(
         metrics_cache_status=artifacts.metrics_cache_status,
         phase_timings=phase_timings,
         vsview_review_seconds=max(0.0, vsview_review_seconds),
-        warnings=[*preflight_warnings, *sorted(artifacts.warnings)],
+        warnings=[
+            *preflight_warnings,
+            *sorted(
+                artifacts.warnings,
+                key=lambda warning: (
+                    warning.message + (" " + warning.detail if warning.detail is not None else "")
+                ),
+            ),
+        ],
     )
 
 
@@ -97,8 +106,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     clip_count = 0
     selected_frame_count = 0
     artifacts: RunArtifacts | None = None
-    preflight_warnings: tuple[str, ...] = ()
-    current_preflight_warnings: list[str] | None = None
+    preflight_warnings: list[RunWarning] = []
+    current_preflight_warnings: list[RunWarning] | None = None
 
     def _capture_reserved_run(capture: ReservedRunCapture) -> None:
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, reserved_workspace
@@ -144,7 +153,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         artifacts = prep.artifacts
         phase_timings = state.phase_timings
         clip_count = len(prep.clips)
-        preflight_warnings = tuple(prep.preflight_warnings)
+        preflight_warnings = list(prep.preflight_warnings)
         current_preflight_warnings = prep.preflight_warnings
 
         state.phase_timings["preflight"] = prep.preflight_duration
@@ -232,7 +241,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 ),
                 selected_frames=state.selected_frames,
                 alignment_warnings=[
-                    warning for warning in state.warnings if warning.startswith("align:")
+                    warning for warning in state.warnings if warning.source == "alignment"
                 ],
                 json_output=request.json_output,
                 quiet=request.quiet,
@@ -298,7 +307,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 warnings=(
                     preflight_warnings
                     if current_preflight_warnings is None
-                    else tuple(current_preflight_warnings)
+                    else list(current_preflight_warnings)
                 ),
             )
             raise

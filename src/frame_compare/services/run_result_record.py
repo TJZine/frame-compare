@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
 from typing import Literal, NotRequired, TypedDict, cast
@@ -16,6 +16,7 @@ from frame_compare.errors import FrameCompareError
 from frame_compare.services.errors import HistoryAccessError, HistoryOpenError
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 RUN_RESULT_FILENAME = "run_result.toml"
@@ -105,7 +106,7 @@ class CompletedRunFacts:
     screenshot_dir: Path | None
     clip_count: int
     selected_frame_count: int
-    warnings: tuple[str, ...]
+    warnings: list[RunWarning]
     metrics_cache_status: Literal["skipped", "hit", "miss"]
     phase_timings: dict[str, float]
     slowpics_url: str | None
@@ -123,7 +124,7 @@ class FailedRunFacts:
     screenshot_dir: Path | None = None
     metrics_cache_status: Literal["skipped", "hit", "miss"] = "skipped"
     slowpics_url: str | None = None
-    warnings: tuple[str, ...] = ()
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +225,7 @@ def _safe_relative_path(path: Path | None, run_dir: Path | None) -> str | None:
         return None
 
 
-def _warning_summaries(warnings: tuple[str, ...]) -> tuple[str, ...]:
+def _warning_summaries(warnings: list[RunWarning]) -> tuple[str, ...]:
     if not warnings:
         return ()
     count = min(len(warnings), _MAX_WARNING_SUMMARIES)

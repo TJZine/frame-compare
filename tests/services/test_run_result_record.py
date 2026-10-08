@@ -23,6 +23,7 @@ from frame_compare.services.run_result_record import (
     serialize_run_result,
     write_run_result,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -51,7 +52,7 @@ def _record(root: Path, run_dir: Path, *, seconds: int = 10) -> RunResultRecord:
             screenshot_dir=run_dir / "screenshots",
             clip_count=2,
             selected_frame_count=3,
-            warnings=("secret=/Users/private token=abc",),
+            warnings=[RunWarning("sources", "warning", "secret=/Users/private token=abc")],
             metrics_cache_status="hit",
             phase_timings={"render": 2.0, "align": 1.0},
             slowpics_url="https://slow.pics/c/safe",
@@ -175,7 +176,7 @@ def test_naive_lifecycle_times_follow_existing_run_info_utc_convention(tmp_path:
             screenshot_dir=None,
             clip_count=1,
             selected_frame_count=1,
-            warnings=(),
+            warnings=[],
             metrics_cache_status="skipped",
             phase_timings={},
             slowpics_url=None,
@@ -194,7 +195,12 @@ def test_failed_record_preserves_only_bounded_generic_warning_facts(tmp_path: Pa
         error=RuntimeError("secret failure"),
         started_at=started,
         completed_at=started + timedelta(seconds=1),
-        facts=FailedRunFacts(warnings=("token=secret", "path=/Users/private")),
+        facts=FailedRunFacts(
+            warnings=[
+                RunWarning("sources", "warning", "token=secret"),
+                RunWarning("sources", "warning", "path=/Users/private"),
+            ]
+        ),
     )
 
     assert record.warning_count == 2
@@ -543,3 +549,67 @@ def test_run_record_interrupt_guard_allows_only_failure_publication(
     if failed:
         assert read_run_result(target).status == "failed"
     assert list(run_dir.glob(f".{RUN_RESULT_FILENAME}.*")) == []
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize(("count", "summary_count"), [(2, 2), (10, 8)])
+def test_warning_record_bytes_preserve_count_cap_and_sanitization(
+    tmp_path: Path,
+    failed: bool,
+    count: int,
+    summary_count: int,
+) -> None:
+    started = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    warnings = [
+        RunWarning("sources", "warning", "token=secret /Users/private") for _ in range(count)
+    ]
+    if failed:
+        record = failed_record(
+            error=RuntimeError("secret failure"),
+            started_at=started,
+            completed_at=started + timedelta(seconds=1),
+            facts=FailedRunFacts(warnings=warnings),
+        )
+    else:
+        record = completed_record(
+            workspace=_workspace(tmp_path, tmp_path / "generated" / "run"),
+            facts=CompletedRunFacts(
+                report_path=None,
+                screenshot_dir=None,
+                clip_count=2,
+                selected_frame_count=3,
+                warnings=warnings,
+                metrics_cache_status="skipped",
+                phase_timings={},
+                slowpics_url=None,
+                slowpics_confirmation_status="not_applicable",
+            ),
+            started_at=started,
+            completed_at=started + timedelta(seconds=1),
+        )
+    # Exact V1 bytes captured from ec2fc6ca; producer text never enters the record.
+    expected = (
+        "version = 1\n"
+        + ('status = "failed"\n' if failed else 'status = "completed_with_warnings"\n')
+        + 'started_at = "2026-07-14T12:00:00Z"\n'
+        'completed_at = "2026-07-14T12:00:01Z"\nduration_seconds = 1.0\n'
+        + (
+            "clip_count = 0\nselected_frame_count = 0\n"
+            if failed
+            else "clip_count = 2\nselected_frame_count = 3\n"
+        )
+        + f"warning_count = {count}\nwarning_summaries = [\n"
+        + '    "A run warning was reported.",\n' * summary_count
+        + ']\nmetrics_cache_status = "skipped"\n\n[phase_timings]\n\n'
+        '[slowpics]\noutcome = "not_uploaded"\n'
+        + (
+            '\n[failure]\ncode = "FC-0001"\nname = "INTERNAL_ERROR"\n'
+            'category = "internal"\nmessage = "The run failed because of an internal error."\n'
+            if failed
+            else ""
+        )
+    )
+    assert serialize_run_result(record).encode("utf-8") == expected.encode("utf-8")
+    assert record.warning_count == count
+    assert len(record.warning_summaries) == summary_count
+    assert parse_run_result(tomllib.loads(expected)) == record

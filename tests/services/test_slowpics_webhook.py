@@ -80,8 +80,8 @@ async def test_rejects_non_https_and_localhost_names(url: str) -> None:
 
     assert result.success is False
     assert result.warning is not None
-    assert "hooks.example.test" not in result.warning
-    assert "localhost" not in result.warning
+    assert "hooks.example.test" not in result.warning.text
+    assert "localhost" not in result.warning.text
 
 
 @pytest.mark.parametrize(
@@ -152,8 +152,8 @@ async def test_resolution_failure_is_rejected_without_connecting() -> None:
 
     assert result.success is False
     assert result.warning is not None
-    assert "secret.example.test" not in result.warning
-    assert "/path" not in result.warning
+    assert "secret.example.test" not in result.warning.text
+    assert "/path" not in result.warning.text
 
 
 async def test_malformed_ipv6_url_returns_sanitized_validation_warning() -> None:
@@ -165,7 +165,7 @@ async def test_malformed_ipv6_url_returns_sanitized_validation_warning() -> None
         failure_kind=WebhookFailureKind.VALIDATION,
     )
     assert result.warning is not None
-    assert "::1" not in result.warning
+    assert "::1" not in result.warning.text
 
 
 @pytest.mark.parametrize(
@@ -192,7 +192,7 @@ async def test_non_ascii_url_components_return_sanitized_validation_warning(
     )
     assert result.warning is not None
     for fragment in sensitive_fragments:
-        assert fragment not in result.warning
+        assert fragment not in result.warning.text
 
 
 async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host_header() -> None:
@@ -250,9 +250,9 @@ async def test_connector_serialization_failure_returns_sanitized_warning() -> No
     )
     assert calls == WEBHOOK_ATTEMPTS
     assert result.warning is not None
-    assert "hooks.example.test" not in result.warning
-    assert "/webhook/token" not in result.warning
-    assert "secret=value" not in result.warning
+    assert "hooks.example.test" not in result.warning.text
+    assert "/webhook/token" not in result.warning.text
+    assert "secret=value" not in result.warning.text
 
 
 def test_request_serialization_rejects_non_ascii_target_before_socket(
@@ -547,10 +547,10 @@ async def test_warnings_redact_configured_webhook_url_details() -> None:
 
     assert result.success is False
     assert result.warning is not None
-    assert "secret.example.test" not in result.warning
-    assert "webhook" in result.warning
-    assert "/webhook/token" not in result.warning
-    assert "secret=value" not in result.warning
+    assert "secret.example.test" not in result.warning.text
+    assert "webhook" in result.warning.text
+    assert "/webhook/token" not in result.warning.text
+    assert "secret=value" not in result.warning.text
 
 
 def test_pinned_transport_parses_retry_after_and_preserves_sni(
@@ -800,7 +800,9 @@ async def test_default_resolution_timeout_reaps_child_without_transport(
     assert marker.exists()
     assert time.monotonic() - started < 3
     assert result == SlowpicsWebhookResult(
-        success=False, warning=WEBHOOK_FAILURE_WARNING, failure_kind=WebhookFailureKind.TIMEOUT
+        success=False,
+        warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.TIMEOUT,
     )
     assert len(resolver_children) == 1
     assert resolver_children[0].returncode is not None

@@ -60,6 +60,7 @@ from frame_compare.utils.cancellation import (
 )
 from frame_compare.utils.progress import align_phase_duration_text
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.run_warnings import RunWarning, WarningSource
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -71,6 +72,19 @@ __all__ = [
 ]
 
 
+_PHASE_WARNING_SOURCES: dict[str, WarningSource] = {
+    "frame_plan": "frame selection",
+    "analyze": "analysis",
+    "align": "alignment",
+    "render": "render",
+    "metadata": "sources",
+    "publish": "slow.pics",
+    "report": "render",
+    "confirm_slowpics_upload": "slow.pics",
+    "post_report_cleanup": "cleanup",
+}
+
+
 def _create_timed_phase(
     name: str,
     timing_key: str,
@@ -79,7 +93,7 @@ def _create_timed_phase(
     state: ExecutionState,
     monotonic_timer: Callable[[], float],
     phase_timings: dict[str, float],
-    warnings: list[str],
+    warnings: list[RunWarning],
     *,
     warn_only: bool = False,
     fatal_exceptions: tuple[type[BaseException], ...] = (),
@@ -122,7 +136,9 @@ def _create_timed_phase(
             raise asyncio.CancelledError() from None
         except Exception as exc:
             if warn_only:
-                warnings.append(f"{name}: {exc}")
+                warnings.append(
+                    RunWarning(_PHASE_WARNING_SOURCES[name], "warning", f"{name}: {exc}")
+                )
                 raise
             raise
         finally:

@@ -17,6 +17,7 @@ from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
@@ -189,6 +190,6 @@ class RunContext:
     analysis_metrics: FrameMetrics | None = None
     confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
     full_window_retry_override: FullWindowRetryOverride | None = None
-    run_warnings: list[str] | None = None
-    preflight_warnings: list[str] | None = None
+    run_warnings: list[RunWarning] | None = None
+    preflight_warnings: list[RunWarning] | None = None
     no_color: bool = False

@@ -478,18 +478,21 @@ unchanged.
   shown on that row and removed from the separate warnings panel. The report
   path is shown before screenshots, and artifact paths are Rich hyperlinks.
   Durations use human units.
-- Final warnings are grouped by source in a `Warnings` panel. Existing runtime
-  warning strings and slow.pics post-upload action warnings are bridged into
-  presentation rows with source, severity, message, and optional detail, then
+- Final warnings are grouped by producer-selected source in a `Warnings` panel.
+  Producers provide severity, message, and optional detail directly; labels and
+  diagnostic wording do not change warning or skipped status. Records are
   de-duplicated for display. A warning tied to one of the follow-up rows
   (clipboard, browser, shortcut, webhook) is shown on that row and removed from
-  the separate warnings panel. A `because ...` reason is shown once as detail.
+  the separate warnings panel, using warning-record equality to associate it.
+  Producer-provided detail is shown once.
   Normal output shows at most eight warning rows and summarizes hidden rows by
   source; `--verbose` shows every warning. Panel rows use the `!` (warning) and
   `–` (skipped) glyphs, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
+- Applied results use `alignment applied` in both short alignment summaries;
+  native-review counts and `needs visual confirmation` wording are unchanged.
 - When the Run plan reports optional VSView probe failures, it uses a
   sanitized summary (e.g. `probe failed (RuntimeError)`) rather than raw probe
   exception text; the secret exception message itself is never displayed.

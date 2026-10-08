@@ -87,6 +87,7 @@ from frame_compare.utils.cancellation import (
     cancellation_checkpoint,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import AlignmentCacheSettings, AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
@@ -120,12 +121,17 @@ def format_rejected_alignment_warning(
     result: AlignmentResult,
     *,
     comparison_label: str,
-) -> str:
+) -> RunWarning:
     """Format a rejected computed alignment as a deterministic run warning."""
     reason = _safe_alignment_diagnostic(result.diagnostic)
-    return (
-        f"align: {comparison_label} alignment left unapplied because {reason}; "
-        "rendering in best-effort reference-frame domain without accepted alignment."
+    return RunWarning(
+        source="alignment",
+        severity="warning",
+        message=f"align: {comparison_label} alignment left unapplied",
+        detail=(
+            f"because {reason}; rendering in best-effort reference-frame domain "
+            "without accepted alignment."
+        ),
     )
 
 

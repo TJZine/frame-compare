@@ -18,6 +18,7 @@ from frame_compare.orchestration.context import (
     ClipActiveRect,
     ClipState,
 )
+from frame_compare.utils.run_warnings import RunWarning
 
 if TYPE_CHECKING:
     from frame_compare.vs.loader import VSLoader
@@ -108,7 +109,7 @@ def refine_auto_content_active_rects_for_clips(
     sampler: ActiveRectFrameSampler | None,
     fail_closed: bool,
     recompute_content_derived: bool = False,
-) -> tuple[list[ClipState], list[str]]:
+) -> tuple[list[ClipState], list[RunWarning]]:
     """Refine unresolved full-frame active rects when opt-in auto detection is enabled."""
     if detection != ScreenshotActiveRectDetection.AUTO:
         return list(clips), []
@@ -139,10 +140,15 @@ def refine_auto_content_active_rects_for_clips(
         return _handle_detection_error(
             baseline_clips,
             fail_closed=fail_closed,
-            message="active-rect auto detection could not run because no VS loader is available",
+            warning=RunWarning(
+                "active-rect auto detection",
+                "warning",
+                "active-rect auto detection could not run",
+                "because no VS loader is available",
+            ),
         )
 
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
     refined_by_path: dict[Path, ClipActiveRect] = {}
     for clip in refinable:
         sample_indices = sample_source_frame_indices(
@@ -151,8 +157,12 @@ def refine_auto_content_active_rects_for_clips(
         )
         if len(sample_indices) < CONTENT_MIN_VALID_FRAME_CANDIDATES:
             warnings.append(
-                f"active-rect auto detection skipped {clip.path.name}: fewer than "
-                f"{CONTENT_MIN_VALID_FRAME_CANDIDATES} sample frames were available."
+                RunWarning(
+                    "active-rect auto detection",
+                    "skipped",
+                    f"active-rect auto detection skipped {clip.path.name}: fewer than "
+                    f"{CONTENT_MIN_VALID_FRAME_CANDIDATES} sample frames were available.",
+                )
             )
             continue
         try:
@@ -171,9 +181,9 @@ def refine_auto_content_active_rects_for_clips(
                 return _handle_detection_error(
                     baseline_clips,
                     fail_closed=fail_closed,
-                    message=message,
+                    warning=RunWarning("active-rect auto detection", "warning", message),
                 )
-            warnings.append(message)
+            warnings.append(RunWarning("active-rect auto detection", "warning", message))
             continue
 
         if rect is None:
@@ -276,11 +286,11 @@ def _handle_detection_error(
     clips: Sequence[ClipState],
     *,
     fail_closed: bool,
-    message: str,
-) -> tuple[list[ClipState], list[str]]:
+    warning: RunWarning,
+) -> tuple[list[ClipState], list[RunWarning]]:
     if fail_closed:
-        raise ActiveRectContentDetectionError(message)
-    return list(clips), [message]
+        raise ActiveRectContentDetectionError(warning.text)
+    return list(clips), [warning]
 
 
 def _clip_has_full_frame_static_rect(clip: ClipState) -> bool:

@@ -22,6 +22,7 @@ from typing import Protocol, cast
 from urllib.parse import urlparse
 
 from frame_compare import __version__
+from frame_compare.utils.run_warnings import RunWarning
 
 WEBHOOK_TIMEOUT_SECONDS = 10.0
 WEBHOOK_RESOLUTION_POLL_SECONDS = 0.05
@@ -36,10 +37,12 @@ WEBHOOK_USER_AGENT = (
     f"DiscordBot (https://github.com/TJZine/frame-compare, {__version__}) "
     f"frame-compare/{__version__}"
 )
-WEBHOOK_FAILURE_WARNING = "slow.pics webhook: delivery failed"
-WEBHOOK_VALIDATION_WARNING = (
-    "slow.pics webhook: delivery skipped because the configured webhook URL "
-    "is not an allowed external HTTPS endpoint"
+WEBHOOK_FAILURE_WARNING = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
+WEBHOOK_VALIDATION_WARNING = RunWarning(
+    "slow.pics",
+    "warning",
+    "slow.pics webhook: delivery skipped",
+    "because the configured webhook URL is not an allowed external HTTPS endpoint",
 )
 
 type WebhookResolver = Callable[[str, int], tuple[str, ...]]
@@ -79,7 +82,7 @@ class SlowpicsWebhookResult:
 
     success: bool
     detail: str | None = None
-    warning: str | None = None
+    warning: RunWarning | None = None
     failure_kind: WebhookFailureKind | None = None
     status_code: int | None = None
 
@@ -488,7 +491,7 @@ def _sleep_before_retry(
 def _failure_result(
     failure_kind: WebhookFailureKind,
     *,
-    warning: str = WEBHOOK_FAILURE_WARNING,
+    warning: RunWarning = WEBHOOK_FAILURE_WARNING,
     status_code: int | None = None,
 ) -> SlowpicsWebhookResult:
     return SlowpicsWebhookResult(

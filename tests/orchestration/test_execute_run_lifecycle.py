@@ -24,6 +24,7 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
 
@@ -110,10 +111,10 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(
             post_upload_actions=(shortcut,),
-            warnings=["report: warned"],
+            warnings=[RunWarning("render", "warning", "report: warned")],
         ),
         metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=["preflight: warned"],
+        preflight_warnings=[RunWarning("sources", "warning", "preflight: warned")],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
@@ -138,7 +139,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
 
     assert result.success is True
     assert result.post_upload_actions == (shortcut,)
-    assert result.warnings == ["preflight: warned", "report: warned"]
+    assert [warning.text for warning in result.warnings] == ["preflight: warned", "report: warned"]
 
 
 def test_execute_run_closes_execution_section_without_masking_phase_failure(
@@ -237,7 +238,12 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
                 PostUploadActionResult(
                     kind="shortcut",
                     success=False,
-                    warning="slow.pics shortcut: could not choose a safe output directory",
+                    warning=RunWarning(
+                        "slow.pics",
+                        "warning",
+                        "slow.pics shortcut:",
+                        "could not choose a safe output directory",
+                    ),
                 ),
             ),
         )
@@ -275,7 +281,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
 
     assert result.success is True
     assert result.slowpics_url == "https://slow.pics/c/example"
-    assert result.warnings == [
+    assert [warning.text for warning in result.warnings] == [
         f"cleanup: failed to delete uploaded screenshot {uploaded}: locked",
         "slow.pics shortcut: could not choose a safe output directory",
     ]
@@ -289,7 +295,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
     config.report.enable = False
-    webhook_warning = "slow.pics webhook: delivery failed"
+    webhook_warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
     render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "screenshots" / "planned.png"]},
         screenshot_dir=tmp_path / "screenshots",
@@ -435,7 +441,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
 
     assert result.success is True
     assert result.slowpics_url == "https://slow.pics/c/example"
-    assert any(warning.startswith("report:") for warning in result.warnings)
+    assert any(warning.text.startswith("report:") for warning in result.warnings)
     assert uploaded.exists()
 
 
@@ -695,7 +701,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 workspace=workspace,
                 clip_count=1,
                 preflight_duration=0.0,
-                preflight_warnings=(),
+                preflight_warnings=[],
                 run_warnings=artifacts.warnings,
             )
         )

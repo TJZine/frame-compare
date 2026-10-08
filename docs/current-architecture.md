@@ -98,6 +98,15 @@ admission, and drain or reap owned work. Already-admitted native calls have no
 guaranteed finite drain deadline; see the CLI contract's Run Interruption section
 for that limit and the separately owned shared-TMDB response-cache exception.
 
+`frame_compare.utils.run_warnings` owns the immutable in-memory `RunWarning`
+record (typed source, severity, message, optional detail). Producers choose
+source and severity from the operation's outcome; labels and diagnostic text
+never determine them. Orchestration carries records and selects alignment and
+active-rect retry warnings by source. CLI output renders the fields and
+associates post-upload rows by warning-record equality. Successful run JSON
+still omits warnings, and run-result V1 still stores only bounded generic
+sanitized warning summaries.
+
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v8 payload metadata, and orchestration only passes the effective

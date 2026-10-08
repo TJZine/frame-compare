@@ -373,8 +373,8 @@ def test_run_align_phase_composes_global_source_trims(
     assert output.selected_frames == expected_frames
     if warns:
         assert len(output.warnings) == 1
-        assert "align: Encode B alignment" in output.warnings[0]
-        assert "encode_b" not in output.warnings[0]
+        assert "align: Encode B alignment" in output.warnings[0].text
+        assert "encode_b" not in output.warnings[0].text
         assert output.reference.alignment is None
 
 
@@ -406,7 +406,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
 
     assert output.reference.trim.trim_start_frames == 2
     assert output.selected_frames == [48]
-    assert output.warnings == [
+    assert [warning.text for warning in output.warnings] == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]
 
@@ -810,7 +810,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2]
     assert output.selected_frames == [0, 48, 97]
     assert len(output.warnings) == 1
-    warning = output.warnings[0]
+    warning = output.warnings[0].text
     normalized_warning = warning.replace("_", " ").lower()
     assert "align:" in warning.lower()
     assert "align: Encode B alignment" in warning

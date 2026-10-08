@@ -39,6 +39,7 @@ from frame_compare.orchestration.preflight import (
     validate_and_normalize_config_paths,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal import interruptible_prompt
 from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
 
@@ -793,7 +794,7 @@ def _copy_slowpics_url(
         return PostUploadActionResult(
             kind="clipboard",
             success=False,
-            warning="slow.pics clipboard: failed to copy URL",
+            warning=RunWarning("slow.pics", "warning", "slow.pics clipboard: failed to copy URL"),
         )
     return PostUploadActionResult(
         kind="clipboard",
@@ -818,13 +819,18 @@ def _open_slowpics_url(
         return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning="slow.pics browser: failed to open URL",
+            warning=RunWarning("slow.pics", "warning", "slow.pics browser: failed to open URL"),
         )
     if not opened:
         return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning="slow.pics browser: failed to open URL: no browser accepted the request",
+            warning=RunWarning(
+                "slow.pics",
+                "warning",
+                "slow.pics browser: failed to open URL:",
+                "no browser accepted the request",
+            ),
         )
     return PostUploadActionResult(
         kind="browser",

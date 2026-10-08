@@ -51,6 +51,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     AlignmentReviewSummary,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -114,7 +115,7 @@ async def run_align_phase(
     )
 
     updated_comparisons: list[ClipState] = []
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
         if result.applied:
@@ -187,8 +188,14 @@ async def run_align_phase(
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:
         warnings.append(
-            "frame selection: dropped user frame(s) outside aligned renderable range: "
-            + ", ".join(str(frame) for frame in normalized_selection.dropped_user_source_frames)
+            RunWarning(
+                "frame selection",
+                "warning",
+                "frame selection: dropped user frame(s) outside aligned renderable range: "
+                + ", ".join(
+                    str(frame) for frame in normalized_selection.dropped_user_source_frames
+                ),
+            )
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
@@ -294,7 +301,7 @@ def _align_success_summary(
         return summary
     parts = [
         (
-            f"{_request_short_name(comparison)} audio applied"
+            f"{_request_short_name(comparison)} alignment applied"
             if result.applied
             else f"{_request_short_name(comparison)} needs visual confirmation"
         )

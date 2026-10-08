@@ -21,6 +21,7 @@ from frame_compare.orchestration.errors import (
     NoVideosFoundError,
 )
 from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 # Canonical video patterns
@@ -33,7 +34,7 @@ class PreflightResult:
 
     config: ConfigSchema
     workspace: WorkspacePaths
-    warnings: list[str] = field(default_factory=lambda: [])
+    warnings: list[RunWarning] = field(default_factory=lambda: [])
 
 
 def resolve_workspace(root: Path | None) -> Path:
@@ -384,7 +385,7 @@ def prepare_preflight(
     overrides: dict[str, object] | None = None,
 ) -> PreflightResult:
     """Validate configuration and resolve workspace paths."""
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
 
     if config_path is not None:
         expanded_config_path = Path(os.path.expandvars(str(config_path)))

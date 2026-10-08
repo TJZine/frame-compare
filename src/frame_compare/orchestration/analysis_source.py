@@ -12,6 +12,7 @@ from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.errors import FastestAnalysisSourceError
 from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.source_selection import resolve_source_selector
+from frame_compare.utils.run_warnings import RunWarning
 
 if TYPE_CHECKING:
     from frame_compare.vs.loader import VSLoader
@@ -31,7 +32,7 @@ class AnalysisSourceSelection:
 
     clip: ClipState
     reason: str
-    warning: str | None = None
+    warning: RunWarning | None = None
 
 
 def resolve_analysis_source(
@@ -52,8 +53,10 @@ def resolve_analysis_source(
         return AnalysisSourceSelection(
             clip=selected,
             reason="fastest",
-            warning=(
-                f"Analysis source: {clip_role(selected_index)} | selected by fastest-source policy"
+            warning=RunWarning(
+                "analysis source",
+                "warning",
+                f"Analysis source: {clip_role(selected_index)} | selected by fastest-source policy",
             ),
         )
 
@@ -69,7 +72,11 @@ def resolve_analysis_source(
             return AnalysisSourceSelection(
                 clip=clip,
                 reason="configured",
-                warning=(f"Analysis source: {clip_role(index)} | selected by configured policy"),
+                warning=RunWarning(
+                    "analysis source",
+                    "warning",
+                    f"Analysis source: {clip_role(index)} | selected by configured policy",
+                ),
             )
     raise FastestAnalysisSourceError()
 

@@ -749,10 +749,15 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
 
     assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
     assert state.artifacts.slowpics_url is None
-    assert state.warnings == [
+    assert [warning.text for warning in state.warnings] == [
         "report: report failed",
         "slow.pics upload skipped because report confirmation was unavailable",
     ]
+    assert state.warnings[-1].source == "slow.pics"
+    assert state.warnings[-1].severity == "skipped"
+    from frame_compare.cli.output import _warning_presentations
+
+    assert _warning_presentations([state.warnings[-1]], ())[0].severity == "skipped"
     assert [event for event in reporter.events if event in {"suspend", "resume"}] == []
     assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
     assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
@@ -943,6 +948,6 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
         await execute_phases([publish_phase], ctx, LogProgressReporter())
 
     assert len(state.warnings) == 1
-    assert "publish:" in state.warnings[0]
-    assert "Image upload failed with status 400" in state.warnings[0]
+    assert "publish:" in state.warnings[0].text
+    assert "Image upload failed with status 400" in state.warnings[0].text
     assert warning_events == ["phase_warned"]

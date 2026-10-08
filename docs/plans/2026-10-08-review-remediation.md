@@ -397,7 +397,7 @@ same local checkout, disjoint ownership, and no Git mutations.
 
 | Unit | Chat ID | Preset | Explicit model / effort | Status |
 | --- | --- | --- | --- | --- |
-| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | Controller-confirmed implementation integrated; wave review pending |
+| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | Integrated `ec2fc6ca`; wave A review complete |
 | U2 | `01a11cac-4d5d-7192-9f2d-dd94c22eae4d` | worker_luna | gpt-5.6-luna / xhigh | `01fc3af5`; controller-directed R-A01 correction `f8dcc3b8` |
 | U3 | `01a11cac-553a-7262-952f-dcdd9e4fb429` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ca432635` |
 | U4 | `01a11cac-5eab-7a01-8ce9-b67a09d1677a` | worker_luna | gpt-5.6-luna / xhigh | Integrated `fbc59eb3` |
@@ -406,6 +406,7 @@ same local checkout, disjoint ownership, and no Git mutations.
 | U7 | `01a11cac-7d6e-7920-a020-daad3bf50043` | worker | gpt-6.1-sol / medium | Integrated `25b15ae8` |
 | U8 | `01a11cac-8813-7f92-979a-64534fcb4c27` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ee1d674f` |
 | U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Integrated `05adff41` |
+| U10 | `01a11cf6-2e2c-7ef3-bf8b-553b6f039d4e` | worker | gpt-6.1-sol / medium | Controller-approved implementation integrated; wave B review pending |
 
 Models and efforts above are the explicit creation settings; terminal reports
 will reconcile actual execution. Preset aliases were resolved from their TOML
@@ -869,3 +870,276 @@ API regeneration produced no diff because the changed utility signatures are
 outside its locked module list. Physical Windows console and actual native
 drain latency remain unverified. Audio collector cleanup was unchanged, so the
 conditional streaming-resource heavy proof is not required by this unit.
+
+### Final wave A review and adjudication
+
+Same reviewer reconciled the final net range `a7dffd6e..ec2fc6ca`, including U1's
+new range `f8dcc3b8..ec2fc6ca`, with its earlier eight-unit and U2 corrective
+reviews. No new material finding and no unresolved wave A finding. R-A01 is
+closed at import-boundary level; packaged native acceptance remains an end
+gate. Fresh final review: 271 passed, no skips, 14.12 seconds over 15 selected
+files; net diff-check passed. Earlier 540-pass/32-skip and 29-pass selections
+overlap, so their counts are not summed. Checkout remained clean during review.
+
+Adjudication: retain the explicit-path hook workaround, early bounded review
+followed by final net reconciliation, and deterministic U9 non-I/O paths as
+strictly better execution/proof choices with the evidence above. The controller's
+main-task cancellation amendments, native/TMDB exceptions, additional writer
+owners, parent-trust import rule and extra corrective commit are explicit
+authorizations, not unresolved deviations. No additional design approval is
+inferred from this review. Source/test over-engineering hunt found no material
+shim, redundant harness, broad framework, orphan consumer or ownership violation
+requiring removal. U1's synchronous marker and async delivery have different
+obligations; its publisher, lock, HTTPX, PTY and real-failure cases are distinct.
+The final source review preserves runtime-free help/version, typed errors,
+machine-clean JSON, zero/alignment authority, downward imports and owned cleanup.
+
+Representative wave A test map (supporting cases remain where obligations differ):
+
+| Finding | Meaningful proof |
+| --- | --- |
+| F-001 | `test_first_sigint_stops_admission_and_records_failure` (startup/review/render/HTTPX); separate PTY, publisher and prior-real-failure controls |
+| F-002 / R-A01 | `test_libplacebo_probe_does_not_import_hostile_vapoursynth`; real enabled-parent positive and disabled-parent controls |
+| F-003 | Installed CLI invalid-UTF8 config and preset-apply controls in `tests/e2e/test_cli_errors.py` and `test_cli_config.py` |
+| F-004 | `test_cli_rejects_nul_paths_as_typed_config_errors` |
+| F-005 | `test_cli_rejects_nonfinite_exclusions_as_typed_config_errors` |
+| F-006 | `test_cli_history_list_json_isolates_oversized_record`; real written cache recomputation and cache-only refusal |
+| F-007 | `test_verifier_preserves_previous_artifacts_and_owns_fresh_invocation_directory` success/failure and symlink controls |
+| F-008 | `test_workflow_path_filter_has_positive_and_negative_controls` |
+| F-009 | `test_dockerignore_excludes_local_residue_without_excluding_image_inputs`; real image sentinel still pending |
+| F-010 | PS5 non-ASCII state/command process cases; Windows runtime skips remain open |
+| F-011 / D-01 | `test_root_source_installer_prerequisite_at_process_boundary` and cmd refusal controls |
+| D-03 | `test_windows_rollback_checks_backup_identity_without_mutating_on_refusal` and malformed/missing/mismatch controls |
+| F-012 | Production viewer/viewport handler harness driven by `test_report_viewer_state.py`, all 30 combinations |
+| F-013 | Review-state/controller harnesses driven by `test_report_review_state.py`: exact selected delta, stale/forged refusal, File path and atomic rejection |
+| F-016 | Consumer audit plus retained active encoder/range/tonemap/import coverage; deleted orphan mocks are not claimed as proof |
+| F-021 | `test_emit_frame_alignment_report_verbose_retains_row_zero_frames_and_paths`, deep/short and wrong-path/row negative controls |
+
+Independent review does not claim Docker/native plugins, actual Chrome, Windows
+console/portable runtime, native cancellation latency, physical gestures/picker,
+hosted CI or artifact/signing acceptance. Wave B is released for its design
+checkpoint; production migration still requires a controller decision relayed
+through the human under their later steering.
+
+U10 dispatch: existing preset responsibility text, full-plan/findings routes,
+settled `ec2fc6ca` dependency baseline, complete constraints and verified parent
+callback authorization supplied to a new local `worker` chat with explicit
+`gpt-6.1-sol` / `medium`. Assignment is read-only design tracing/reproduction:
+return owner, fields, complete producer/carrier inventory, exact public-string
+projection, proof strategy and unresolved decisions. No migration or test edits
+are authorized until the human relays their controller's checkpoint decision.
+
+### U10 design checkpoint — awaiting human/controller decision
+
+Design-only child returned at `ec2fc6ca`, with no production/test/doc edit.
+Configured `worker` / `gpt-6.1-sol` / `medium`; actual sampler settings are not
+independently exposed. It verified the original human callback authorization
+and later controller-routing steering. The following is a proposal, not approval.
+
+**A — Shared record and direct producer semantics.** Proposed owner:
+`src/frame_compare/utils/warnings.py`, standard-library-only frozen, slotted
+`RunWarning` dataclass:
+
+```python
+source: str
+severity: Literal["warning", "skipped"]
+message: str
+detail: str | None = None
+```
+
+Read-only `text` returns `message` when detail is absent, otherwise
+`f"{message} {detail}"`. Producers choose exact portions of their existing
+text; no stripping/normalization, raw-text field, implicit string conversion,
+string subclass, parser, registry, compatibility shim or persisted record.
+Producers author source/severity directly, with stable sources `alignment`,
+`frame selection`, `render`, `sources`, `analysis`, `active-rect auto detection`,
+`analysis source`, `slow.pics`, `cleanup`, `history`; generic timed failures use
+an explicit phase-to-source map. Only genuinely skipped branches use `skipped`
+(too-few active-rect samples and report-unavailable upload); other warnings use
+`warning`. Source headings must no longer accidentally include filenames or
+exception fragments. CLI may retain its local presentation row's action kind,
+which has a real row-suppression consumer. Exact `.text` matching preserves
+post-upload association; field-tuple display dedup, cap, headline counts,
+verbose expansion and stable text sorting remain. No import-contract change.
+
+**B — Related retry text-policy seam.** `full_window_retry.py` currently removes
+old active-rect warnings with `startswith("active-rect auto detection ")`.
+Proposal: select by `source == "active-rect auto detection"` during the same
+carrier migration. This preserves the intended producer membership while
+removing another text-policy dependency. Retry/selection authority is unchanged.
+Controller concurrence requested rather than silently widening the checkpoint.
+
+**C — Exact existing public/persisted behavior.** Source inspection confirms
+successful `run --json` has **no warning field** (`cli/run_command.py`,
+`handle_json_output`), and run-result V1 stores only capped repetitions of
+`"A run warning was reported."`, with the full original warning count
+(`services/run_result_record.py`, `_warning_summaries`). Proposal: preserve those
+schemas and exact bytes, not introduce a public warning field or persist
+producer text. Completed/failed facts become typed in-memory inputs; persisted
+summary fields, parser/history read diagnostics and unrelated diagnostic/log
+strings remain strings. The orchestrator independently inspected these owners.
+
+Migration inventory: warning producers in `services/alignment.py`,
+`slowpics_shortcut.py`, `slowpics_webhook.py`, `slowpics_post_upload.py`,
+`cli/run_command.py`, and orchestration's `phase_alignment.py`,
+`phase_selection.py`, `phase_render.py`, `selection_domain.py`,
+`active_rect_content.py`, `full_window_retry.py`, `execution.py`,
+`phase_post_render.py`, `slowpics_metadata.py`, `analysis_source.py`,
+`run_result_lifecycle.py`. Carriers/consumers additionally include
+`utils/post_upload_actions.py`, orchestration `types.py`, `execution_types.py`,
+`context.py`, `preflight.py`, `preparation.py`, `coordinator.py`,
+`phase_output_application.py`, `alignment_report.py`, service run-result input
+facts, and `cli/output.py`. Preserve log-only metadata and diagnostic-only
+analysis-source routing rather than inflating final run counts. `runner.py`
+only forwards the result and needs no change. Both applied-summary owners
+(`phase_alignment.py`, `services/alignment_presentation.py`) change only
+`audio applied` to `alignment applied`; review counts and unavailable/needs-
+confirmation language remain.
+
+Evidence before migration: production-path probe reproduces F-014 — identical
+unapplied result with neutral label yields warning, adversarial label containing
+`skipped`, colon and `because` yields skipped with truncated message/detail.
+Genuine upload skip remains skipped. Both real summary owners currently say
+`audio applied` for manual zero/nonzero and computed/cached presentation DTOs;
+review-count control stays intact. Eleven existing focused warning/frozen-string/
+generic-summary cases pass (0.68 wall seconds, no skips). These are baseline
+observations, not new regression red/green or native authority evidence. Two
+initial probe setup mistakes were corrected before the observations.
+
+After approval, extend existing phase/output/frozen-string/run-record tests:
+adversarial-label semantic invariance, genuine skip, exact text and action
+dedup/cap/headline, pinned JSON omission and record bytes/count/cap, all applied
+summary origins, existing retained success lines, active-rect/source/producer
+branches and failure lifecycle. No new general harness or media gate for text
+alone. Exact shared architecture/CLI/CHANGELOG deltas were proposed to the
+orchestrator, who owns those files. No migration has begun; A/B/C require the
+human's controller response before dependent work proceeds.
+
+
+### U10 controller decision received (2026-10-08)
+
+Human turn `01a11d1f-ab94-7733-9c60-8412ba982f66`, user message
+`01a11d1f-abe3-7233-ac11-aeaf1dba8a88`, supplied the following exact decision in
+`/Users/tristan/.codex/attachments/96217696-e11a-49d4-995b-a9ad5d06fe7f/Pasted text.txt`.
+It approves A/B/C with explicit amendments and supersedes the earlier proposal:
+
+Here's the U10 decision to pass back. It approves A, B and C, with three amendments to A.
+
+---
+
+**Controller decision: U10 typed warnings (2026-10-08). Approved with amendments.** Record it in the execution record. U10 migration may begin on top of `ec2fc6ca`.
+
+**A. Shared warning record: approved, with three amendments.**
+
+1. **Module name.** Use `src/frame_compare/utils/run_warnings.py`, not `utils/warnings.py`, so it doesn't share the standard library `warnings` module's name. That module is already relevant through pytest's `filterwarnings = error`. Keep the record frozen, slotted and standard-library-only, with the fields as proposed.
+2. **Typed source.** Make `source` a `Literal` type alias (`WarningSource`) listing the stable sources the worker inventoried:
+   - `alignment`, `frame selection`, `render`, `sources`, `analysis`;
+   - `active-rect auto detection`, `analysis source`, `slow.pics`, `cleanup`, `history`.
+
+   The phase-to-source map for generic timed failures returns that type. A misspelled source then fails pyright instead of quietly creating a new heading. No enum, registry or runtime validation is needed.
+3. **Post-upload association by record, not text.** Post-upload action results carry the `RunWarning` itself. Match action rows to warnings and dedupe by record equality (frozen dataclass equality), not by `.text` lookup. That removes the last text-matching step. Keep `.text` only where a string is actually emitted: human output, logs and the alignment report.
+
+Further requirements for A:
+- Carriers are `list[RunWarning]` only. No `str | RunWarning` unions, implicit conversion, adapters, or parsing fallbacks.
+- Delete `_warning_presentation_from_string`, `_normalize_warning_source`, the `" because "` and `":"` splitting, and the coordinator's `startswith("align:")` filter. Alignment warnings are selected by `source == "alignment"`, including the list handed to the alignment report.
+- Producers write their message and detail as the exact text portions shown today, so human output stays identical except where F-014 is being fixed.
+- The CLI's local presentation row keeps its action kind, and the field-tuple dedup, cap, headline counts, verbose expansion and stable sorting stay as they are.
+
+**B. Retry filtering: approved.** In `full_window_retry.py`, select earlier active-rect warnings by `source == "active-rect auto detection"` instead of the text prefix, as part of the same migration. Retry and selection authority are unchanged. The ownership transfer is approved for this change only.
+
+**C. Contract preservation: approved.** Successful `run --json` keeps having no warning field, and run-result V1 keeps its generic summaries, original count and cap, with byte-identical output. No new public warning field and no producer text in persisted records. This supersedes the plan's wording about projecting records to strings for JSON and run records. Persisted summary fields, history read diagnostics, and unrelated diagnostic or log strings stay strings. Log-only metadata and diagnostic-only analysis-source routing stay out of the final run count.
+
+**F-015: approved as proposed.** Both summary owners change only `audio applied` to `alignment applied`. Review counts and the unavailable and needs-confirmation wording are unchanged.
+
+**Ownership:** U10 owns the producer and carrier inventory listed in the checkpoint, plus `utils/run_warnings.py` and `orchestration/full_window_retry.py`. Shared architecture, CLI-contract and CHANGELOG text still go to the orchestrator as deltas. `lint-imports` must stay clean; `utils` is the lowest layer, so no contract change should be needed.
+
+**Proof**, extending the existing phase, output, frozen-string and run-record tests:
+
+- The F-014 production-path probe becomes a regression that fails before the migration. An identical unapplied result with a neutral label and with a label containing `skipped`, `:` and ` because ` renders with identical severity, source, message and detail.
+- A genuine skip (the upload when the report is unavailable, and too few active-rect samples) still renders as skipped.
+- Post-upload association and dedup work through record equality; cap and headline counts are unchanged.
+- Successful JSON is pinned as having no warning field. Run-record bytes, count and cap are pinned.
+- "alignment applied" appears for manual zero and nonzero, computed, cached and reviewed origins, and existing success lines are unchanged.
+- Active-rect retry selection uses source, and the failure-lifecycle warnings still work.
+
+No new harness and no media gate are needed for text-only behavior. The full native suite at the end covers integration.
+
+**Return to the controller** if a producer can't produce today's exact text from the message/detail split without changing visible output beyond F-014. The same applies if any consumer outside the inventory needs the warning text or a new source value.
+
+---
+
+Two notes on why I amended A rather than approving it unchanged:
+
+- **Text matching:** the worker's post-upload association still matched warnings by text. That is the same kind of text policy this unit exists to remove, and switching to record equality costs nothing.
+- **Free-string source:** a free-form `source` string would let a typo create a new heading silently, and a `Literal` type catches that in pyright.
+
+Orchestrator proof-wording check: migration remains paused on one internal
+conflict in the decision. Its proof requires identical `message` for neutral
+and adversarial labels, while the producer's existing exact message includes
+`comparison_label` and the decision requires preserving today's text portions.
+Both cannot hold literally. Recommended clarification: source, severity and
+reason/detail remain identical; each message retains its respective label and
+otherwise has identical wording and structure. This matches the original plan's
+F-014 obligation without losing source-identifying context. No producer text or
+implementation has changed. The approved module name, `WarningSource` Literal,
+record-equality association, list-only carriers, retry selection, persisted/JSON
+preservation and F-015 scope remain recorded; only the human/controller may
+settle the conflicting proof wording before migration proceeds.
+
+### U10 F-014 controller clarification (2026-10-08)
+
+The human supplied the following controller clarification directly in this chat.
+It resolves the proof conflict above; all other approvals remain in force.
+
+**Controller clarification: U10 F-014 proof (2026-10-08).** The worker's reading is approved. Record it in the execution record. Migration may resume.
+
+For the same unapplied result rendered once with the neutral label and once with the adversarial label (containing `skipped`, `:` and `because`), the regression asserts:
+
+- `source`, `severity` and `detail` are identical between the two renderings.
+- The adversarial `message` equals the neutral `message` with the neutral label replaced by the full adversarial label. Compute the expected string from the neutral rendering and compare for exact equality, so the wording is otherwise identical.
+- The adversarial label appears whole and untruncated in `message`, and no part of it leaks into `source` or `detail`. This is the truncation and splitting F-014 reported.
+- The rendered human line follows the same rule: the same glyph, styling and source heading, with only the label text differing.
+
+The test must fail before the migration and pass after it. All other U10 approvals stand.
+
+Orchestrator disposition: resume the same U10 implementation chat on `ec2fc6ca`
+under the recorded module/source/record-equality/list-carrier amendments, approved
+retry ownership and exact JSON/persisted behavior. The clarified regression must
+fail before migration and pass afterward. No independent design approval or
+expansion of the producer/carrier inventory is inferred.
+
+### U10 integration evidence
+
+Inspected the 28 production and 24 existing-test paths against the approved
+inventory. `utils/run_warnings.py` is frozen/slotted/standard-library-only with
+the ten-value `WarningSource` Literal; all runtime warning collections use
+typed records, with no string unions, fallback parsers or adapters. CLI source/
+severity/detail parsing and post-upload prefix slicing are deleted; action
+association uses record equality. Alignment-report and retry selection use
+source. JSON output function and persisted warning-summary/count/cap schema are
+unchanged; log-only/diagnostic-only warnings retain their routing. Both short
+applied-summary owners change only the approved phrase, preserving counts,
+confirmation wording, durations, retention and authority. U1 cancellation and
+U4 numeric recovery remain intact.
+
+The clarified production formatter-to-CLI F-014 regression failed before any
+production migration (wrong skipped severity and corrupted detail; log
+`.tmp/remediation-2026-10-08/U10/f014-before.txt`), then passes with exact complete-
+label substitution in message and ANSI-rendered line, invariant source/severity/
+detail and no label leakage. Distinct controls prove both genuine skips, record
+equality versus same emitted text, action row dedup/cap/headline, active-rect
+source selection despite misleading prefix text, applied manual zero/nonzero/
+computed/cached/reviewed summaries, pinned JSON bytes and exact completed/failed
+V1 count/cap/sanitized bytes captured from `ec2fc6ca`. No new harness or skip.
+
+Child final selections: 535 passed in 12.97 seconds and 34 runtime-free controls
+in 0.62 seconds, no skips. Integration combined selection: **569 passed, no
+skips, 13.53 test seconds**. Whole-tree pyright: zero errors/warnings; Ruff
+check/format: pass (520 files); bandit medium/high: pass (22 low findings);
+import contracts: 2 kept (181 files, 763 dependencies). API regeneration
+produced no diff. Architecture and CLI deltas applied by the orchestrator;
+CHANGELOG remains the required post-heavy-gate step. Child's configured
+`worker` / `gpt-6.1-sol` / `medium` agrees with explicit creation settings;
+actual sampler settings are not independently observable. Intermediate fixture
+and collection errors were repaired without weakening production obligations;
+only final clean selections are acceptance evidence.

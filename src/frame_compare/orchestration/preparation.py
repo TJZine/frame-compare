@@ -95,6 +95,7 @@ from frame_compare.utils.paths import (
     require_managed_descendant,
     require_managed_immediate_child,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -125,8 +126,8 @@ async def _resolve_run_directory(
     input_videos: list[Path],
     deps: RunDependencies,
     preflight_duration: float,
-    preflight_warnings: tuple[str, ...],
-    run_warnings: list[str],
+    preflight_warnings: list[RunWarning],
+    run_warnings: list[RunWarning],
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
     await cancellation_checkpoint()
     metadata = None
@@ -398,7 +399,7 @@ def _probe_input_videos(
     labels_by_path: dict[Path, str],
     release_identities_by_path: dict[Path, ReleaseIdentity],
     explicit_labels_by_path: dict[Path, bool],
-) -> tuple[list[ClipState], list[str], list[str]]:
+) -> tuple[list[ClipState], list[str], list[RunWarning]]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
     snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
@@ -480,7 +481,7 @@ def _refine_auto_active_rects_after_selection_window(
     config: ConfigSchema,
     deps: RunDependencies,
     fail_closed: bool,
-) -> tuple[list[ClipState], list[str]]:
+) -> tuple[list[ClipState], list[RunWarning]]:
     if config.screenshots.active_rect_detection != ScreenshotActiveRectDetection.AUTO:
         return clips, []
 
@@ -513,7 +514,7 @@ def _probe_input_videos_from_snapshots(
     release_identities_by_path: dict[Path, ReleaseIdentity],
     explicit_labels_by_path: dict[Path, bool],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
-) -> tuple[list[ClipState], list[str], list[str]]:
+) -> tuple[list[ClipState], list[str], list[RunWarning]]:
     result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
@@ -599,7 +600,7 @@ async def execute_prep(
     prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
     full_window_retry_override = None
     load_source_diagnostics: list[str] = []
-    source_warnings: list[str] = []
+    source_warnings: list[RunWarning] = []
 
     if request.from_cache_only and analysis_required:
         prevalidated_snapshots_by_path = _cached_probe_snapshots_for_cache_only(
@@ -645,7 +646,7 @@ async def execute_prep(
         )
         prevalidated_analysis_clip = prevalidated_analysis_selection.clip
         if prevalidated_analysis_selection.warning is not None:
-            load_source_diagnostics.append(prevalidated_analysis_selection.warning)
+            load_source_diagnostics.append(prevalidated_analysis_selection.warning.text)
         prevalidated_selection_domain = build_analysis_selection_domain_token(
             clips=prevalidated_clips,
             analysis_clip=prevalidated_analysis_clip,
@@ -672,7 +673,7 @@ async def execute_prep(
         input_videos=input_videos,
         deps=deps,
         preflight_duration=preflight_duration,
-        preflight_warnings=tuple(preflight.warnings),
+        preflight_warnings=list(preflight.warnings),
         run_warnings=artifacts.warnings,
     )
 
@@ -731,7 +732,7 @@ async def execute_prep(
             )
             analysis_clip = analysis_selection.clip
             if analysis_selection.warning is not None:
-                load_source_diagnostics.append(analysis_selection.warning)
+                load_source_diagnostics.append(analysis_selection.warning.text)
             selection_domain = build_analysis_selection_domain_token(
                 clips=clips,
                 analysis_clip=analysis_clip,

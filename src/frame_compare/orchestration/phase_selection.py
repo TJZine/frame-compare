@@ -31,6 +31,7 @@ from frame_compare.orchestration.full_window_retry import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
@@ -187,14 +188,18 @@ def _dropped_user_frame_warnings(
     reference: ClipState,
     window_start: int,
     frame_count: int,
-) -> list[str]:
+) -> list[RunWarning]:
     retained = _user_frames_in_window(config, reference, window_start, frame_count)
     dropped = sorted(set(config.user_frames) - set(retained))
     if not dropped:
         return []
     return [
-        "frame selection: dropped user frame(s) outside trims/windowing: "
-        + ", ".join(str(frame) for frame in dropped)
+        RunWarning(
+            "frame selection",
+            "warning",
+            "frame selection: dropped user frame(s) outside trims/windowing: "
+            + ", ".join(str(frame) for frame in dropped),
+        )
     ]
 
 

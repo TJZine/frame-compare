@@ -52,6 +52,7 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import SourceInfo
 from tests.analysis._cache_io_test_helpers import valid_cache_metadata_payload
 from tests.orchestration.phase_task_helpers import (
@@ -131,8 +132,10 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     ctx.preflight_warnings = [
-        "active-rect auto detection skipped reference.mkv: constrained attempt",
-        "probe warning",
+        RunWarning("active-rect auto detection", "skipped", "constrained attempt"),
+        RunWarning(
+            "sources", "warning", "active-rect auto detection skipped reference.mkv: probe warning"
+        ),
     ]
     constrained_metrics = _metrics_for_range(start=40, end=60)
     full_metrics = _metrics_for_range(start=0, end=100)
@@ -174,12 +177,16 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
         "Motion",
         "Random",
     }
-    assert any("disabled for this run only" in warning for warning in output.warnings)
-    assert any(warning.endswith(": 120") for warning in output.warnings)
-    assert not any(warning.endswith(": 10") for warning in output.warnings)
+    assert any("disabled for this run only" in warning.text for warning in output.warnings)
+    assert any(warning.text.endswith(": 120") for warning in output.warnings)
+    assert not any(warning.text.endswith(": 10") for warning in output.warnings)
     assert config_path.read_bytes() == authored_bytes
     assert confirmation_requests[0].eligible_frame_count == 20
-    assert ctx.preflight_warnings == ["probe warning"]
+    assert ctx.preflight_warnings == [
+        RunWarning(
+            "sources", "warning", "active-rect auto detection skipped reference.mkv: probe warning"
+        )
+    ]
     assert output.replaces_frame_plan_selection is True
 
 
@@ -342,8 +349,8 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
 
     assert prompt_calls == 1
     assert len(ctx.run_warnings) == 1
-    assert "configured lead=1.66667s" in ctx.run_warnings[0]
-    assert "effective lead=0s" in ctx.run_warnings[0]
+    assert "configured lead=1.66667s" in ctx.run_warnings[0].text
+    assert "effective lead=0s" in ctx.run_warnings[0].text
 
 
 @pytest.mark.parametrize(
@@ -427,7 +434,7 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
 
     assert isinstance(exc_info.value.__cause__, MetricsCalculationError)
     assert len(ctx.run_warnings) == 1
-    assert "configured lead=1s, trail=1s" in ctx.run_warnings[0]
+    assert "configured lead=1s, trail=1s" in ctx.run_warnings[0].text
 
 
 def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
@@ -916,7 +923,9 @@ def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
     output = phase_selection.select_initial_frame_plan(ctx)
 
     assert 2 in output.selected_frames
-    assert output.warnings == ["frame selection: dropped user frame(s) outside trims/windowing: 0"]
+    assert [warning.text for warning in output.warnings] == [
+        "frame selection: dropped user frame(s) outside trims/windowing: 0"
+    ]
 
 
 def test_select_initial_frame_plan_labels_user_and_random_frames(

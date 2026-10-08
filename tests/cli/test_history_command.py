@@ -85,7 +85,7 @@ def _setup(
             screenshot_dir=run_dir / "screenshots",
             clip_count=2,
             selected_frame_count=4,
-            warnings=(),
+            warnings=[],
             metrics_cache_status="miss",
             phase_timings={"render": 1.0},
             slowpics_url=None,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from rich.columns import Columns
 from rich.console import Console
@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.run_warnings import RunWarning, WarningSeverity, WarningSource
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     BORDER_FAILED,
@@ -41,15 +42,13 @@ STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
 STYLE_WARN = "yellow"
 
-type WarningPresentationSeverity = Literal["warning", "skipped"]
-
 
 @dataclass(frozen=True)
 class WarningPresentation:
-    """CLI-local warning presentation row bridged from existing runtime warnings."""
+    """CLI-local warning row with an optional follow-up action association."""
 
-    source: str
-    severity: WarningPresentationSeverity
+    source: WarningSource
+    severity: WarningSeverity
     message: str
     detail: str | None = None
     action: str | None = None
@@ -676,12 +675,7 @@ def _slowpics_link(url: str) -> str:
     return f"[link={target}][bold {ACCENT} underline]{escape(url)}[/][/link]"
 
 
-_BROWSER_FAILURE_PREFIX = "slow.pics browser: failed to open URL"
-
-
 _ROW_WARNING_ACTIONS = ("clipboard", "browser", "shortcut", "webhook")
-
-_SHORTCUT_FAILURE_PREFIX = "slow.pics shortcut:"
 
 
 def _row_warning_count(actions: PostUploadActionResults) -> int:
@@ -701,11 +695,7 @@ def _row_warning_count(actions: PostUploadActionResults) -> int:
 def _shortcut_failure_value(action: PostUploadActionResult, *, glyphs: GlyphSet) -> str:
     """Render a failed shortcut action for the `  shortcut` summary row."""
     item = f"[{WARN}]{glyphs.warning}[/] not created"
-    reason = ""
-    if action.warning is not None and action.warning.startswith(_SHORTCUT_FAILURE_PREFIX):
-        reason = action.warning[len(_SHORTCUT_FAILURE_PREFIX) :].lstrip(": ")
-    elif action.warning is not None:
-        reason = action.warning
+    reason = None if action.warning is None else action.warning.detail
     if reason:
         item += f" [dim]({escape(reason)})[/]"
     return item
@@ -725,13 +715,7 @@ def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet
                 items.append(f"[{OK}]{glyphs.ok}[/] opened in browser")
             else:
                 item = f"[{WARN}]{glyphs.warning}[/] browser didn't open"
-                reason = ""
-                if action.warning is not None and action.warning.startswith(
-                    _BROWSER_FAILURE_PREFIX
-                ):
-                    reason = action.warning[len(_BROWSER_FAILURE_PREFIX) :].lstrip(": ")
-                elif action.warning is not None:
-                    reason = action.warning
+                reason = None if action.warning is None else action.warning.detail
                 if reason:
                     item += f" [dim]({escape(reason)})[/]"
                 items.append(item)
@@ -739,28 +723,30 @@ def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet
 
 
 def _warning_presentations(
-    warnings: list[str],
+    warnings: list[RunWarning],
     actions: PostUploadActionResults,
 ) -> list[WarningPresentation]:
     candidates: list[WarningPresentation] = []
-    seen: set[tuple[str, WarningPresentationSeverity, str, str | None]] = set()
-    action_warnings_by_message = {
+    seen: set[tuple[str, WarningSeverity, str, str | None]] = set()
+    action_warnings_by_record = {
         action.warning: _post_upload_warning_presentation(action)
         for action in actions
         if action.warning is not None
     }
 
     for warning in warnings:
-        row = action_warnings_by_message.get(warning)
+        row = action_warnings_by_record.get(warning)
         if row is None:
-            row = _warning_presentation_from_string(warning)
+            row = WarningPresentation(
+                warning.source, warning.severity, warning.message, warning.detail
+            )
         key = (row.source, row.severity, row.message, row.detail)
         if key in seen:
             continue
         seen.add(key)
         candidates.append(row)
 
-    for row in action_warnings_by_message.values():
+    for row in action_warnings_by_record.values():
         key = (row.source, row.severity, row.message, row.detail)
         if key in seen:
             continue
@@ -776,53 +762,13 @@ def _post_upload_warning_presentation(
     warning = action.warning
     if warning is None:
         raise ValueError("post-upload warning presentation requires action.warning")
-    row = _warning_presentation_from_string(warning)
     return WarningPresentation(
-        source=row.source,
-        severity=row.severity,
-        message=row.message,
-        detail=row.detail,
+        source=warning.source,
+        severity=warning.severity,
+        message=warning.message,
+        detail=warning.detail,
         action=action.kind,
     )
-
-
-def _warning_presentation_from_string(warning: str) -> WarningPresentation:
-    stripped = warning.strip()
-    severity: WarningPresentationSeverity = (
-        "skipped" if "skipped" in stripped.lower() else "warning"
-    )
-
-    source = "run"
-    message = stripped
-    detail: str | None = None
-
-    if ":" in stripped:
-        prefix, _remainder = stripped.split(":", 1)
-        normalized_prefix = prefix.strip()
-        if normalized_prefix:
-            source = _normalize_warning_source(normalized_prefix)
-    elif stripped.lower().startswith("slow.pics "):
-        source = "slow.pics"
-
-    if " because " in message:
-        message, reason = message.split(" because ", 1)
-        detail = f"because {reason.strip()}"
-
-    return WarningPresentation(
-        source=source,
-        severity=severity,
-        message=message,
-        detail=detail,
-    )
-
-
-def _normalize_warning_source(source: str) -> str:
-    normalized = source.lower().replace("_", " ").replace("-", " ").strip()
-    if normalized.startswith("slow.pics"):
-        return "slow.pics"
-    if normalized in {"align", "alignment"}:
-        return "alignment"
-    return normalized
 
 
 def _group_warnings_by_source(warnings: list[WarningPresentation]) -> list[WarningPresentation]:

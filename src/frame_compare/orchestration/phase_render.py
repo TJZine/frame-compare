@@ -20,6 +20,7 @@ from frame_compare.utils.media_facts import (
     HDRStaticFacts,
     SourceSignalFacts,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.props import range_label_from_props
 
 _MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
@@ -79,7 +80,7 @@ def run_render_phase(
             )
         )
 
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
     rendered = render_screenshots_from_batch_detailed(
         batch_requests=requests,
         output_dir=output_dir,
@@ -100,8 +101,12 @@ def run_render_phase(
         )
         if missing_count:
             warnings.append(
-                f"render: picture type unavailable for {missing_count} selected frame(s) in "
-                f"{label}; screenshots were rendered without picture-type metadata"
+                RunWarning(
+                    "render",
+                    "warning",
+                    f"render: picture type unavailable for {missing_count} selected frame(s) in "
+                    f"{label}; screenshots were rendered without picture-type metadata",
+                )
             )
 
     screenshot_total = sum(len(paths) for paths in rendered.screenshots_by_label.values())

@@ -51,7 +51,7 @@ def test_create_slowpics_url_shortcut_requires_safe_reserved_run_dir(
     assert result.success is False
     assert result.path is None
     assert result.warning is not None
-    assert "no reserved run directory" in result.warning
+    assert "no reserved run directory" in result.warning.text
     if junction:
         assert not run_dir.exists()
     else:
@@ -138,5 +138,5 @@ def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
     assert result.success is False
     assert result.path == root / "generated" / "Example" / "Example.url"
     assert result.warning is not None
-    assert "failed to write URL shortcut" in result.warning
-    assert "locked" in result.warning
+    assert "failed to write URL shortcut" in result.warning.text
+    assert "locked" in result.warning.text

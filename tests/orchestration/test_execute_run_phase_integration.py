@@ -240,7 +240,7 @@ enable = true
     assert result.slowpics_upload_confirmation_status == "declined"
     assert result.slowpics_url is None
     publish.assert_not_awaited()
-    assert not any(warning.startswith("publish:") for warning in result.warnings)
+    assert not any(warning.text.startswith("publish:") for warning in result.warnings)
 
 
 def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Path) -> None:

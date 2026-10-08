@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from frame_compare.utils.run_warnings import RunWarning
+
 type PostUploadActionKind = Literal["clipboard", "browser", "shortcut", "webhook"]
 
 
@@ -18,7 +20,7 @@ class PostUploadActionResult:
     detail: str | None = None
     path: Path | None = None
     message: str | None = None
-    warning: str | None = None
+    warning: RunWarning | None = None
 
 
 type PostUploadActionResults = tuple[PostUploadActionResult, ...]

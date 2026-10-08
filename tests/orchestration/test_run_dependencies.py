@@ -24,6 +24,7 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import HDRMetadata
 
 from .phase_task_helpers import _workspace
@@ -56,7 +57,7 @@ def test_run_artifacts_warning_defaults_are_isolated() -> None:
     first = RunArtifacts()
     second = RunArtifacts()
 
-    first.warnings.append("first-run warning")
+    first.warnings.append(RunWarning("sources", "warning", "first-run warning"))
 
     assert second.warnings == []
 
@@ -222,17 +223,17 @@ def test_reserved_warning_sink_survives_prep_failure(
 
     async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
         assert local_deps.capture_reserved_run is not None
-        warnings: list[str] = []
+        warnings: list[RunWarning] = []
         local_deps.capture_reserved_run(
             ReservedRunCapture(
                 workspace=workspace,
                 clip_count=2,
                 preflight_duration=0.1,
-                preflight_warnings=(),
+                preflight_warnings=[],
                 run_warnings=warnings,
             )
         )
-        warnings.append("accepted full-window override")
+        warnings.append(RunWarning("analysis", "warning", "accepted full-window override"))
         raise StopAfterDependencyInit
 
     def fake_record_failed_run_best_effort(
@@ -252,4 +253,6 @@ def test_reserved_warning_sink_survives_prep_failure(
         asyncio.run(execute_run(RunRequest(root=tmp_path), deps=RunDependencies()))
 
     assert captured_artifacts is not None
-    assert captured_artifacts.warnings == ["accepted full-window override"]
+    assert [warning.text for warning in captured_artifacts.warnings] == [
+        "accepted full-window override"
+    ]

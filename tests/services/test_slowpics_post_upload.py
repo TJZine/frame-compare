@@ -14,6 +14,7 @@ from frame_compare.services.slowpics_webhook import (
     WebhookFailureKind,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -137,7 +138,12 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
     tmp_path: Path, monkeypatch
 ) -> None:
     warning_calls: list[tuple[str, dict[str, object]]] = []
-    warning = "slow.pics shortcut: failed to resolve URL shortcut directory: locked"
+    warning = RunWarning(
+        "slow.pics",
+        "warning",
+        "slow.pics shortcut:",
+        "failed to resolve URL shortcut directory: locked",
+    )
     failure_path = tmp_path / "workspace" / "runs" / "Example" / "Example.url"
 
     def _fake_create_shortcut(**_kwargs: object) -> SlowpicsShortcutResult:
@@ -167,7 +173,7 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
     assert warning_calls == [
         (
             "slowpics_shortcut_create_failed",
-            {"path": str(failure_path), "warning": warning},
+            {"path": str(failure_path), "warning": warning.text},
         ),
     ]
 
@@ -175,7 +181,7 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
 async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_and_redacted(
     tmp_path: Path, monkeypatch
 ) -> None:
-    warning = "slow.pics webhook: delivery failed"
+    warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
     warning_calls: list[tuple[str, dict[str, object]]] = []
 
     async def _fake_deliver_slowpics_webhook(
@@ -211,7 +217,7 @@ async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_
         (
             "slowpics_webhook_delivery_failed",
             {
-                "warning": warning,
+                "warning": warning.text,
                 "failure_kind": "http_status",
                 "status_code": 404,
             },

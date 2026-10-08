@@ -43,6 +43,8 @@ from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentProvenance,
     AlignmentResult,
+    AlignmentReviewSummary,
+    AlignmentSource,
 )
 from frame_compare.utils.alignment_evidence import (
     AudioAuthorityRecount,
@@ -56,6 +58,7 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.logging import configure_logging
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from tests.services.alignment_request_test_support import alignment_request
@@ -1156,7 +1159,25 @@ def _applied_result(reference: Path, comparison: Path, attempt) -> AlignmentResu
     )
 
 
-def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) -> None:
+@pytest.mark.parametrize(
+    ("source", "offset", "reviewed"),
+    [
+        ("manual", 0, False),
+        ("manual", 12, False),
+        ("computed", 0, False),
+        ("cached", 12, False),
+        ("manual", 12, True),
+    ],
+    ids=["manual-zero", "manual-nonzero", "computed", "cached", "reviewed"],
+)
+def test_align_pre_review_summary_uses_frozen_fragments(
+    tmp_path: Path,
+    capsys,
+    source: AlignmentSource,
+    offset: int,
+    reviewed: bool,
+) -> None:
+    from frame_compare.orchestration.phase_alignment import _align_success_summary
     from frame_compare.utils.progress import RichProgressReporter
 
     reference, alpha, beta = (tmp_path / name for name in ("ref.mkv", "alpha.mkv", "beta.mkv"))
@@ -1178,11 +1199,11 @@ def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) 
         f"{reference.stem}:{comparison.stem}": AlignmentResult(
             reference.name,
             comparison.name,
-            0 if applied else None,
-            0.0 if applied else None,
+            offset if applied else None,
+            offset / 24 if applied else None,
             0.0,
             None,
-            "computed",
+            source,
             applied=applied,
         )
         for comparison, applied in ((alpha, True), (beta, False))
@@ -1197,7 +1218,22 @@ def test_align_pre_review_summary_uses_frozen_fragments(tmp_path: Path, capsys) 
 
     err = capsys.readouterr().err
     assert "Align" in err
-    assert "Alpha audio applied · Beta needs visual confirmation" in err
+    assert "Alpha alignment applied · Beta needs visual confirmation" in err
+
+    summary = _align_success_summary(
+        request=request,
+        results=list(results_map.values()),
+        review=AlignmentReviewSummary(
+            review_ran=reviewed,
+            pairs_confirmed=1 if reviewed else 0,
+            comparisons_kept=1 if reviewed else 0,
+        ),
+    )
+    assert summary == (
+        "1 pair confirmed in VSView · 1 kept"
+        if reviewed
+        else "Alpha alignment applied · Beta needs visual confirmation"
+    )
 
 
 @pytest.mark.parametrize(
@@ -2547,7 +2583,9 @@ def test_json_review_diagnostics_stay_on_stderr_and_run_stdout_is_pinned(
         assert f'"reason": "{reason}"' in diagnostic.err
         assert reason not in diagnostic.out
 
-        handle_json_output(RunResult(success=True, warnings=[reason]))
+        handle_json_output(
+            RunResult(success=True, warnings=[RunWarning("alignment", "warning", reason)])
+        )
         serialized = capsys.readouterr()
         serialized_outputs.append(serialized.out.encode("utf-8"))
         assert serialized.out.encode("utf-8") == expected_stdout

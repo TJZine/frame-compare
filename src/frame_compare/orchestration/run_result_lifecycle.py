@@ -19,11 +19,14 @@ from frame_compare.services.run_result_record import (
     write_run_result,
 )
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
 
-RUN_RESULT_WRITE_WARNING = "history: run result could not be recorded"
+RUN_RESULT_WRITE_WARNING = RunWarning(
+    "history", "warning", "history: run result could not be recorded"
+)
 
 
 def record_completed_run_result(
@@ -45,7 +48,7 @@ def record_completed_run_result(
                 screenshot_dir=result.screenshot_dir,
                 clip_count=result.clips_processed,
                 selected_frame_count=result.frame_count,
-                warnings=tuple(result.warnings),
+                warnings=list(result.warnings),
                 metrics_cache_status=result.metrics_cache_status,
                 phase_timings=result.phase_timings,
                 slowpics_url=result.slowpics_url,
@@ -76,7 +79,7 @@ def record_failed_run_best_effort(
     clip_count: int,
     selected_frame_count: int,
     phase_timings: dict[str, float],
-    warnings: tuple[str, ...],
+    warnings: list[RunWarning],
 ) -> None:
     """Avoid masking the original with ordinary failed-outcome recording failures."""
     if started_at is None or workspace is None or workspace.run_dir is None:
@@ -102,7 +105,18 @@ def record_failed_run_best_effort(
                 ),
                 slowpics_url=None if artifacts is None else artifacts.slowpics_url,
                 warnings=(
-                    warnings if artifacts is None else (*warnings, *sorted(artifacts.warnings))
+                    warnings
+                    if artifacts is None
+                    else [
+                        *warnings,
+                        *sorted(
+                            artifacts.warnings,
+                            key=lambda warning: (
+                                warning.message
+                                + (" " + warning.detail if warning.detail is not None else "")
+                            ),
+                        ),
+                    ]
                 ),
             ),
             workspace=workspace,
