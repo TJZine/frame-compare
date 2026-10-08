@@ -63,11 +63,18 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   and nonfinite lead/trail windows as typed validation errors. Recover from
   oversized numeric values in persisted run history and caches while retaining
   valid entries and requiring recomputation when cache authority is unavailable.
-- Observe the first Ctrl+C before admitting another phase, render unit or audio
-  job, and before publishing results, caches or diagnostics. Interrupted runs
-  retain their failure record and exit 130. Already-admitted native operations
-  drain without a guaranteed finite deadline; FFmpeg extraction retains its
-  timeout and repeated Ctrl+C retains its existing behavior.
+- After the first Ctrl+C, Frame Compare starts no new phase or audio work, and
+  stops starting new frames within a fraction of a second; frames already being
+  rendered or analysed finish first. Render admission uses a 50 ms poll with
+  100 ms scheduling slack. Results, caches and diagnostics stop publication;
+  interrupted runs retain their failure record and exit 130. A native frame
+  request already in flight drains without a guaranteed finite deadline;
+  FFmpeg batch extraction is stopped and reaped with bounded cleanup. Extraction
+  retains its timeout, already-written PNGs may remain, and repeated Ctrl+C
+  retains its existing behavior.
+- Show source-specific unavailable messages and Retry actions when main-stage
+  images fail in Slider, Single, Diff or Blink; navigation and successful retry
+  recover without stale image events affecting the current frame.
 - Preserve an explicitly paused report Blink mode through viewport and Lens
   gestures, and apply the exact review-import file and conflict choices shown
   in its preview.

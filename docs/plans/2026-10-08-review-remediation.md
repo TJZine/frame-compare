@@ -1675,3 +1675,431 @@ hooks; YAML and both Ruff hooks skipped because only Markdown changed.
 and `pyproject.toml`/`uv.lock` bytes match the baseline. Only CHANGELOG and this
 execution record are task-owned unstaged changes; the unrelated prompt remains
 untracked. No further unit work or gate is pending under this plan.
+
+
+### Follow-up F-022/F-023 (local acceptance)
+
+The maintainer requested two decision-complete follow-ups on
+`agent/e2e-test-strategy` at `80beafdcdabc7ac556f78fada5e7593b89e8880c`.
+The initial tree contained only three untracked `docs/prompts/` files; these remain
+outside the changes. The later instruction in the orchestrator chat authorizes
+committing and pushing once the changes are verified. All other exclusions in the
+follow-up request remain in force, including no branch switches, worktrees,
+dependency changes, release work or live-service calls.
+
+| Unit | Chat | Preset | Model / effort | Ownership |
+| --- | --- | --- | --- | --- |
+| C1 F-022 | `01a11d7e-e072-72f0-999d-483980fc38ba` | worker | gpt-6.1-sol / medium | Metric and sibling frame checkpoints, render stop event, FFmpeg abort/reaping, focused tests |
+| C2 F-023 | `01a11d7e-e9fe-7f12-b2d7-c9d7fd643efa` | worker_luna | gpt-5.6-luna / xhigh | Main-stage unavailable/retry state, Diff/Lens sibling checks, existing viewer harnesses |
+
+Orchestrator: `01a11d7d-ee3d-7a02-8358-b4db726dc3dc` on `local`. Each
+child receives the exact preset responsibility instructions, original human
+request and retrievable authorization source, and one terminal callback route.
+The orchestrator owns Git integration and shared documents.
+
+Baseline evidence from the maintainer's local acceptance harness:
+
+| Scenario | Exit | Signal to exit | Run record | Written after the signal |
+| --- | --- | --- | --- | --- |
+| During analysis | 130 | 14.18 s | failed | run record only |
+| During alignment | 130 | 0.33 s | failed | run record only |
+| During VS render | 130 | 7.78 s | failed | run record plus all remaining PNGs (160 total) |
+| During FFmpeg render | 130 | 5.63 s | failed | run record plus all remaining PNGs (160 total) |
+| Render, two signals | 130 | 3.57 s | failed | run record plus remaining PNGs |
+
+No surviving process or post-signal cache, alignment-reuse or diagnostic write was
+reported in the baseline. F-023 was reproduced by moving one generated screenshot:
+Slider displayed a black pane; Grid displayed its unavailable message and Retry.
+Implementation is locally committed:
+
+- `e80d965a8dc61371d3028a9bae9b5607221e60c3` —
+  `fix(cancellation): stop frame work after the first interrupt`.
+- `e719e5e07fac4d407c59f595d5c2066e160dcb4f` —
+  `fix(report): show unavailable images in the main viewer`.
+
+Independent reviewer: `01a11d87-188c-7f43-936d-bc598baa2240`, preset
+`reviewer`, `gpt-6.1-sol` / `high`, inspecting `80beafd..e719e5e0`.
+Contract and CHANGELOG deltas were applied before final verification so the gates
+cover the resulting documentation; measured acceptance and review adjudication
+are recorded below before the record commit. At initial unit integration, full
+acceptance was still pending.
+
+Focused proof and integration inspection:
+
+- C1 recorded six required before-change parameter cases failing on `80beafd`:
+  cancellation at metric request 3 still requested 100 quality / 33 performance
+  frames; worker cancellation admitted later frames, including sibling frames
+  5–7 after a real failure; abort/timeout calls lacked the new subprocess keyword.
+  The parent reran the final C1 selection: **338 passed in 18.61 s**, no skips,
+  including existing U1, render and sibling-loop coverage. Additional real-child
+  batch wiring, normal exit/output and ignored-SIGTERM escalation cases have
+  after-change evidence only.
+- The real caller trace excludes `services/alignment_video.py` from ambient-task
+  checks: `_await_audio_computation` dispatches `_compute_requested_alignments`
+  through `asyncio.to_thread`; the video check already receives that worker's
+  cancellation event. `utils/cancellation.py` needed no change. This follows the
+  requested thread-context condition, rather than deviating from it.
+- C2's extended existing harness failed against baseline `viewer.js` because
+  the stage message stayed hidden on image error. Parent inspection found the
+  initial implementation checked only the stored request token, allowing an old
+  callback to change Grid or a pending Diff frame. The same child corrected this
+  before commit and proved the additional Grid/deferred-Diff regressions fail
+  without the current-generation guards. Focused viewer/Grid/Lens/viewport
+  drivers: **5 passed**, no skips; JS syntax and whitespace checks passed.
+- Repository static gates passed: Pyright **0 errors, 0 warnings**; Ruff lint and
+  formatting (**523 files**); Bandit medium/high (**0 issues** at those severities);
+  import contracts (**2 kept, 0 broken**). API reference drift check passed;
+  generated `docs/api.md` required no change. CLI-contract documentation tests
+  passed after the wording update.
+- An additional owned real-Chrome file-URL probe generated an offline report,
+  moved the comparison PNG, and observed each main mode's source-specific stage
+  message, error tone, hidden failed image, unavailable pane and Retry ARIA label.
+  Slider, Single, Diff and Blink passed. The first headless Diff attempt did not
+  settle within the virtual-time probe; the rerun passed all four without source
+  changes. Raw DOM/stderr evidence is retained under the ignored
+  `.tmp/followup-2026-10-08/controller/chrome-missing/` directory.
+
+O-06 is now a reproduced and fixed defect (F-023), replacing its parked hypothesis
+for this main-stage failure mechanism. Focused Node and actual Chrome failure-state
+proof does not establish physical Windows interaction or broader accessibility.
+Diff and Lens already have explicit unavailable states, so their assets were not
+changed; their focused coverage remained green. O-09's physical Windows console,
+native review and platform acceptance remain open.
+
+#### Independent review adjudication — C1 paused for controller decision
+
+The reviewer (`gpt-6.1-sol` / `high`, chat above) returned one validated P2
+finding and no material C2 findings. The C1 poll-only event implementation follows
+the prescribed mechanism, but does not establish the stricter acceptance bound:
+while the main task is blocked in the 100 ms `concurrent.futures.wait`, a real
+SIGINT cancels the task without unwinding the synchronous wait. Source-sized
+futures do not finish when one frame finishes, so workers can admit later frames
+before the main poll sets their batch event.
+
+The parent independently reproduced this on frozen head `e719e5e0` using the
+production render orchestrator, actual `ThreadPoolExecutor`, actual
+`asyncio.run`/Runner SIGINT handling, and 20 ms fake frame calls. A sender thread
+waits until production polling begins and the two first frames start, then sends
+`os.kill(..., SIGINT)`. The wait wrapper only records entry and delegates to the
+real wait unchanged. Captured `task.cancelling()` at admission distinguishes
+pending cancellation from timestamp uncertainty; no PNGs are written by this
+probe.
+
+| Probe | Frames admitted after task cancellation | Admission after signal | Signal to exit |
+| --- | --- | --- | --- |
+| Parent repeat 1 | 8 (1–4, 21–24) | 13.7–86.3 ms | 107.4 ms |
+| Parent repeat 2 | 8 (1–4, 21–24) | 13.9–86.3 ms | 110.4 ms |
+
+The committed worker regression schedules cancellation after `real_wait` returns
+and releases its in-flight frame functions on the next poll. It proves stopping
+once the event is propagated, but misses this signal-to-event window. The parent
+accepts the reviewer finding; lowering the poll timeout alone cannot prove the
+absolute no-additional-frame bound.
+
+Original request authority: consequential decisions not settled by the follow-up
+request go to the maintainer's Claude controller, and the affected unit pauses.
+The parent requested a controller decision on an explicitly approved immediate
+cancellation-to-event mechanism preserving the strict bound, or an explicit
+contract/acceptance amendment accepting bounded detection. No mechanism or
+relaxation is assumed approved. C1 changes and push were paused at this review checkpoint. The existing C1
+commit was an implementation checkpoint, not accepted completion. Shared product
+document deltas remained uncommitted and provisional until reconciliation.
+
+The review found no other material plan deviations or over-engineering burden.
+It confirmed per-invocation event lifetime, executor drain, progress locking,
+stopped/real-error distinction, deterministic failure ordering, sequential marker
+conversion, generic optional subprocess abort, captured-output/check behavior,
+bounded child reaping, and temporary staging cleanup. BaseException metric
+progress bookkeeping and abort checks before staging promotion are justified
+within the requested obligations. Alignment-video's existing worker event and
+unchanged Lens/Diff assets satisfy the conditional sibling requirements.
+
+Proving tests: F-022 metric admission is covered by
+`test_metric_loop_stops_before_next_frame_after_task_cancel`; worker stopping and
+failure priority by `test_clip_workers_stop_before_next_frame_and_preserve_first_failure`
+(with the timing limitation above); complete FFmpeg wiring by
+`test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results`; child
+abort/timeout/kill by `test_run_subprocess_abort_path_reaps_real_child`.
+F-023 is covered by the production viewer load path in
+`test_viewer_state_harness_exercises_pair_scoped_alignment`, including four
+modes, retry, recovery and stale Grid/deferred-Diff generations. The reviewer ran
+15 focused C1 parameter cases and three viewer/Lens/Grid drivers, all passing,
+and reproduced the signal finding twice. Parent probe source/logs are retained in
+ignored `.tmp/followup-2026-10-08/controller/signal_admission_probe.py` and
+`signal-admission.log`. They are real signal/executor evidence with simulated
+frame work, not native Docker or Windows latency acceptance.
+
+Independent C2 acceptance while C1 is paused: real-Chrome browser smoke
+`uv run --no-sync pytest -o addopts='' -q tests/browser/test_report_browser_smoke.py`
+passed **17 tests in 30.17 s**, with no skips. The full native suite, canonical
+Docker gate, five after-fix Docker latency scenarios, final documentation build
+and distribution recipe were pending at this checkpoint until the C1 decision
+was resolved; these were not skipped passes. No push or Windows-handoff edit
+had occurred.
+
+#### Controller decision: C1 cancellation propagation (2026-10-08)
+
+The maintainer supplied this decision in orchestrator human message
+`01a11d93-dd8d-7042-9772-323ff7a3b309` (turn
+`01a11d93-dcc7-7510-b16d-f7505005d47c`): **C1 may resume; accept a bounded
+polling delay, and do not add immediate event propagation.** This supersedes the
+original strict extra-frame-count acceptance criterion and resolves the review
+finding's mechanism/contract conflict.
+
+- Change only the render orchestrator's future-wait timeout to **50 ms**, named
+  by one nonconfigurable module constant. Other approved polling bounds stay as
+  built. Keep the batch event, worker frame checks, FFmpeg abort and first-failure
+  precedence. Add no render-path signal-handler ownership.
+- No render frame or analysis frame request may start later than one poll
+  interval plus **100 ms scheduling slack** after main-thread interrupt
+  observation. For the approved render loop this is **150 ms**. Already-running
+  frames finish. Use frame-start timestamps against signal time in the real-SIGINT
+  regression and Docker logs; extra-frame counts are observations, not pass/fail.
+- Extend the real-SIGINT probe into the existing regression coverage, asserting
+  the time bound. Prove failure with a 250 ms poll or absent stop event and passing
+  at 50 ms. Keep the analysis loop's within-one-frame proof.
+- Use this contract and CHANGELOG wording: “After the first Ctrl+C, Frame Compare
+  starts no new phase or audio work, and stops starting new frames within a
+  fraction of a second; frames already being rendered or analysed finish first.”
+  Keep the native limitation for the single native call or FFmpeg process already
+  in flight.
+- Rerun the five Docker scenarios: exit 130, failed record, no surviving process,
+  analysis/render signal-to-exit under about 2 s, frame-start bound above, and no
+  cache/reuse/diagnostic writes after the signal. Record extra-frame counts.
+- Return to the controller only if the 50 ms poll measurably costs more than **2%**
+  render throughput on the Docker baseline run, or meeting the time bound would
+  require signal-handler changes. C2 is accepted as reported. Finish remaining
+  gates, record commit and final report; Windows acceptance remains separate.
+
+The maintainer's rationale favors one signal-handler owner, existing bounded
+wait behavior on supported platforms, and a time-based admission limit suitable
+for the prescribed polling design. Those platform/4K rationale statements are
+controller-supplied reasoning, not newly measured platform acceptance here.
+The same `worker` chat resumes with explicit `gpt-6.1-sol` / `medium`, limited to
+this source constant and regression. The parent owns Docker instrumentation,
+throughput comparison, shared docs and final integration.
+
+Controller correction integrated as
+`e8c478b2b5b61679505c190775e6194fd0b45306` —
+`fix(cancellation): bound render frame admission polling`. This additional local
+correction commit preserves the original unit commits without amending or rewriting
+history. Parent focused selection: **165 passed in 4.39 s**; real-SIGINT production
+latest frame start **42.6 ms**, 250 ms sensitivity control **239.9 ms**. The fixed
+150 ms assertion rejects the slow control; it does not infer a zero extra-frame
+count. Repository static gates were refreshed after this source/test correction
+and all passed (Pyright 0/0, Ruff lint/format, Bandit medium/high, import contracts).
+
+Same independent reviewer (`gpt-6.1-sol` / `high`) targeted the two-file correction
+and original human decision. It resolved the prior P2 under the approved amended
+contract, with no material new findings or unjustified deviations. Its own
+real-SIGINT regression run measured **39.4 ms** production latest admission and
+**236.9 ms** for the rejected 250 ms sensitivity control. Signal handling remains
+owned by the existing Runner/prompt facilities; no immediate-propagation mechanism
+was added. The isolated regression explicitly skips POSIX signal injection on
+Windows, leaving physical console acceptance open rather than implying a pass.
+
+Final native gate on code head `e8c478b2`:
+`uv run --no-sync pytest -q -n4 --dist loadgroup` with retained JUnit evidence
+passed **3236 tests**, **99 skipped**, **0 failures/errors**, in **48.59 s**.
+The skips are capability/opt-in gaps, not platform passes: **83 Windows/PowerShell**,
+**4 L-SMASH module**, **1 libplacebo**, **6 media E2E**, **3 continuous-resource**,
+and **2 live-service** skips = **99**.
+Raw reasons remain in `.tmp/followup-2026-10-08/controller/native.xml` and
+`native.log`. The streaming collectors/resource bounds were not changed, so the
+separate three-hour resource proof is not triggered. The Chrome cases ran in the
+native suite as well as the earlier explicit 17-case smoke; C2 source was unchanged.
+Final API-doc drift check passed without regeneration.
+
+Canonical Docker gate passed on code head `e8c478b2`: **281 passed in 183.19 s**,
+**zero skips/nonpassing outcomes**. It rebuilt `frame-compare:dev` and the test
+image; cached native build layers were reused, so no cold build is claimed.
+The retained production image is
+`sha256:0fb92227298990a2825af123d372258e850346b9d202a9f44e1ff15091bfd114`.
+The temporary Compose override sets `network_mode: none` on the test and
+production-run services, with the test container's effective mode inspected as
+`none`. Docker runs remain serialized. Runtime proof passed non-root execution,
+VS R81/API 4.3, L-SMASH 1310, FFMS2, vs-placebo RGB48 tonemap, Debian FFmpeg/ffprobe,
+software Vulkan, native shared-library linkage, source provenance, fixture matrix,
+real frame render, doctor JSON, production tooling absence and generated mount /
+application outputs. Logs: `.tmp/followup-2026-10-08/controller/docker.log`.
+This aarch64/software-Vulkan proof does not replace amd64, Windows, physical GPU
+or visible native acceptance.
+
+Strict documentation and distribution verification:
+
+- The direct strict documentation build failed on broken links in unrelated,
+  untracked `docs/plans/2026-10-08-documentation-refresh-assets/` drafts created
+  during this task. Those files were left untouched. A disposable ordinary
+  directory snapshot of all **665 tracked paths**, copied from current file
+  contents (including this task's documentation edits), passed
+  `zensical build --clean --strict` with **no issues in 1.73 s**. No Git worktree,
+  branch change, stash, repository exclusion or weakened strictness was used.
+- The first direct distribution build was stopped when its in-progress source
+  archive began including unrelated local untracked `.handoff` residue. Only
+  that owned build and its children were terminated; local residue was preserved.
+  The canonical distribution recipe then passed on the same tracked snapshot:
+  wheel + sdist build, `scripts/verify_distribution.py`, installation into a fresh
+  Python 3.13 environment, installed `version` and runtime-free `--help`.
+  Packaging configuration/dependencies/lockfile were unchanged. Packaged viewer
+  and source changes trigger this gate; no release asset was published.
+
+This snapshot scope isolates the exact intended tracked candidate without
+mutating concurrent drafts or incidental outputs. Direct dirty-checkout failures
+are recorded, not hidden or called passes. Final docs/record commit remains
+parent-owned; unrelated untracked drafts/prompts stay outside staging.
+
+
+#### Docker render throughput comparison
+
+After the canonical gate and before the final admission-timestamp rerun, the
+parent ran the original real-media harness serially with no timestamp profiling
+and no interrupts. One warm-up was excluded, then **five alternating-order
+pairs** compared the same rebuilt image with the original **100 ms** future wait
+against production **50 ms**. A scratch entry-point wrapper changed only the
+orchestrator wait's timeout argument for the baseline; the production source was
+unchanged. Each fresh workspace completed with the same **160 PNG paths / selected
+frames**. Containers used `--network none`; other unrelated running services were
+not altered. This is real 720p/native frame evidence on this Docker host, not
+physical 4K/GPU/Windows performance evidence.
+
+| Pair | 100 ms render seconds | 50 ms render seconds | 50 ms throughput loss |
+| --- | --- | --- | --- |
+| 1 | 17.188 | 8.986 | -91.28% |
+| 2 | 7.986 | 8.883 | +10.10% |
+| 3 | 8.103 | 7.727 | -4.86% |
+| 4 | 8.145 | 7.616 | -6.94% |
+| 5 | 8.538 | 11.089 | +23.01% |
+
+The prespecified aggregate metric is equal work divided by summed render time:
+**800 frames / 49.960 s = 16.013 fps** at 100 ms and
+**800 frames / 44.301 s = 18.058 fps** at 50 ms. Aggregate throughput loss is
+**-12.77%** and median paired loss **-4.86%**. Positive and negative individual
+pairs and the first baseline's large duration show substantial host variation;
+these values establish no consistent measured **>2% regression**, not a claimed
+poll-induced acceleration or a precise statistical upper bound on overhead.
+Neither controller return condition is established by this comparison or the
+passing real-SIGINT admission test. Raw full-run logs, recorded phase timings,
+input-equality checks and summary are retained under
+`.tmp/followup-2026-10-08/controller/throughput-*` and
+`.tmp/local-acceptance-2026-10-08/ws-throughput-*`.
+
+
+#### After-fix Docker interrupt acceptance
+
+All five scenarios used the rebuilt production image above, original generated
+180 s / 720p inputs, fresh workspaces and original `run.sh`, serially with
+`--network none`. The scratch CLI wrapper observes production statements/functions
+without changing signal handlers, scheduling policy, stop events or frame results.
+It timestamps entry to the Runner's existing `_on_sigint`, actual main-thread
+`get_frame` statements, render-frame calls and abortable FFmpeg process calls.
+VapourSynth Cython methods did not emit the expected C profile events, so the
+initial analysis timestamp probe was rejected and replaced with source-scoped line
+tracing. Thread profiling is limited to newly created render workers. Instrumentation
+outputs are harness observations outside `generated/`, not application diagnostics.
+
+The original ALIGN-completion + 0.2 s trigger sometimes interrupted source
+preparation/FFprobe before any render request. That run was not counted as render
+admission proof. The final three render cases instead pass the original harness a
+first-actual-render-call / FFmpeg-call observation line, retaining its **0.2 s**
+delay. This synchronization adjustment proves that each signal interrupts native
+render work; analysis and alignment retain their original completion-line triggers.
+Raw rejected probes are preserved in `acceptance-global-profile/`,
+`acceptance-render-profile/` and `acceptance-line-trace-phase-trigger/` rather than
+being overwritten as passing evidence.
+
+| Scenario | Exit / record | Signal to exit | PNG files after signal marker | New application frame requests after main-thread observation |
+| --- | --- | --- | --- | --- |
+| During analysis | 130 / failed | 0.25 s | 0 | 0 |
+| During alignment | 130 / failed | 4.32 s | 0 | 0 |
+| During VS render | 130 / failed | 0.53 s | 3 | 0 |
+| During FFmpeg render | 130 / failed | 0.78 s | 0 | 0 |
+| Render, two signals | 130 / failed | 0.24 s | 2 | 0 |
+
+The native request logs contain **61 analysis starts** in the interrupted analysis
+case, **4351 analysis starts** before alignment/render in each later case, **6 VS
+render starts** in each VS case, and **2 FFmpeg batch-process starts** in the FFmpeg
+case. All five logs have a real main-thread first-interrupt observation and no
+later application frame/batch start, satisfying the approved **150 ms** bound.
+The real-SIGINT regression separately exercises positive post-interrupt admissions
+and rejects the 250 ms control, so these zero-count native observations do not
+turn the time contract back into a frame-count requirement. The PNG counts are
+observations against the earlier filesystem marker, not acceptance limits; a file
+write can follow admission of its already-running frame.
+
+The FFmpeg observer records **8** newly delivered selected-frame `showinfo` entries
+after interrupt observation, with the latest receipt at **83.175 ms**. Receipt
+timestamps are upper bounds for those native frame starts, not exact timestamps
+or a claim to instrument every internal FFmpeg decoding operation. The two batch
+processes were already in flight; no later process was admitted, staging was not
+promoted and both children were reaped. The retained single-native-operation
+exception remains applicable.
+
+No process survived any scenario. No cache, alignment-reuse, diagnostic or report
+file was written after the signal marker; only `run_result.toml` and the observed
+completed PNGs were written. Both signals in the repeated case were successfully
+sent to the still-live CLI, **0.2 s** apart. Only the first was observed by the
+Runner probe: the second arrived after Runner cleanup during CLI/interpreter
+shutdown. This is two-signal CLI exit evidence, not a claim to inject the second
+signal inside the render wait or native cleanup. Existing repeat-interrupt tests
+remain passing.
+
+Analysis and both render backends meet the controller's under-about-2-second
+acceptance criterion. **Alignment did not reproduce the original 0.33 s baseline**:
+it took 4.32 s, and an uninstrumented control took **4.22 s** with two FFmpeg
+processes already in flight. Earlier instrumented repeats were 4.36 / 4.19 s.
+Thus profiling is not the cause of this host observation. Alignment worker,
+streaming collector and signal-handler ownership are unchanged; the existing
+worker cancellation event drains its current native work before raising, with no
+new frame/audio work or publication. The controller's revised timed exit criterion
+applies to analysis/render, and the retained native-limit contract provides no
+finite drain deadline for this existing alignment work. Record this longer
+alignment drain as a remaining runtime observation, not an alignment latency pass
+or a reason to introduce signal-handler ownership contrary to the decision.
+
+Evidence: `.tmp/followup-2026-10-08/controller/acceptance-results.json`,
+`acceptance-summary.log`, five `followup-*.log` files, the original workspaces'
+`frame-starts.jsonl`, filesystem markers and process snapshots. The phase-synchronized
+native runs, simulated real-SIGINT regression and subprocess reaping tests have
+distinct proof obligations; none substitutes for physical Windows acceptance.
+
+#### Final integration and handoff
+
+The reviewer finding is resolved under the maintainer's amended polling contract;
+C2 is accepted and O-06 is reproduced/fixed. The substantive departures are:
+
+- The explicit controller decision replaces the zero-extra-frame acceptance
+  with 50 ms polling / 150 ms admission time, without immediate propagation.
+  An additional correction commit preserves the two original unit commits.
+- Contract docs were updated before final gates, and strict docs/distribution
+  used the exact tracked candidate snapshot because concurrent untracked drafts
+  and local residue made direct dirty-checkout builds unsuitable. Direct failures
+  and the unchanged strict checks are recorded above.
+- Render acceptance synchronization observes the first actual native call, avoiding
+  a false pass during preparation. The original harness, media, signal delays,
+  non-root runtime and network isolation are otherwise retained. Alignment's
+  longer native drain and the second signal's shutdown timing are explicitly
+  limited observations.
+
+Conditional sibling exclusions are compliant rather than deviations:
+`alignment_video.py` already owns a worker event, `utils/cancellation.py` needs no
+new primitive, and Diff/Lens already show unavailable state. No dependency/lock,
+release, live-service, Windows-handoff or unrelated draft changes are included.
+
+Repository static checks, focused behavioral proof, independent review, full
+native suite, real Chrome, canonical Docker, API drift, strict documentation and
+fresh-environment distribution checks have the results recorded above. The final
+CLI contract wording additionally passed **3 documentation tests**. The strict
+documentation snapshot was refreshed with the complete execution record and
+passed with **no issues in 1.32 s**. The final
+record and shared docs are committed with explicit paths as
+`docs: record frame-level cancellation and viewer follow-up`, then pushed normally
+to the existing branch under the maintainer's later push authorization.
+
+The controller should update the Windows acceptance handoff to the final pushed
+commit and the **150 ms application-frame admission bound**, with already-running
+native work allowed to finish. Check physical console timing and first/repeated
+Ctrl+C, native cleanup/publication and all four missing-image modes/retry. The
+handoff file itself was deliberately not edited. Windows, amd64, physical GPU,
+visible native review and other previously parked platform acceptance remain open;
+no skipped native test or absent job establishes those passes. Longer alignment
+native drain remains an explicit observation for that handoff.

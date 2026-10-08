@@ -712,7 +712,7 @@ unchanged.
 
 ### Run Interruption
 
-After the first Ctrl+C, Frame Compare starts no new phase, render unit or audio work, and publishes no new result, cache or diagnostic entry except the failure record. Native operations already admitted (VapourSynth frame requests, render and audio worker native calls, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. FFmpeg frame extraction keeps its existing timeout. A second Ctrl+C keeps its existing behavior.
+After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
 The interrupted run follows the failure-record path and exits 130. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight

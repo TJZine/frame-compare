@@ -93,10 +93,20 @@ before awaited cleanup. `utils.terminal` temporarily restores interruptible inpu
 only for a main-thread TTY using the asyncio Runner's SIGINT handler, then restores
 that exact handler. Persistence owners pass guards to atomic writes and abort checks
 to lock polling; generic utilities do not inspect the ambient task. Failure records
-remain writable. Render and VSView owners poll their blocking waits, stop new
-admission, and drain or reap owned work. Already-admitted native calls have no
-guaranteed finite drain deadline; see the CLI contract's Run Interruption section
-for that limit and the separately owned shared-TMDB response-cache exception.
+remain writable. Main-task metric, active-rectangle sampling and source-benchmark
+loops check before each frame request. Each parallel render batch owns one
+`threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
+or a real failure, and workers check it before each render frame. Stopped units
+retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
+The accepted admission bound is one poll interval plus 100 ms scheduling slack
+after main-thread interrupt observation; additional frame counts inside that
+window are observations rather than acceptance limits.
+FFmpeg batch extraction receives the event as an abort callable, stops staging
+promotion, and boundedly terminates and reaps its child. Sequential render frames
+also check admission. VSView polls its blocking waits and reaps owned work.
+A native frame request already in flight has no guaranteed finite drain deadline;
+see the CLI contract's Run Interruption section for that limit and the separately
+owned shared-TMDB response-cache exception.
 
 `frame_compare.utils.run_warnings` owns the immutable in-memory `RunWarning`
 record (typed source, severity, message, optional detail). Producers choose
@@ -936,6 +946,13 @@ can be present in baked screenshot overlays, physical image filenames, and repor
 metadata, so viewer-only label hiding cannot provide an honest blind workflow. Any
 future blind comparison must use an explicitly eligible clean artifact and a
 separately approved invocation, delivery, reveal, and publishing contract.
+
+The main stage uses Grid's missing-image wording in Slider, Single, Diff and
+Blink. A failed selected image is hidden, its pane is marked unavailable, and the
+existing stage-message and error-status surfaces identify the source with a Retry
+action. Source-label text remains available without presenting the failed image's
+badge as visible content. Navigation and successful retry clear the unavailable
+state; generation and retry-attempt checks reject stale image callbacks.
 
 #### Lens
 
