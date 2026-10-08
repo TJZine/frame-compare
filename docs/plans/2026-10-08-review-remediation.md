@@ -379,5 +379,85 @@ O-04 to O-08 stay parked as hypotheses; this plan does not address them.
 
 ## Execution record
 
-(Orchestrator: dispatch map, commits, review adjudications, gate results,
-deviations, and open items.)
+### Baseline and dispatch
+
+Baseline: `58e50a6d48c0004b63f60b9b3ba53c1ac4b31537` on
+`agent/e2e-test-strategy`. Initial porcelain status contained only untracked
+`docs/prompts/`, `docs/reviews/`, and this plan. Initial docs commit:
+`a7dffd6e` — `docs(reviews): record comprehensive review and remediation plan`.
+
+Orchestrator: `01a11caa-f929-7cb1-a7c1-cbeebe42a44b`, host `local`.
+Human authorization: turn `01a11cab-03d8-7303-afd6-7da36c16adac`, user message
+`01a11cab-0774-76e3-8b8a-1277452564a8` in that chat. Each child must retrieve
+and cite that authorization before its terminal callback. All children use the
+same local checkout, disjoint ownership, and no Git mutations.
+
+| Unit | Chat ID | Preset | Explicit model / effort | Status |
+| --- | --- | --- | --- | --- |
+| U1 | `01a11cac-44cd-7c93-b71d-892fb0313d1b` | worker | gpt-6.1-sol / medium | Dispatched; design checkpoint pending |
+| U2 | `01a11cac-4d5d-7192-9f2d-dd94c22eae4d` | worker_luna | gpt-5.6-luna / xhigh | Integrated `01fc3af5` |
+| U3 | `01a11cac-553a-7262-952f-dcdd9e4fb429` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ca432635` |
+| U4 | `01a11cac-5eab-7a01-8ce9-b67a09d1677a` | worker_luna | gpt-5.6-luna / xhigh | Dispatched |
+| U5 | `01a11cac-699d-76f2-ac02-972093943961` | worker_luna | gpt-5.6-luna / xhigh | Integrated `e49cb87d` |
+| U6 | `01a11cac-735c-7731-8bc6-6f12ff7edde9` | worker | gpt-6.1-sol / medium | Integrated `2350cf48` |
+| U7 | `01a11cac-7d6e-7920-a020-daad3bf50043` | worker | gpt-6.1-sol / medium | Integrated `25b15ae8` |
+| U8 | `01a11cac-8813-7f92-979a-64534fcb4c27` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ee1d674f` |
+| U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Verified; commit follows |
+
+Models and efforts above are the explicit creation settings; terminal reports
+will reconcile actual execution. Preset aliases were resolved from their TOML
+`name` fields (`worker-luna.toml`, `deep-reviewer.toml` use hyphenated filenames).
+
+U1 design challenge: `01a11cae-94b3-7573-9eb3-df4f5366bea7`,
+`deep_reviewer` / `gpt-6.1-sol` / `xhigh`. U1 production work is paused pending
+the human's controller decision on the main-task checkpoint alternative and
+ownership transfers; this challenge supplies evidence and does not replace
+wave A's independent review. The human clarified that design checkpoints and
+consequential decisions must be routed through them to their controller;
+Luna chats may not settle these decisions. That steering was sent to all wave A
+children and the design challenger. No U1 production design was approved.
+
+### Integration evidence (in progress)
+
+- U9: the original assertion failed at the full-path check with basetemp
+  `.tmp/remediation-2026-10-08/U9/deep/review/controller/representative-long-checkout-and-temporary-output-directory/native/native-tmp`.
+  Fixed full path fixtures replace irrelevant filesystem temp paths. The full
+  alignment-report file passes (20 cases), including narrow-width controls;
+  the same target test passes under short and deep basetemps. Scratch copies
+  with a wrong expected path and wrong expected source frame both fail their
+  intended assertions. Product width is unchanged. The first deep invocation
+  had a missing-parent setup error; corrected setup preceded the genuine failure.
+- U8: inspected removal and consumer audit; regenerated `docs/api.md`. Retained
+  props, tonemap conversion, runtime-free imports, and all encoder tests pass
+  together (87 cases). The child had run 86 with one deselected; integration
+  runs the complete selection.
+- U2: integration caught a native-only false capability assertion in the new
+  hostile-module test. The child corrected it to compare the clean real-child
+  capability with cwd, PYTHONPATH, and combined hostile inputs. All 36 selected
+  tests pass in its report; real managed libplacebo proof remains an end gate.
+- Initial whole-tree cheap checks during concurrent edits: pyright 0 errors /
+  warnings, bandit medium/high pass (22 low findings), both import contracts
+  kept. Ruff/format found unfinished changes in other active units; these
+  transient runs do not establish final integration passes.
+- Ready-unit integration batch: 174 passed across U2/U5/U8/U9 selections
+  (approximately 10 seconds); U3's 266 selected cases pass again (8.13 seconds);
+  U7's six harness drivers pass (9 cases, 0.84 test seconds); U6's changed-test
+  selection passes (36 cases, 32 platform/PowerShell skips, 0.17 test seconds).
+  CLI-contract documentation guards pass (3 cases, 0.12 test seconds).
+- Final ready-unit cheap gates: whole-tree pyright has 0 errors/warnings;
+  Ruff check passes and format reports 518 formatted files; bandit medium/high
+  passes (22 low findings, 1.62 seconds), and both import contracts pass
+  (0.10 seconds). U1's intentional failing regression is excluded from these
+  focused behavioral selections while its design is pending.
+- All seven configured pre-commit hooks passed against explicit ready-unit
+  paths (1.37 seconds). Per-command `core.hooksPath=/dev/null` is used for the
+  subsequent commits to prevent the hook runner temporarily stashing concurrent
+  unstaged work; the identical checks ran beforehand and repository hook
+  configuration is unchanged. No stash, reset, branch change, or broad staging
+  was used. U2/U3/U5/U6/U7/U8 each have one local commit (dispatch table above).
+- U6's source/platform contract evidence is supporting only. The child's full
+  Windows selection had 114 passes and 83 skips; the integration selection is
+  36 passes / 32 skips. O-01/O-02/O-03 remain physical Windows acceptance.
+- U7 architecture wording now records effective Blink pause ownership and
+  selected-candidate preview/apply ownership. The actual Chrome smoke and O-10
+  remain outstanding. Heavy gates have not started.

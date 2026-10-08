@@ -485,11 +485,12 @@ def test_emit_frame_alignment_report_prioritizes_normal_alignment_evidence(
 
 
 def test_emit_frame_alignment_report_verbose_retains_row_zero_frames_and_paths(
-    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    reference_path = tmp_path / "reference.mkv"
-    comparison_path = tmp_path / "comparison.mkv"
+    # Reporting does not access these files. Fixed paths keep this assertion
+    # independent of checkout depth and pytest's temporary-directory layout.
+    reference_path = Path("/media/reference.mkv")
+    comparison_path = Path("/media/comparison.mkv")
     comparison = AlignmentReportComparison(
         label="Encode",
         alignment_source="manual",
