@@ -268,6 +268,10 @@ def _assert_update_applied(*, bundle_dir: Path, version_py: Path) -> None:
     assert len(backups) == 1
     backup_version_py = backups[0] / "frame_compare" / "version.py"
     assert backup_version_py.read_text(encoding="utf-8") == _OLD_VERSION_CONTENT
+    assert json.loads((backups[0] / "compatibility.json").read_text(encoding="utf-8-sig")) == {
+        "media_runtime_fingerprint": _RUNTIME_HASH,
+        "requirements_lock_sha256": _REQ_HASH,
+    }
 
 
 def _snapshot_tree(path: Path) -> dict[str, str]:
@@ -646,3 +650,55 @@ def test_windows_portable_update_refuses_invalid_installed_runtime_identity(
     assert "media runtime fingerprint" in normalized_output
     assert version_py.read_bytes() == original_content
     assert not (bundle_dir / "app" / ".update_backups").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "identity", ["matching", "missing", "runtime", "requirements", "malformed"]
+)
+def test_windows_rollback_checks_backup_identity_without_mutating_on_refusal(
+    tmp_path: Path, repo_root: Path, identity: str
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+    bundle_dir, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml=""
+    )
+    version_py = _write_mock_bundle(bundle_dir=bundle_dir)
+    backup_id = "20261008000000"
+    backup_parent = bundle_dir / "app" / ".update_backups" / backup_id
+    backup_code = backup_parent / "frame_compare"
+    backup_code.mkdir(parents=True)
+    (backup_code / "version.py").write_text(_NEW_VERSION_CONTENT, encoding="utf-8")
+    compatibility = {
+        "media_runtime_fingerprint": _RUNTIME_HASH,
+        "requirements_lock_sha256": _REQ_HASH,
+    }
+    if identity in ("runtime", "requirements"):
+        key = "media_runtime_fingerprint" if identity == "runtime" else "requirements_lock_sha256"
+        compatibility[key] = "f" * 64
+    if identity != "missing":
+        (backup_parent / "compatibility.json").write_text(
+            "invalid json" if identity == "malformed" else json.dumps(compatibility),
+            encoding="utf-8",
+        )
+    before = _snapshot_bytes(bundle_dir)
+    listing = _run_update_command(
+        exe=exe, env=os.environ.copy(), shim_update_ps1=updater, args=["list-backups"]
+    )
+    assert listing.returncode == 0, listing.stderr
+    assert backup_id in listing.stdout
+    assert ("unavailable:" in listing.stdout) == (identity != "matching")
+    assert _snapshot_bytes(bundle_dir) == before
+
+    rollback = _run_update_command(
+        exe=exe, env=os.environ.copy(), shim_update_ps1=updater, args=["rollback", backup_id]
+    )
+    if identity == "matching":
+        assert rollback.returncode == 0, rollback.stderr
+        assert version_py.read_text(encoding="utf-8") == _NEW_VERSION_CONTENT
+    else:
+        assert rollback.returncode != 0
+        assert "Rollback refused" in rollback.stdout + rollback.stderr
+        assert _snapshot_bytes(bundle_dir) == before

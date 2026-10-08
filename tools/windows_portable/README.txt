@@ -2,7 +2,8 @@ Frame Compare - Portable Edition
 ================================
 
 INSTALL (enables `frame-compare` globally for current user):
-  1. Run `install.cmd` from the portable bundle root.
+  1. Extract the complete ZIP into a fresh, empty folder, then run `install.cmd`
+     from the portable bundle root. Windows PowerShell 5.1 and PowerShell 7 are supported.
   2. Open a new terminal.
   3. Run: frame-compare --help
 
@@ -31,9 +32,15 @@ NOTES:
     installed updater, rollback, reinstall, and uninstall never manage that
     external data. A moved bundle can change cache identity for source clips moved
     with it because their source paths changed.
-  - For source builds (`tools\windows_portable\install-from-source.cmd`), use:
+  - Source builds require PowerShell 7 or newer before bootstrap or output changes.
+    For source builds (`tools\windows_portable\install-from-source.cmd`), use:
       .\dist\frame-compare-portable-win-x64\
     as the bundle root (not the repository root).
+  - A complete runtime reinstall requires a fresh, empty folder. Overlaying a full
+    ZIP onto an existing bundle root is unsupported. Preserve user configuration,
+    input clips, and generated data; copy only those user files to the new bundle
+    if they were bundle-local. AppData fallback configuration and external data
+    remain preserved. Do not copy application/runtime files or old update backups.
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:
@@ -82,6 +89,10 @@ UPDATING (Code-Only Update Package):
     frame-compare-update purge-backups --keep 5
 
   Safety behavior:
+    - Each backup records its bundle's media-runtime and requirements-lock identity.
+      list-backups marks missing, malformed, or mismatched identity as unavailable;
+      rollback refuses it before any file change. Legacy backups without identity
+      cannot be restored or migrated.
     - Signature verification is mandatory. Missing or invalid signatures are always
       refused; the updater has no interactive unsigned bypass.
     - Archive processing is bounded before extraction by compressed size, entry count,

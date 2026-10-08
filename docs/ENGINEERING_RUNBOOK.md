@@ -423,6 +423,11 @@ Required when changing:
 - installer/update commands or release asset layout in docs
 - bundle/update manifests and signing flow
 
+Source builds and source install entrypoints require PowerShell 7 or newer before
+bootstrap, sync, or output changes. Published-bundle installation, launch, and
+updates retain Windows PowerShell 5.1 support; exercise BOM-less UTF-8 install
+state from a non-ASCII bundle path under that interpreter.
+
 Canonical verification path:
 
 1. Validate the update public key and manifest schemas.
@@ -453,6 +458,12 @@ Canonical verification path:
    dependency graph with the new application code, even when the media-runtime
    fingerprint and L-SMASH index token are unchanged. The current full bundle
    advertises `bundle_info.schema_version` 3.
+   Each update backup must record the bundle's media-runtime and requirements-lock
+   fingerprints. Verify that `list-backups` marks missing, malformed, or mismatched
+   backup identity as unavailable and that `rollback` refuses it before creating a
+   lock or changing files. Identity-less legacy backups are not migrated. A full
+   runtime reinstall uses a fresh, empty directory, preserves user configuration
+   and data, and never overlays a full ZIP onto an existing root.
 6. Sign the update ZIP when updater or release-package logic changes.
 7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
    For an exact hosted verification of a candidate SHA, dispatch the default-branch

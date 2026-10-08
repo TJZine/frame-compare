@@ -758,3 +758,16 @@ def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in sign_script
     assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in updater
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in updater
+
+
+def test_backup_identity_is_written_and_checked_before_rollback_mutation(repo_root: Path) -> None:
+    updater = _read_text_or_fail(repo_root / "tools/windows_portable/shim/frame-compare-update.ps1")
+    apply = _extract_powershell_function(updater, "Invoke-ApplyUpdate")
+    assert 'Join-Path (Split-Path -Parent $backupDir) "compatibility.json"' in apply
+    assert "$installedCompatibility | ConvertTo-Json" in apply
+    rollback = _extract_powershell_function(updater, "Invoke-Rollback")
+    assert rollback.index("Get-BackupCompatibilityError") < rollback.index("Acquire-UpdateLock")
+    assert rollback.index("Get-BackupCompatibilityError") < rollback.index("Restore-FromBackup")
+    listing = _extract_powershell_function(updater, "Invoke-ListBackups")
+    assert "Get-BackupCompatibilityError" in listing
+    assert "unavailable:" in listing

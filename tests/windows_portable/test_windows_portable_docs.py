@@ -60,3 +60,13 @@ def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) 
     assert "Confirm these aligned positions" in docs
     assert "Keep current alignment" in docs
     assert "Keep current offset" not in docs
+
+
+def test_windows_docs_distinguish_source_prerequisite_and_fresh_reinstall(repo_root: Path) -> None:
+    docs = _read_text_or_fail(repo_root / "docs/windows-portable.md")
+    assert "PowerShell 7 or newer" in docs
+    assert "Windows PowerShell 5.1 remains supported" in docs
+    assert "fresh, empty folder" in docs
+    assert "Overlaying a full ZIP onto an existing bundle root is unsupported" in docs
+    assert "AppData fallback configuration and external user data are preserved" in docs
+    assert "Identity-less legacy backups cannot be restored or migrated" in docs

@@ -284,7 +284,7 @@ function Get-InstallConfig() {
   }
 
   try {
-    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     throw "Invalid config file: $configPath`nRun install.cmd from the portable bundle."
   }
@@ -427,6 +427,30 @@ function Get-BackupRoot([string]$BundlePath) {
   return Join-PathParts -Root $BundlePath -Parts @("app", ".update_backups")
 }
 
+function Get-BackupCompatibilityError([string]$BackupParent, [object]$InstalledCompatibility) {
+  $identityPath = Join-Path $BackupParent "compatibility.json"
+  if (!(Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+    return "backup runtime/requirements identity is missing (legacy backups cannot be restored)"
+  }
+  try {
+    $identity = Get-Content -LiteralPath $identityPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $requirements = Get-RequiredStringProperty -Object $identity -Name "requirements_lock_sha256" -Context "backup identity"
+    $runtime = Get-RequiredStringProperty -Object $identity -Name "media_runtime_fingerprint" -Context "backup identity"
+    if ($requirements -cnotmatch '^[a-f0-9]{64}$' -or $runtime -cnotmatch '^[a-f0-9]{64}$') {
+      return "backup runtime/requirements identity is invalid"
+    }
+  } catch {
+    return "backup runtime/requirements identity is invalid"
+  }
+  if (
+    $requirements -cne [string]$InstalledCompatibility["requirements_lock_sha256"] -or
+    $runtime -cne [string]$InstalledCompatibility["media_runtime_fingerprint"]
+  ) {
+    return "backup runtime/requirements identity differs from the current bundle"
+  }
+  return ""
+}
+
 function Get-PayloadVersionFromManifest([object]$Manifest) {
   return Get-RequiredStringProperty -Object $Manifest -Name "to_app_version" -Context "manifest"
 }
@@ -493,8 +517,14 @@ function Invoke-ListBackups([string]$BundlePath) {
     Write-Host "No backups found."
     return 0
   }
+  $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
   foreach ($dir in $dirs) {
-    Write-Host $dir.Name
+    $compatibilityError = Get-BackupCompatibilityError -BackupParent $dir.FullName -InstalledCompatibility $installedCompatibility
+    if ([string]::IsNullOrWhiteSpace($compatibilityError)) {
+      Write-Host $dir.Name
+    } else {
+      Write-Host "$($dir.Name) (unavailable: $compatibilityError)"
+    }
   }
   return 0
 }
@@ -606,18 +636,24 @@ function Restore-FromBackup([string]$BackupDir, [string]$TargetDir) {
 }
 
 function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
+  $backupRoot = Get-BackupRoot -BundlePath $BundlePath
+  if ($BackupId -notmatch '^\d{14}$') {
+    throw "Invalid backup id format: $BackupId (expected yyyyMMddHHmmss)"
+  }
+  $backupParent = Get-SafeChildPath -Root $backupRoot -RelativePath $BackupId -Context "backup id"
+  $backupDir = Join-Path $backupParent "frame_compare"
+  if (!(Test-Path -LiteralPath $backupDir -PathType Container)) {
+    throw "Backup id not found: $BackupId"
+  }
+  $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
+  $compatibilityError = Get-BackupCompatibilityError -BackupParent $backupParent -InstalledCompatibility $installedCompatibility
+  if (![string]::IsNullOrWhiteSpace($compatibilityError)) {
+    throw "Rollback refused: $compatibilityError."
+  }
+
   $lockInfo = $null
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
-    $backupRoot = Get-BackupRoot -BundlePath $BundlePath
-    if ($BackupId -notmatch '^\d{14}$') {
-      throw "Invalid backup id format: $BackupId (expected yyyyMMddHHmmss)"
-    }
-    $backupParent = Get-SafeChildPath -Root $backupRoot -RelativePath $BackupId -Context "backup id"
-    $backupDir = Join-Path $backupParent "frame_compare"
-    if (!(Test-Path -LiteralPath $backupDir)) {
-      throw "Backup id not found: $BackupId"
-    }
     $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
     Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
     Write-Host "Rollback applied from backup: $BackupId"
@@ -859,6 +895,9 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $backupDir = Join-Path (Join-Path $backupRoot $backupId) "frame_compare"
     Ensure-Directory -Path (Split-Path -Parent $backupDir)
     Copy-Item -LiteralPath $targetDir -Destination $backupDir -Recurse -Force
+    $backupIdentityPath = Join-Path (Split-Path -Parent $backupDir) "compatibility.json"
+    $backupIdentityJson = $installedCompatibility | ConvertTo-Json
+    [System.IO.File]::WriteAllText($backupIdentityPath, $backupIdentityJson, [System.Text.UTF8Encoding]::new($false))
 
     Copy-DirectoryContents -SourceDir $payloadDir -DestinationDir $newDir
     try {
