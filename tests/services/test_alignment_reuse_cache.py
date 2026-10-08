@@ -1092,6 +1092,7 @@ def test_owned_lock_wait_aborts_without_publishing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import asyncio
+    import errno
 
     from frame_compare.utils import file_lock
     from frame_compare.utils.cancellation import (
@@ -1107,7 +1108,8 @@ def test_owned_lock_wait_aborts_without_publishing(
     def acquire(fd: int) -> None:
         try:
             real_acquire(fd)
-        except BlockingIOError:
+        except OSError as exc:
+            assert exc.errno in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}
             blocked.append(True)
             task = asyncio.current_task()
             assert task is not None

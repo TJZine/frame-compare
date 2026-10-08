@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
@@ -30,10 +32,10 @@ def test_stream_is_tty_handles_missing_and_broken_streams() -> None:
     assert stream_is_tty(_InteractiveTTY()) is True
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Real PTY signal proof requires a POSIX host")
 @pytest.mark.parametrize("prompt", ["reuse", "retry", "upload"])
 def test_first_sigint_interrupts_real_pty_prompt_and_restores_runner(prompt: str) -> None:
     import json
-    import os
     import pty
     import selectors
     import signal

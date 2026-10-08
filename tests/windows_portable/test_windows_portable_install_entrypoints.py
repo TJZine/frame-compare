@@ -105,6 +105,7 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
     tmp_path: Path, repo_root: Path
 ) -> None:
     import os
+    import shutil
     import subprocess
 
     if os.name != "nt":
@@ -117,17 +118,28 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env["PATH"] = str(Path(env["SystemRoot"]) / "System32")
-    env["ProgramFiles"] = str(tmp_path / "no-powershell")
+    # Keep real command discovery, without exposing host executables or its working directory.
+    shutil.copyfile(Path(env["SYSTEMROOT"]) / "System32/where.exe", tmp_path / "where.exe")
+    env["PATH"] = str(tmp_path)
+    # Set the fallback inside CMD; the Windows runner restores the host's ProgramFiles.
+    driver = tmp_path / "invoke.cmd"
+    driver.write_text(
+        "@echo off\n"
+        'set "ProgramFiles=%~dp0no-powershell"\n'
+        'call "%~dp0install.cmd" -SkipSync\n'
+        "exit /b %ERRORLEVEL%\n",
+        encoding="utf-8",
+    )
     proc = subprocess.run(
-        [env["COMSPEC"], "/d", "/c", str(wrapper), "-SkipSync"],
+        [env["COMSPEC"], "/d", "/c", str(driver)],
+        cwd=tmp_path,
         env=env,
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
     )
-    assert proc.returncode != 0
+    assert proc.returncode != 0, (proc.stdout, proc.stderr)
     assert "PowerShell 7 or newer is required" in proc.stdout + proc.stderr
     assert not marker.exists()
 

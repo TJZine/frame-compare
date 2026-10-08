@@ -2103,3 +2103,55 @@ handoff file itself was deliberately not edited. Windows, amd64, physical GPU,
 visible native review and other previously parked platform acceptance remain open;
 no skipped native test or absent job establishes those passes. Longer alignment
 native drain remains an explicit observation for that handoff.
+
+
+#### Concurrent remote integration before push
+
+The first normal push of record commit
+`b616e9ae` (`docs: record frame-level cancellation and viewer follow-up`) was
+rejected because the remote advanced from `80beafdc` to
+`612ab9847088be4a61217f9d96996d32327d2e11` during verification. Fetching showed six
+existing maintainer commits: `d124df04`, `34837433`, `2e8ed9aa`, `44a65dbf`,
+`1689d131`, `612ab984`. Their 13 changed paths are disjoint from this follow-up's
+owned source/tests/documents. They strengthen report/shortcut publication guards,
+Windows updater rollback/purge locking and Windows/test diagnostics/discovery;
+they also retire one redundant test. Those preexisting remote changes are preserved
+as their own history, not attributed to C1/C2 or silently overwritten.
+
+The parent performed a clean **non-rebasing, non-forced merge**, retaining all
+four follow-up commits and the remote commits. No branch switch, reset, stash,
+amend, worktree or force push was used. This necessary integration is an additional
+commit beyond the original unit/record sequence; it is required to satisfy the
+maintainer's later normal-push instruction while preserving concurrent work.
+
+Combined-source native verification passed **3235 tests**, **99 skipped**,
+**0 failures/errors** in **57.04 s**. The one fewer passing test reflects the
+remote's deliberate duplicate-cache-test retirement, not a new skip. The skip
+categories remain the original **83 Windows/PowerShell, 4 L-SMASH, 1 libplacebo,
+6 media opt-in, 3 resource opt-in and 2 live-service opt-in**. Chrome cases also
+passed within that full suite. Pyright **0/0**, Ruff lint, Bandit medium/high,
+import contracts and API drift checks passed again. The direct format command
+reported two unrelated untracked documentation drafts; the refreshed **665-path
+tracked snapshot** passed formatting (**525 files**). Neither draft was changed.
+The canonical distribution recipe passed again on that merged tracked snapshot,
+including fresh Python 3.13 installation and runtime-free help/version.
+
+Admission timestamps, throughput comparisons and independent C1/C2 review remain
+evidence for their unchanged production owners at `e8c478b2`; they are not claimed
+as new measurements of the merged image. New remote publication guards only
+strengthen the same no-publication contract; the combined native suite exercises
+their updated call paths. The refreshed Docker gate and strict documentation
+results for this integration are recorded next. The Windows handoff remains
+unmodified, and neither this merge nor skipped native tests establish physical
+Windows acceptance of the updater changes.
+
+
+The canonical serial Docker gate passed again on the merged source:
+**281 passed in 171.40 s, zero skips**, with the full production runtime / real
+frame / generated-output proofs passing. Runtime containers retained the same
+`network_mode: none` override; native build layers were cached. The updated image
+is `sha256:951134eab8751570619d2d7f08fbc113fc70f6f5e45d68086feb0d8e0883e8ad`. Log:
+`.tmp/followup-2026-10-08/controller/merged-docker.log`. The complete merged record
+is included in the refreshed strict-documentation snapshot before the final merge
+commit, `chore: integrate concurrent branch fixes`. Push uses the existing branch
+and normal fast-forward remote update; unrelated untracked files remain untouched.

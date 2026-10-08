@@ -497,6 +497,8 @@ def test_ctrl_c_cancels_alignment_cleanup_before_keyboard_interrupt(tmp_path: Pa
     reference.touch()
     comparison.touch()
     script = """
+import faulthandler
+faulthandler.dump_traceback_later(5)
 import asyncio
 import os
 import signal
@@ -521,18 +523,22 @@ request = alignment_request(
 )
 
 worker_reached_block = threading.Event()
+print("ctrl_c_stage=imports-ready", file=sys.stderr, flush=True)
 
 def block(**kwargs):
+    print("ctrl_c_stage=worker-ready", file=sys.stderr, flush=True)
     worker_reached_block.set()
     cancellation = kwargs["cancellation"]
     while not cancellation.is_set():
         time.sleep(0.001)
+    print("ctrl_c_stage=worker-cancelled", file=sys.stderr, flush=True)
     raise_if_alignment_cancelled(cancellation)
 
 alignment._compute_requested_alignments = block
 
 def interrupt_once_worker_ready():
     if worker_reached_block.wait(timeout=5):
+        print("ctrl_c_stage=sending-sigint", file=sys.stderr, flush=True)
         os.kill(os.getpid(), signal.SIGINT)
         return
     print("ctrl_c_setup=worker-never-reached-block", file=sys.stderr, flush=True)
@@ -543,17 +549,22 @@ helper.start()
 try:
     asyncio.run(alignment.align_clips_from_request(request, config))
 except KeyboardInterrupt:
-    print("ctrl_c_cleanup=ok")
+    print("ctrl_c_cleanup=ok", flush=True)
 else:
     raise SystemExit("SIGINT did not become KeyboardInterrupt")
+finally:
+    faulthandler.cancel_dump_traceback_later()
 """
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(reference), str(comparison)],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(reference), str(comparison)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"alignment child timed out; stdout={exc.stdout!r}; stderr={exc.stderr!r}")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ctrl_c_cleanup=ok"

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
@@ -42,6 +43,7 @@ def create_slowpics_url_shortcut(
     collection_title: str,
 ) -> SlowpicsShortcutResult:
     """Create a deterministic Windows InternetShortcut-style file."""
+    raise_if_cancelling()
     try:
         output_dir = _select_shortcut_directory(workspace)
     except (OSError, RuntimeError, PathEscapesRootError) as exc:
@@ -71,7 +73,7 @@ def create_slowpics_url_shortcut(
     )
     content = f"[InternetShortcut]\nURL={slowpics_url}\n"
     try:
-        write_text_atomic(shortcut_path, content)
+        write_text_atomic(shortcut_path, content, publish_guard=raise_if_cancelling)
     except OSError as exc:
         return SlowpicsShortcutResult(
             success=False,

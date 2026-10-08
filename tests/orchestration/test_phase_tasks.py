@@ -60,7 +60,6 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _create_config,
-    _frame_metrics,
 )
 
 if TYPE_CHECKING:
@@ -571,48 +570,6 @@ def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
             require_cache_only=True,
             vs_loader=cast("VSLoader", FailingLoader()),
         )
-
-
-def test_run_analyze_phase_computed_acquisition_reports_cache_miss(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
-    input_videos = [ctx.reference.path]
-    metrics = _frame_metrics(
-        luminance=[0.1, 0.9],
-        motion=[0.0, 0.8],
-        frame_count=2,
-        fps=Fraction(24, 1),
-        config_fingerprint="fingerprint",
-        clips=[],
-    )
-    calculate_calls = 0
-
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
-        nonlocal calculate_calls
-        calculate_calls += 1
-        return MetricsAcquisition(metrics=metrics, disposition="computed")
-
-    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
-        return FrameSelection(
-            frames=[0],
-            seed=ctx.config.analysis.random_seed,
-            breakdown=SelectionBreakdown(quantile_dark=[0]),
-        )
-
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
-
-    output = phase_selection.run_analyze_phase(
-        ctx,
-        input_videos=input_videos,
-        workspace=ctx.workspace,
-    )
-
-    assert output.metrics_cache_hit is False
-    assert calculate_calls == 1
 
 
 def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
