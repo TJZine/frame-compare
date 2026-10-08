@@ -32,6 +32,10 @@ const ReportViewer = {
         categoryFilterKeys: new Map(),
         imageLoadPromises: new Map(),
         imageRequestToken: 0,
+        mainImageRequests: {
+            left: null,
+            right: null,
+        },
         helpRestoreFocus: null,
         infoRestoreFocus: null,
         inspectorRestoreFocus: null,
@@ -362,16 +366,30 @@ const ReportViewer = {
         });
     },
 
-    showStageMessage(message) {
+    showStageMessage(message, retryActions = []) {
         if (!this.dom.emptyState || !this.dom.stage) return;
-        this.dom.emptyState.textContent = message;
+        const messageElement = document.createElement('span');
+        messageElement.textContent = message;
+        const children = [messageElement];
+        retryActions.forEach(action => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Retry';
+            button.setAttribute('aria-label', action.ariaLabel);
+            button.addEventListener('click', event => {
+                event.stopPropagation?.();
+                action.onClick();
+            });
+            children.push(button);
+        });
+        this.dom.emptyState.replaceChildren(...children);
         this.dom.emptyState.hidden = false;
         this.dom.stage.classList.add('rv-viewer-stage--empty');
     },
 
     hideStageMessage() {
         if (!this.dom.emptyState || !this.dom.stage) return;
-        this.dom.emptyState.textContent = '';
+        this.dom.emptyState.replaceChildren();
         this.dom.emptyState.hidden = true;
         this.dom.stage.classList.remove('rv-viewer-stage--empty');
     },
@@ -1950,16 +1968,11 @@ const ReportViewer = {
             rightClip,
             isOverlay,
             isBlink,
+            requiredSides = ['left', 'right'],
         } = imageState;
 
-        if (this.dom.leftImg.getAttribute('src') !== leftSrc) {
-            if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
-                this.dom.sizerImg.src = leftSrc;
-            }
-            this.dom.leftImg.src = leftSrc;
-        }
-        if (this.dom.rightImg.getAttribute('src') !== rightSrc) {
-            this.dom.rightImg.src = rightSrc;
+        if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
+            this.dom.sizerImg.src = leftSrc;
         }
 
         this.dom.leftImg.alt = leftAlt;
@@ -1975,6 +1988,20 @@ const ReportViewer = {
             'rv-overlay-label--active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx,
         );
+        this.installMainImageRequest(
+            'left',
+            leftSrc,
+            isOverlay ? this.state.activeClipIdx : this.state.leftClipIdx,
+            requiredSides.includes('left'),
+            this.state.imageRequestToken,
+        );
+        this.installMainImageRequest(
+            'right',
+            rightSrc,
+            this.state.rightClipIdx,
+            requiredSides.includes('right'),
+            this.state.imageRequestToken,
+        );
         this.updateCurrentFrameMetadata(frameData);
 
         this.dom.leftLayer.classList.toggle(
@@ -1989,6 +2016,7 @@ const ReportViewer = {
             'active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
         );
+        this.refreshMainImageAvailability();
         this.lens?.sync();
     },
 
@@ -2070,11 +2098,17 @@ const ReportViewer = {
             rightClip,
             isOverlay,
             isBlink,
+            requiredSides: isOverlay ? ['left'] : ['left', 'right'],
         });
     },
 
     clearFrameImages() {
         this.invalidatePendingImageState();
+        ['left', 'right'].forEach(side => {
+            const request = this.state.mainImageRequests[side];
+            this.detachMainImageRequest(request);
+            this.state.mainImageRequests[side] = null;
+        });
         this.gridView?.clear();
         this.lens?.clearTransient?.();
         if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
@@ -2088,6 +2122,8 @@ const ReportViewer = {
         }
         this.dom.leftLayer?.classList?.remove('active', 'rv-layer--aligned-active');
         this.dom.rightLayer?.classList?.remove('active');
+        if (this.dom.leftLayer) this.dom.leftLayer.dataset.status = 'empty';
+        if (this.dom.rightLayer) this.dom.rightLayer.dataset.status = 'empty';
         if (this.dom.labelLeft) this.dom.labelLeft.replaceChildren?.();
         if (this.dom.labelRight) this.dom.labelRight.replaceChildren?.();
         this.updateCurrentFrameMetadata(null);
@@ -2184,6 +2220,169 @@ const ReportViewer = {
 
     preloadImage(src) {
         void this.ensureImageReady(src);
+    },
+
+    imageUnavailableLabel(request) {
+        const clip = this.state.data?.clips?.[request?.clipIdx];
+        return ViewerFormat.clipDisplay(clip, 'micro') || 'Selected source';
+    },
+
+    detachMainImageRequest(request) {
+        if (!request?.image) return;
+        request.image.removeEventListener?.('load', request.onLoad);
+        request.image.removeEventListener?.('error', request.onError);
+        request.onLoad = null;
+        request.onError = null;
+    },
+
+    installMainImageRequest(side, src, clipIdx, required, requestToken, options = {}) {
+        const image = this.dom[`${side}Img`];
+        const layer = this.dom[`${side}Layer`];
+        if (!image || !layer) return;
+
+        const previous = this.state.mainImageRequests[side];
+        const preserveStatus = !options.force
+            && previous?.src === src
+            && previous.required === required
+            && ['ready', 'error'].includes(previous.status);
+        this.detachMainImageRequest(previous);
+
+        const request = {
+            side,
+            image,
+            layer,
+            src,
+            clipIdx,
+            required,
+            token: requestToken,
+            attempt: options.attempt || 0,
+            status: preserveStatus ? previous.status : 'loading',
+            onLoad: null,
+            onError: null,
+        };
+        this.state.mainImageRequests[side] = request;
+
+        request.onLoad = () => this.handleMainImageEvent(
+            side,
+            requestToken,
+            request.attempt,
+            src,
+            true,
+        );
+        request.onError = () => this.handleMainImageEvent(
+            side,
+            requestToken,
+            request.attempt,
+            src,
+            false,
+        );
+        image.addEventListener('load', request.onLoad);
+        image.addEventListener('error', request.onError);
+        layer.dataset.status = request.status;
+        image.hidden = request.status !== 'ready';
+
+        if (!preserveStatus && !options.deferSrc && image.getAttribute('src') !== src) {
+            image.src = src;
+        }
+        if (
+            !options.deferSrc
+            && image.complete === true
+            && image.getAttribute('src') === src
+        ) {
+            this.handleMainImageEvent(
+                side,
+                requestToken,
+                request.attempt,
+                src,
+                Number(image.naturalWidth) > 0 || Number(image.naturalHeight) > 0,
+            );
+        }
+    },
+
+    handleMainImageEvent(side, requestToken, attempt, src, succeeded) {
+        const request = this.state.mainImageRequests[side];
+        if (
+            !request
+            || request.token !== this.state.imageRequestToken
+            || request.token !== requestToken
+            || request.attempt !== attempt
+            || request.src !== src
+        ) return;
+
+        request.status = succeeded ? 'ready' : 'error';
+        request.image.hidden = !succeeded;
+        request.layer.dataset.status = request.status;
+        this.refreshMainImageAvailability();
+        if (succeeded) this.lens?.sync?.();
+    },
+
+    refreshMainImageAvailability() {
+        const unavailable = ['left', 'right']
+            .map(side => this.state.mainImageRequests[side])
+            .filter(request => (
+                request?.token === this.state.imageRequestToken
+                && request.required
+                && request.status === 'error'
+            ));
+        if (unavailable.length === 0) {
+            this.hideStageMessage();
+            this.clearStatus();
+            return;
+        }
+
+        const labels = unavailable.map(request => `${this.imageUnavailableLabel(request)} image unavailable`);
+        const message = labels.join(' · ');
+        this.showStageMessage(message, unavailable.map(request => ({
+            ariaLabel: `Retry ${this.imageUnavailableLabel(request)} image`,
+            onClick: () => this.retryMainImage(request),
+        })));
+        this.showStatus(message, 'error');
+    },
+
+    retryMainImage(request) {
+        const side = request?.side;
+        if (
+            !request
+            || !side
+            || request.token !== this.state.imageRequestToken
+            || this.state.mainImageRequests[side] !== request
+            || request.status !== 'error'
+        ) return;
+
+        const attempt = request.attempt + 1;
+        this.installMainImageRequest(
+            side,
+            request.src,
+            request.clipIdx,
+            request.required,
+            request.token,
+            { attempt, force: true, deferSrc: true },
+        );
+        const retryRequest = this.state.mainImageRequests[side];
+        retryRequest.image.removeAttribute('src');
+        const assign = () => {
+            if (this.state.mainImageRequests[side] !== retryRequest) return;
+            retryRequest.image.src = retryRequest.src;
+            if (
+                retryRequest.image.complete === true
+                && retryRequest.image.getAttribute('src') === retryRequest.src
+            ) {
+                this.handleMainImageEvent(
+                    side,
+                    retryRequest.token,
+                    retryRequest.attempt,
+                    retryRequest.src,
+                    Number(retryRequest.image.naturalWidth) > 0
+                        || Number(retryRequest.image.naturalHeight) > 0,
+                );
+            }
+        };
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(assign);
+        } else {
+            assign();
+        }
+        this.refreshMainImageAvailability();
     },
 
     ensureImageReady(src) {

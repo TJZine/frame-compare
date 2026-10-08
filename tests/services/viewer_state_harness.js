@@ -108,6 +108,7 @@ function fakeElement() {
         tagName: 'DIV',
         isContentEditable: false,
         isConnected: true,
+        listeners,
         classList: {
             toggle(name, force) {
                 const enabled = force === undefined ? !classes.has(name) : Boolean(force);
@@ -146,6 +147,10 @@ function fakeElement() {
             const registered = listeners.get(type) || [];
             registered.push(listener);
             listeners.set(type, registered);
+        },
+        removeEventListener(type, listener) {
+            const registered = listeners.get(type) || [];
+            listeners.set(type, registered.filter(item => item !== listener));
         },
         dispatch(type, event = {}) {
             if (!Object.hasOwn(event, 'target')) event.target = this;
@@ -334,6 +339,8 @@ function loadViewer({ clipCount, savedState = null }) {
         rightImg: fakeElement(),
         labelLeft: fakeElement(),
         labelRight: fakeElement(),
+        emptyState: fakeElement(),
+        status: fakeElement(),
         leftLayer: fakeElement(),
         rightLayer: fakeElement(),
         zoomRange: fakeElement(),
@@ -1739,6 +1746,140 @@ async function assertDeferredDiffCannotCommitAfterGridNavigation() {
     };
 }
 
+async function assertMainImageUnavailableState() {
+    const modes = [
+        { mode: 'slider', failedSide: 'right', clipIndex: 1 },
+        { mode: 'overlay', failedSide: 'left', clipIndex: 0 },
+        { mode: 'diff', failedSide: 'right', clipIndex: 1 },
+        { mode: 'blink', failedSide: 'right', clipIndex: 1 },
+    ];
+    const results = {};
+
+    for (const { mode, failedSide, clipIndex } of modes) {
+        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = mode;
+        viewer.updateImages();
+        if (mode === 'diff') {
+            deferredImages.forEach(image => image.trigger('load'));
+            await new Promise(resolve => setImmediate(resolve));
+            window.rafQueue.splice(0).forEach(callback => callback?.());
+        }
+
+        const failedImage = viewer.dom[`${failedSide}Img`];
+        const failedLayer = viewer.dom[`${failedSide}Layer`];
+        const label = viewer.state.data.clips[clipIndex].display.micro;
+        failedImage.dispatch('error');
+
+        assert.equal(viewer.dom.emptyState.hidden, false);
+        assert.equal(renderedText(viewer.dom.emptyState), `${label} image unavailableRetry`);
+        assert.equal(viewer.dom.status.textContent, `${label} image unavailable`);
+        assert.equal(viewer.dom.status.dataset.tone, 'error');
+        assert.equal(failedImage.hidden, true);
+        assert.equal(failedLayer.dataset.status, 'error');
+        assert.equal(viewer.dom[`${failedSide === 'left' ? 'labelLeft' : 'labelRight'}`].children.length > 0, true);
+
+        const retryButton = viewer.dom.emptyState.children.find(child => child.tagName === 'BUTTON');
+        assert.equal(retryButton.textContent, 'Retry');
+        assert.equal(retryButton.getAttribute('aria-label'), `Retry ${label} image`);
+        retryButton.dispatch('click', { stopPropagation() {} });
+        window.rafQueue.splice(0).forEach(callback => callback?.());
+        failedImage.dispatch('load');
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        assert.equal(failedImage.hidden, false);
+        assert.equal(failedLayer.dataset.status, 'ready');
+
+        results[mode] = {
+            label,
+            failedSide,
+            retryAriaLabel: retryButton.getAttribute('aria-label'),
+            recovered: viewer.dom.emptyState.hidden && viewer.dom.status.hidden,
+        };
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.staleErrorIgnored = true;
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        viewer.dom.leftImg.dispatch('load');
+        viewer.dom.rightImg.dispatch('load');
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        viewer.updateImages();
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.sameImageGenerationIgnored = true;
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.gridView = { render() {} };
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        viewer.state.mode = 'grid';
+        viewer.updateImages();
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.gridNavigationStaleErrorIgnored = true;
+    }
+
+    {
+        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        viewer.gridView = { render() {} };
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+
+        viewer.state.mode = 'diff';
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        assert.equal(deferredImages.length, 2);
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+
+        viewer.state.mode = 'grid';
+        viewer.updateImages();
+        deferredImages.forEach(image => image.trigger('load'));
+        await new Promise(resolve => setImmediate(resolve));
+        window.rafQueue.splice(0).forEach(callback => callback?.());
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.deferredDiffNavigationStaleErrorIgnored = true;
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        viewer.dom.rightImg.dispatch('error');
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        viewer.dom.leftImg.dispatch('load');
+        viewer.dom.rightImg.dispatch('load');
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.navigationRecovery = true;
+    }
+
+    return results;
+}
+
 {
     const { viewer } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
@@ -1897,9 +2038,13 @@ async function assertDeferredDiffCannotCommitAfterGridNavigation() {
     };
 }
 
-assertDeferredDiffCannotCommitAfterGridNavigation()
-    .then(result => {
-        summary.deferredDiffGridNavigation = result;
+Promise.all([
+    assertDeferredDiffCannotCommitAfterGridNavigation(),
+    assertMainImageUnavailableState(),
+])
+    .then(([deferredDiffResult, unavailableResult]) => {
+        summary.deferredDiffGridNavigation = deferredDiffResult;
+        summary.mainImageUnavailable = unavailableResult;
         console.log(JSON.stringify(summary));
     })
     .catch(error => {
