@@ -162,7 +162,7 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
                 effective_program_files.stderr,
             ),
         )
-    assert proc.returncode != 0, diagnostics
+    assert proc.returncode != 0, str(diagnostics)
     assert "PowerShell 7 or newer is required" in proc.stdout + proc.stderr
     assert not marker.exists()
 
