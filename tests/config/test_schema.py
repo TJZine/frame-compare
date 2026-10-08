@@ -62,6 +62,20 @@ def test_analysis_rejects_invalid_bounds(payload: dict[str, object], message: st
         AnalysisConfig.model_validate(payload)
 
 
+@pytest.mark.parametrize("field_name", ["ignore_lead_seconds", "ignore_trail_seconds"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_analysis_rejects_nonfinite_exclusions(field_name: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        AnalysisConfig.model_validate({field_name: value})
+
+
+@pytest.mark.parametrize("field_name", ["input_dir", "generated_dir", "config_dir"])
+@pytest.mark.parametrize("value", ["bad\x00path", "bad\ud800path"])
+def test_paths_reject_filesystem_unrepresentable_values(field_name: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        PathsConfig.model_validate({field_name: value})
+
+
 @pytest.mark.parametrize(
     ("value", "message"),
     [

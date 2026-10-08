@@ -45,6 +45,14 @@ def test_load_preset_success(tmp_path: Path) -> None:
     assert data == {"key": "value"}
 
 
+def test_load_preset_with_invalid_utf8_raises_preset_error(tmp_path: Path) -> None:
+    preset_path = tmp_path / "invalid-encoding.toml"
+    preset_path.write_bytes(b"[analysis]\nrandom_frame_count = 20\n\xff")
+
+    with pytest.raises(PresetInvalidError, match="Invalid preset file"):
+        load_preset("invalid-encoding", presets_dir=tmp_path)
+
+
 @pytest.mark.parametrize(
     ("name", "content", "error_type", "message"),
     [

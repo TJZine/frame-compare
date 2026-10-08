@@ -55,6 +55,8 @@ def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]
         payload = tomllib.loads(preset_path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
         raise PresetInvalidError(preset_path, str(exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise PresetInvalidError(preset_path, "preset is not valid UTF-8") from exc
     return payload
 
 

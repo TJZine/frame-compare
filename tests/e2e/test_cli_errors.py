@@ -139,3 +139,109 @@ def test_cli_errors_are_typed_and_json_only(
         "other_stream_empty": True,
     }
     record(f"E2-{scenario_id}", root, [(arguments, result)], summary, expected)
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("field_name", ["input_dir", "generated_dir", "config_dir"])
+def test_cli_rejects_nul_paths_as_typed_config_errors(
+    field_name: str,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace()
+    root.config_path.write_text(
+        f'[paths]\n{field_name} = "\\u0000"\n',
+        encoding="utf-8",
+    )
+    before = root.config_path.read_bytes()
+    result = run_cli(
+        root.root,
+        [
+            "run",
+            "--json",
+            "--dry-run",
+            "--skip-metadata",
+            "--no-upload",
+            "--root",
+            str(root.root),
+        ],
+    )
+
+    payload = json.loads(result.stdout)
+    assert result.exit_code == 2
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
+    assert result.stderr == ""
+    assert root.config_path.read_bytes() == before
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("json_output", [True, False], ids=["json", "human"])
+def test_cli_rejects_invalid_utf8_config_without_traceback(
+    json_output: bool,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace()
+    root.config_path.write_bytes(b"[analysis]\nrandom_frame_count = 10\n\xff")
+    before = root.config_path.read_bytes()
+    output_options = ["--json"] if json_output else []
+    result = run_cli(
+        root.root,
+        [
+            "run",
+            *output_options,
+            "--dry-run",
+            "--skip-metadata",
+            "--no-upload",
+            "--root",
+            str(root.root),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert root.config_path.read_bytes() == before
+    assert "Traceback" not in result.stderr
+    if json_output:
+        payload = json.loads(result.stdout)
+        assert payload["error"]["code"] == "FC-1002"
+        assert payload["error"]["name"] == "CONFIG_PARSE_ERROR"
+        assert result.stderr == ""
+    else:
+        assert result.stdout == ""
+        assert "[FC-1002]" in result.stderr
+        assert "CONFIG_PARSE_ERROR" not in result.stderr
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("field_name", ["ignore_lead_seconds", "ignore_trail_seconds"])
+def test_cli_rejects_nonfinite_exclusions_as_typed_config_errors(
+    field_name: str,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace()
+    root.config_path.write_text(
+        f"[analysis]\n{field_name} = inf\n",
+        encoding="utf-8",
+    )
+    before = root.config_path.read_bytes()
+    result = run_cli(
+        root.root,
+        [
+            "run",
+            "--json",
+            "--dry-run",
+            "--skip-metadata",
+            "--no-upload",
+            "--root",
+            str(root.root),
+        ],
+    )
+
+    payload = json.loads(result.stdout)
+    assert result.exit_code == 2
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
+    assert result.stderr == ""
+    assert root.config_path.read_bytes() == before

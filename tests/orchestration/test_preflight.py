@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -361,6 +362,34 @@ class TestResolvePaths:
             resolve_contained_path("$CONTAINED_OUTPUT", tmp_path)
             == (tmp_path / "generated" / "custom").resolve()
         )
+
+    @pytest.mark.parametrize("field_name", ["input_dir", "generated_dir", "config_dir"])
+    def test_resolve_paths_rejects_invalid_environment_path_value(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field_name: str,
+    ) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+        environment_name = "FRAME_COMPARE_INVALID_PATH"
+        original_expandvars = os.path.expandvars
+
+        def expandvars(value: str) -> str:
+            if value == f"${environment_name}":
+                return "invalid\x00path"
+            return original_expandvars(value)
+
+        monkeypatch.setattr("frame_compare.orchestration.preflight.os.path.expandvars", expandvars)
+        config = ConfigSchema(
+            paths=PathsConfig.model_validate({field_name: f"${environment_name}"})
+        )
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            resolve_paths(config, root)
+
+        assert exc_info.value.code == "FC-1003"
+        assert exc_info.value.validation_errors[0]["loc"] == ["paths", field_name]
 
     def test_selected_config_allows_exact_windows_portable_state_path(
         self,
