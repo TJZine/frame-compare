@@ -10,8 +10,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from threading import current_thread, main_thread
 
-from click import Abort
-from typer import Abort as TyperAbort
+from typer import Abort
 
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
@@ -65,10 +64,8 @@ def interruptible_prompt() -> Generator[None]:
     try:
         try:
             yield
-        except (KeyboardInterrupt, Abort, TyperAbort) as error:
-            if isinstance(error, (Abort, TyperAbort)) and not isinstance(
-                error.__context__, KeyboardInterrupt
-            ):
+        except (KeyboardInterrupt, Abort) as error:
+            if isinstance(error, Abort) and not isinstance(error.__context__, KeyboardInterrupt):
                 raise
             saved(signal.SIGINT, None)
             raise _RunInterrupt() from None

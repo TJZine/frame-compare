@@ -407,7 +407,7 @@ same local checkout, disjoint ownership, and no Git mutations.
 | U8 | `01a11cac-8813-7f92-979a-64534fcb4c27` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ee1d674f` |
 | U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Integrated `05adff41` |
 | U10 | `01a11cf6-2e2c-7ef3-bf8b-553b6f039d4e` | worker | gpt-6.1-sol / medium | Integrated `12b2eee1`; wave B review complete |
-| U11 | `01a11d39-822d-72f2-b67d-ccdec2195b67` | worker_luna | gpt-5.6-luna / xhigh | Documentation integrated; wave C review pending |
+| U11 | `01a11d39-822d-72f2-b67d-ccdec2195b67` | worker_luna | gpt-5.6-luna / xhigh | Integrated `9bccc330`; wave C review complete |
 
 Models and efforts above are the explicit creation settings; terminal reports
 will reconcile actual execution. Preset aliases were resolved from their TOML
@@ -1233,3 +1233,217 @@ media/browser/Docker/site run was introduced for prose-only changes. Exact
 runtime/platform and strict-site acceptance remains for the final serial gates.
 Configured `worker_luna` / `gpt-5.6-luna` / `xhigh` matches creation; actual
 sampler settings cannot be independently observed.
+
+U11 commit: `9bccc3300d069d940d3e061bdb92d0bbaf354ede` —
+`docs: reconcile setup, report, cache and runtime guidance`. Ten document paths
+staged explicitly; applicable hooks pass. YAML/Ruff/format hooks skip for this
+doc-only selection because there are no relevant files; whole-repository Ruff
+and format checks separately pass. Checkout was clean after commit.
+
+Wave C reviewer `01a11d3f-5b6c-7421-80d0-5ddb29ef8e98`, preset `reviewer`,
+explicit `gpt-6.1-sol` / `high`, receives committed `12b2eee1..9bccc330` and
+the source/historical routes, complete limits, deviations and proof-map duties.
+Review is read-only and cannot authenticate missing logs, approve new platform
+posture or make design decisions. Final heavy gates still have not started.
+
+### Wave C review and adjudication
+
+Independent reviewer inspected committed `12b2eee1..9bccc330`, all ten document
+deltas, runtime owners and exact historical handoff. No validated material
+finding or unresolved consequential choice. It repeated the 21 narrow controls
+(13 in 1.53 seconds, preset-save 8 in 0.53 seconds, 27 unrelated deselections)
+and one existing inspector/formatter driver (0.23 seconds): **22 passes, no
+skips**. Fresh installed CLI probes confirm random-only/user-only fastest+
+cache-only dry-run success without metrics, metric-control FC-3014 refusal,
+and symlinked preset-save target/link/temp behavior. Production Node formatter
+and initialization under New York timezone preserve ISO attributes and invalid
+text while localizing valid display text. A required document stub corrected
+the first probe setup error; only the subsequent observation is evidence.
+These probes are not actual Chrome, current GUI or native media acceptance.
+
+Adjudication: no fix required. Existing guards/source/probes are proportionate
+to prose-only scope, with no new harness, redundant ceremony or scope departure.
+Short repeated entry-guide statements serve distinct reader routes; the
+historical evidence is bounded and linked, never claimed as a current platform
+pass. Earlier hook workaround remains bounded and documented. Unit/shared-doc
+ownership and product/public/persistence contracts remain intact.
+
+Wave C proof map: F-017 wizard owner/first-use test and config/env/preset routes;
+F-018 renderer ISO metadata plus production viewer formatter/initializer and
+timestamp tests; F-019 exact 2026-10-07 handoff and verifier source, with raw-log/
+current-wrapper limits; F-020 dry-run/preparation `needs_analysis` guard plus
+installed no-metric/metric controls; D-02 preset save/atomic filesystem traversal,
+existing save tests and a real symlink-target CLI probe. No physical item waived.
+
+An unrelated untracked
+`docs/prompts/2026-10-08-documentation-refresh-planning-session.md` appeared
+outside this task. It is preserved and excluded from commits/review scope;
+the only task-owned dirty path at end-gate start is this execution record.
+All waves are reviewed; final gates now run serially against `9bccc330`.
+
+### Final gates: first attempt and U1 packaged-runtime checkpoint
+
+The gates ran serially against `9bccc330`. Logs and JUnit files are under
+`.tmp/remediation-2026-10-08/controller/final-gates/`; durations below are
+`/usr/bin/time -p` wall times. These passing results precede the pending U1
+correction and are not yet final acceptance of corrected code.
+
+- Native: `uv run --no-sync pytest -q -n4 --dist loadgroup
+  --junitxml=.tmp/remediation-2026-10-08/controller/final-gates/native.xml
+  --basetemp=.tmp/remediation-2026-10-08/controller/final-gates/native-tmp
+  -p no:cacheprovider` passed in 48.11 seconds: 3,222 passed, 99 skipped,
+  zero failures/errors. Exact skip reasons and counts:
+  - 4 collection skips: unavailable local L-SMASH plugin;
+  - 6 media E2E cases require `FRAME_COMPARE_E2E_REQUIRE_MEDIA=1`;
+  - 3 streaming-resource cases require
+    `FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1`;
+  - 1 passive slow.pics probe requires `FRAME_COMPARE_LIVE_SLOWPICS=1`;
+  - 1 live webhook requires `FRAME_COMPARE_LIVE_WEBHOOK=1` and its URL;
+  - 1 native libplacebo runtime case: local plugin unavailable;
+  - 1 portable-build regression requires PowerShell 7;
+  - 27 Windows PowerShell process-semantics cases;
+  - 1 generated-launcher case requires Windows with PowerShell;
+  - 3 Windows process-tree-semantics cases;
+  - 1 Windows CMD process-semantics case;
+  - 2 Windows source-installer process-semantics cases;
+  - 1 portable install/uninstall case requires Windows user-PATH semantics;
+  - 44 cases: `pwsh/powershell not available`;
+  - 2 portable-launcher PATH cases require Windows process semantics;
+  - 1 case requires Windows PowerShell 5.1 encoding semantics.
+  Live-service opt-ins remain unset under the user's authorization. U1 did not
+  change audio collector cleanup, so the conditional streaming-resource proof
+  is not required. Docker supplies the separate media/runtime proof.
+- Chrome: `uv run --no-sync pytest -q
+  tests/browser/test_report_browser_smoke.py
+  --junitxml=.tmp/remediation-2026-10-08/controller/final-gates/browser.xml
+  -p no:cacheprovider` passed in 15.75 seconds: 17 passed, zero skips/failures.
+- Docker: canonical `bash tools/verify_docker_integration.sh`, with the host
+  `FRAME_COMPARE_REQUIRE_LIBPLACEBO` unset and a scratch Compose override
+  setting `network_mode: none` on both runtime services, failed in 12.07 seconds
+  before pytest. Both images built; retained artifacts are
+  `generated/e2e/run.EUKo2F`. CLI help raised `ModuleNotFoundError: No module
+  named 'click'` from U1's new import in `utils/terminal.py`. A separate
+  network-disabled production-image inspection confirmed Typer 0.27.3 supplies
+  `typer.exceptions.Abort` and Click is absent. The runtime dependency export
+  excludes Click; the native development environment masked this defect.
+
+The proposed correction uses the declared runtime owner's `typer.Abort`, keeps
+the approved KeyboardInterrupt-context/EOF distinction, pending-interrupt
+checks and exact Runner-handler restoration, and replaces incidental Click
+test fixtures with Typer fixtures. Add a meaningful subprocess CLI import/help
+proof with Click unavailable, then rerun invalidated gates and independently
+review the correction. No dependency or lockfile change is proposed.
+
+Production correction is held for a controller decision because the existing
+controller requirements explicitly name Click's `Abort`. Request confirmation
+of Typer-only handling for actual production prompts and authorization for one
+additional U1 correction commit (U1 is already committed; amendments and resets
+are prohibited). No child may decide this interpretation. Remaining heavy
+gates, CHANGELOG and acceptance completion await this checkpoint.
+
+### Controller decision: U1 packaged-runtime correction
+
+The human relayed and approved the following decision directly in this chat.
+It resolves the held checkpoint, authorizes exactly one extra U1 correction
+commit, and adds a final distribution gate. All other constraints remain.
+The U1 worker is reused with its explicit `worker` settings
+(`gpt-6.1-sol`, `medium`); the existing wave A reviewer will inspect the
+correction before Docker verification. The full native gate is invalidated;
+Chrome's unchanged 17-case viewer result remains valid.
+
++**Controller decision: U1 correction (2026-10-08). Approved.** Record it in the execution record.
+
+**1. Typer-only Abort handling: approved.** The earlier decision named “click’s `Abort`” because prompts reach the user through `typer.confirm`. The intent was always “the Abort exception the actual production prompt raises”. In Typer 0.27.3 that is `typer.exceptions.Abort`: Typer bundles its own Click internally, does not depend on Click, and Click is absent from the runtime export. So:
+
+- Import and catch only `typer.Abort` (with `KeyboardInterrupt`) in utils/terminal.py. Remove the `click` import completely.
+- Keep every approved condition unchanged:
+  - count `Abort` as an interrupt only when its exception context is a `KeyboardInterrupt`;
+  - EOF (context `EOFError`) stays EOF, with an interrupt count of zero;
+  - check for a pending interrupt before reading and after a successful read;
+  - restore the exact saved Runner handler within the synchronous input scope;
+  - act on the main thread with a TTY and the Runner handler only.
+- No dependency or lockfile change. Do not add Click as a runtime dependency.
+- Production source must not import `click` anywhere. Typer is the declared owner of the prompt layer.
+
+**2. One additional U1 correction commit: approved.** No amend or reset. Suggested subject: `fix(cli): handle Typer prompt aborts without importing Click`. Replace the incidental Click test fixtures with Typer fixtures in the same commit.
+
+**3. Proof:**
+
+- **Runtime import without Click.** Add a subprocess test that blocks Click (`sys.modules["click"] = None` before importing anything), then imports `frame_compare.utils.terminal` and runs the CLI’s `--help` and `version` entry. It must fail on the current commit and pass after the fix.
+- **Prompt behavior.** Rerun the real-PTY prompt cases with Typer fixtures:
+  - a first Ctrl+C at `typer.confirm` exits 130;
+  - EOF is not an interrupt;
+  - handlers are restored.
+- **Distribution check.** Run the existing distribution recipe once at the end: build a fresh wheel, run scripts/verify_distribution.py, then check installed help and version in a fresh environment outside the checkout. This is the check that proves runtime dependencies are complete, independently of the development environment, and it would have caught this defect. Record it as a final gate.
+
+**4. Invalidated gates:** rerun the static gates, the affected focused tests, and the full native suite once after the correction. Then run the canonical Docker gate, which has not yet produced test results, so every Docker obligation is still open:
+
+- U1, U2 and U4 media and runtime behavior;
+- U5’s production-image `.tmp` sentinel check.
+
+The 17-case Chrome result stands unless the correction touches viewer files. Send the correction to the wave reviewer before the Docker run. Then continue with CHANGELOG and acceptance as planned.
+
+**5. Sibling check (cheap, record the result):** compare the runtime dependency export with the third-party packages imported anywhere under `src/frame_compare`. Report any other package that is installed only through the development environment but imported at runtime. Do not fix anything beyond Click without returning to the controller.
+
+---
+
+I added the distribution check to the final gates because it’s the one check built to catch “works in the dev environment, missing at runtime”. The Docker failure surfaced this by luck, before any tests ran.
+
+### U1 correction sibling import audit
+
+The controller compared the frozen base runtime export (`uv export --frozen
+--no-dev --no-emit-project --format requirements.txt`) with AST import sites
+throughout `src/frame_compare`, mapping top-level import names to installed
+distribution metadata. It also inspected dynamic import owners and embedded
+child-script imports. Scratch evidence is
+`controller/final-gates/runtime-import-audit.json` under the existing remediation
+scratch directory; the two exact frozen exports are retained alongside it.
+
+All base third-party imports resolve to runtime-export distributions: Pillow,
+anitopy, guessit, HTTPX, NumPy, Pydantic, pydantic-settings, pyperclip, Rich,
+structlog, tomli-w and Typer. PySide6, VapourSynth and VSView are absent from
+the base export but present in the declared `vsview` extra's frozen export;
+their source owners are optional GUI/native-media paths, not dependencies
+provided only by development tools. Dynamic file-lock imports are platform
+stdlib modules (`fcntl`/`msvcrt`); lazy facades resolve internal modules.
+The tonemap child script imports VapourSynth, and generated review sessions
+import VapourSynth/VSView, already covered by their runtime profiles.
+
+No additional development-only runtime import was found. Click's production
+import is the sole defect under correction. No other source, dependency or
+lockfile was changed for this audit. This static comparison establishes declared
+coverage, not execution of every optional feature; fresh distribution and
+Docker verification remain required.
+
+### U1 packaged-runtime correction integration
+
+The direct human approval is turn `01a11d52-1341-7b50-9229-da5c24a49732`,
+user message `01a11d52-1379-7c80-8fdf-b06462cc2998`. The reused U1 worker
+retrieved the original callback authorization before its terminal report.
+It changed exactly `utils/terminal.py`, `tests/utils/test_terminal.py` and
+`tests/cli/test_help_and_import.py`. Production now imports/catches only the
+declared Typer Abort. Every approved prompt condition remains intact; tests
+retire only the duplicate EOF parameter distinguished by library identity.
+The subprocess proof blocks Click immediately after importing `sys`, imports
+the actual terminal owner, then calls the actual CLI app for help and version.
+
+Red proof before production changes at `9bccc330`: `uv run --no-sync pytest
+-q -o addopts='' tests/cli/test_help_and_import.py -k without_click` produced
+2 expected failures/31 deselections in 0.52 seconds (1.21 seconds command wall).
+Both failures came from the direct Click import with Click blocked. Green:
+both owned test modules produced 44 passes in 4.84 seconds (5.39 seconds wall),
+including all three real PTY first-SIGINT cases, EOF count zero, foreign-handler
+preservation, exact handler restoration and queued cancellation. No skip.
+The child also passed scoped Ruff lint/format checks and released its paths.
+
+The parent inspected the actual diff and production source imports, confirmed
+the bounded ownership, and reran whole-tree static gates plus both affected
+test modules before the newly authorized correction commit. No viewer,
+dependency or lockfile changed; the 17-case real Chrome result stands.
+
+Parent gates passed: Pyright 0 errors/warnings, Ruff lint and format (521
+Python files), Bandit 0 medium/high issues, both import contracts kept, and
+44 focused tests in 4.54 seconds with no skips. Explicit-path pre-commit hooks
+passed; YAML skipped because no YAML file changed. The same previously reviewed
+ephemeral hook override is used for the commit after manual hooks, avoiding the
+forbidden automatic stash of the unrelated untracked/dirty work.

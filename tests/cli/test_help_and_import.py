@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 import typer.rich_utils as typer_rich_utils
 from pytest import MonkeyPatch
@@ -10,6 +13,32 @@ from frame_compare.config.overrides import CLI_OVERRIDE_MAP
 from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
 
 from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
+
+
+@pytest.mark.parametrize(
+    ("argument", "expected_output"),
+    [("--help", "Reproducible video comparisons"), ("version", "frame-compare ")],
+)
+def test_terminal_import_and_cli_entry_work_without_click(
+    argument: str, expected_output: str
+) -> None:
+    code = """
+import sys
+sys.modules["click"] = None
+import frame_compare.utils.terminal
+from frame_compare.cli.entry import app
+app()
+"""
+    result = subprocess.run(  # noqa: S603 - explicit interpreter and CLI arguments
+        [sys.executable, "-c", code, argument],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert expected_output in _normalize_cli_output(result.stdout)
 
 
 def test_root_help_mentions_run_wizard_doctor_preset_and_version():

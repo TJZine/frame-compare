@@ -131,7 +131,7 @@ def test_interruptible_prompt_leaves_foreign_handler_and_eof_untouched(
     import signal
     import sys
 
-    from click import Abort
+    from typer import Abort
 
     from frame_compare.utils.terminal import interruptible_prompt
 
@@ -160,7 +160,7 @@ def test_interruptible_prompt_leaves_foreign_handler_and_eof_untouched(
         signal.signal(signal.SIGINT, original)
 
 
-@pytest.mark.parametrize("outcome", ["answer", "click-eof", "typer-eof", "error"])
+@pytest.mark.parametrize("outcome", ["answer", "eof", "error"])
 def test_runner_prompt_restores_handler_without_counting_non_interrupts(
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
@@ -169,8 +169,7 @@ def test_runner_prompt_restores_handler_without_counting_non_interrupts(
     import signal
     import sys
 
-    from click import Abort
-    from typer import Abort as TyperAbort
+    from typer import Abort
 
     from frame_compare.utils.terminal import interruptible_prompt
 
@@ -181,13 +180,11 @@ def test_runner_prompt_restores_handler_without_counting_non_interrupts(
         saved = signal.getsignal(signal.SIGINT)
         try:
             with interruptible_prompt():
-                if outcome == "click-eof":
+                if outcome == "eof":
                     raise Abort() from EOFError()
-                if outcome == "typer-eof":
-                    raise TyperAbort() from EOFError()
                 if outcome == "error":
                     raise ValueError("read failed")
-        except (Abort, TyperAbort, ValueError):
+        except (Abort, ValueError):
             assert outcome != "answer"
         finally:
             assert signal.getsignal(signal.SIGINT) is saved
