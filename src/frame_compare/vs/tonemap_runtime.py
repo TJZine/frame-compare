@@ -8,6 +8,7 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import structlog
 
@@ -17,6 +18,14 @@ _REQUIRE_LIBPLACEBO_ENV = "FRAME_COMPARE_REQUIRE_LIBPLACEBO"
 _DISABLE_LIBPLACEBO_ENV = "FRAME_COMPARE_DISABLE_LIBPLACEBO"
 _LIBPLACEBO_PROBE_ENV = "FRAME_COMPARE_LIBPLACEBO_PROBE"
 _LIBPLACEBO_PROBE_TIMEOUT_SECONDS = 5.0
+_CHILD_PROCESS_CWD = Path(sys.executable).resolve().parent
+_PYTHON_INJECTION_ENV_KEYS = (
+    "PYTHONHOME",
+    "PYTHONINSPECT",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONUSERBASE",
+)
 
 
 @dataclass(slots=True)
@@ -24,6 +33,17 @@ class LibplaceboRuntimeState:
     """Process-owned state for the libplacebo runtime probe."""
 
     probe_result: bool | None = None
+
+
+def _build_probe_env() -> dict[str, str]:
+    """Build the probe environment without caller-controlled Python imports."""
+    env = os.environ.copy()
+    for key in _PYTHON_INJECTION_ENV_KEYS:
+        env.pop(key, None)
+    env["PYTHONSAFEPATH"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
+    env[_LIBPLACEBO_PROBE_ENV] = "1"
+    return env
 
 
 def probe_libplacebo_runtime() -> bool:
@@ -61,14 +81,16 @@ def probe_libplacebo_runtime() -> bool:
         _ = out.get_frame(0)
         """
     )
-    env = os.environ.copy()
-    env[_LIBPLACEBO_PROBE_ENV] = "1"
+    env = _build_probe_env()
 
     try:
-        # argv uses sys.executable and a static probe script; shell=True is never used.
+        # -I excludes the cwd, PYTHONPATH, and user site from imports. The safe
+        # cwd is also explicit so this remains true if the interpreter flags
+        # change. The copied environment retains native runtime/plugin paths.
         result = subprocess.run(  # nosec B603
-            [sys.executable, "-c", probe_script],
+            [sys.executable, "-I", "-c", probe_script],
             env=env,
+            cwd=_CHILD_PROCESS_CWD,
             capture_output=True,
             text=True,
             timeout=_LIBPLACEBO_PROBE_TIMEOUT_SECONDS,
