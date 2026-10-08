@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from tests.workflow_helpers import load_workflow
 
 from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
 from ._helpers import bash_executable_or_skip as _bash_executable_or_skip
+from ._helpers import bash_path_or_skip as _bash_path_or_skip
 
 RESOURCE_TEST = "tests/integration/test_alignment_streaming_resources.py"
 
@@ -125,6 +127,13 @@ def _run_verifier(
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     _write_fake_docker(fake_bin / "docker")
+    # The copied verifier must use the same installed project as this test process.
+    python_wrapper = fake_bin / "python3"
+    python_wrapper.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(_bash_path_or_skip(bash, Path(sys.executable)))} "$@"\n',
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
     invocation = tmp_path / "docker-invocation.txt"
     environment = os.environ.copy()
     environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"

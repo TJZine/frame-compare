@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -123,7 +124,12 @@ def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
 ) -> None:
     root = tmp_path / "workspace"
 
-    def _raise_write_error(_path: Path, _content: str) -> None:
+    def _raise_write_error(
+        _path: Path,
+        _content: str,
+        *,
+        publish_guard: Callable[[], None] | None = None,
+    ) -> None:
         raise PermissionError("locked")
 
     monkeypatch.setattr(

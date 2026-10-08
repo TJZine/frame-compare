@@ -721,7 +721,8 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
 
     def interrupt() -> None:
         assert ready.wait(3)
-        os.kill(os.getpid(), signal.SIGINT)
+        # os.kill(..., SIGINT) forcibly terminates Windows instead of invoking Runner.
+        signal.raise_signal(signal.SIGINT)
         interrupted.set()
         release_render.set()
 
@@ -793,7 +794,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         done, pending = real_wait(*args, **kwargs)
         if done and not failure_interrupted:
             failure_interrupted.append(True)
-            os.kill(os.getpid(), signal.SIGINT)
+            signal.raise_signal(signal.SIGINT)
             release_render.set()
         return done, pending
 

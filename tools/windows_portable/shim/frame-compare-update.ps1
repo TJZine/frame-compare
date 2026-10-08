@@ -654,6 +654,16 @@ function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
   $lockInfo = $null
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
+    # Another update may have pruned this backup after the unlocked preflight.
+    if (!(Test-Path -LiteralPath $backupDir -PathType Container)) {
+      throw "Backup id not found: $BackupId"
+    }
+    $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
+    $compatibilityError = Get-BackupCompatibilityError -BackupParent $backupParent -InstalledCompatibility $installedCompatibility
+    if (![string]::IsNullOrWhiteSpace($compatibilityError)) {
+      throw "Rollback refused: $compatibilityError."
+    }
+
     $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
     Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
     Write-Host "Rollback applied from backup: $BackupId"
@@ -1062,7 +1072,16 @@ function Invoke-FrameCompareUpdate([object[]]$ArgsValues) {
         throw "Unknown argument for purge-backups: $($argsList[$i])"
       }
     }
-    return Invoke-PurgeBackups -BundlePath $bundlePath -Keep $keep
+    if ($keep -lt 0) {
+      throw "--keep must be >= 0"
+    }
+    $lockInfo = $null
+    try {
+      $lockInfo = Acquire-UpdateLock -BundlePath $bundlePath
+      return Invoke-PurgeBackups -BundlePath $bundlePath -Keep $keep
+    } finally {
+      Release-UpdateLock -LockInfo $lockInfo
+    }
   }
 
   throw "Unknown command: $command. Run frame-compare-update --help"

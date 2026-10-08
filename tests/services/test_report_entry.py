@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -118,7 +119,13 @@ def test_generate_report_requires_explicit_output_path(report_data: ReportData) 
 def test_generate_report_wraps_persistence_failures_as_report_error(
     report_data: ReportData, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def fail_write(_path: Path, _content: str, *, encoding: str) -> None:
+    def fail_write(
+        _path: Path,
+        _content: str,
+        *,
+        encoding: str,
+        publish_guard: Callable[[], None] | None = None,
+    ) -> None:
         raise OSError("disk full")
 
     monkeypatch.setattr("frame_compare.services.report.entry.write_text_atomic", fail_write)

@@ -117,8 +117,8 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
         encoding="utf-8",
     )
     env = os.environ.copy()
-    env["PATH"] = str(Path(env["SystemRoot"]) / "System32")
-    env["ProgramFiles"] = str(tmp_path / "no-powershell")
+    env["PATH"] = str(Path(env["SYSTEMROOT"]) / "System32")
+    env["PROGRAMFILES"] = str(tmp_path / "no-powershell")
     proc = subprocess.run(
         [env["COMSPEC"], "/d", "/c", str(wrapper), "-SkipSync"],
         env=env,
