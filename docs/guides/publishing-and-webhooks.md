@@ -1,8 +1,10 @@
 # Publishing and webhooks
 
-Frame Compare is offline-first. slow.pics upload is disabled by default, and a
-first-use wizard writes `slowpics.auto_upload = false`. Enable it deliberately only
-after a local report looks right:
+Frame Compare is offline-first. slow.pics upload is disabled by default, and the
+first-use wizard does not prompt for or enable an upload toggle; it writes
+`slowpics.auto_upload = false` for a new configuration. Enable it deliberately only
+after a local report looks right, using the config file, the
+`FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true` environment variable, or a saved preset:
 
 ```toml
 [slowpics]

@@ -35,9 +35,11 @@ Supported patterns include:
 - `"fastest"` — benchmark usable sources and analyze the fastest one;
 - a source selector — analyze a specifically named source.
 
-Changing the analysis source does not change reference order or display order. The
-`fastest` policy is runtime-dependent and is therefore incompatible with
-`run --from-cache-only`.
+Changing the analysis source does not change reference order or display order. A
+random/user-only plan that does not require metrics remains valid in a dry run with
+`analysis_source = "fastest"` and `run --from-cache-only`; the `fastest` policy is
+runtime-dependent and is incompatible with `run --from-cache-only` when metrics are
+required.
 
 ## Make labels readable
 

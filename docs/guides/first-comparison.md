@@ -67,12 +67,12 @@ case-insensitively.
 ### 1. Wizard
 
 The wizard interactively sets the input directory, the generated-data location,
-reference selection, and the frame-selection goal. It does not configure rendering
-or publishing; those remain config-file and preset concerns. It writes configuration
-only after confirmation, and the first-use configuration explicitly keeps
-`slowpics.auto_upload = false`. After a successful save, or a no-op with nothing to
-change, it prints suggested `doctor`, `run --dry-run`, and `run` commands for your
-resolved workspace and config file. It never runs them.
+reference selection, and the frame-selection goal. It does not prompt for an upload
+toggle or configure rendering and publishing; those remain configuration, environment,
+and preset concerns. It writes configuration only after confirmation, and the first-use
+configuration explicitly keeps `slowpics.auto_upload = false`. After a successful save,
+or a no-op with nothing to change, it prints suggested `doctor`, `run --dry-run`, and
+`run` commands for your resolved workspace and config file. It never runs them.
 
 ### 2. Doctor
 

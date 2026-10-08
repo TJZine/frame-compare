@@ -406,7 +406,8 @@ same local checkout, disjoint ownership, and no Git mutations.
 | U7 | `01a11cac-7d6e-7920-a020-daad3bf50043` | worker | gpt-6.1-sol / medium | Integrated `25b15ae8` |
 | U8 | `01a11cac-8813-7f92-979a-64534fcb4c27` | worker_luna | gpt-5.6-luna / xhigh | Integrated `ee1d674f` |
 | U9 | Orchestrator directly | Direct option permitted by plan | Parent model; no child preset override | Integrated `05adff41` |
-| U10 | `01a11cf6-2e2c-7ef3-bf8b-553b6f039d4e` | worker | gpt-6.1-sol / medium | Controller-approved implementation integrated; wave B review pending |
+| U10 | `01a11cf6-2e2c-7ef3-bf8b-553b6f039d4e` | worker | gpt-6.1-sol / medium | Integrated `12b2eee1`; wave B review complete |
+| U11 | `01a11d39-822d-72f2-b67d-ccdec2195b67` | worker_luna | gpt-5.6-luna / xhigh | Documentation integrated; wave C review pending |
 
 Models and efforts above are the explicit creation settings; terminal reports
 will reconcile actual execution. Preset aliases were resolved from their TOML
@@ -1143,3 +1144,92 @@ CHANGELOG remains the required post-heavy-gate step. Child's configured
 actual sampler settings are not independently observable. Intermediate fixture
 and collection errors were repaired without weakening production obligations;
 only final clean selections are acceptance evidence.
+
+U10 local commit: `12b2eee1f3ed9b823b9fc73d63a864aeec72203a` —
+`refactor(warnings): carry producer semantics through run output`. Explicitly
+staged 52 implementation/test paths (including new `run_warnings.py`) and the
+three orchestrator-owned shared docs; applicable hooks passed. CLI-doc guards
+also pass (3 cases, 0.13 seconds). Checkout was clean after commit.
+
+Wave B reviewer: `01a11d32-e96a-72f2-8d98-c30253ef8730`, preset `reviewer`,
+explicit `gpt-6.1-sol` / `high`. Self-contained read-only assignment covers
+`ec2fc6ca..12b2eee1`, every approved amendment and clarification, deviations,
+source/test over-engineering hunt, F-014/F-015 test map, ownership/contracts and
+the remaining acceptance limits. No heavy gate, new design authority or
+recursive dispatch is granted. Actual sampler settings remain unobservable.
+
+### Wave B review and adjudication
+
+Independent reviewer inspected `ec2fc6ca..12b2eee1`, all 28 production and 24
+test deltas and affected callers. No validated material correctness or
+maintainability finding; no new consequential decision or scope expansion.
+Fresh focused evidence: **421 passed, no skips, 11.42 seconds** over 15 files;
+scoped pyright zero errors/warnings, Ruff/format all 52 paths, committed
+diff-check pass. An isolated disposable-process replay of exact baseline
+production function bodies produces six expected failures (F-014 and five
+F-015 origins, 0.48 seconds); those unchanged regressions pass against current
+code. Baseline and current run-record owners independently produce identical
+completed/failed V1 bytes for warning counts 2 and 10. This is supplemental
+body-replay evidence, not a complete baseline checkout or native acceptance.
+
+Adjudication: no correction required. Controller amendments remain explicit
+authorizations; no additional U10 deviation was found. The earlier manual-hook
+workaround remains bounded and justified. Over-engineering hunt found no
+parser residue, text-matched action policy, union carrier, shim, registry,
+unnecessary provenance DTO, new harness, skip or weakened assertion. Two local
+stable-sort key expressions reconstruct identical prior lexical order; no
+helper framework is justified. Literal sources and exact-record action
+association remain owned at the shared utility and CLI consumers; no import
+contract, JSON or persisted-schema expansion. U1 cancellation/failure capture
+and U4 parsers remain intact. Shared architecture/CLI deltas are accurate.
+
+Wave B test map:
+
+| Obligation | Representative proving test |
+| --- | --- |
+| F-014 | `test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics` (whole-label and ANSI substitution, invariant semantic fields) |
+| F-015 | `test_align_pre_review_summary_uses_frozen_fragments` (manual zero/nonzero, computed, cached, reviewed; both owners) |
+| Genuine skip | `test_report_confirmed_report_failure_skips_prompt_and_publish`; `test_auto_refinement_too_few_samples_remains_a_skipped_warning` |
+| Record association | `test_post_upload_association_requires_record_equality`; equality-copy shortcut/webhook row dedup |
+| Presentation cap/count | `test_result_summary_warning_headline_cap_and_verbose_expansion` |
+| JSON omission/bytes | `test_run_json_is_machine_only_and_omits_post_upload_actions`; `test_json_review_diagnostics_stay_on_stderr_and_run_stdout_is_pinned` |
+| V1 bytes/count/cap/privacy | `test_warning_record_bytes_preserve_count_cap_and_sanitization` |
+| Retry source selection | `test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain`; superseded frame-plan replacement |
+| Failure warning sink | `test_reserved_warning_sink_survives_prep_failure`; real interrupt failure-record/client-close controls; completed-write degradation |
+
+Counts overlap integration and are not summed. Heavy gates and all recorded
+physical/platform acceptance remain open. Wave C documentation is released
+against the final reviewed code at `12b2eee1`.
+
+U11 dispatch uses the current `worker-luna.toml` responsibility text and explicit
+`gpt-5.6-luna` / `xhigh`. Self-contained handoff covers full-plan/findings routes,
+F-017–F-020 and approved D-02, final code baseline, unit-only document ownership,
+exact shared-doc deltas returned to the orchestrator, historical versus current
+platform evidence, bounded checks and original human callback authorization.
+No feature, platform-proof, design or consequential decision authority is granted
+to the Luna chat. It must return such a question through the human/controller.
+
+### U11 integration evidence
+
+Seven unit-owned guides reconcile wizard scope/default publishing, report-local
+date/time with exact ISO metadata, metrics-conditional fastest/cache-only
+guidance, approved symlinked preset writes and historical offscreen evidence.
+Orchestrator applied the corresponding CLI-contract and architecture deltas.
+Historical 2026-10-07 handoff explicitly reports the Linux-container offscreen
+three-source session, panel, frame-0 outputs, sidecar and cleanup on macOS Docker
+Desktop; no current GUI run or independently authenticated raw log is claimed.
+Current X11 wrapper, visible desktop and physical native acceptance stay open.
+The runbook's bounded historical evidence already agrees and needed no edit.
+No runtime, platform posture, preset containment or wizard feature change.
+
+Focused checks repeated at integration: CLI docs (3), generated timestamp (4),
+fastest preparation (4), preset save (8), first-use wizard (1), and metrics-
+required fastest/cache-only dry-run refusal (1): **21 passed, no skips**.
+Source inspection confirms ISO `datetime`/tooltip preservation and existing
+preset-directory-link filesystem behavior. Whole-tree pyright zero errors/
+warnings, Ruff check/format pass (520 files), bandit medium/high pass (22 low),
+and both import contracts kept. Diff-check passes. No new test/harness or
+media/browser/Docker/site run was introduced for prose-only changes. Exact
+runtime/platform and strict-site acceptance remains for the final serial gates.
+Configured `worker_luna` / `gpt-5.6-luna` / `xhigh` matches creation; actual
+sampler settings cannot be independently observed.

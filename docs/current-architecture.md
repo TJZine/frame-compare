@@ -657,7 +657,7 @@ Current Docker capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the 2026-10-07 dependency-refresh handoff records reported Linux-container offscreen proof on macOS Docker Desktop for a production-generated three-source session, panel, frame-0 outputs, sidecar, and cleanup. The current Linux X11 host wrapper, visible launch, and physical native acceptance remain unverified |
 | Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
 
 Keep these integrations at their current owners:
@@ -721,9 +721,13 @@ construct the panel in its inert ordinary-session state, load a production-gener
 L-SMASH session with VSView 0.12.0, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
-result sidecar. This
-feature run has static contract proof only; execution remains unavailable/unverified
-until a compatible Linux/X11 host runs it. The contract covers dependency
+result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
+inside-container offscreen pass on macOS Docker Desktop for this contract, including
+a production-generated three-source L-SMASH session, frame-0 rendering, sidecar
+round-trip, and cleanup. This is historical reported evidence for that refresh,
+not a current GUI run; raw historical logs were not independently authenticated
+in this checkout. Execution through the current Linux/X11 host wrapper remains
+unavailable/unverified until a compatible Linux/X11 host runs it. The contract covers dependency
 availability, plugin discovery, panel construction, generated metadata/result
 integration, named-output registration, and offscreen rendering without requiring a
 real desktop launch. It does not prove visible X11 launch, Qt ergonomics, native

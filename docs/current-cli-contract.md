@@ -1000,9 +1000,10 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   gradient without reducing thumbnail image space or increasing card height.
   Category identification uses text in captions and filters; filters keep their counts,
   and the selected thumbnail retains its brass border.
-- The header shows the generation date in `YYYY-MM-DD` form using the timestamp's
-  recorded date, without timezone conversion. The exact timestamp remains in the date
-  tooltip, Report Information, and payload; unparseable date text is shown unchanged.
+- The header shows the generation date and time localized by the browser. The exact
+  ISO timestamp remains in the report payload and in the `<time>` element's `datetime`
+  and `title` attributes; hover over the header or Generated value to inspect it.
+  Unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.
@@ -1023,9 +1024,11 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 
 ### slow.pics Upload Behavior
 
-- slow.pics publishing is disabled by default. Users must set
-  `slowpics.auto_upload = true` in config or through the wizard before `run`
-  uploads generated screenshots.
+- slow.pics publishing is disabled by default. The first-use wizard prompts only
+  for paths, reference, and frame-selection goal; it writes
+  `slowpics.auto_upload = false` for a new config and provides no upload toggle.
+  Before `run` uploads generated screenshots, enable `slowpics.auto_upload = true`
+  in config, with `FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true`, or through a saved preset.
 - Users may additionally opt into report-confirmed upload with the config-only
   field `slowpics.confirm_upload_after_report = true`. The field is inert unless
   effective `slowpics.auto_upload = true`.
@@ -2045,5 +2048,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   values in the loaded config.
 - Loads the resolved config file.
 - Saves the current config as a named preset under `<root>/config/presets`.
+- A user-authored symlink at `<root>/config/presets` remains permitted. `preset save`
+  follows that directory link and writes the preset file to its resolved target.
 - On success, writes a concise confirmation to stderr including the preset name and
   saved preset path.

@@ -12,7 +12,7 @@ and the level of reproducibility the route can provide.
 | Windows portable source build | Windows 10/11 x64 | Medium to high | Build scripts assemble pinned inputs | Supported packaging fallback |
 | Docker default | macOS or Linux | Low to medium | Image | Recommended headless macOS/Linux route |
 | Docker NVIDIA | Compatible Linux NVIDIA host | High | Image plus host driver/toolkit | Experimental until proved on the host |
-| Docker X11 | Linux X11 desktop | High | Image plus host display/session | Static verifier contract covers offscreen VSView proof; execution and visible X11 remain unverified until proved on the host |
+| Docker X11 | Linux X11 desktop | High | Image plus host display/session | Historical Linux-container offscreen proof is recorded; the current X11 wrapper and visible desktop remain unverified |
 | Native source with `uv` | Windows, macOS, or Linux | High | Locked Python environment plus host media stack | Advanced |
 | Native source with pip | Compatible Python host | Highest | User-managed Python and media stack | Advanced integration route |
 
@@ -71,11 +71,16 @@ Tradeoffs:
 ### Optional Docker profiles
 
 The Linux NVIDIA and X11 routes are separate host-dependent proof surfaces. Passing the
-default Docker verification does not prove either optional profile. The VSView X11
-profile has a verifier contract for offscreen dependency/session/metadata/result proof;
-this feature run has static contract proof only, and execution plus visible X11 desktop
-behavior remain unverified until exercised on a compatible Linux host. Use the
-dedicated commands for the relevant proof surface.
+default Docker verification does not prove either optional profile. The
+[2026-10-07 dependency-refresh handoff](../plans/2026-10-07-dependency-refresh-windows10-handoff.md)
+records a reported `tools/verify_docker_gui.sh --inside-container` pass in the `gui-linux`
+image on macOS Docker Desktop with `QT_QPA_PLATFORM=offscreen`: a production-generated
+three-source session was loaded, the panel was constructed, frame 0 was rendered for the
+named outputs, the typed sibling sidecar was exercised, and cleanup completed. This is
+historical Linux-container offscreen media evidence for that refresh, not a current GUI
+run; its raw logs were not independently authenticated in this checkout. The Linux X11
+host wrapper, visible desktop behavior, and physical native acceptance remain unverified.
+Use the dedicated commands for the relevant proof surface.
 
 [Advanced Docker environments](../docker-environments.md)
 

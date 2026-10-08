@@ -80,6 +80,8 @@ frame-compare preset save publication-quality
 
 Presets are appropriate for reusable comparison intent such as frame counts, overlays,
 analysis mode, and publishing policy. Generated preset files omit runtime secrets.
+User-authored symlinks for the preset directory remain supported: `preset save` follows
+the directory link and writes the preset file to its resolved target.
 
 ## Apply a preset
 
