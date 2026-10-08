@@ -2,11 +2,125 @@ import asyncio
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 
-from frame_compare.utils.subproc import resolve_executable, run_subprocess
+import frame_compare.utils.subproc as subproc_module
+from frame_compare.utils.subproc import (
+    prepare_python_child,
+    resolve_executable,
+    run_subprocess,
+)
+
+
+def test_prepare_python_child_strips_injection_and_keeps_native_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONSTARTUP", "/caller/startup.py")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
+    environment = {
+        "PYTHONHOME": "/caller/python-home",
+        "PYTHONPATH": "/caller/python-path",
+        "PYTHONSTARTUP": "/caller/startup.py",
+        "PYTHONUSERBASE": "/caller/user-base",
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH": "/runtime/plugins",
+        "FRAME_COMPARE_RUNTIME_KIND": "docker",
+    }
+
+    child_argv, child_env = prepare_python_child(
+        [sys.executable, "-c", "print('ok')"], env=environment
+    )
+
+    assert child_argv[:2] == [sys.executable, "-P"]
+    assert child_env["PYTHONSAFEPATH"] == "1"
+    assert "PYTHONHOME" not in child_env
+    assert "PYTHONPATH" not in child_env
+    assert "PYTHONSTARTUP" not in child_env
+    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in child_env
+    assert "FRAME_COMPARE_RUNTIME_KIND" in child_env
+    if subproc_module.site.ENABLE_USER_SITE and not sys.flags.no_user_site:
+        assert "-s" not in child_argv
+        assert child_env["PYTHONUSERBASE"] == "/caller/user-base"
+    else:
+        assert "-s" in child_argv
+        assert "PYTHONUSERBASE" not in child_env
+
+
+def test_prepare_python_child_real_disabled_user_site_child_uses_no_user_site(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "sitecustomize-imported"
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "PYTHONPATH": str(Path(__file__).parents[2] / "src"),
+            "PYTHONUSERBASE": str(tmp_path / "userbase"),
+        }
+    )
+    script = textwrap.dedent(
+        f"""
+        import os
+        import site
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        from frame_compare.utils.subproc import prepare_python_child
+
+        marker = Path({str(marker)!r})
+        user_site = Path(site.getusersitepackages())
+        user_site.mkdir(parents=True, exist_ok=True)
+        (user_site / "sitecustomize.py").write_text(
+            "from pathlib import Path\\nPath({str(marker)!r}).touch()\\n",
+            encoding="utf-8",
+        )
+        child_argv, child_env = prepare_python_child(
+            [sys.executable, "-c", "import site; print(site.ENABLE_USER_SITE)"],
+            env=os.environ.copy(),
+        )
+        assert "-s" in child_argv
+        assert "PYTHONUSERBASE" not in child_env
+        result = subprocess.run(
+            child_argv,
+            cwd={str(tmp_path)!r},
+            env=child_env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if result.returncode != 0 or result.stdout.strip() != "False" or marker.exists():
+            raise SystemExit(
+                f"child user-site policy failed: {{result.returncode=}}, "
+                f"{{result.stdout=!r}}, {{result.stderr=!r}}, {{marker.exists()=}}"
+            )
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-s", "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(

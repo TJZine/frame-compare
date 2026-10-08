@@ -12,6 +12,8 @@ from pathlib import Path
 
 import structlog
 
+from frame_compare.utils.subproc import prepare_python_child
+
 log = structlog.get_logger()
 
 _REQUIRE_LIBPLACEBO_ENV = "FRAME_COMPARE_REQUIRE_LIBPLACEBO"
@@ -19,13 +21,6 @@ _DISABLE_LIBPLACEBO_ENV = "FRAME_COMPARE_DISABLE_LIBPLACEBO"
 _LIBPLACEBO_PROBE_ENV = "FRAME_COMPARE_LIBPLACEBO_PROBE"
 _LIBPLACEBO_PROBE_TIMEOUT_SECONDS = 5.0
 _CHILD_PROCESS_CWD = Path(sys.executable).resolve().parent
-_PYTHON_INJECTION_ENV_KEYS = (
-    "PYTHONHOME",
-    "PYTHONINSPECT",
-    "PYTHONPATH",
-    "PYTHONSTARTUP",
-    "PYTHONUSERBASE",
-)
 
 
 @dataclass(slots=True)
@@ -33,17 +28,6 @@ class LibplaceboRuntimeState:
     """Process-owned state for the libplacebo runtime probe."""
 
     probe_result: bool | None = None
-
-
-def _build_probe_env() -> dict[str, str]:
-    """Build the probe environment without caller-controlled Python imports."""
-    env = os.environ.copy()
-    for key in _PYTHON_INJECTION_ENV_KEYS:
-        env.pop(key, None)
-    env["PYTHONSAFEPATH"] = "1"
-    env["PYTHONNOUSERSITE"] = "1"
-    env[_LIBPLACEBO_PROBE_ENV] = "1"
-    return env
 
 
 def probe_libplacebo_runtime() -> bool:
@@ -81,14 +65,15 @@ def probe_libplacebo_runtime() -> bool:
         _ = out.get_frame(0)
         """
     )
-    env = _build_probe_env()
+    env = os.environ.copy()
+    env[_LIBPLACEBO_PROBE_ENV] = "1"
+    probe_argv, env = prepare_python_child([sys.executable, "-c", probe_script], env=env)
 
     try:
-        # -I excludes the cwd, PYTHONPATH, and user site from imports. The safe
-        # cwd is also explicit so this remains true if the interpreter flags
-        # change. The copied environment retains native runtime/plugin paths.
+        # -P excludes the cwd and script directory. The helper strips Python
+        # injection variables while retaining trusted user-site and native paths.
         result = subprocess.run(  # nosec B603
-            [sys.executable, "-I", "-c", probe_script],
+            probe_argv,
             env=env,
             cwd=_CHILD_PROCESS_CWD,
             capture_output=True,

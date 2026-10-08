@@ -1,11 +1,15 @@
 """Tests for libplacebo runtime probe policy."""
 
+import os
+import site
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import cast
 
 import pytest
+import structlog
 
 import frame_compare.vs.tonemap_runtime as tonemap_runtime_module
 from frame_compare.vs.tonemap_runtime import (
@@ -86,7 +90,7 @@ def test_libplacebo_probe_uses_current_vapoursynth_range_property(
         argv: list[str],
         **_kwargs: object,
     ) -> subprocess.CompletedProcess[str]:
-        captured["script"] = argv[3]
+        captured["script"] = argv[-1]
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
@@ -140,6 +144,7 @@ def test_libplacebo_probe_launches_an_isolated_child_with_runtime_environment(
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "/runtime/plugins")
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
     monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
@@ -147,15 +152,84 @@ def test_libplacebo_probe_launches_an_isolated_child_with_runtime_environment(
     assert probe_libplacebo_runtime() is True
 
     child_argv = cast(list[str], captured["argv"])
-    assert child_argv[:2] == [sys.executable, "-I"]
+    assert child_argv[0] == sys.executable
+    assert child_argv[1] == "-P"
+    assert "-I" not in child_argv
     assert captured["cwd"] == Path(sys.executable).resolve().parent
     child_env = captured["env"]
     assert isinstance(child_env, dict)
     assert "PYTHONPATH" not in child_env
     assert child_env["PYTHONSAFEPATH"] == "1"
-    assert child_env["PYTHONNOUSERSITE"] == "1"
     assert child_env["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "/runtime/plugins"
     assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "docker"
+    if site.ENABLE_USER_SITE and not sys.flags.no_user_site:
+        assert "-s" not in child_argv
+        assert child_env["PYTHONUSERBASE"] == "/caller/user-base"
+    else:
+        assert "-s" in child_argv
+        assert "PYTHONUSERBASE" not in child_env
+
+
+def test_libplacebo_probe_preserves_parent_user_site_in_real_child(tmp_path: Path) -> None:
+    """A parent with an enabled user site exposes that trusted site to its child."""
+    base_executable = getattr(sys, "_base_executable", sys.executable)
+    source_root = Path(__file__).parents[2] / "src"
+    dependency_root = Path(structlog.__file__).resolve().parent.parent
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "PYTHONUSERBASE": str(tmp_path / "userbase"),
+            "PYTHONPATH": os.pathsep.join((str(source_root), str(dependency_root))),
+        }
+    )
+    script = textwrap.dedent(
+        """
+        import site
+        from pathlib import Path
+
+        user_site = Path(site.getusersitepackages())
+        user_site.mkdir(parents=True, exist_ok=True)
+        (user_site / "vapoursynth.py").write_text(
+            "from types import SimpleNamespace\\n"
+            "RGB48 = 1\\n"
+            "class Clip:\\n"
+            "    @property\\n"
+            "    def std(self): return self\\n"
+            "    def SetFrameProps(self, **kwargs): return self\\n"
+            "    def get_frame(self, n): return None\\n"
+            "core = SimpleNamespace(\\n"
+            "    std=SimpleNamespace(BlankClip=lambda **kwargs: Clip()),\\n"
+            "    placebo=SimpleNamespace(Tonemap=lambda clip, **kwargs: clip),\\n"
+            ")\\n",
+            encoding="utf-8",
+        )
+
+        from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+
+        raise SystemExit(0 if probe_libplacebo_runtime() else 1)
+        """
+    )
+    result = subprocess.run(
+        [base_executable, "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(

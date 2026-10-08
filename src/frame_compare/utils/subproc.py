@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import site
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from shutil import which
@@ -12,6 +14,13 @@ _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
     "ffprobe": "FRAME_COMPARE_FFPROBE_EXECUTABLE",
 }
+_PYTHON_INJECTION_ENV_KEYS = (
+    "PYTHONHOME",
+    "PYTHONINSPECT",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONNOUSERSITE",
+)
 
 
 def _is_executable_file(path: Path) -> bool:
@@ -76,6 +85,39 @@ def _normalize_argv(argv: Sequence[str], cwd: Path | None) -> list[str]:
     return normalized
 
 
+def prepare_python_child(
+    argv: Sequence[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    """Prepare a child Python command with the parent's trusted import policy.
+
+    Safe-path mode excludes the working and script directories from imports.
+    Caller-controlled Python injection variables are removed, while an enabled
+    parent user site and its ``PYTHONUSERBASE`` remain available to the child.
+    When the parent has user-site imports disabled, ``-s`` keeps the child from
+    discovering a user site of its own.
+    """
+    if not argv:
+        raise ValueError("argv must contain at least one element")
+
+    child_env = dict(os.environ if env is None else env)
+    for key in _PYTHON_INJECTION_ENV_KEYS:
+        child_env.pop(key, None)
+
+    user_site_enabled = site.ENABLE_USER_SITE and not sys.flags.no_user_site
+    python_flags = ["-P"]
+    if user_site_enabled:
+        if env is not None and "PYTHONUSERBASE" in env:
+            child_env["PYTHONUSERBASE"] = env["PYTHONUSERBASE"]
+    else:
+        child_env.pop("PYTHONUSERBASE", None)
+        python_flags.append("-s")
+
+    child_env["PYTHONSAFEPATH"] = "1"
+    return [str(argv[0]), *python_flags, *(str(part) for part in argv[1:])], child_env
+
+
 def run_subprocess(
     argv: Sequence[str],
     *,
@@ -104,4 +146,4 @@ def run_subprocess(
     )
 
 
-__all__ = ["resolve_executable", "run_subprocess"]
+__all__ = ["prepare_python_child", "resolve_executable", "run_subprocess"]
