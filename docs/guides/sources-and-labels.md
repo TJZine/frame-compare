@@ -22,8 +22,7 @@ runtime work begins.
 
 ## Choose the analysis source
 
-The source used to compute luminance and motion metrics does not need to be the
-reference:
+The source used to compute luminance and motion metrics does not need to be the reference:
 
 ```toml
 [sources]
