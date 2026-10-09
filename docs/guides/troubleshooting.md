@@ -22,10 +22,8 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Doctor reports VapourSynth or L-SMASH-Works missing | Use Docker or Windows portable, or repair the native supported runtime; the default renderer requires VapourSynth |
 | Doctor reports vs-placebo or Vulkan unavailable | Repair the selected plugin/driver path or use the supported Docker software-Vulkan route for headless work |
 | Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify with the native Frame Compare VSView panel when available |
-| Doctor reports the Frame Compare alignment panel is missing | Install `frame-compare[vsview]` in the same Python environment that runs Frame Compare; PATH-only VSView discovery is unsupported |
-| The native alignment panel is inactive | Open a Frame Compare-generated session; ordinary VSView sessions and malformed/mixed output metadata intentionally remain inert |
-| The panel closed before saving | No typed result sidecar was written; reopen the generated session, visit every source, and choose **Confirm these aligned positions** or **Keep current alignment** |
-| Native review result was rejected | The sidecar is missing, malformed, stale, mixed-session, duplicated, incomplete, or outside raw source bounds; generate a fresh session and review again |
+| The VSView alignment panel is missing, inactive, or rejects a result | See [VSView alignment review](vsview-review.md#troubleshooting) |
+| An alignment line says `NOT APPLIED` | The audio candidate was not confirmed by the video; see [what the results mean](audio-alignment.md#what-the-results-mean) |
 | Requested frames cannot survive alignment | Reduce trims or frame counts and inspect the final shared overlap; user frames are not silently replaced |
 | Docker cannot write config or generated data | Export host UID/GID values and pre-create `config`, `comparison_videos`, and `generated` as the host user |
 | Docker report did not open | Expected across the container boundary; use the host helper and exact path printed by the run |
@@ -34,6 +32,8 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 | Code-only update reports a runtime fingerprint mismatch | Install the complete portable ZIP for that release; code-only updates cannot replace native media components |
 | Report opens without images | Keep `report.html` beside its `screenshots/` directory or rerun the comparison with `report.embed_images = true` |
 | A cache hit appears stale after replacing media | Ensure path, size, or modification time changed, or remove the smallest relevant cache entry |
+| `--no-cache` and `--from-cache-only` are rejected together | Choose one: the first disables cache use, the second requires it |
+| Docker prints `without an L-SMASH index cache` | Expected on the default Docker route; see [Docker](../getting-started/docker.md#the-index-warning) |
 
 ## Diagnose by pipeline stage
 
@@ -80,16 +80,7 @@ selection failures. It is not a general “continue anyway” option.
 
 ### Alignment
 
-Check that the selected audio streams contain corresponding material. A stable constant
-offset cannot fix drift, different edits, or mismatched cadence. Review early, middle,
-and late evidence. When native VSView review is available, open **Frame Compare
-Alignment Review**, unlink playheads, and visit the Reference and every Comparison tab.
-Leave each source on the same visible moment; the source lineup reports which outputs
-are ready and previews the signed trim. Save the complete lineup once with **Confirm
-these aligned positions**. If you already know the values, expand **Enter alignment
-manually...** and choose either source frames or signed offsets. **Keep current
-alignment** is the secondary whole-set action when you want to preserve the existing
-alignment authority without confirming an unapplied candidate.
+Check that the selected audio streams contain corresponding material. A constant offset cannot fix drift, different edits, or mismatched cadence; review early, middle, and late frames. To confirm or enter an offset by eye, use [VSView alignment review](vsview-review.md).
 
 ### Rendering and HDR
 
@@ -113,6 +104,7 @@ Include:
 - whether the command was interactive, quiet, or JSON;
 - sanitized `doctor` output;
 - sanitized run warnings and error code;
+- `alignment_diagnostics/` files when alignment is involved (they hold no media paths or credentials);
 - affected source extensions and relevant media properties;
 - `run --diagnose-paths` output when path resolution matters;
 - whether the issue reproduces with a small publication-safe fixture.
@@ -141,10 +133,9 @@ Do not delete the complete generated-data root as a first response.
 
 Platform-specific help:
 
-- [Windows Portable](../windows-portable.md)
+- [Windows portable](../windows-portable.md)
 - [Docker](../getting-started/docker.md)
-- [Advanced Docker Environments](../docker-environments.md)
-- [Native Source](../getting-started/native.md)
+- [Docker profiles](../getting-started/docker-profiles.md)
+- [Native source](../getting-started/native.md)
 
-For exact error streams, JSON shape, and exit behavior, see the
-[CLI Behavioral Contract](../current-cli-contract.md).
+For exact error streams, JSON shape, and exit codes, see the [CLI behavioral contract](../current-cli-contract.md) and its [exit-code table](../current-cli-contract.md#exit-codes-and-error-families).
