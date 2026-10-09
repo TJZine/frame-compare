@@ -369,7 +369,40 @@ For each run retain:
 Confirm deterministic repeatability from a clean generated-data directory and from a
 warm candidate cache.
 
-## 10. Completion record
+## 10. Native VSView panel acceptance
+
+Hosted Windows verification is required to prove the exact package, embedded runtime,
+same-environment entry-point discovery/loading, offscreen panel construction,
+generated-session metadata, atomic result round trip, and fail-closed result
+validation. After that proof
+passes, record these remaining interactive checks on a physical Windows 10/11 x64
+system:
+
+- open a real Frame Compare-generated session through the installed portable launcher;
+- verify the panel is discoverable from VSView's Tool Panel and remains inert in an
+  ordinary VSView session;
+- verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
+  suggestion markers, source-frame bounds, signed relationship, and trim-direction text;
+- unlink playheads, visit every source, use the whole-set positions action, then close
+  VSView and verify Frame Compare applies only the validated offsets;
+- exercise the manual source-frame and known-offset bases plus the whole-set keep-audio
+  action;
+- close or cancel before saving and verify optional mode retains the current result
+  while forced mode fails with an actionable diagnostic;
+- exercise missing/malformed/stale/mixed/duplicate/incomplete/out-of-bounds sidecars,
+  bounded readiness failure, child-process failure, and timeout behavior;
+- use real L-SMASH-backed media to verify native decoder/index diagnostics, then inspect
+  early, middle, late, and final shared-content evidence for drift or edit changes;
+- on the production GPU, verify Vulkan/HDR behavior and compare report output against
+  the prior supported bundle where the release changes runtime behavior.
+
+Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
+screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
+as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
+unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
+its offscreen contract does not establish visible ergonomics.
+
+## 11. Completion record
 
 Summarize the physical pass in the pull request with:
 

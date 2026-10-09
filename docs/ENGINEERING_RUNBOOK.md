@@ -141,6 +141,13 @@ or different fingerprints, before any unsafe dependency override; each refusal
 requires a complete portable bundle reinstall. Crossing a media-runtime
 fingerprint also requires a complete portable bundle reinstall.
 
+Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
+`pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
+source selection. They also require the supplied complete bundle's application version
+and complete packaged `app/src/frame_compare` tree to match that committed source before
+borrowing its compatibility fingerprints. Commit the intended release source and rebuild
+the complete bundle before creating the matching update artifact.
+
 Locked dependency audit (PowerShell):
 
 ```powershell
@@ -410,6 +417,41 @@ documented-only/unverified rather than supported.
 On macOS, an offscreen or synthetic-panel check proves only the Python/Qt/plugin
 contract; if `core.lsmas` is absent, it is not native L-SMASH media proof. Linux X11
 visible-GUI behavior remains unavailable/unverified until a compatible host runs it.
+
+### Alignment Accuracy Benchmark
+
+`tools/alignment_benchmark.py` runs every pair in a maintainer-supplied label
+file through the production alignment path (result cache disabled, per-pair
+diagnostics) and classifies each pair as `correct_applied`, `wrong_applied`,
+`provisional`, `unavailable`, or `correctly_withheld` for pairs that must never
+apply. It prints a sanitized summary (pair ids and categories only) and writes
+the full per-pair JSON plus diagnostics to the output directory. Run it in the Docker test service:
+
+```bash
+mkdir -p /tmp/u5-real-media
+docker compose run --rm \
+  --volume "$PWD/comparison_videos:/media:ro" \
+  --volume "/tmp/u5-real-media:/proof" \
+  frame-compare-test -lc \
+  'python tools/alignment_benchmark.py --labels /media/alignment_labels.json --output /proof'
+```
+
+Label schema (media paths are relative to the label file's directory):
+
+```json
+{
+  "pairs": [
+    {"id": "pair-1", "category": "development", "reference": "A.mkv",
+     "comparison": "B.mkv", "expected_frame": 0, "expected_automatic": "applied"},
+    {"id": "control-1", "category": "negative_control", "reference": "C.mkv",
+     "comparison": "D.mkv", "expected_frame": null,
+     "expected_automatic": "not_applied"}
+  ]
+}
+```
+
+`speed_change` pairs run with the comparison's effective FPS set to the
+reference's probed FPS, matching `sources.match_fps = "assume_reference"`.
 
 ### Windows Portable / Release-Path Verification
 

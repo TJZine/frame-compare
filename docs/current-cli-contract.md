@@ -8,6 +8,7 @@ It is intentionally about current behavior, not desired future behavior.
 - [Operating Stance](#operating-stance)
 - [Authority And Update Rules](#authority-and-update-rules)
 - [Command Surface](#command-surface)
+- [Exit Codes And Error Families](#exit-codes-and-error-families)
 - [Shared Path Resolution Rules](#shared-path-resolution-rules)
 - [Config-Only Sources Surface](#config-only-sources-surface)
 - [`history` Command Contract](#history-command-contract)
@@ -99,6 +100,27 @@ for first setup, a dry-run preview, and a local-only comparison. `run --help` gr
 options under Workspace and configuration, Sources and frame selection, Rendering
 and alignment, Reports and publishing, Planning and diagnostics, and Output modes.
 Help uses the current terminal width; it does not impose a routine 200-column width.
+
+## Exit Codes And Error Families
+
+Commands exit with these codes (`src/frame_compare/cli/errors.py`,
+`src/frame_compare/cli/run_command.py:346-354`,
+`src/frame_compare/cli/cli_helpers.py:130-139`):
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including a dry run, `--write-config`, a wizard no-op, and a declined wizard confirmation |
+| `1` | Unexpected or unclassified error |
+| `2` | Configuration error (`FC-1xxx`) or command-line usage error |
+| `3` | Dependency error (`FC-2xxx`), including a `doctor` run with a failing required check |
+| `4` | Input error (`FC-3xxx`) |
+| `5` | Processing error (`FC-4xxx`), or a run that finished unsuccessfully |
+| `6` | Network error (`FC-5xxx`) |
+| `130` | A run or the wizard interrupted by Ctrl+C, or a wizard prompt aborted or reaching end of input |
+
+The first digit of an `FC-` code selects its family and exit code. Human output
+prints the code and message on stderr; `--json` prints the typed error document
+described under Output Modes.
 
 ## Shared Path Resolution Rules
 
@@ -1746,6 +1768,37 @@ over a two-frame step on the prepared active picture; `auto` is the default prep
 rectangle policy. Unexamined targets retain evenly spaced planned review frames, which
 are not scored.
 
+Video confirmation runs whenever audio produces a global lag and uses the run's
+L-SMASH loader; there is no FFMS2 fallback. It scores 12 base positions across the
+middle 90% of the raw-frame overlap at offsets `r-2` through `r+2`. A strict local
+minimum must have a runner-up/best margin of at least 1.1. The exact frame is
+confirmed only within `r-1..r+1`, with at least 6 informative positions, at least
+75% wins, and a median winning margin of at least 1.5. Static, tied, repeated, or
+aliased frames are uninformative rather than false confirmation.
+
+After global confirmation, V5a checks frame-distinct disagreement regions with 12
+targeted positions in total: competing runs receive four positions first, single
+credible chunks receive four each in descending PSR order, and active non-credible
+chunks receive two each. At each position it compares the confirmed frame with the
+target's own compensated audio-frame neighbourhood, excluding the confirmed frame.
+Exact ties and two zero scores mean neither hypothesis wins. A non-credible
+neither-win is weak evidence and does not block. A credible chunk needs at least one
+confirmed-frame win and no alternative win; a run needs at least two confirmed-frame
+wins and no alternative win. Unexamined or unresolved credible evidence blocks.
+
+This is deliberately a sampling contract, not proof that every edit is found. A
+chunk that straddles an edit can resolve from sampled pre-edit motion while sampled
+post-edit frames are inconclusive; later shifted chunks usually expose the change,
+but the straddling chunk alone does not prove it. Active non-credible shifted audio
+is caught only when a target samples it and the alternative video wins. Fully silent
+or inactive shifted audio creates no target. Same-length replacement content is
+allowed because its constant offset remains correct.
+
+Level changes, compression, surround/downmix differences, stem changes, quiet
+sections, and local inconclusive evidence do not independently veto an otherwise
+confirmed offset. They remain review context. Credible evidence for another offset
+must still be resolved, and global audio/video confirmation is always required.
+
 Interrupting a run during fresh audio computation cooperatively cancels the active
 collection or bounded numeric work, waits for the owned FFmpeg child, pipe readers,
 and computation worker to finish cleanup, and then preserves the existing interrupted
@@ -1873,6 +1926,10 @@ option; see [Run Help Presentation](#run-help-presentation).
 100 nits. `color.target_nits` overrides that preset target only when the value is
 explicitly present in config or supplied through `--tm-target`; unrelated CLI overrides
 must not turn schema defaults into explicit tonemap target overrides.
+
+`tone_curve`, `gamma_lift`, and `contrast_recovery` follow the same rule as
+`target_nits`: each replaces the preset value only when explicitly present in config.
+`--tm-curve` overrides `tone_curve` for one run (`src/frame_compare/render/prepare.py:37-73`).
 
 The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
 forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
