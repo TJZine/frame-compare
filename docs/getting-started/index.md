@@ -1,83 +1,99 @@
 # Choose an installation
 
-Frame Compare has one CLI and three primary ways to provide its Python and media
-runtime. Choose based on operating system and how much native dependency management
-you want to own.
+Frame Compare has one CLI and three ways to supply its Python and media runtime. Choose
+by operating system and by how much of the media runtime you want to manage.
 
-<div class="fc-card-grid" markdown>
+<div class="fc-routes" markdown>
 
-<div class="fc-card" markdown>
+<div class="fc-route" markdown>
 
-## Windows portable
+<p class="fc-route-tag">Windows 10/11 x64</p>
 
-**Recommended for Windows 10/11 x64.**
+### [Windows portable](../windows-portable.md)
 
-The published bundle includes Python, FFmpeg, VapourSynth, the supported source and
-tonemapping plugins, VSView with its PySide6 backend and native Frame Compare
-alignment panel, installer, updater, and rollback tooling.
-
-[Install the Windows portable bundle](../windows-portable.md){ .md-button .md-button--primary }
+Complete runtime, VSView alignment panel, installer, and signed code-only updates.
 
 </div>
 
-<div class="fc-card" markdown>
+<div class="fc-route" markdown>
 
-## Docker
+<p class="fc-route-tag">macOS · Linux</p>
 
-**Recommended for reproducible macOS and Linux headless use.**
+### [Docker](docker.md)
 
-The image provides the managed runtime and uses explicit host mounts for configuration,
-media, reports, run records, and caches. The default route uses software Vulkan and
-does not include the interactive VSView runtime or alignment panel.
-
-[Start with Docker](docker.md){ .md-button .md-button--primary }
+Headless managed runtime with software-Vulkan HDR. Reports stay on the host.
 
 </div>
 
-<div class="fc-card" markdown>
+<div class="fc-route" markdown>
 
-## Native source
+<p class="fc-route-tag">Advanced</p>
 
-**For advanced host-managed installations.**
+### [Native source](native.md)
 
-Use this when direct host integration matters and you already manage compatible
-FFmpeg, VapourSynth, source plugins, vs-placebo, and Vulkan components.
-
-[Install from source](native.md){ .md-button .md-button--primary }
+Bring your own FFmpeg, VapourSynth, L-SMASH-Works, vs-placebo, and Vulkan.
 
 </div>
 
 </div>
 
-## Recommendation by situation
+## Which route fits
 
 | Situation | Recommended route |
 | --- | --- |
 | Windows user who wants the broadest supported feature set | Windows portable |
 | macOS user who wants a reproducible backend | Docker |
 | Linux user who wants the canonical headless route | Docker |
-| Linux user who specifically needs NVIDIA or X11 integration | Docker, then follow the separately verified advanced profile |
+| Linux user who needs NVIDIA acceleration or an X11 desktop | Docker, then the matching [Docker profile](docker-profiles.md) |
 | Existing native VapourSynth environment | Native source with `uv` |
 | Embedding Frame Compare in an existing Python environment | Native source with pip, with host runtime validation |
-| Contributor changing application code | Contributor environment from `CONTRIBUTING.md` |
+| Contributor changing application code | [Contributor environment](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md) |
 
-For dependency ownership, feature availability, and support boundaries, see the
-[full route comparison](route-comparison.md).
+## What each route includes
+
+| Capability | Windows portable | Docker | Native source |
+| --- | --- | --- | --- |
+| Discovery, probing, frame selection, and alignment | Yes | Yes | Yes, with the required runtime |
+| SDR screenshots and offline reports | Yes | Yes | Yes, with the required runtime |
+| HDR tonemapping | Host Vulkan driver | Software Vulkan | Host Vulkan driver |
+| VSView alignment panel | Included | Not included | Optional `vsview` extra |
+| Opening the report and slow.pics URL automatically | Interactive desktop session | No; use the host helper | Interactive desktop session |
+| Signed code-only updates and rollback | Yes | No | No |
+| History and caches that persist | Yes | Yes, through the host `generated/` mount | Yes |
+
+Browser and clipboard actions need an interactive desktop session; headless, SSH,
+service, and non-TTY sessions should not rely on them.
+
+## Who owns the runtime
+
+| Route | Runtime owner | Setup effort | Support |
+| --- | --- | --- | --- |
+| Windows portable release | The bundle | Lowest | Recommended on Windows |
+| Windows portable source build | Build scripts that assemble pinned inputs | Medium to high | Packaging fallback |
+| Docker | The image | Low to medium | Recommended headless route on macOS and Linux |
+| Native source with `uv` | Locked Python environment plus your media stack | High | Advanced |
+| Native source with pip | Your Python and media stack | Highest | Advanced integration |
+
+“Reproducible” does not mean identical pixels across unrelated operating systems or GPU
+drivers. Use the same route and runtime when bit-for-bit output matters.
+
+The [Supported media runtime](../supported-media-runtime.md) page is the home of
+component versions.
 
 ## After installation
 
 Use the same sequence on every route:
 
-1. Put at least two supported clips in the selected input directory.
+1. Put at least two supported video files in the selected input directory.
 2. Run the wizard.
 3. Run `doctor` through the same route.
 4. Run a dry run to inspect source discovery and output intent.
 5. Run the comparison and open the generated report.
 
-Continue with [Your First Comparison](../guides/first-comparison.md). Later
+Continue with [Your first comparison](../guides/first-comparison.md). Later
 comparisons with an established configuration and runtime usually need only the dry
 run and run; see [Repeat comparisons](../guides/first-comparison.md#repeat-comparisons).
 
-!!! note "Publishing remains off by default"
+!!! note "Publishing stays off"
     The first-use configuration keeps slow.pics automatic upload disabled. Local
     screenshot and report generation do not require any publishing account.

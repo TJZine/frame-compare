@@ -7,13 +7,12 @@ resolution remain consistent.
 ## Before you begin
 
 Create or select a workspace with at least two supported files in its input directory.
-For a publication-safe example, use names such as:
+For a publication-safe example matching the figures below, use two sources such as:
 
 ```text
 comparison_videos/
-├── reference.mkv
-├── hlg10-encode.mkv
-└── pq10-encode.mkv
+├── pq10-reference.ts
+└── hlg10-comparison.ts
 ```
 
 Supported extensions are `.mkv`, `.mp4`, `.avi`, `.m2ts`, and `.ts`, matched
@@ -81,9 +80,6 @@ the features you intend to use. Optional integrations can remain disabled, but a
 FFmpeg, VapourSynth, source-plugin, or Vulkan failure can block the corresponding
 rendering or alignment path.
 
-The doctor command confirms the core runtime for the selected route before the first
-comparison; the optional TMDB integration can remain unconfigured.
-
 ### 3. Dry run
 
 A dry run validates configuration, source discovery, reference and comparison order,
@@ -97,21 +93,21 @@ runtime is ready to render; run `doctor` to confirm runtime readiness. Check:
 - frame counts and analysis mode match your intent;
 - publishing remains disabled unless deliberately enabled.
 
-<figure class="fc-doc-figure">
-  <img src="../images/first-run-dry-run.png" alt="Frame Compare dry-run plan showing the generic workspace, three EBU/DVB display labels, frame 1000 intent, quality analysis, local output root, and disabled publishing.">
-  <figcaption>A dry run makes source order, frame selection, analysis mode, local output intent, and publishing state visible before any rendering starts.</figcaption>
+<figure class="fc-figure">
+  <img src="../images/terminal-dry-run.svg" alt="Dry-run output listing the workspace, two sources, the reference, frame counts, outputs, and disabled publishing." loading="lazy">
+  <figcaption>A dry run shows what a real run would use and create, without touching media or the network.</figcaption>
 </figure>
 
 ### 4. Run
 
-The normal run reserves a fresh run folder, probes the clips, builds the frame plan,
+The normal run reserves a fresh run folder, probes the sources, builds the frame plan,
 performs analysis and alignment when required, renders screenshots, records metadata,
 and writes the report. Network publication occurs only when the effective configuration
 or command explicitly enables it.
 
-<figure class="fc-doc-figure">
-  <img src="../images/first-run-complete.png" alt="Completed Frame Compare run showing three matched EBU/DVB clips, one selected frame, the report and run-folder paths, the optional VSView warning summary, and elapsed time.">
-  <figcaption>The completed run summary links the report and run folder to the three matched sources, records frame 1000, surfaces the optional VSView warning, and reports the duration.</figcaption>
+<figure class="fc-figure">
+  <img src="../images/terminal-run-complete.svg" alt="Completed run summary with the report and screenshot paths, frame and source counts, and timings." loading="lazy">
+  <figcaption>The summary links the report and screenshots of the run folder you created.</figcaption>
 </figure>
 
 ## Repeat comparisons
@@ -152,11 +148,11 @@ Revisit `wizard` when the input directory, generated-data location, reference, o
 frame-selection goal changes. After a successful save, or a no-op, it prints suggested
 `doctor`/`run --dry-run`/`run` commands for your resolved workspace and config file.
 Run them through the same route that ran the wizard. In Docker, the printed paths are
-container paths such as `/workspace`; use the Docker commands above from the host. Revisit `doctor` after any change to the
-runtime: an application upgrade, a new machine, a different Docker image, a
-graphics-driver or Vulkan update, or a VSView/plugin change. A dry run only validates
-configuration and intent; it does not probe media or prove the runtime is ready to
-render.
+container paths such as `/workspace`; use the Docker commands above from the host.
+Revisit `doctor` after any change to the runtime: an application upgrade, a new
+machine, a different Docker image, a graphics-driver or Vulkan update, or a
+VSView/plugin change. A dry run only validates configuration and intent; it does not
+probe media or prove the runtime is ready to render.
 
 ## Find the result
 
@@ -169,10 +165,14 @@ generated/
 └── <run-name>/
     ├── report.html
     ├── screenshots/
+    ├── alignment_diagnostics/
     ├── generated/
     ├── run_info.toml
     └── run_result.toml
 ```
+
+See [Output layout](../reference/output-layout.md) for what each item holds.
+`alignment_diagnostics/` exists only when audio alignment ran.
 
 Open `report.html` while keeping the run folder together. Relative screenshot links
 continue to work when the entire folder is moved or archived. Docker users should use
@@ -186,15 +186,16 @@ Before sharing a result:
 1. Review several frames in slider and diff modes.
 2. Check source labels, resolution, HDR/SDR identity, and frame numbers.
 3. Verify alignment around dialogue, cuts, and motion.
-4. Look for crop, aspect-ratio, or tone-mapping differences that could make the
+4. Look for crop, aspect-ratio, or tonemapping differences that could make the
    comparison misleading.
 5. Keep the result local until it looks correct.
 
 Continue with:
 
-- [Reports and Overlays](reports-and-overlays.md)
-- [Sources, References, and Labels](sources-and-labels.md)
-- [Frame Selection and Analysis](analysis-modes.md)
-- [Audio Alignment and VSView](audio-alignment.md)
-- [HDR and Tonemapping](hdr-tonemapping.md)
+- [Reports and overlays](reports-and-overlays.md)
+- [Sources, references, and labels](sources-and-labels.md)
+- [Frame selection and analysis](analysis-modes.md)
+- [Audio alignment](audio-alignment.md)
+- [VSView alignment review](vsview-review.md)
+- [HDR and tonemapping](hdr-tonemapping.md)
 - [Troubleshooting](troubleshooting.md)

@@ -1,65 +1,41 @@
-# Docker Environments
+# Docker profiles
 
-> Platform-specific Docker runtime details — capability matrix, GPU profiles,
-> GUI profiles, and the host open helper.
+The default Docker route is headless and uses software Vulkan; this page covers the
+Compose services, the optional NVIDIA and X11 profiles, and the host helper; basic use
+is on [Docker](docker.md).
 
-For basic Docker usage (build, doctor, run), see the
-[Docker getting-started guide](getting-started/docker.md).
+## Compose services
 
----
+| Audience | Service | Purpose | Mount policy |
+| --- | --- | --- | --- |
+| User | `frame-compare-wizard` | One-time or intentional interactive configuration, isolated behind the `setup` profile and started explicitly by the quick-start command | `config/` and `generated/` writable; `comparison_videos/` read-only |
+| User | `frame-compare-run` | Doctor, dry-run, normal runs, history, and other production-like CLI commands | `config/` and media read-only; `generated/` writable |
+| Contributor | `frame-compare` | Interactive development shell | Runtime workspace mounts plus the generated-data mount, with a shell entrypoint |
+| Contributor | `frame-compare-test` | Real-dependency integration verification | Repository and generated-data mounts |
 
-## Docker Path Overview
+Use the wizard and run services together so configuration and output paths match. Both
+run as `FRAME_COMPARE_HOST_UID` and `FRAME_COMPARE_HOST_GID` so files they create belong
+to you; the wizard is the only user service that can write configuration.
 
-The default Docker path is headless and deterministic: it uses software Vulkan and
-matches the CI-safe backend proof path rather than a desktop GUI workflow.
+## Capability by host
 
-The [Docker getting-started guide](getting-started/docker.md)
-is the canonical user journey. It pre-creates host-owned bind directories, creates
-configuration through the setup service, validates the intended run without side
-effects, and then uses the production-like run service.
-
-For reproducible "real deps" verification, prefer Docker:
-
-```bash
-bash tools/verify_docker_integration.sh
-```
-
----
-
-## Default Compose Services
-
-| Service | Purpose | Mount policy |
-| --- | --- | --- |
-| `frame-compare-wizard` | One-time or intentional interactive configuration, isolated behind the `setup` profile and started explicitly by the quick-start command | `config/` and `generated/` writable; `comparison_videos/` read-only |
-| `frame-compare-run` | Doctor, dry-run, normal runs, history, and other production-like CLI commands | `config/` and media read-only; `generated/` writable |
-| `frame-compare` | Interactive development shell | Runtime workspace mounts plus the generated-data mount, with a shell entrypoint |
-| `frame-compare-test` | Real-dependency integration verification | Repository and generated-data mounts |
-
-Use the wizard and run services as a pair so configuration and output paths remain
-consistent. The setup service is the only default user service that deliberately
-grants configuration write access. The README route also maps both services to the
-current host UID/GID so their writable bind-mount output remains host-owned.
-
----
-
-## Docker Capability Matrix
-
-| Environment | Current supported posture | Not first-class / not supported by default | Notes |
-| ----------- | ------------------------- | ------------------------------------------ | ----- |
+| Environment | Supported | Not supported by default | Notes |
+| --- | --- | --- | --- |
 | macOS Docker Desktop | Backend rendering, HTML reports, software tonemap, `doctor`, non-GUI `run`, reproducible software Vulkan path | Native GPU acceleration, Docker-based VSView GUI launch, native Qt desktop forwarding | Supported for backend/software-Vulkan features only. macOS Docker does not support VSView GUI launch beyond the documented backend features; use a native desktop runtime for VSView GUI workflows. |
 | Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSView unless separately configured | This is the canonical default Docker mode. |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile and GPU proof script for host-dependent Vulkan acceleration | Guaranteed parity without host setup, default CI path, GUI/VSView by default | Documented-only/unverified in this repo unless you run the dedicated proof on a compatible Linux NVIDIA host. |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSView/plugin availability, generated-session loading, native panel construction, typed metadata/result integration, and offscreen rendering | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. The verifier contract covers VSView 0.12.0, exact Frame Compare panel entry-point loading, named `Reference`/`Comparison 1` outputs, frame-0 rendering, and sibling-sidecar validation. The R81 dependency refresh has Linux-container offscreen proof on macOS Docker Desktop. The Linux X11 host wrapper and visible launch remain unverified. |
-| Native Windows portable | Full native app path including backend rendering, reports, VSView GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. See [Windows Portable](windows-portable.md). |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSView/plugin availability, generated-session loading, native panel construction, typed metadata/result integration, and offscreen rendering | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. The verifier contract covers VSView, exact Frame Compare panel entry-point loading, named `Reference`/`Comparison 1` outputs, frame-0 rendering, and sibling-sidecar validation. The Linux X11 host wrapper and visible launch remain unverified. |
+| Native Windows portable | Full native app path including backend rendering, reports, VSView GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. See [Windows portable](../windows-portable.md). |
 
 Optional Docker GPU and GUI profiles require compatible host setup and separate
 verification. The default Docker behavior remains the deterministic headless
 software-Vulkan path even when a host could support more. The GUI verifier's current
 offscreen result does not establish visible X11 desktop behavior.
 
----
+The NVIDIA profile is experimental until proved on the host. The X11 wrapper and a
+visible desktop are unverified.
 
-## NVIDIA GPU Profile
+## NVIDIA GPU profile
 
 Optional Linux NVIDIA hosts can try the separate GPU proof path:
 
@@ -87,9 +63,7 @@ Compose profiles, and the Compose `gpus` service attribute are documented at
 and
 [docs.docker.com/reference/compose-file/services/#gpus](https://docs.docker.com/reference/compose-file/services/#gpus).
 
----
-
-## Linux X11 GUI Profile
+## Linux X11 GUI profile
 
 The optional GUI profile is for Linux desktop users who want the native Frame Compare
 VSView alignment panel inside the container for interactive alignment checks. The
@@ -97,7 +71,7 @@ panel is available only for Frame Compare-generated sessions and is the sole hum
 alignment-review surface. It does not change the default Docker image or the default
 CI-safe path.
 
-### X11 Contract
+### X11 contract
 
 - `DISPLAY` must be set to a live host X11 display.
 - `/tmp/.X11-unix` must be mounted into the container.
@@ -109,20 +83,18 @@ CI-safe path.
   line up with the host session, while preserving the image's locked Python user
   base for VSView imports.
 
-### Proof Command
+### Proof command
 
 ```bash
 bash tools/verify_docker_gui.sh
 ```
 
-The verifier contract covers the exact `frame-compare-alignment-review` VSView entry
-point, offscreen panel construction, generated output metadata, atomic sibling-sidecar
-round-trip, and malformed-result rejection. The R81 dependency refresh ran the
-inside-container offscreen proof on macOS Docker Desktop; see the
-[Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)
-for evidence and limits. The Linux X11 host wrapper and visible desktop launch remain
-unverified until a compatible Linux/X11 host runs them. The host-wrapper command
-shown above requires Linux/X11 and is unavailable on macOS Docker Desktop.
+The verifier covers the `frame-compare-alignment-review` entry point, offscreen panel
+construction, generated output metadata, the atomic sidecar round trip, and
+malformed-result rejection. An offscreen pass does not prove visible desktop behavior;
+the X11 host wrapper and a visible launch remain unverified until a compatible Linux/X11
+host runs them. The host wrapper needs Linux with X11 and does not run on macOS Docker
+Desktop.
 
 If your X server denies access, use the narrow local-user form on the host instead
 of `xhost +`:
@@ -137,7 +109,7 @@ Cleanup:
 xhost -si:localuser:$(id -un)
 ```
 
-### Manual GUI Launch
+### Manual GUI launch
 
 Manual GUI launch stays separate from proofing. After the proof passes, you can
 launch an interactive container manually with:
@@ -150,9 +122,7 @@ docker compose -f docker-compose.yml -f docker-compose.gui-linux.yml run --rm fr
 GUI support here remains documented-only/unverified until you run
 `bash tools/verify_docker_gui.sh` successfully on a compatible Linux desktop host.
 
----
-
-## Host Open Helper
+## Host open helper
 
 Containerized runs cannot directly open the host browser for generated reports or
 slow.pics links. For the default `docker compose` volume layout, use the

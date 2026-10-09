@@ -13,22 +13,27 @@
 **[Documentation](https://tjzine.github.io/frame-compare/)**
 
 Frame Compare turns two or more local video sources into a repeatable comparison:
-it discovers and validates the clips, selects representative frames, aligns differing
+it discovers and validates the sources, selects representative frames, aligns differing
 edits when possible, renders labeled screenshots, and builds a static HTML report that
 works without a server. Publishing to slow.pics and webhook notification are explicit
 opt-ins.
+
+![Frame Compare report in Slider mode comparing the EBU DVB PQ10 reference with the HLG10 comparison at frame 1000.](docs/images/report-overview.webp)
+
+<sub>Footage: EBU/DVB HEVC test content © EBU, shot by Frans de Jong (EBU), PQ10 conversion by Andrew Cotton (BBC), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).</sub>
 
 ## Why Frame Compare
 
 - **Repeatable frame selection** — combine exact user frames with deterministic random,
   dark, bright, and motion selections.
-- **Alignment-aware comparisons** — use automatic audio correlation, prior accepted
-  offsets, and optional native VSView panel review.
+- **Alignment-aware comparisons** — apply an automatic audio offset only when the video
+  confirms it, reuse accepted offsets, and review the rest in the VSView alignment
+  panel.
 - **HDR-aware rendering** — tonemap HDR sources through VapourSynth and vs-placebo when
   required, with configurable overlays and diagnostics.
-- **A serious offline viewer** — inspect slider, overlay, diff, blink, and grid views;
-  navigate by frame or category; zoom, pan, inspect metadata, and keep browser-local
-  review notes.
+- **An offline review report** — inspect Slider, Single, Diff, Blink, and Grid views;
+  navigate by frame or category; zoom, pan, use the lens and Inspector, and keep
+  browser-local review notes.
 - **Reproducible delivery** — use the complete Windows portable bundle or the managed
   Docker runtime instead of assembling the media stack by hand.
 
@@ -40,36 +45,35 @@ opt-ins.
 | Docker | Reproducible headless use on macOS or Linux, including HDR software tonemapping | [Run with Docker](docs/getting-started/docker.md) |
 | Native source | Advanced users who already manage FFmpeg, VapourSynth, source plugins, and Vulkan | [Install from source](docs/getting-started/native.md) |
 
-Not sure which route fits? Use the
-[installation chooser](docs/getting-started/index.md) or the
-[detailed route comparison](docs/getting-started/route-comparison.md).
+Not sure which route fits? See [Choose an installation](docs/getting-started/index.md).
 
 ## First comparison
 
 Every route follows the same safe sequence:
 
-1. Put at least two supported clips in the selected input directory.
+1. Put at least two supported video files in the selected input directory.
 2. Run `frame-compare wizard` through that route.
 3. Run `frame-compare doctor` and resolve relevant failures.
 4. Preview the effective inputs and output intent with `run --dry-run`.
 5. Run the comparison and open the generated `report.html`.
 
 The exact commands and expected output are in
-[Your First Comparison](docs/guides/first-comparison.md). Later comparisons with an
+[Your first comparison](docs/guides/first-comparison.md). Later comparisons with an
 established configuration and runtime usually need only the dry run and run; see
 [Repeat comparisons](docs/guides/first-comparison.md#repeat-comparisons).
 
 ## Documentation map
 
-- [How the pipeline works](docs/guides/how-it-works.md)
+- [How Frame Compare works](docs/guides/how-it-works.md)
 - [Sources, references, and labels](docs/guides/sources-and-labels.md)
-- [Frame selection and analysis modes](docs/guides/analysis-modes.md)
-- [Audio alignment and VSView](docs/guides/audio-alignment.md)
+- [Frame selection and analysis](docs/guides/analysis-modes.md)
+- [Audio alignment](docs/guides/audio-alignment.md)
+- [VSView alignment review](docs/guides/vsview-review.md)
 - [HDR and tonemapping](docs/guides/hdr-tonemapping.md)
 - [Reports and overlays](docs/guides/reports-and-overlays.md)
-- [Configuration recipes](docs/guides/configuration-recipes.md)
 - [Troubleshooting](docs/guides/troubleshooting.md)
-- [Commands and configuration reference](docs/reference/commands-and-configuration.md)
+- [Commands](docs/reference/commands.md)
+- [Configuration](docs/reference/configuration.md)
 
 ## Project status
 
@@ -78,8 +82,8 @@ published release artifacts are the supported surfaces. Importable modules are
 conveniences unless the project explicitly documents a compatibility promise.
 
 The verification policy and current architecture are maintained in the
-[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) and
-[Current Architecture](docs/current-architecture.md).
+[Engineering runbook](docs/ENGINEERING_RUNBOOK.md) and
+[Current architecture](docs/current-architecture.md).
 
 ## License
 

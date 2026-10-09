@@ -15,15 +15,6 @@ VapourSynth is not optional for the default renderer. Setting
 `screenshots.use_ffmpeg = true` selects the FFmpeg screenshot path, but HDR frames
 that require tonemapping still need VapourSynth.
 
-The supported reference stack, exact source revisions, and platform policies are
-listed in [Supported Media Runtime](../supported-media-runtime.md). Native installs
-may resolve distribution-managed FFmpeg and Vulkan components differently, so
-`frame-compare doctor --json` and a generated-fixture smoke test are required after
-any runtime change. Unmanaged Windows, Linux, and macOS use OS-scoped selected-contract
-identities rather than verified native binary hashes. After replacing native FFmpeg,
-VapourSynth, or source-plugin binaries, clear generated caches and Frame Compare-owned
-indexes before reuse.
-
 ## Install with uv
 
 From a clone of the repository:
@@ -47,11 +38,6 @@ retaining the required native renderer dependencies. BestSource is owned by VSVi
 UI workspace; generated Frame Compare sessions continue to load sources through
 L-SMASH-Works and its Frame Compare-owned index paths.
 
-When upgrading an existing Windows checkout from the R79 stack, recreate `.venv`
-before syncing if its VapourSynth plugin directory contains manually installed or
-untracked DLLs. An old `libvslsmashsource.dll` can otherwise load before the selected
-wheel-owned `LSMASHSource.dll` and produce the deprecated API3 warning.
-
 Use the managed entry point for every command:
 
 ```bash
@@ -73,5 +59,16 @@ For a pip-managed installation, run `frame-compare wizard`, `doctor`, and `run`
 directly, without the `uv run --no-sync` prefix. The pip installation still relies
 on your native FFmpeg, VapourSynth R81, and L-SMASH-Works 1310 setup.
 
-Put at least two supported clips in `comparison_videos/`, then follow
-[Your First Comparison](../guides/first-comparison.md).
+Put at least two supported video files in `comparison_videos/`, then follow
+[Your first comparison](../guides/first-comparison.md).
+
+## Check the runtime
+
+The supported reference stack, exact source revisions, and platform policies are
+listed in [Supported Media Runtime](../supported-media-runtime.md). Native installs
+may resolve distribution-managed FFmpeg and Vulkan components differently, so
+`frame-compare doctor --json` and a generated-fixture smoke test are required after
+any runtime change. Unmanaged Windows, Linux, and macOS use OS-scoped selected-contract
+identities rather than verified native binary hashes. After replacing native FFmpeg,
+VapourSynth, or source-plugin binaries, clear generated caches and Frame Compare-owned
+indexes before reuse.
