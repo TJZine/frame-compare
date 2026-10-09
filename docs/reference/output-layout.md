@@ -15,12 +15,15 @@ sharing only explicitly reusable cache state across runs.
 │   │   └── alignment_reuse.toml
 │   └── tmdb.toml
 ├── clip_probe.toml
-└── <reserved-run-name>/
+└── <run-name>/
     ├── report.html
     ├── screenshots/
-    │   └── <frame-and-source>.png
+    │   └── <frame> - <source-stem>.png
+    ├── alignment_diagnostics/
+    │   └── comparison-<n>.json
     ├── generated/
-    │   └── <run-local intermediates>
+    │   ├── clip_probe.toml
+    │   └── vsview_sessions/
     ├── run_info.toml
     └── run_result.toml
 ```
@@ -39,12 +42,19 @@ rely only on documented artifacts rather than assuming every internal file is st
 | `<run>/report.html` | Canonical offline report entry point |
 | `<run>/screenshots/` | Rendered comparison images referenced by the normal report |
 | `<run>/generated/` | Run-local generated state and intermediates |
+| `<run>/alignment_diagnostics/` | Per-comparison alignment evidence; diagnostic only |
+| `<run>/generated/vsview_sessions/` | Generated VSView sessions and their saved panel results |
 | `<run>/run_info.toml` | Write-only run identity and provenance recorded at reservation |
 | `<run>/run_result.toml` | Completed or failed lifecycle record used by history |
+
+Files ending in `.lock` coordinate concurrent writers; leave them alone.
 
 Frame Compare-owned L-SMASH-Works `.lwi` indexes are adjacent to the media source rather
 than beneath this root. Their filename includes a runtime-scoped token. Ambiguous legacy
 `<media>.lwi` files are not silently adopted.
+
+When media is mounted read-only, as on the default Docker route, no index file can be
+written and each run rebuilds the index; see [Docker](../getting-started/docker.md#the-index-warning).
 
 ## Portability
 

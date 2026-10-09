@@ -3,7 +3,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
+from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_models import SourceOverrideConfig
 
 
 def test_current_cli_contract_keeps_command_families_and_live_override_map() -> None:
@@ -58,3 +62,22 @@ def test_current_authorities_describe_run_relative_records_and_clean_history_cut
     assert "Folders without a supported `run_result.toml` are omitted" in cli_contract
     assert "`FC-3016`" in cli_contract
     assert "does not create the root" in cli_contract
+
+
+def test_configuration_reference_lists_every_config_key() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    reference = (repo_root / "docs" / "reference" / "configuration.md").read_text(encoding="utf-8")
+    documented = set(
+        re.findall(r"^\| `([a-z_]+(?:\.[a-z_<>]+)+)` \|", reference, flags=re.MULTILINE)
+    )
+
+    expected: set[str] = set()
+    for section, field in ConfigSchema.model_fields.items():
+        model = field.annotation
+        assert isinstance(model, type) and issubclass(model, BaseModel)
+        expected.update(f"{section}.{key}" for key in model.model_fields)
+    expected.update(
+        f"sources.overrides.<selector>.{key}" for key in SourceOverrideConfig.model_fields
+    )
+
+    assert documented == expected
