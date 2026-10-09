@@ -97,5 +97,5 @@ than hashing the full media file. A replacement that preserves all three is inte
 considered the same source. Advance the modification time or clear the relevant cache
 when such a replacement occurs.
 
-For exact schemas and persistence behavior, see [Current Architecture](../current-architecture.md)
-and the [CLI Behavioral Contract](../current-cli-contract.md).
+For exact schemas and persistence behavior, see [Current architecture](../current-architecture.md)
+and the [CLI behavioral contract](../current-cli-contract.md).
