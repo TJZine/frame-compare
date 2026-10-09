@@ -22,7 +22,8 @@ runtime work begins.
 
 ## Choose the analysis source
 
-The clip used to compute luminance and motion metrics does not need to be the reference:
+The source used to compute luminance and motion metrics does not need to be the
+reference:
 
 ```toml
 [sources]
@@ -83,7 +84,7 @@ short source names: a source's release group when no other source shares it
 (case-insensitive), otherwise its compact release descriptor, or its label when
 neither is available. Explicit labels stay exact, and remaining collisions are
 qualified deterministically.
-Report v1.2 similarly derives collision-safe control and constrained labels from the
+The report derives collision-safe control and compact labels from the
 prepared release identity while retaining the canonical label for keys and mappings.
 The report Clips inspector keeps the exact filename available, and an explicit source
 label remains the primary report presentation name. None of these presentation choices

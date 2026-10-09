@@ -23,20 +23,22 @@ move.
 generated_dir = "D:/FrameCompareData"
 ```
 
+Use a normal user-writable directory. The Windows updater and uninstaller leave an
+external generated-data root outside their replacement boundary.
+
 Environment variables and platform-specific path rules are documented in the
-[CLI Behavioral Contract](../current-cli-contract.md#shared-path-resolution-rules).
+[CLI behavioral contract](../current-cli-contract.md#shared-path-resolution-rules).
 
 ## Run-folder layout
 
 ```text
 <generated-data-root>/
 ├── cache/
-│   ├── analysis/
-│   └── alignment/
 ├── clip_probe.toml
 └── <run-name>/
     ├── report.html
     ├── screenshots/
+    ├── alignment_diagnostics/
     ├── generated/
     ├── run_info.toml
     └── run_result.toml
@@ -45,7 +47,7 @@ Environment variables and platform-specific path rules are documented in the
 The top-level shared cache is not a history entry. Each immediate run folder is
 self-contained for review, while selected caches remain reusable across compatible runs.
 
-See [Output Layout](../reference/output-layout.md) for ownership and portability rules.
+See [Output layout](../reference/output-layout.md) for ownership and portability rules.
 
 ## List recorded runs
 
