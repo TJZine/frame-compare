@@ -82,7 +82,10 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
     )
     search_scope_check = _step_by_name(build, "Check user documentation search scope")["run"]
     assert 'Path("site/search.json")' in search_scope_check
-    assert '("TODO/", "plans/")' in search_scope_check
+    assert (
+        '("TODO/", "plans/", "reviews/", "prompts/", "images/", "release-evidence/")'
+        in search_scope_check
+    )
 
 
 def test_docs_workflow_gates_pages_steps_and_deployment(repo_root: Path) -> None:

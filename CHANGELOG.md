@@ -56,6 +56,19 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   `window_stride_seconds`, `minimum_valid_windows`, `consensus_minimum_ratio`,
   `refinement_mode`, `refinement_sample_rate`) now fail validation as unknown
   keys; delete each such key.
+- Refresh the report viewer: the Inspector has Frame, Clips, Image offset, and Review
+  tabs with a per-source frame table; review export and import moved into the Review
+  tab; the lens can caption the magnified source; source labels show file size; the
+  header shows a localized generation time; and the fit-width control is removed.
+- Refresh the terminal presentation of the run plan, sources, alignment, and the
+  completion summary. Machine-readable JSON output is unchanged.
+- The wizard prints suggested `doctor`, `run --dry-run`, and `run` commands for the
+  exact workspace and config it saved.
+- `run --help` groups options by purpose, and an invalid `--overlay`, `--tm-preset`,
+  or `--tm-curve` value lists the allowed choices before any work starts.
+- Update the supported runtime to VapourSynth R81, VSView 0.12.0, CPython 3.13.16,
+  vsjetengine 1.8.0, vspackrgb 2.0.0, BestSource 22, and Windows FFmpeg
+  `n8.1.3-9-g29e619e767`. Install a complete portable bundle for this runtime.
 
 ### Fixed
 
@@ -91,6 +104,14 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   to support PowerShell 5.1. Rollback refuses backups with missing or incompatible
   runtime identity before changing files. Reinstall full bundles into a fresh,
   empty folder rather than overlaying an existing bundle.
+- Reject `--no-cache` combined with `--from-cache-only` in runs and dry runs before any
+  runtime work.
+- Redact `slowpics.webhook_url` and `tmdb.api_key` inputs in every configuration
+  error.
+- Bound webhook DNS resolution and keep application secrets out of the resolver.
+- Reap VSView review processes after interrupted waits.
+- Discard pending Diff image loads after Grid navigation so a newer frame is never
+  overwritten.
 
 ## [0.6.0]
 
