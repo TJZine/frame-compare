@@ -39,10 +39,10 @@ The wizard does not configure tonemapping. Choose a preset in `[color]`, save it
 preset, or override it for one run with `--tm-preset`, `--tm-target`, and `--tm-curve`.
 
 The preset sets every value; `target_nits`, `tone_curve`, `gamma_lift`, and
-`contrast_recovery` override it only when you write them in the file. `--tm-target` and
-`--tm-curve` override the file for one run; `--tm-preset` replaces only the preset, and
-values written in the file still override it (source:
-`src/frame_compare/render/prepare.py:37-74`).
+`contrast_recovery` override it only when explicitly supplied in the configuration file
+or environment variables. `--tm-target` and `--tm-curve` take precedence for one run;
+`--tm-preset` replaces only the preset, and explicitly supplied configuration values
+still override it (source: `src/frame_compare/render/prepare.py:37-74`).
 
 | Preset | Curve | Target | Gamma lift |
 | --- | --- | --- | --- |
