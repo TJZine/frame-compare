@@ -5,133 +5,93 @@ search:
 
 # Documentation image capture record
 
-This directory contains the V2 public-facing screenshots used by the README and
-documentation site. The capture follows the active
-[V2 screenshot remediation plan](../plans/2026-08-17-documentation-v2-screenshot-remediation.md)
-and uses one rights-cleared natural-image source set.
+## Capture sets
 
-This record exists to keep future recaptures consistent, publication-safe, and
-reproducible. It is not a second documentation workflow or a product contract.
+The [documentation refresh plan](../plans/2026-10-08-documentation-refresh.md)
+defines two capture sets:
 
-## Canonical capture workspace
-
-Use a clean workspace outside the repository and outside the installed portable bundle:
-
-```text
-C:\FrameCompareDemo\
-├── config\
-│   └── config.toml
-├── comparison_videos\
-│   ├── reference.mkv
-│   ├── hlg10-encode.mkv
-│   └── pq10-encode.mkv
-└── generated\
-```
-
-The physical filenames are deliberately generic. Do not capture original release names,
-release groups, private download paths, usernames, server names, or collection paths.
-
-Use explicit presentation labels:
-
-```toml
-[sources]
-reference = "reference.mkv"
-analysis_source = "reference"
-label_mode = "stem"
-
-[sources.overrides."reference.mkv"]
-label = "EBU DVB PQ10 — Reference"
-
-[sources.overrides."hlg10-encode.mkv"]
-label = "EBU DVB HLG10 — Comparison"
-
-[sources.overrides."pq10-encode.mkv"]
-label = "EBU DVB PQ10 — SDR Presentation"
-```
-
-When the report does not present the title elsewhere, prefix each label with the
-publication-safe title. When it does, source-only labels are cleaner and avoid repeating
-the same title in every control.
+1. Set 1 uses macOS, Docker, the official EBU/DVB streams, and headless Chrome
+   for report, HDR, and terminal captures (U1).
+2. Set 2 uses the physical Windows host for installer output and the VSView alignment
+   panel (U10); this set is pending.
 
 ## Provenance record
 
-Complete this table during each capture pass:
+### Set 1: macOS
 
 | Field | Recorded value |
 | --- | --- |
 | Source title | EBU/DVB HEVC Test Content: PQ10 and HLG10 natural harbour sequence |
 | Rights basis | EBU-published media, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
-| Attribution requirement | Credit EBU; footage by Frans de Jong; HLG-to-PQ10 conversion by Andrew Cotton (BBC); link to the [EBU/DVB HEVC test-content page](https://dvb.org/specifications/verification-validation/hevc-test-content/) |
-| Physical filenames | `reference.mkv` (PQ10 remux), `hlg10-encode.mkv` (HLG10 remux), `pq10-encode.mkv` (FFmpeg SDR presentation derivative) |
-| Display labels | `EBU DVB PQ10 — Reference`; `EBU DVB HLG10 — Comparison`; `EBU DVB PQ10 — SDR Presentation` |
-| Frame number and category | Frame `1000`, `User`; 1 selected frame, 3 clips |
-| Frame Compare commit or release | `ac9b2fa24c83558af28105b895c5893ae9f48a95` on `dev/v0.2.0` |
-| Media-runtime profile | Windows portable bundle from the same commit; VapourSynth R79/API 4.2, L-SMASH-Works, vs-placebo 2.0.4, FFmpeg n8.1.2-34-g9b6c8969e0-20260731, Vulkan-capable path |
-| Capture host and OS | One physical Windows 10 Home 22H2 host, build 19045; display scaling 100% |
-| Browser and version | Codex In-app Browser (IAB production build; exact embedded engine version is not surfaced by the connector) |
-| Display scaling and browser zoom | Windows 100%; browser zoom 100%; report capture viewport 1683×1080 (exact visible IAB surface, 1080p height) |
-| Report theme | Dark |
-| HDR diagnostic transform | `bt2390` preset; target luminance `100 nits` |
-| Capture date | 2026-08-17 |
-| Captured by | Codex capture pass; maintainer review pending |
+| Attribution | Credit EBU; footage by Frans de Jong; HLG-to-PQ10 conversion by Andrew Cotton (BBC); link to the [EBU/DVB HEVC test-content page](https://dvb.org/specifications/verification-validation/hevc-test-content/) |
+| Physical filenames and SHA-256 | `DVB_7680x4320_HEVC_50fps_PQ10.ts`, copied byte-for-byte as `pq10-reference.ts`: `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA2019FE3DD344A05DA8D83`; `DVB_7680x4320_HEVC_50fps_HLG10.ts`, copied byte-for-byte as `hlg10-comparison.ts`: `B9EA646565751BB41CFC1F954172FDF5162C890D35AAC22238F536F6CF425300` |
+| Display labels | `EBU DVB PQ10 — Reference`; `EBU DVB HLG10 — Comparison` |
+| Frame and category | Frame `1000`, `User`; 6 frames, 2 sources |
+| Frame Compare commit | `e3f5681b6202645cd91ffd83f15d3788aec9dbfc` |
+| Docker image ID | `sha256:c513ca2661974aa86d2eda0ed58e8bc88ae095d4422d4624cb89a5aa99faea2f` |
+| Chrome and Node versions | Google Chrome `154.0.8037.99`; Node `v24.14.0` |
+| Viewport | 1600 × 1000 at scale 1; Report Information dialog captured at 896 × 666 |
+| Report theme | Viewer default, dark |
+| Capture date | 2026-10-09 |
+| Captured by | Codex U1 capture pass; maintainer acceptance pending |
 
-Do not publish a screenshot until the rights basis and required attribution are known.
+### Set 2: physical Windows
 
-The downloaded source hashes were `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA2019FE3DD344A05DA8D83`
-(PQ10) and `B9EA646565751BB41CFC1F954172FDF5162C890D35AAC22238F536F6CF425300`
-(HLG10). The capture-workspace hashes were `32E1632D0D32EDE7A1D806505422908338CDB75A303C8146D389BC8302A83CAC`
-(`reference.mkv`), `EC7C29952B75B291C603DA7D16A9C1549385297BBB970A436B80178D5AEA8A0E`
-(`hlg10-encode.mkv`), and `271AB130410462CEE6EA19B9D69FA2E3CEADD7E1AA856E51ED1DAA74AE32E9FC`
-(`pq10-encode.mkv`).
+| Field | Recorded value |
+| --- | --- |
+| Source title | Pending U10 |
+| Rights basis | Pending U10 |
+| Attribution | Pending U10 |
+| Physical filenames and SHA-256 | Pending U10 |
+| Display labels | Pending U10 |
+| Frame and category | Pending U10 |
+| Frame Compare commit | Pending U10 |
+| Bundle SHA | Pending U10 |
+| Windows build | Pending U10 |
+| Display scaling | Pending U10 |
+| Report theme | Pending U10 |
+| Capture date | Pending U10 |
+| Captured by | Pending U10 |
 
 ## Asset policy
 
-- Capture a lossless PNG first.
-- Do not upscale.
-- Use WebP for report and future VSView imagery when text and fine detail remain sharp.
-- Keep terminal captures as PNG.
-- Strip EXIF and unrelated metadata during export.
-- Preserve one canonical report overview and reuse it in the README, documentation home,
-  and report guide.
-- Keep source labels, selected pair, frame/category context, and visible controls
-  consistent across the report overview, slider, grid, diff, and inspector assets.
-- Use one browser, one zoom level, and one Windows display-scaling setting for the
-  complete report-viewer set.
-- Record any deliberate exception in this file.
+- Export viewer and photo captures as WebP at quality 90 with metadata stripped.
+- Generate terminal SVGs with the capture specification's ANSI converter.
+- Keep Windows terminal captures as PNG.
+- Never upscale a capture.
+- Use the capture specification for every capture.
+
+## Current asset set
+
+| File | Role | Pages | Set |
+| --- | --- | --- | --- |
+| `report-overview.webp` | Slider mode at frame 1000 with the reference and comparison labels visible | `docs/index.md` (hero and strip), `README.md`, `docs/guides/reports-and-overlays.md` | 1 |
+| `report-grid.webp` | Grid view at frame 1000 | `docs/index.md` (strip), `docs/guides/reports-and-overlays.md` | 1 |
+| `report-inspector.webp` | Slider mode with the **Inspector** open on the **Clips** tab | `docs/index.md` (strip), `docs/guides/reports-and-overlays.md` | 1 |
+| `report-lens.webp` | Slider mode with the lens on and pointer at viewport (640, 470) | `docs/index.md` (strip), `docs/guides/reports-and-overlays.md` | 1 |
+| `report-information.webp` | **Report Information** dialog clipped to its bounds | `docs/guides/reports-and-overlays.md` | 1 |
+| `hdr-diagnostic-overlay.webp` | Top-left 1920 × 1080 crop of the frame-1000 HLG10 diagnostic screenshot | `docs/guides/hdr-tonemapping.md` | 1 |
+| `terminal-dry-run.svg` | Complete human dry-run output | `docs/guides/first-comparison.md` | 1 |
+| `terminal-run-complete.svg` | `Comparison complete` panel from the run | `docs/guides/first-comparison.md` | 1 |
+| `windows-portable-install.png` | Checksum verification through the install script's final terminal instruction | `docs/windows-portable.md` | 2, pending |
+| `vsview-alignment-panel.webp` | VSView alignment panel with both sources captured at frame 1000 and ready to confirm | `docs/guides/vsview-review.md` | 2, pending |
 
 ## Deliberate capture decisions
 
-- The report-viewer images predate payload v1.2 and its stable toolbar/responsive
-  Inspector presentation. They remain publication-safe historical assets, but they are
-  intentionally absent from current-facing documentation and are not acceptance
-  evidence for the v1.2 layout. Replace the overview, slider, grid, and Inspector
-  captures together on the documented physical Windows capture host before restoring
-  those references or closing the active report-viewer plan.
-- `report-diff.webp` retains the controlled-pattern locator. The natural PQ/HLG/SDR
-  difference flooded the frame with presentation-transform colour changes and was
-  misleading at normal documentation width; the retained caption explicitly describes
-  the pattern as a changed-region locator, not source footage.
-- `report-grid.webp` keeps the inspector's Clips tab open so all three full labels and
-  their HDR/SDR roles remain readable while the three natural frames are visible.
-- The report overview, slider, grid, and inspector assets were recaptured after the
-  report-viewer HUD fixes in commit `ac9b2fa24c83558af28105b895c5893ae9f48a95`.
-  The capture host exposes a 1683×1080 visible in-app-browser surface; a 1920-wide
-  CSS override clipped the report controls, so the exact visible 1080p-height surface
-  is recorded and no upscaling is used.
-- `report-inspector.webp` uses the same report and frame with the Align tab open;
-  `report-grid.webp` uses the Clips tab as described above.
-- `hdr-diagnostic-overlay.webp` is a readability crop of the real physical-Windows
-  diagnostic render. Its label card repeats only values proved by ffprobe, the selected
-  run, and the portable runtime proof; it does not claim calibrated luminance or missing
-  mastering metadata.
-- No interactive alignment capture is currently published. A future physical-Windows
-  capture must use the VSView bundle from the tested commit, a generic external fixture,
-  and a complete provenance record before it is added to this directory or referenced
-  by active documentation. macOS and headless Docker evidence cannot establish the
-  native desktop UI surface.
-- The capture config deliberately keeps `report.auto_open = false`, `slowpics.auto_upload =
-  false`, `--skip-metadata`, and one explicit user frame so the public example performs no
-  network publication and stays deterministic.
+- Use only the two official EBU/DVB transport streams, byte-for-byte under CC BY 4.0,
+  with no remux, re-encode, derivative, synthetic, or private media.
+- Use the PQ10 reference and HLG10 comparison, both tonemapped to SDR, so every view
+  shows real HDR handling.
+- Describe Diff in text only because natural PQ10/HLG10 presentation-transform colour
+  changes fill the frame and mislead at documentation width.
+- Generate the static report in Docker on macOS so generic `/workspace` paths reach
+  the capture and the Mac browser renders the Windows bundle's viewer.
+- Drive the five viewer states with the specified headless Chrome script to keep
+  viewport, scale, frame, pair, and browser state consistent.
+- Export captured ANSI text through Rich as searchable SVG with remote font rules
+  removed so documentation loads no external font.
+- Capture installer output and the visible VSView alignment panel only on the
+  physical Windows host in U10.
 
 ## Privacy and integrity review
 
@@ -151,20 +111,22 @@ Redaction should be the last resort. Prefer clean source copies, generic physica
 filenames, explicit display labels, and a dedicated capture workspace so sensitive
 information is never rendered into the image.
 
-## Current asset set
+Set 1 privacy and integrity review completed on 2026-10-09:
 
-| Asset | Intended role |
+| Asset | Review result |
 | --- | --- |
-| `report-viewer-overview.webp` | Shared README/site/report-guide hero |
-| `report-slider.webp` | Natural-image pair comparison |
-| `report-diff.webp` | Difference-location example |
-| `report-grid.webp` | Three-source triage |
-| `report-inspector.webp` | Metadata and review controls |
-| `first-run-dry-run.png` | Pre-render intent validation |
-| `first-run-complete.png` | Cropped final run summary |
-| `windows-portable-install.png` | Checksum and shim installation |
-| `hdr-diagnostic-overlay.webp` | Physical-Windows HDR diagnostic example |
+| `report-overview.webp` | Frame 1000, User, correct pair, default Slider zoom, and visible source labels; no loading, error, or private strings |
+| `report-grid.webp` | Frame 1000 and both official sources in Grid view; no loading, error, or private strings |
+| `report-inspector.webp` | Correct pair at frame 1000 with **Clips** selected and source metadata readable; no loading, error, or private strings |
+| `report-lens.webp` | Correct pair at frame 1000 with the lens on and pointer at (640, 470); no loading, error, or private strings |
+| `report-information.webp` | Complete 896 × 666 dialog with correct pair, six frames, two sources, and generic filenames; no private strings |
+| `hdr-diagnostic-overlay.webp` | Complete diagnostic block, including `Signal:` and `Tonemap:`, on the HLG10 source at frame 1000; no cut line or private strings |
+| `terminal-dry-run.svg` | Every nonblank output line retained; no private strings, remote font rules, or external font URL |
+| `terminal-run-complete.svg` | `Comparison complete` panel retained with generic run paths, six frames, and two sources; no private strings or external font URL |
 
-The active plan remains Active until the maintainer reviews the final assets and the
-browser-version limitation is either accepted or replaced with a browser capture whose
-exact embedded version is available.
+The six WebP exports use quality 90 and contain no EXIF, XMP, or ICC metadata.
+Both SVGs contain zero occurrences of remote font rules, the CDN hostname,
+host home-directory paths, or the maintainer's username.
+No release-group names, private server names, credentials, tokens, cookies, or
+unintended subtitles or watermarks appear in set 1.
+Set 2 privacy and integrity review is pending U10.
