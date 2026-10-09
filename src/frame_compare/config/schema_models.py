@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from fractions import Fraction
 from typing import Annotated, Literal
@@ -46,6 +47,18 @@ class PathsConfig(BaseModel):
     generated_dir: str = "generated"
     config_dir: str = "config"
 
+    @field_validator("input_dir", "generated_dir", "config_dir")
+    @classmethod
+    def validate_filesystem_path(cls, value: str, info: ValidationInfo) -> str:
+        field_name = info.field_name or "path"
+        try:
+            encoded = os.fsencode(value)
+        except UnicodeError as exc:
+            raise ValueError(f"{field_name} is not representable by the filesystem") from exc
+        if b"\x00" in encoded:
+            raise ValueError(f"{field_name} must not contain NUL characters")
+        return value
+
 
 class RuntimeConfig(BaseModel):
     """VapourSynth frame-cache settings, not total process memory limits."""
@@ -67,8 +80,8 @@ class AnalysisConfig(BaseModel):
     motion_frame_count: int = Field(default=0, ge=0)
     random_seed: int = 42
     performance_mode: AnalysisPerformanceMode = AnalysisPerformanceMode.QUALITY
-    ignore_lead_seconds: float = Field(default=0.0, ge=0.0)
-    ignore_trail_seconds: float = Field(default=0.0, ge=0.0)
+    ignore_lead_seconds: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
+    ignore_trail_seconds: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
     min_window_seconds: float = Field(default=5.0, ge=0.0)
     dark_quantile: float = Field(default=0.05, ge=0.0, le=0.5)
     bright_quantile: float = Field(default=0.95, ge=0.5, le=1.0)

@@ -1,5 +1,6 @@
 """Tests for configuration schema validation."""
 
+import os
 import tomllib
 from fractions import Fraction
 from pathlib import Path
@@ -60,6 +61,31 @@ from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
 def test_analysis_rejects_invalid_bounds(payload: dict[str, object], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         AnalysisConfig.model_validate(payload)
+
+
+@pytest.mark.parametrize("field_name", ["ignore_lead_seconds", "ignore_trail_seconds"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_analysis_rejects_nonfinite_exclusions(field_name: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        AnalysisConfig.model_validate({field_name: value})
+
+
+@pytest.mark.parametrize("field_name", ["input_dir", "generated_dir", "config_dir"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "bad\x00path",
+        pytest.param(
+            "bad\ud800path",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows filesystem encoding permits lone surrogates"
+            ),
+        ),
+    ],
+)
+def test_paths_reject_filesystem_unrepresentable_values(field_name: str, value: str) -> None:
+    with pytest.raises(ValidationError):
+        PathsConfig.model_validate({field_name: value})
 
 
 @pytest.mark.parametrize(

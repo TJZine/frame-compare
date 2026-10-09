@@ -432,14 +432,14 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
-    tmp_path_factory: pytest.TempPathFactory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # Keep absolute paths within the report width, including xdist's worker prefix.
-    tmp_path = tmp_path_factory.mktemp("fps")
-    input_dir = tmp_path / "comparison_videos"
+    # Reporting does not access these files. Fixed paths keep the full-path
+    # assertions independent of checkout depth and pytest's temporary layout.
+    workspace = Path("/media/workspace")
+    input_dir = workspace / "comparison_videos"
     internal_path = input_dir / "season" / "reference.mkv"
-    external_path = tmp_path / "outside" / "comparison.mkv"
+    external_path = workspace / "outside" / "comparison.mkv"
     clips = [
         _fps_report_clip(
             path=internal_path,

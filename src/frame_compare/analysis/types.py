@@ -210,6 +210,14 @@ class FrameMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class MetricsAcquisition:
+    """Metrics and the disposition of the acquisition that supplied them."""
+
+    metrics: FrameMetrics
+    disposition: Literal["hit", "computed"]
+
+
+@dataclass(frozen=True, slots=True)
 class SelectionBreakdown:
     """Breakdown of which frames were selected by which criteria.
 

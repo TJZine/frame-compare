@@ -110,6 +110,7 @@ function makeViewer() {
             this.viewport.storeCurrentPairAlignment();
         },
         updateInspectorData() {},
+        updateBlinkControls() {},
     };
     viewer.viewport = context.__Viewport.create(viewer);
     return { viewer, viewport: viewer.viewport, refresh, persistence };

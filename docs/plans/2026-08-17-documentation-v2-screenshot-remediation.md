@@ -66,10 +66,10 @@ Do not:
 ### Dependency
 
 Publication capture happens after the changes owned by the
-[CLI and report UX plan](2026-09-22-cli-and-report-ux-improvements.md) settle on this
+historical CLI and report UX plan (`2026-09-22-cli-and-report-ux-improvements.md`) settle on this
 branch, so the images show the integrated viewer rather than an intermediate state. It
 is not tied to the physical-Windows W1 session of the
-[audio alignment remediation plan](2026-09-22-audio-alignment-post-activation-remediation-and-ux.md);
+historical audio alignment remediation plan (`2026-09-22-audio-alignment-post-activation-remediation-and-ux.md`);
 only the deferred VSView alignment capture (asset 6) should reuse a native Windows
 session when practical.
 

@@ -381,3 +381,60 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
                 deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
             )
         )
+
+
+@pytest.mark.parametrize("in_flight", [False, True])
+def test_interrupt_stops_tmdb_request_admission_and_cancels_inflight_http(
+    tmp_path: Path,
+    in_flight: bool,
+) -> None:
+    create_config(
+        tmp_path,
+        content=METADATA_RETRY_CONFIG.replace(
+            'api_key = "test-key"', 'api_key = "0123456789abcdef0123456789abcdef"'
+        ),
+    )
+    create_video_files(tmp_path / "comparison_videos", "Fight.Club.1999.mkv")
+    requests: list[str] = []
+    cancelled: list[bool] = []
+    admitted: list[str] = []
+
+    async def verify() -> None:
+        started = asyncio.Event()
+
+        async def transport(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+            raise AssertionError("blocked HTTP request returned")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+            request = RunRequest(root=tmp_path, quiet=True, skip_analysis=True, no_upload=True)
+            deps = RunDependencies(
+                http_client=client, vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()
+            )
+
+            async def run() -> None:
+                if not in_flight:
+                    task = asyncio.current_task()
+                    assert task is not None
+                    task.cancel()
+                await execute_run(request, deps)
+
+            worker = asyncio.create_task(run())
+            if in_flight:
+                await asyncio.wait_for(started.wait(), timeout=2)
+                admitted.extend(requests)
+                worker.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await worker
+            assert not client.is_closed
+
+    asyncio.run(verify())
+    assert bool(requests) is in_flight
+    assert requests == admitted
+    assert cancelled == [True] * len(admitted)

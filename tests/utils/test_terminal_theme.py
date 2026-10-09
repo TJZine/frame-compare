@@ -9,6 +9,7 @@ from rich.console import Console
 
 from frame_compare.cli.output import print_result_summary
 from frame_compare.orchestration.types import RunResult
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal_theme import (
     GLYPHS_ASCII,
     GLYPHS_UNICODE,
@@ -74,7 +75,11 @@ def test_result_summary_degrades_generated_punctuation_on_non_utf_stderr(
 
     print_result_summary(
         human_console(stderr=True, width=100),
-        result=RunResult(success=True, duration_seconds=5.0, warnings=["Übersicht"]),
+        result=RunResult(
+            success=True,
+            duration_seconds=5.0,
+            warnings=[RunWarning("sources", "warning", "Übersicht")],
+        ),
         quiet=False,
         root=Path.cwd(),
     )

@@ -16,6 +16,7 @@ from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
 
@@ -125,8 +126,8 @@ class ReservedRunCapture:
     workspace: WorkspacePaths
     clip_count: int
     preflight_duration: float
-    preflight_warnings: tuple[str, ...]
-    run_warnings: list[str]
+    preflight_warnings: list[RunWarning]
+    run_warnings: list[RunWarning]
 
 
 @dataclass(frozen=True)
@@ -150,7 +151,7 @@ class RunResult:
 
     # Diagnostics
     errors: list[str] = field(default_factory=list[str])
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
     # Measured VSView review wait for the human summary. Memory only: never a
     # phase timing, never persisted to the run record or JSON output.

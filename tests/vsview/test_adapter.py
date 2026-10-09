@@ -6,9 +6,12 @@ import json
 import logging
 import os
 import re
+import signal
+import site
 import subprocess
 import sys
 import types
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -98,12 +101,15 @@ def test_child_environment_isolated_and_preserves_warning_policy(
 
     assert child_env["PYTHONWARNINGS"] == "error::ResourceWarning"
     assert child_env["PYTHONSAFEPATH"] == "1"
-    assert child_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONNOUSERSITE" not in child_env
     assert "PYTHONPATH" not in child_env
     assert "PYTHONHOME" not in child_env
     assert "PYTHONSTARTUP" not in child_env
     assert "PYTHONINSPECT" not in child_env
-    assert "PYTHONUSERBASE" not in child_env
+    if site.ENABLE_USER_SITE and not sys.flags.no_user_site:
+        assert child_env["PYTHONUSERBASE"] == "/caller/user-base"
+    else:
+        assert "PYTHONUSERBASE" not in child_env
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
 
@@ -223,7 +229,7 @@ def test_run_vsview_command_returns_measured_wait_with_fake_clock(
 ) -> None:
     import frame_compare.vsview.adapter as adapter
 
-    clock = iter([100.0, 142.5])
+    clock = iter([100.0, 100.0, 142.5])
     monkeypatch.setattr(adapter, "monotonic", lambda: next(clock))
 
     class _FakeProcess:
@@ -318,7 +324,7 @@ def test_startup_probe_failure_reports_reason_and_redacted_stderr(
             )
         )
     )
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", failure)
+    monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", failure)
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.Popen",
         MagicMock(side_effect=AssertionError("Failed startup checks must not launch VSView")),
@@ -343,9 +349,8 @@ def test_launch_uses_managed_launcher(
     monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
     monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
     mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
+    monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", mock_run)
     process = MagicMock()
-    process.__enter__.return_value = process
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
@@ -355,8 +360,10 @@ def test_launch_uses_managed_launcher(
         VSViewConfig(enabled=True),
     )
 
+    flags = ["-P"] if site.ENABLE_USER_SITE and not sys.flags.no_user_site else ["-P", "-s"]
     assert popen.call_args.args[0] == [
         sys.executable,
+        *flags,
         "-m",
         "frame_compare.vsview.launcher",
         str(session.script_path),
@@ -365,7 +372,9 @@ def test_launch_uses_managed_launcher(
     assert "PYTHONPATH" not in launch_env
     assert "PYTHONHOME" not in launch_env
     assert launch_env["PYTHONSAFEPATH"] == "1"
-    assert launch_env["PYTHONNOUSERSITE"] == "1"
+    assert "PYTHONNOUSERSITE" not in launch_env
+    process.terminate.assert_not_called()
+    process.kill.assert_not_called()
 
 
 def test_disabled_launch_writes_vsview_named_session_without_starting_process(
@@ -408,12 +417,12 @@ def test_launch_timeout_terminates_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr("frame_compare.vsview.adapter._REVIEW_PROCESS_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
+        "frame_compare.vsview.adapter._run_startup_probe",
         MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
     )
     process = MagicMock()
-    process.__enter__.return_value = process
     process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1), 0]
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
@@ -427,6 +436,122 @@ def test_launch_timeout_terminates_child(
 
     process.terminate.assert_called_once_with()
     process.kill.assert_not_called()
+
+
+def test_launch_timeout_kills_child_when_terminate_does_not_reap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr("frame_compare.vsview.adapter._REVIEW_PROCESS_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter._run_startup_probe",
+        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
+    )
+    process = MagicMock()
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired(["vsview"], 1),
+        subprocess.TimeoutExpired(["vsview"], 1),
+        0,
+    ]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(VSViewError, match="timed out"):
+        launch_alignment_verification_session(
+            _session_request(tmp_path),
+            VSViewConfig(enabled=True),
+        )
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert all(call.kwargs == {"timeout": 5.0} for call in process.wait.call_args_list[1:])
+
+
+def test_run_vsview_command_reaps_child_after_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = MagicMock()
+    process.wait.side_effect = [KeyboardInterrupt(), 0]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_vsview_command(["vsview"], env={})
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_not_called()
+    assert process.wait.call_args_list[1].kwargs == {"timeout": 5.0}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGINT wait interruption is POSIX-specific")
+def test_real_child_is_reaped_after_interruption(tmp_path: Path) -> None:
+    """Exercise the signal boundary that a Popen mock cannot model."""
+    marker = tmp_path / "child.pid"
+    child_code = (
+        "import os, time\n"
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text(str(os.getpid()), encoding='ascii')\n"
+        "time.sleep(60)\n"
+    )
+    helper_code = (
+        "import os, signal, sys, threading, time\n"
+        "from pathlib import Path\n"
+        "from frame_compare.vsview.adapter import _run_vsview_command\n"
+        "marker = Path(sys.argv[1])\n"
+        "child_code = sys.argv[2]\n"
+        "def interrupt_parent():\n"
+        "    startup_deadline = time.monotonic() + 2.0\n"
+        "    while not marker.exists() and time.monotonic() < startup_deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    os.kill(os.getpid(), signal.SIGINT)\n"
+        "threading.Thread(target=interrupt_parent, daemon=True).start()\n"
+        "try:\n"
+        "    _run_vsview_command([sys.executable, '-c', child_code], env=os.environ.copy())\n"
+        "except KeyboardInterrupt:\n"
+        "    deadline = time.monotonic() + 2.0\n"
+        "    while not marker.exists() and time.monotonic() < deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    if not marker.exists():\n"
+        "        raise SystemExit('child startup marker was not written before the deadline')\n"
+        "    child_pid = int(marker.read_text(encoding='ascii'))\n"
+        "    while time.monotonic() < deadline:\n"
+        "        try:\n"
+        "            os.kill(child_pid, 0)\n"
+        "        except ProcessLookupError:\n"
+        "            raise SystemExit(0)\n"
+        "        time.sleep(0.01)\n"
+        "    raise SystemExit('child still exists after interruption cleanup')\n"
+        "else:\n"
+        "    raise SystemExit('expected KeyboardInterrupt')\n"
+    )
+
+    runner = subprocess.Popen(  # noqa: S603 - test uses an explicit interpreter argv
+        [sys.executable, "-c", helper_code, str(marker), child_code],
+        cwd=Path(__file__).parents[2],
+        env=os.environ.copy(),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        try:
+            stdout, stderr = runner.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(f"interruption helper exceeded bound: {exc}")
+        assert runner.returncode == 0, f"stdout={stdout!r}\nstderr={stderr!r}"
+    finally:
+        if runner.poll() is None:
+            with suppress(ProcessLookupError):
+                os.killpg(runner.pid, signal.SIGKILL)
+            runner.wait(timeout=2.0)
+        if marker.exists():
+            child_pid = int(marker.read_text(encoding="ascii"))
+            with suppress(ProcessLookupError):
+                os.kill(child_pid, signal.SIGKILL)
 
 
 def _execute_generated_script(
@@ -817,3 +942,57 @@ def test_write_vsview_session_script_retries_uuid_path_collision(
     )
 
     assert script.name.endswith(f"_{'2' * 32}.py")
+
+
+def test_adapter_children_preserve_trusted_parent_user_site(tmp_path: Path) -> None:
+    """Both readiness and review subprocesses can see an installed user-site dependency."""
+    import textwrap
+
+    import structlog
+
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "PYTHONUSERBASE": str(tmp_path / "userbase"),
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(Path(__file__).parents[2] / "src"),
+                    str(Path(structlog.__file__).resolve().parent.parent),
+                )
+            ),
+        }
+    )
+    script = textwrap.dedent("""
+        import site, sys
+        from pathlib import Path
+        from frame_compare.vsview.adapter import (
+            _build_vsview_child_env, _run_startup_probe, _run_vsview_command,
+        )
+        assert site.ENABLE_USER_SITE and not sys.flags.no_user_site
+        user_site = Path(site.getusersitepackages())
+        user_site.mkdir(parents=True, exist_ok=True)
+        (user_site / "vsview.py").write_text("INSTALLED = True\\n", encoding="utf-8")
+        env = _build_vsview_child_env(no_color=True)
+        command = [sys.executable, "-c", "import vsview; assert vsview.INSTALLED"]
+        assert _run_startup_probe(command, env=env).returncode == 0
+        assert _run_vsview_command(command, env=env)[0] == 0
+    """)
+    result = subprocess.run(  # noqa: S603 - selected Python interpreter and owned fixture
+        [getattr(sys, "_base_executable", sys.executable), "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr

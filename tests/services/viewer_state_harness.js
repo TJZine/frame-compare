@@ -108,6 +108,7 @@ function fakeElement() {
         tagName: 'DIV',
         isContentEditable: false,
         isConnected: true,
+        listeners,
         classList: {
             toggle(name, force) {
                 const enabled = force === undefined ? !classes.has(name) : Boolean(force);
@@ -146,6 +147,10 @@ function fakeElement() {
             const registered = listeners.get(type) || [];
             registered.push(listener);
             listeners.set(type, registered);
+        },
+        removeEventListener(type, listener) {
+            const registered = listeners.get(type) || [];
+            listeners.set(type, registered.filter(item => item !== listener));
         },
         dispatch(type, event = {}) {
             if (!Object.hasOwn(event, 'target')) event.target = this;
@@ -204,6 +209,7 @@ function renderedText(element) {
 
 function loadViewer({ clipCount, savedState = null }) {
     const storage = new Map();
+    const deferredImages = [];
     const reviewMetrics = { creates: 0, binds: 0, renders: 0 };
     const storageApi = {
         getItem(key) {
@@ -215,6 +221,31 @@ function loadViewer({ clipCount, savedState = null }) {
     };
     const context = {
         console,
+        Image: class DeferredImage {
+            constructor() {
+                this.listeners = new Map();
+                this._src = '';
+                deferredImages.push(this);
+            }
+
+            get src() {
+                return this._src;
+            }
+
+            set src(value) {
+                this._src = String(value);
+            }
+
+            addEventListener(type, listener) {
+                const registered = this.listeners.get(type) || [];
+                registered.push(listener);
+                this.listeners.set(type, registered);
+            }
+
+            trigger(type) {
+                for (const listener of this.listeners.get(type) || []) listener();
+            }
+        },
         setInterval(callback) {
             return { callback };
         },
@@ -308,6 +339,8 @@ function loadViewer({ clipCount, savedState = null }) {
         rightImg: fakeElement(),
         labelLeft: fakeElement(),
         labelRight: fakeElement(),
+        emptyState: fakeElement(),
+        status: fakeElement(),
         leftLayer: fakeElement(),
         rightLayer: fakeElement(),
         zoomRange: fakeElement(),
@@ -436,10 +469,12 @@ function loadViewer({ clipCount, savedState = null }) {
     return {
         viewer,
         format: context.__ViewerFormat,
+        lensFactory: context.__Lens,
         storage,
         storageKey: viewer.state.storageKey,
         document: context.document,
         window: context.window,
+        deferredImages,
         reviewMetrics,
     };
 }
@@ -464,6 +499,63 @@ function keyboardEvent(key) {
 }
 
 const summary = {};
+
+// Exercise the production pointer handlers and interval callback, including cancellation.
+for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
+    for (const gesture of ['pan', 'pinch', 'lens', 'lens-pan', 'lens-pinch']) {
+        for (const ending of ['pointerup', 'pointercancel']) {
+            const fixture = loadViewer({ clipCount: 2 });
+            const { viewer } = fixture;
+            fixture.window.addEventListener = () => {};
+            for (const name of ['btnZoomOut', 'btnZoomIn', 'btnZoomReset', 'btnFullscreen']) {
+                viewer.dom[name] = fakeElement();
+            }
+            viewer.dom.stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1920, height: 1080 });
+            viewer.bindViewportEvents();
+            if (pauseCause === 'reduced-motion') viewer.reducedMotionActive = () => true;
+            viewer.setMode('blink');
+            if (pauseCause === 'explicit') viewer.setBlinkPaused(true);
+            if (gesture.startsWith('lens')) {
+                const lensElement = { ...fakeElement(), style: { setProperty() {} } };
+                fixture.document.getElementById = id => id === 'rv-lens' ? lensElement : null;
+                fixture.document.querySelector = () => null;
+                fixture.document.querySelectorAll = () => [];
+                viewer.lens = fixture.lensFactory.create(viewer);
+                viewer.lens.state.report.enabled = true;
+                for (const image of [viewer.dom.leftImg, viewer.dom.rightImg]) {
+                    image.getBoundingClientRect = viewer.dom.stage.getBoundingClientRect;
+                }
+            }
+            const event = {
+                pointerId: 1, pointerType: gesture === 'pan' ? 'mouse' : 'touch',
+                button: 0, clientX: 100, clientY: 100, preventDefault() {},
+            };
+            viewer.dom.stage.dispatch('pointerdown', { ...event });
+            if (gesture.endsWith('pinch')) viewer.dom.stage.dispatch('pointerdown', { ...event, pointerId: 2, clientX: 200 });
+            if (gesture === 'lens-pan') viewer.dom.stage.dispatch('pointermove', { ...event, clientX: 120 });
+            if (gesture.endsWith('pinch')) assert.equal(viewer.pointerInteraction.pinchActive, true);
+            else if (gesture === 'lens') assert.equal(viewer.pointerInteraction.lensPointHandled, true);
+            else assert.equal(viewer.pointerInteraction.isPanning, true);
+            const during = viewer.state.activeClipIdx;
+            viewer.state.blinkInterval.callback();
+            assert.equal(viewer.state.activeClipIdx, during, `${pauseCause}/${gesture}: suspended timer`);
+            assert.equal(viewer.dom.blinkStatus.textContent, 'Blink paused');
+            assert.equal(viewer.dom.btnBlinkPause.disabled, true);
+            viewer.dom.stage.dispatch(ending, { ...event });
+            if (gesture.endsWith('pinch')) viewer.dom.stage.dispatch(ending, { ...event, pointerId: 2, clientX: 200 });
+            if (gesture.startsWith('lens')) assert.equal(viewer.lens.state.touchPending, null);
+            const before = viewer.state.activeClipIdx;
+            viewer.state.blinkInterval.callback();
+            const paused = pauseCause !== 'running';
+            assert.equal(viewer.state.activeClipIdx === before, paused, `${pauseCause}/${gesture}/${ending}: pause intent`);
+            assert.equal(viewer.dom.btnBlinkPause.disabled, false);
+            assert.equal(viewer.dom.btnBlinkPause.textContent, paused ? 'Resume' : 'Pause');
+            assert.equal(viewer.dom.btnBlinkPause.getAttribute('aria-pressed'), String(paused));
+            assert.equal(viewer.dom.blinkStatus.textContent, paused ? 'Blink paused' : 'Blink 0.7s');
+        }
+    }
+}
+summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 
 {
     const { viewer, format } = loadViewer({ clipCount: 4 });
@@ -690,7 +782,7 @@ const summary = {};
     assert.equal(viewer.state.inspectorOpen, true);
     assert.equal(viewer.state.inspectorTab, 'align');
     assert.equal(viewer.state.blinkIntervalMs, 1200);
-    assert.equal(viewer.state.blinkPaused, false);
+    assert.equal(viewer.state.blinkPauseRequested, false);
     viewer.dom.btnInspectorClose.setAttribute('tabindex', '0');
     viewer.inspector.setOpen(false, { focus: false, save: false });
 
@@ -753,6 +845,7 @@ const summary = {};
     assert.equal(saved.pixelLensEnabled, undefined);
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
+    assert.equal(saved.blinkPauseRequested, undefined);
     summary.inspectorBlinkKeyboardState = {
         currentFrameIdx: saved.currentFrameIdx,
         inspectorOpen: saved.inspectorOpen,
@@ -928,7 +1021,7 @@ const summary = {};
     viewer.reducedMotionActive = () => true;
     viewer.setMode('blink');
     assert.equal(viewer.state.mode, 'blink');
-    assert.equal(viewer.state.blinkPaused, true);
+    assert.equal(viewer.state.blinkPauseRequested, true);
     assert.equal(viewer.dom.blinkStatus.textContent, 'Blink paused');
     viewer.setBlinkPaused(false);
     viewer.stepBlinkInterval(1);
@@ -1598,6 +1691,195 @@ const summary = {};
     };
 }
 
+async function assertDeferredDiffCannotCommitAfterGridNavigation() {
+    const { viewer, window, deferredImages } = loadViewer({ clipCount: 2 });
+    viewer.dom.currentFrameLabel = fakeElement();
+    viewer.dom.currentFrameCategoryDivider = fakeElement();
+    viewer.dom.currentFrameCategory = fakeElement();
+
+    const gridEvents = { active: false, renders: 0 };
+    viewer.gridView = {
+        setActive(active) {
+            gridEvents.active = active;
+        },
+        render() {
+            gridEvents.renders += 1;
+            viewer.updateCurrentFrameMetadata(viewer.currentFrame());
+        },
+        clear() {},
+    };
+    viewer.render = function renderImageStateTest() {
+        this.updateImages();
+    };
+
+    viewer.state.mode = 'diff';
+    viewer.updateImages();
+    assert.equal(deferredImages.length, 2);
+    const oldFrameSources = deferredImages.map(image => image.src);
+
+    viewer.setMode('grid');
+    viewer.setFrame(1);
+    assert.equal(gridEvents.active, true);
+    assert.equal(gridEvents.renders, 2);
+    assert.equal(viewer.dom.currentFrameLabel.textContent, 'Frame 20');
+    assert.equal(viewer.dom.currentFrameCategory.textContent, 'Selected');
+
+    deferredImages.forEach(image => image.trigger('load'));
+    await new Promise(resolve => setImmediate(resolve));
+    window.rafQueue.splice(0).forEach(callback => callback?.());
+
+    assert.deepEqual(deferredImages.map(image => image.src), oldFrameSources);
+    assert.equal(viewer.dom.leftImg.src, undefined);
+    assert.equal(viewer.dom.rightImg.src, undefined);
+    assert.deepEqual(viewer.dom.labelLeft.children, []);
+    assert.deepEqual(viewer.dom.labelRight.children, []);
+    assert.equal(viewer.dom.currentFrameLabel.textContent, 'Frame 20');
+    assert.equal(viewer.dom.currentFrameCategory.textContent, 'Selected');
+    return {
+        active: gridEvents.active,
+        renders: gridEvents.renders,
+        currentFrame: viewer.dom.currentFrameLabel.textContent,
+        stalePairCommitBlocked: viewer.dom.leftImg.src === undefined
+            && viewer.dom.rightImg.src === undefined
+            && viewer.dom.labelLeft.children.length === 0
+            && viewer.dom.labelRight.children.length === 0,
+    };
+}
+
+async function assertMainImageUnavailableState() {
+    const modes = [
+        { mode: 'slider', failedSide: 'right', clipIndex: 1 },
+        { mode: 'overlay', failedSide: 'left', clipIndex: 0 },
+        { mode: 'diff', failedSide: 'right', clipIndex: 1 },
+        { mode: 'blink', failedSide: 'right', clipIndex: 1 },
+    ];
+    const results = {};
+
+    for (const { mode, failedSide, clipIndex } of modes) {
+        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = mode;
+        viewer.updateImages();
+        if (mode === 'diff') {
+            deferredImages.forEach(image => image.trigger('load'));
+            await new Promise(resolve => setImmediate(resolve));
+            window.rafQueue.splice(0).forEach(callback => callback?.());
+        }
+
+        const failedImage = viewer.dom[`${failedSide}Img`];
+        const failedLayer = viewer.dom[`${failedSide}Layer`];
+        const label = viewer.state.data.clips[clipIndex].display.micro;
+        failedImage.dispatch('error');
+
+        assert.equal(viewer.dom.emptyState.hidden, false);
+        assert.equal(renderedText(viewer.dom.emptyState), `${label} image unavailableRetry`);
+        assert.equal(viewer.dom.status.textContent, `${label} image unavailable`);
+        assert.equal(viewer.dom.status.dataset.tone, 'error');
+        assert.equal(failedImage.hidden, true);
+        assert.equal(failedLayer.dataset.status, 'error');
+        assert.equal(viewer.dom[`${failedSide === 'left' ? 'labelLeft' : 'labelRight'}`].children.length > 0, true);
+
+        const retryButton = viewer.dom.emptyState.children.find(child => child.tagName === 'BUTTON');
+        assert.equal(retryButton.textContent, 'Retry');
+        assert.equal(retryButton.getAttribute('aria-label'), `Retry ${label} image`);
+        retryButton.dispatch('click', { stopPropagation() {} });
+        window.rafQueue.splice(0).forEach(callback => callback?.());
+        failedImage.dispatch('load');
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        assert.equal(failedImage.hidden, false);
+        assert.equal(failedLayer.dataset.status, 'ready');
+
+        results[mode] = {
+            label,
+            failedSide,
+            retryAriaLabel: retryButton.getAttribute('aria-label'),
+            recovered: viewer.dom.emptyState.hidden && viewer.dom.status.hidden,
+        };
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.staleErrorIgnored = true;
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        viewer.dom.leftImg.dispatch('load');
+        viewer.dom.rightImg.dispatch('load');
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        viewer.updateImages();
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.sameImageGenerationIgnored = true;
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.gridView = { render() {} };
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        viewer.state.mode = 'grid';
+        viewer.updateImages();
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.gridNavigationStaleErrorIgnored = true;
+    }
+
+    {
+        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        viewer.gridView = { render() {} };
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+
+        viewer.state.mode = 'diff';
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        assert.equal(deferredImages.length, 2);
+        staleError();
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+
+        viewer.state.mode = 'grid';
+        viewer.updateImages();
+        deferredImages.forEach(image => image.trigger('load'));
+        await new Promise(resolve => setImmediate(resolve));
+        window.rafQueue.splice(0).forEach(callback => callback?.());
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.deferredDiffNavigationStaleErrorIgnored = true;
+    }
+
+    {
+        const { viewer } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'slider';
+        viewer.updateImages();
+        viewer.dom.rightImg.dispatch('error');
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        viewer.dom.leftImg.dispatch('load');
+        viewer.dom.rightImg.dispatch('load');
+        assert.equal(viewer.dom.emptyState.hidden, true);
+        assert.equal(viewer.dom.status.hidden, true);
+        results.navigationRecovery = true;
+    }
+
+    return results;
+}
+
 {
     const { viewer } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
@@ -1756,4 +2038,16 @@ const summary = {};
     };
 }
 
-console.log(JSON.stringify(summary));
+Promise.all([
+    assertDeferredDiffCannotCommitAfterGridNavigation(),
+    assertMainImageUnavailableState(),
+])
+    .then(([deferredDiffResult, unavailableResult]) => {
+        summary.deferredDiffGridNavigation = deferredDiffResult;
+        summary.mainImageUnavailable = unavailableResult;
+        console.log(JSON.stringify(summary));
+    })
+    .catch(error => {
+        console.error(error);
+        process.exitCode = 1;
+    });

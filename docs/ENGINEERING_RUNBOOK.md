@@ -4,8 +4,8 @@ Specialist verification and release procedures for Frame Compare.
 
 ## Entrypoint
 
-Start at [`AGENTS.md`](../AGENTS.md) and the repository profile
-[`.agents/project.md`](../.agents/project.md). The shared `develop-code`,
+Start at the repository-root `AGENTS.md` and `.agents/project.md` profile
+(these source files are outside the documentation site). The shared `develop-code`,
 `design-code`, `review-code`, and `verify-code` skills own general methodology;
 `maintain-workflow` is for explicitly requested maintenance. These are conditional
 responsibilities, not mandatory sequential stages.
@@ -289,6 +289,23 @@ bash tools/verify_docker_integration.sh
 
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
+It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
+For changes to whole-track memory bounds, maximum admitted lag, or streaming collector
+cleanup, run the existing resource proof separately after the canonical gate has
+built the test image:
+
+```bash
+docker compose run --rm --no-deps \
+  -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1 \
+  --entrypoint python frame-compare-test \
+  -m pytest -o cache_dir=/tmp/frame-compare-resource-pytest-cache \
+  tests/integration/test_alignment_streaming_resources.py -rsx -s
+```
+
+This observes three-hour RSS bounds, the largest admitted lag, and cancellation
+with real child reaping. Docker CI invokes it in a separate step. A successful
+canonical gate alone does not establish those resource claims.
+
 Use `--pytest-path tests/e2e` for focused development or scenario proof; it does not
 replace the full gate when the runtime/dependency/media triggers above apply.
 The script builds images by default. After `docker-test` dependency or `uv.lock`
@@ -336,7 +353,7 @@ Current capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSView GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
 | Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof. The R81 dependency refresh has Linux-container offscreen proof on macOS Docker Desktop; the Linux X11 host wrapper and visible launch remain unverified |
 | Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
 
 When documenting or reviewing optional Docker GPU/profile work, cite the official
@@ -380,10 +397,12 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.11.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
-all three outputs, and round-trip/validate the sibling result sidecar. This feature run has
-static contract proof only; execution remains unavailable/unverified until a
-compatible Linux/X11 host runs it. The contract does not prove a visible X11 desktop
+0.12.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+all three outputs, and round-trip/validate the sibling result sidecar. The R81
+dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
+see the [Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)
+for its evidence and limits. The Linux X11 host wrapper remains unverified.
+The contract does not prove a visible X11 desktop
 launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.
 
 If the local machine cannot run the GUI proof command, record GUI support as
@@ -404,6 +423,11 @@ Required when changing:
 - installer/update commands or release asset layout in docs
 - bundle/update manifests and signing flow
 
+Source builds and source install entrypoints require PowerShell 7 or newer before
+bootstrap, sync, or output changes. Published-bundle installation, launch, and
+updates retain Windows PowerShell 5.1 support; exercise BOM-less UTF-8 install
+state from a non-ASCII bundle path under that interpreter.
+
 Canonical verification path:
 
 1. Validate the update public key and manifest schemas.
@@ -411,7 +435,7 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R80/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.11.0,
+   verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.12.0,
    PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
@@ -434,6 +458,12 @@ Canonical verification path:
    dependency graph with the new application code, even when the media-runtime
    fingerprint and L-SMASH index token are unchanged. The current full bundle
    advertises `bundle_info.schema_version` 3.
+   Each update backup must record the bundle's media-runtime and requirements-lock
+   fingerprints. Verify that `list-backups` marks missing, malformed, or mismatched
+   backup identity as unavailable and that `rollback` refuses it before creating a
+   lock or changing files. Identity-less legacy backups are not migrated. A full
+   runtime reinstall uses a fresh, empty directory, preserves user configuration
+   and data, and never overlays a full ZIP onto an existing root.
 6. Sign the update ZIP when updater or release-package logic changes.
 7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
    For an exact hosted verification of a candidate SHA, dispatch the default-branch

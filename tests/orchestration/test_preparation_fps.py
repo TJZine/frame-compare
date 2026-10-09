@@ -264,7 +264,7 @@ def test_execute_prep_majority_fps(
     if no_diagnostics:
         assert prep.load_source_diagnostics == []
     if warning_fragment is not None:
-        assert any(warning_fragment in warning for warning in prep.preflight_warnings)
+        assert any(warning_fragment in warning.text for warning in prep.preflight_warnings)
     if no_warnings:
         assert prep.preflight_warnings == []
 

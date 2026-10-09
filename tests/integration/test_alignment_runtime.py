@@ -159,7 +159,7 @@ def _write_insert_clip(path: Path) -> None:
 
 
 def _config(**overrides: object) -> AlignmentConfig:
-    return AlignmentConfig(cache_results=False, max_offset_seconds=1.0, **overrides)  # type: ignore[arg-type]
+    return AlignmentConfig(cache_results=False, **overrides)  # type: ignore[arg-type]
 
 
 @pytest.fixture
@@ -177,8 +177,8 @@ def _align_pair(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=generated_dir,
+        max_offset_seconds=1.0,
         fps_num=_FPS,
     )
     (result,) = align_clips_from_request(request, config, vs_loader=loader)
@@ -359,7 +359,7 @@ def test_remix_is_confirmed(
     result = _align_pair(
         reference,
         comparison,
-        _config(channel_strategy="mono_downmix"),
+        _config(),
         tmp_path / "cache",
         lsmash_loader,
     )

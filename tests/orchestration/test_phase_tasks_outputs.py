@@ -261,7 +261,7 @@ def test_run_render_phase_aggregates_missing_picture_type_once_per_clip(
 
     output = phase_render.run_render_phase(ctx, frames=[1, 2], runner=cast(Any, _RenderRunner()))
 
-    assert output.render.warnings == [
+    assert [warning.text for warning in output.render.warnings] == [
         "render: picture type unavailable for 2 selected frame(s) in Reference; "
         "screenshots were rendered without picture-type metadata",
         "render: picture type unavailable for 1 selected frame(s) in Encode; "

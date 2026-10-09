@@ -149,3 +149,35 @@ def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
 
     assert target.read_text(encoding="utf-8") == "old"
     assert "cleanup failed" in "\n".join(exc_info.value.__notes__)
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_publish_guard_runs_after_fsync_and_cleans_temp_on_base_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binary: bool,
+) -> None:
+    import os
+
+    target = tmp_path / "existing"
+    target.write_bytes(b"old")
+    events: list[str] = []
+    real_fsync = os.fsync
+
+    def fsync(fd: int) -> None:
+        real_fsync(fd)
+        events.append("fsynced")
+
+    def guard() -> None:
+        assert events == ["fsynced"]
+        assert next(tmp_path.glob(".existing.*")).read_bytes() == b"new"
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", fsync)
+    with pytest.raises(KeyboardInterrupt):
+        if binary:
+            write_bytes_atomic(target, b"new", publish_guard=guard)
+        else:
+            write_text_atomic(target, "new", publish_guard=guard)
+    assert target.read_bytes() == b"old"
+    assert list(tmp_path.glob(".existing.*")) == []

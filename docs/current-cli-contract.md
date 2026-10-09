@@ -478,18 +478,21 @@ unchanged.
   shown on that row and removed from the separate warnings panel. The report
   path is shown before screenshots, and artifact paths are Rich hyperlinks.
   Durations use human units.
-- Final warnings are grouped by source in a `Warnings` panel. Existing runtime
-  warning strings and slow.pics post-upload action warnings are bridged into
-  presentation rows with source, severity, message, and optional detail, then
+- Final warnings are grouped by producer-selected source in a `Warnings` panel.
+  Producers provide severity, message, and optional detail directly; labels and
+  diagnostic wording do not change warning or skipped status. Records are
   de-duplicated for display. A warning tied to one of the follow-up rows
   (clipboard, browser, shortcut, webhook) is shown on that row and removed from
-  the separate warnings panel. A `because ...` reason is shown once as detail.
+  the separate warnings panel, using warning-record equality to associate it.
+  Producer-provided detail is shown once.
   Normal output shows at most eight warning rows and summarizes hidden rows by
   source; `--verbose` shows every warning. Panel rows use the `!` (warning) and
   `–` (skipped) glyphs, with color only reinforcing meaning.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
+- Applied results use `alignment applied` in both short alignment summaries;
+  native-review counts and `needs visual confirmation` wording are unchanged.
 - When the Run plan reports optional VSView probe failures, it uses a
   sanitized summary (e.g. `probe failed (RuntimeError)`) rather than raw probe
   exception text; the secret exception message itself is never displayed.
@@ -707,6 +710,16 @@ unchanged.
   states that configured frame selection still applies; it does not claim
   `--frames` disables `--random-frame-count` or the metric-count options.
 
+### Run Interruption
+
+After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
+
+The interrupted run follows the failure-record path and exits 130. The shared
+TMDB response cache is an exception to the publication rule: an already-in-flight
+validated upstream response may finish its locked, atomic worker publication.
+It carries no run, selection, alignment, or analysis-cache authority, and the
+CLI drains the executor before exit. No new TMDB request starts after the interrupt.
+
 ### Run-Only Full-Window Selection Recovery
 
 - Recovery is eligible only when effective `analysis.ignore_lead_seconds` or
@@ -817,6 +830,11 @@ recovery requirement.
   VapourSynth and L-SMASH-Works decoder identity. In the managed Windows portable and
   Debian/Docker profiles, a selected supported FFmpeg or decoder lineage change cannot
   reuse an offset computed under the previous build.
+- Alignment cache acceptance and offset persistence recheck prepared source path,
+  size, and mtime. A source change after preparation cannot authorize cached trims
+  or newly saved offsets; the typed alignment failure requires a fresh run rather
+  than silently replacing the prepared fingerprint. The existing same-path,
+  same-size, same-mtime cache reuse policy remains unchanged.
 - Successful low-level TMDB search and alternative-title responses are reused from
   `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
   is cached rather than the final ranked match, so current resolver policy always
@@ -830,8 +848,8 @@ recovery requirement.
   Deleting this file clears durable TMDB history and forces fresh successful lookups.
 - Frame Compare-owned L-SMASH-Works indexes use
   `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1310-097c1b9d605b` on managed/portable Windows,
-  `lsw1310-d594aa1352e2` on unmanaged Windows, and `lsw1310-8a3ed7348dea`
+  profile scoped (currently `lsw1310-f125953022b6` on managed/portable Windows,
+  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
@@ -982,9 +1000,10 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   gradient without reducing thumbnail image space or increasing card height.
   Category identification uses text in captions and filters; filters keep their counts,
   and the selected thumbnail retains its brass border.
-- The header shows the generation date in `YYYY-MM-DD` form using the timestamp's
-  recorded date, without timezone conversion. The exact timestamp remains in the date
-  tooltip, Report Information, and payload; unparseable date text is shown unchanged.
+- The header shows the generation date and time localized by the browser. The exact
+  ISO timestamp remains in the report payload and in the `<time>` element's `datetime`
+  and `title` attributes; hover over the header or Generated value to inspect it.
+  Unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, and clip display strings.
@@ -1005,9 +1024,11 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 
 ### slow.pics Upload Behavior
 
-- slow.pics publishing is disabled by default. Users must set
-  `slowpics.auto_upload = true` in config or through the wizard before `run`
-  uploads generated screenshots.
+- slow.pics publishing is disabled by default. The first-use wizard prompts only
+  for paths, reference, and frame-selection goal; it writes
+  `slowpics.auto_upload = false` for a new config and provides no upload toggle.
+  Before `run` uploads generated screenshots, enable `slowpics.auto_upload = true`
+  in config, with `FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true`, or through a saved preset.
 - Users may additionally opt into report-confirmed upload with the config-only
   field `slowpics.confirm_upload_after_report = true`. The field is inert unless
   effective `slowpics.auto_upload = true`.
@@ -1126,6 +1147,11 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   requests.
 - Hostname targets are rejected when DNS resolution fails, returns no addresses,
   includes an unparseable address, or includes any disallowed address.
+- Default DNS resolution has a separate 10-second deadline and runs in an owned
+  standard-library subprocess. Cancellation stops and reaps that resolver before
+  returning; no HTTP attempt starts after cancellation. The resolver receives only
+  the hostname and port, never the webhook URL or request payload. A resolution
+  timeout produces the warning-only `timeout` diagnostic category.
 - Delivery prevents validation-to-connect DNS rebinding by connecting to a
   prevalidated pinned IP address while preserving TLS certificate verification
   and SNI for the original hostname.
@@ -1363,7 +1389,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.11.0 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.12.0 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with
@@ -1938,7 +1964,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - Python compatibility remains enforced by package metadata, runtime manifests, and build
   validation; `doctor` does not emit a separate Python-version check.
-- `doctor.baseline_version` is the supported VapourSynth release (`R80`).
+- `doctor.baseline_version` is the supported VapourSynth release (`R81`).
   `doctor.media_runtime` contains the code-owned component contract, scoped
   fingerprints, and index token. `doctor.runtime_environment` reports the
   deployment kind, expected and declared full fingerprints, declaration syntax,
@@ -2022,5 +2048,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   values in the loaded config.
 - Loads the resolved config file.
 - Saves the current config as a named preset under `<root>/config/presets`.
+- A user-authored symlink at `<root>/config/presets` remains permitted. `preset save`
+  follows that directory link and writes the preset file to its resolved target.
 - On success, writes a concise confirmation to stderr including the preset name and
   saved preset path.

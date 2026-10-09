@@ -225,7 +225,9 @@ def test_completed_result_write_failure_is_warning_only(
     )
 
     assert result.success is True
-    assert result.warnings == ["history: run result could not be recorded"]
+    assert [warning.text for warning in result.warnings] == [
+        "history: run result could not be recorded"
+    ]
     assert list(tmp_path.rglob("run_result.toml")) == []
 
 

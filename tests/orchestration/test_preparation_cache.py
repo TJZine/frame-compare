@@ -31,7 +31,12 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
+from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.execution_types import PrepState
+from frame_compare.orchestration.probing.probe_cache import (
+    compute_probe_cache_key,
+    save_clip_probe_cache,
+)
 from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
@@ -252,6 +257,40 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
         asyncio.run(
             preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
         )
+
+
+def test_execute_prep_reprobes_snapshot_with_mismatched_persisted_identity(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path, content=METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    source_path = _create_video_files(input_dir, "source.mkv")[0]
+    stats = source_path.stat()
+    current_fingerprint = ClipFingerprint(source_path, stats.st_size, stats.st_mtime_ns)
+    stale_snapshot = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(
+            source_path.with_name("different.mkv"), stats.st_size, stats.st_mtime_ns
+        ),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    save_clip_probe_cache(
+        tmp_path / "generated" / "clip_probe.toml",
+        {compute_probe_cache_key(current_fingerprint): stale_snapshot},
+    )
+    loader = FakeVSLoader()
+
+    asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert loader.loaded == [source_path]
 
 
 def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_reservation(

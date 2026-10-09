@@ -86,12 +86,48 @@ Current phase-family owners are intentionally explicit:
   overlay diagnostic metadata mapping
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
+Run cancellation stays on the main task. `utils.cancellation` supplies synchronous
+admission/publication checks and asynchronous checkpoints; synchronous owners raise
+a private control-flow marker, and their async boundaries deliver task cancellation
+before awaited cleanup. `utils.terminal` temporarily restores interruptible input
+only for a main-thread TTY using the asyncio Runner's SIGINT handler, then restores
+that exact handler. Persistence owners pass guards to atomic writes and abort checks
+to lock polling; generic utilities do not inspect the ambient task. Failure records
+remain writable. Main-task metric, active-rectangle sampling and source-benchmark
+loops check before each frame request. Each parallel render batch owns one
+`threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
+or a real failure, and workers check it before each render frame. Stopped units
+retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
+The accepted admission bound is one poll interval plus 100 ms scheduling slack
+after main-thread interrupt observation; additional frame counts inside that
+window are observations rather than acceptance limits.
+FFmpeg batch extraction receives the event as an abort callable, stops staging
+promotion, and boundedly terminates and reaps its child. Sequential render frames
+also check admission. VSView polls its blocking waits and reaps owned work.
+A native frame request already in flight has no guaranteed finite drain deadline;
+see the CLI contract's Run Interruption section for that limit and the separately
+owned shared-TMDB response-cache exception.
+
+`frame_compare.utils.run_warnings` owns the immutable in-memory `RunWarning`
+record (typed source, severity, message, optional detail). Producers choose
+source and severity from the operation's outcome; labels and diagnostic text
+never determine them. Orchestration carries records and selects alignment and
+active-rect retry warnings by source. CLI output renders the fields and
+associates post-upload rows by warning-record equality. Successful run JSON
+still omits warnings, and run-result V1 still stores only bounded generic
+sanitized warning summaries.
+
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v8 payload metadata, and orchestration only passes the effective
 analysis config, active-rect-aware selection-domain token, analysis-owned metric
 active rectangle, active-rect provenance, and exact source-frame metric range into
 the analysis/cache owner.
+`frame_compare.analysis.metrics.calculate_metrics` owns normal cache acquisition
+and returns a `MetricsAcquisition` containing the metrics and the actual `hit` or
+`computed` disposition. Analyze presentation consumes that result without a
+predictive cache read. Cache-only preparation still validates before reserving
+output, and cache-only analysis reads again without permission to compute.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
@@ -294,8 +330,8 @@ recovery requirement.
   data.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1310-097c1b9d605b` on managed/portable Windows,
-  `lsw1310-d594aa1352e2` on unmanaged Windows, and `lsw1310-8a3ed7348dea`
+  `lsw1310-f125953022b6` on managed/portable Windows,
+  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored,
@@ -435,7 +471,17 @@ per-source display strings as optional primitives for the reuse prompt; alignmen
 services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
-`ClipIdentity`, or `ClipFingerprint`.
+`ClipIdentity`, or `ClipFingerprint`. The request is the sole owner of computation
+and cache facts: offset bounds, channel strategy, selected streams, and previous
+offset reuse policy. `AlignmentConfig` carries execution and presentation
+preferences rather than a second copy of those facts.
+
+Prepared identities remain frozen. Cached acceptance and persistence validate
+current path, size, and mtime against them; prompts and native review do not permit
+changed sources to authorize trims or newly saved offsets. Applied
+`AlignmentResult` values require both an integer frame offset and a finite time
+offset; unapplied results carry neither. Zero remains a valid applied offset,
+and historical cached/manual evidence remains distinct from fresh computation.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
 precedence and carries the immutable original audio attempt and diagnostic-only
@@ -621,7 +667,7 @@ Current Docker capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the 2026-10-07 dependency-refresh handoff records reported Linux-container offscreen proof on macOS Docker Desktop for a production-generated three-source session, panel, frame-0 outputs, sidecar, and cleanup. The current Linux X11 host wrapper, visible launch, and physical native acceptance remain unverified |
 | Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
 
 Keep these integrations at their current owners:
@@ -682,12 +728,16 @@ owners. Its explicit X11 contract is:
 The optional GUI proof is non-CI and non-default. Its verifier contract requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.11.0, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.12.0, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
-result sidecar. This
-feature run has static contract proof only; execution remains unavailable/unverified
-until a compatible Linux/X11 host runs it. The contract covers dependency
+result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
+inside-container offscreen pass on macOS Docker Desktop for this contract, including
+a production-generated three-source L-SMASH session, frame-0 rendering, sidecar
+round-trip, and cleanup. This is historical reported evidence for that refresh,
+not a current GUI run; raw historical logs were not independently authenticated
+in this checkout. Execution through the current Linux/X11 host wrapper remains
+unavailable/unverified until a compatible Linux/X11 host runs it. The contract covers dependency
 availability, plugin discovery, panel construction, generated metadata/result
 integration, named-output registration, and offscreen rendering without requiring a
 real desktop launch. It does not prove visible X11 launch, Qt ergonomics, native
@@ -771,6 +821,16 @@ bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
 honors only short valid `Retry-After` rate-limit delays, and does not retry after
 request transmission when the delivery outcome is unknown so it does not knowingly
 create duplicate notifications.
+Default hostname resolution runs fixed standard-library code in an owned
+current-interpreter subprocess. Its Python runtime and packaged startup
+configuration are trusted: portable `._pth` configuration can enable `site` even
+with `-S`. The child environment excludes application configuration and secrets;
+only required operating-system startup values are retained. It receives the hostname and port,
+never the webhook URL or payload, and returns bounded address data for the parent's
+existing public-address validation. Resolution has a separate ten-second deadline;
+cancellation polls the stop signal and terminates, escalates, and boundedly reaps
+the resolver before the owning task returns. Injected callables remain caller-owned
+and must provide their own blocking-operation deadlines.
 Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.
@@ -887,6 +947,13 @@ metadata, so viewer-only label hiding cannot provide an honest blind workflow. A
 future blind comparison must use an explicitly eligible clean artifact and a
 separately approved invocation, delivery, reveal, and publishing contract.
 
+The main stage uses Grid's missing-image wording in Slider, Single, Diff and
+Blink. A failed selected image is hidden, its pane is marked unavailable, and the
+existing stage-message and error-status surfaces identify the source with a Retry
+action. Source-label text remains available without presenting the failed image's
+badge as visible content. Navigation and successful retry clear the unavailable
+state; generation and retry-attempt checks reject stale image callbacks.
+
 #### Lens
 
 `assets/lens.js` is the focused owner for the optional
@@ -964,7 +1031,8 @@ sequence rendering.
 
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
-V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
+V1 JSON export, strict import validation, a selected merge/replace candidate shared by
+preview and atomic apply, stale-preview rejection, and
 the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
 created on first visible Review use, keeps form rendering stable across unrelated viewer
 refreshes, and routes transition announcements through the existing shared polite live
@@ -977,12 +1045,14 @@ separate from viewport preferences and never writes into the report or run direc
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state
 rather than owning duplicate Inspector rendering/focus policy or
-coordinate conversions or grid mount policy. Viewer modules call `Inspector` and
-`ViewerFormat` directly rather than routing those owners through root forwarding
-methods. Grid remains outside the public report default-mode payload
+coordinate conversions or grid mount policy. Inspector owns rendering and focus;
+the root's `updateInspectorData()` forwards refreshes from Grid and viewport to
+that owner. Viewer modules use `ViewerFormat` for shared display formatting.
+Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
-paused.
+paused. The root viewer derives effective Blink pause from user intent and active
+viewport or Lens gestures; gesture completion or cancellation preserves user intent.
 
 #### Browser-Local State
 
@@ -1063,7 +1133,8 @@ The repo exposes two kinds of externally visible surfaces today:
 - user-facing CLI/config/release-asset behavior
 - importable package modules and re-export namespaces used by tests and internal callers
 
-Compatibility policy for those surfaces is defined in the runbook rather than in this document.
+Compatibility policy for those surfaces is defined in
+the repository-root `.agents/project.md`, under “Product and change boundaries”.
 
 ## Current Hotspots
 

@@ -12,6 +12,7 @@ from frame_compare.services.report.payload import (
 )
 from frame_compare.services.report.renderer import build_html
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 
 
 def generate_report(
@@ -23,6 +24,7 @@ def generate_report(
     only validates payload data, renders HTML, and atomically writes the explicit
     destination it receives.
     """
+    raise_if_cancelling()
     if len(data.clips) == 0:
         raise ReportError("no clips provided")
     if len(data.clips) < 2:
@@ -51,7 +53,9 @@ def generate_report(
     html_content = build_html(embedded_data, include_filmstrip=config.include_filmstrip)
 
     try:
-        write_text_atomic(output_path, html_content, encoding="utf-8")
+        write_text_atomic(
+            output_path, html_content, encoding="utf-8", publish_guard=raise_if_cancelling
+        )
     except OSError as e:
         raise ReportError(f"failed to write report: {e}") from e
 

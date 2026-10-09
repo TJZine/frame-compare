@@ -1,4 +1,12 @@
+import asyncio
+import json
+import subprocess
+import sys
+import textwrap
+from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, Future
+from concurrent.futures import wait as real_wait
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event, Lock, Thread
@@ -567,6 +575,8 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
 
     def render_ffmpeg_group(
         group: list[RenderRequest],
+        *,
+        abort: Callable[[], bool] | None = None,
     ) -> list[RenderedFrameResult]:
         both_groups_started.wait(timeout=1.0)
         return [_rendered(request) for request in group]
@@ -779,6 +789,8 @@ def test_render_batch_parallel_mixes_indivisible_ffmpeg_groups_and_singletons(
 
     def render_ffmpeg_group(
         group: list[RenderRequest],
+        *,
+        abort: Callable[[], bool] | None = None,
     ) -> list[RenderedFrameResult]:
         batches.append([request.frame_number for request in group])
         return [_rendered(request) for request in group]
@@ -830,7 +842,9 @@ def test_render_batch_parallel_failure_does_not_schedule_later_work(tmp_path: Pa
     exceptions: list[BaseException] = []
     invoked_singletons: list[int] = []
 
-    def render_failing_group(_group: list[RenderRequest]) -> list[RenderedFrameResult]:
+    def render_failing_group(
+        _group: list[RenderRequest], *, abort: Callable[[], bool] | None = None
+    ) -> list[RenderedFrameResult]:
         assert in_flight_started.wait(timeout=1.0)
         failure_reported.set()
         raise RuntimeError("failed batch")
@@ -873,3 +887,265 @@ def test_render_batch_parallel_failure_does_not_schedule_later_work(tmp_path: Pa
     assert isinstance(exceptions[0], RuntimeError)
     assert str(exceptions[0]) == "failed batch"
     assert 3 not in invoked_singletons
+
+
+@pytest.mark.parametrize("real_failure", [False, True])
+def test_clip_workers_stop_before_next_frame_and_preserve_first_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, real_failure: bool
+) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    started = [Event(), Event()]
+    release = Event()
+    calls: list[int] = []
+    requested_cancel = False
+    requests = [
+        RenderRequest(
+            clip=MagicMock(),
+            diagnostic_source=tmp_path / "video.mkv",
+            frame_number=frame,
+            output_path=tmp_path / f"{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        )
+        for frame in range(8)
+    ]
+
+    def render(request: RenderRequest) -> RenderedFrameResult:
+        calls.append(request.frame_number)
+        if request.frame_number in (0, 4):
+            started[request.frame_number // 4].set()
+            if real_failure and request.frame_number == 0:
+                assert started[1].wait(2)
+                raise RuntimeError("first render failure")
+            assert release.wait(2)
+        return _rendered(request)
+
+    def poll(
+        futures: Iterable[Future[list[RenderedFrameResult]]],
+        *,
+        timeout: float,
+        return_when: str,
+    ) -> tuple[set[Future[list[RenderedFrameResult]]], set[Future[list[RenderedFrameResult]]]]:
+        nonlocal requested_cancel
+        if requested_cancel:
+            # The preceding poll gave the main thread time to propagate stop.
+            release.set()
+        else:
+            assert all(event.wait(2) for event in started)
+        outcome = real_wait(futures, timeout=timeout, return_when=return_when)
+        if not requested_cancel:
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            requested_cancel = True
+        return outcome
+
+    monkeypatch.setattr("frame_compare.render.batch.orchestrator.wait", poll)
+    monkeypatch.setattr("frame_compare.render.batch.orchestrator.render_frame_detailed", render)
+
+    async def run() -> None:
+        try:
+            if real_failure:
+                with pytest.raises(RuntimeError, match="first render failure"):
+                    render_batch_detailed(
+                        requests, parallelism=2, work_unit_ranges=[range(4), range(4, 8)]
+                    )
+            else:
+                with suppress(_RunInterrupt):
+                    render_batch_detailed(
+                        requests, parallelism=2, work_unit_ranges=[range(4), range(4, 8)]
+                    )
+            assert sorted(calls) == [0, 4]
+        finally:
+            release.set()
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, parallelism: int
+) -> None:
+    import subprocess
+    import sys
+
+    from frame_compare.utils import subproc
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    ready = tmp_path / "ready"
+    runner = DefaultFFmpegRunner(extraction_timeout_seconds=3)
+    requests = [
+        RenderRequest(
+            clip=tmp_path / "clip.mkv",
+            diagnostic_source=tmp_path / "clip.mkv",
+            frame_number=frame,
+            output_path=tmp_path / f"{frame}.png",
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+            ffmpeg_runner=runner,
+        )
+        for frame in range(3)
+    ]
+    processes: list[subprocess.Popen[bytes]] = []
+    original_popen = subprocess.Popen
+    task: asyncio.Task[None] | None = None
+    requested_cancel = False
+
+    def popen(
+        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
+    ) -> subprocess.Popen[bytes]:
+        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
+        processes.append(process)
+        return process
+
+    def cancel_when_ready() -> bool:
+        nonlocal requested_cancel
+        if ready.exists() and not requested_cancel:
+            assert task is not None
+            task.cancel()
+            requested_cancel = True
+        return task is not None and task.cancelling() > 0
+
+    monkeypatch.setattr(subproc, "Popen", popen)
+    monkeypatch.setattr("frame_compare.render.batch.orchestrator.is_cancelling", cancel_when_ready)
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.build_extract_frames_argv",
+        lambda **kwargs: [
+            sys.executable,
+            "-c",
+            "import pathlib,sys,time; pathlib.Path(sys.argv[1]).touch(); time.sleep(30)",
+            str(ready),
+        ],
+    )
+
+    async def run() -> None:
+        nonlocal task
+        task = asyncio.current_task()
+        with pytest.raises(_RunInterrupt):
+            render_batch_detailed(requests, parallelism=parallelism)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())
+    assert requested_cancel
+    assert len(processes) == 1
+    assert processes[0].returncode is not None
+    assert not any(request.output_path.exists() for request in requests)
+    assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX SIGINT injection; Windows console behavior requires physical acceptance",
+)
+def test_real_sigint_stops_frame_admission_within_150ms() -> None:
+    script = textwrap.dedent(
+        """
+        import asyncio
+        import json
+        import os
+        import signal
+        import sys
+        import time
+        from concurrent.futures import wait as real_wait
+        from contextlib import suppress
+        from pathlib import Path
+        from threading import Event, Lock, Thread
+        from unittest.mock import MagicMock
+
+        from frame_compare.render.batch import orchestrator
+        from frame_compare.render.types import EncoderSettings, RenderedFrameResult, RenderRequest
+        from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+        from frame_compare.utils.media_facts import RenderedFrameFacts
+
+        slow_poll = sys.argv[1] == 'slow'
+        entered_wait = Event()
+        started = [Event(), Event()]
+        lock = Lock()
+        admissions = []
+        signal_time = []
+        interrupt_observed = []
+        sender_errors = []
+        requests = [
+            RenderRequest(clip=MagicMock(), diagnostic_source=Path('probe.mkv'),
+                          frame_number=i, output_path=Path(f'{i}.png'), overlay=None,
+                          encoder_settings=EncoderSettings())
+            for i in range(120)
+        ]
+
+        def render(request):
+            with lock:
+                admissions.append(time.monotonic())
+            if request.frame_number in (0, 60):
+                started[request.frame_number // 60].set()
+            time.sleep(0.02)
+            return RenderedFrameResult(path=request.output_path,
+                                       facts=RenderedFrameFacts(source_frame=request.frame_number))
+
+        def poll(futures, *, timeout, return_when):
+            entered_wait.set()
+            return real_wait(futures, timeout=0.25 if slow_poll else timeout,
+                             return_when=return_when)
+
+        def send_interrupt():
+            try:
+                assert entered_wait.wait(2)
+                assert all(event.wait(2) for event in started)
+                time.sleep(0.005)
+                signal_time.append(time.monotonic())
+                os.kill(os.getpid(), signal.SIGINT)
+            except BaseException as error:
+                sender_errors.append(repr(error))
+
+        async def run():
+            sender = Thread(target=send_interrupt)
+            sender.start()
+            try:
+                with suppress(_RunInterrupt):
+                    orchestrator.render_batch_detailed(
+                        requests, parallelism=2, work_unit_ranges=[range(60), range(60, 120)]
+                    )
+            finally:
+                sender.join(timeout=2)
+                assert not sender.is_alive()
+            task = asyncio.current_task()
+            assert task is not None and task.cancelling() > 0
+            interrupt_observed.append(time.monotonic())
+            await cancellation_checkpoint()
+
+        orchestrator.render_frame_detailed = render
+        orchestrator.wait = poll
+        try:
+            asyncio.run(run())
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            pass
+        else:
+            raise AssertionError('Expected Runner cancellation')
+        assert len(interrupt_observed) == 1, "Runner did not cancel the main task"
+        assert not sender_errors, sender_errors
+        assert len(signal_time) == 1
+        last_start_seconds = max(admissions) - signal_time[0]
+        print(json.dumps({'last_start_seconds': last_start_seconds,
+                          'signal_to_exit_seconds': time.monotonic() - signal_time[0]}))
+        """
+    )
+    # The bound is the approved 50 ms plus 100 ms slack, independent of the
+    # production constant or mutation: a slower poll cannot relax the assertion.
+    for mode in ("slow", "production"):
+        completed = subprocess.run(
+            [sys.executable, "-c", script, mode],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=8,
+        )
+        measured = json.loads(completed.stdout)
+        last_start = measured["last_start_seconds"]
+        print(f"{mode}: {measured}")
+        if mode == "slow":
+            assert last_start > 0.150, "250 ms mutation did not violate the admission bound"
+        else:
+            assert last_start <= 0.150, measured

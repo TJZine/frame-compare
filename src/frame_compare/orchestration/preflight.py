@@ -21,6 +21,7 @@ from frame_compare.orchestration.errors import (
     NoVideosFoundError,
 )
 from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 # Canonical video patterns
@@ -33,7 +34,7 @@ class PreflightResult:
 
     config: ConfigSchema
     workspace: WorkspacePaths
-    warnings: list[str] = field(default_factory=lambda: [])
+    warnings: list[RunWarning] = field(default_factory=lambda: [])
 
 
 def resolve_workspace(root: Path | None) -> Path:
@@ -63,10 +64,55 @@ def resolve_workspace(root: Path | None) -> Path:
 def _resolve_path(path_str: str, root: Path) -> Path:
     """Expand env vars and resolve relative to root."""
     expanded = os.path.expandvars(path_str)
-    path = Path(expanded)
-    if path.is_absolute():
-        return path.resolve()
-    return (root / path).resolve()
+    _validate_filesystem_path(expanded, field_name="input_dir")
+    try:
+        path = Path(expanded)
+        if path.is_absolute():
+            return path.resolve()
+        return (root / path).resolve()
+    except ValueError as exc:
+        raise _invalid_filesystem_path_error(expanded, field_name="input_dir") from exc
+
+
+def _safe_path_value(path_value: str | Path) -> str:
+    """Render a path value without emitting undecodable or NUL characters."""
+    return (
+        str(path_value)
+        .encode("utf-8", errors="backslashreplace")
+        .decode("utf-8")
+        .replace("\x00", "\\x00")
+    )
+
+
+def _invalid_filesystem_path_error(
+    path_value: str | Path,
+    *,
+    field_name: str,
+) -> ConfigValidationError:
+    return ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["paths", field_name],
+                "msg": f"paths.{field_name} is not representable by the filesystem",
+                "input": _safe_path_value(path_value),
+            }
+        ],
+        message="Invalid configuration path",
+        hint="Choose a filesystem path without NUL or unsupported characters",
+    )
+
+
+def _validate_filesystem_path(path_value: str | Path, *, field_name: str) -> str:
+    """Reject path values that the host filesystem cannot represent."""
+    value = str(path_value)
+    try:
+        encoded = os.fsencode(value)
+    except UnicodeError as exc:
+        raise _invalid_filesystem_path_error(value, field_name=field_name) from exc
+    if b"\x00" in encoded:
+        raise _invalid_filesystem_path_error(value, field_name=field_name)
+    return value
 
 
 def _is_filesystem_root(path_value: str, resolved_path: Path | None = None) -> bool:
@@ -140,6 +186,7 @@ def _generated_root_resolution_error(
 def _resolve_generated_root(path_value: str | Path, root: Path) -> Path:
     """Resolve and structurally validate the configured generated-data root."""
     expanded = os.path.expandvars(str(path_value))
+    _validate_filesystem_path(expanded, field_name="generated_dir")
     if not expanded.strip():
         raise _empty_generated_root_error(path_value)
     if _is_filesystem_root(expanded):
@@ -154,6 +201,8 @@ def _resolve_generated_root(path_value: str | Path, root: Path) -> Path:
         )
     except (OSError, RuntimeError) as exc:
         raise _generated_root_resolution_error(path_value, exc) from exc
+    except ValueError as exc:
+        raise _invalid_filesystem_path_error(path_value, field_name="generated_dir") from exc
     if _is_filesystem_root(expanded, resolved_path):
         raise _invalid_generated_root_error(path_value)
     return resolved_path
@@ -173,14 +222,25 @@ def _validate_generated_descendants(generated_root: Path) -> None:
         raise _generated_root_resolution_error(generated_root, exc) from exc
 
 
-def resolve_contained_path(path_value: str | Path, root: Path) -> Path:
+def resolve_contained_path(
+    path_value: str | Path,
+    root: Path,
+    *,
+    field_name: str = "config_dir",
+) -> Path:
     """Resolve a path and require its final target to remain under ``root``."""
     resolved_root = root.resolve()
     expanded = os.path.expandvars(str(path_value))
-    candidate = Path(expanded)
-    resolved_path = (
-        candidate.resolve() if candidate.is_absolute() else (resolved_root / candidate).resolve()
-    )
+    _validate_filesystem_path(expanded, field_name=field_name)
+    try:
+        candidate = Path(expanded)
+        resolved_path = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (resolved_root / candidate).resolve()
+        )
+    except ValueError as exc:
+        raise _invalid_filesystem_path_error(expanded, field_name=field_name) from exc
     if not resolved_path.is_relative_to(resolved_root):
         raise PathEscapesRootError(resolved_path, resolved_root)
     return resolved_path
@@ -201,10 +261,16 @@ def resolve_selected_config_path(path_value: str | Path, root: Path) -> Path:
     """Resolve a selected config, including the one Windows portable exception."""
     resolved_root = root.resolve()
     expanded = os.path.expandvars(str(path_value))
-    candidate = Path(expanded)
-    resolved_path = (
-        candidate.resolve() if candidate.is_absolute() else (resolved_root / candidate).resolve()
-    )
+    _validate_filesystem_path(expanded, field_name="config_path")
+    try:
+        candidate = Path(expanded)
+        resolved_path = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (resolved_root / candidate).resolve()
+        )
+    except ValueError as exc:
+        raise _invalid_filesystem_path_error(expanded, field_name="config_path") from exc
     if resolved_path.is_relative_to(resolved_root):
         return resolved_path
 
@@ -220,7 +286,7 @@ def validate_and_normalize_config_paths(
 ) -> ConfigSchema:
     """Validate contained config paths without mutating the supplied config."""
     resolved_root = root.resolve()
-    resolve_contained_path(config.paths.config_dir, resolved_root)
+    resolve_contained_path(config.paths.config_dir, resolved_root, field_name="config_dir")
     _resolve_generated_root(config.paths.generated_dir, resolved_root)
     return config
 
@@ -230,7 +296,7 @@ def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     resolved_root = root.resolve()
     validated_config = validate_and_normalize_config_paths(config, resolved_root)
     paths = validated_config.paths
-    config_dir = resolve_contained_path(paths.config_dir, resolved_root)
+    config_dir = resolve_contained_path(paths.config_dir, resolved_root, field_name="config_dir")
     generated_dir = _resolve_generated_root(paths.generated_dir, resolved_root)
     _validate_generated_descendants(generated_dir)
 
@@ -265,7 +331,7 @@ def _resolve_paths_with_config_file(
         run_dir=None,  # Real runs reserve a child before rendering.
         screenshots_dir=generated_dir / "screenshots",
         generated_dir=generated_dir,
-        config_dir=resolve_contained_path(paths.config_dir, resolved_root),
+        config_dir=resolve_contained_path(paths.config_dir, resolved_root, field_name="config_dir"),
         config_file=config_file,
         analysis_cache_dir=generated_dir / "cache" / "analysis",
         alignment_cache_dir=generated_dir / "cache" / "alignment",
@@ -319,7 +385,7 @@ def prepare_preflight(
     overrides: dict[str, object] | None = None,
 ) -> PreflightResult:
     """Validate configuration and resolve workspace paths."""
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
 
     if config_path is not None:
         expanded_config_path = Path(os.path.expandvars(str(config_path)))

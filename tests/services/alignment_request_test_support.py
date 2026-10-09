@@ -1,12 +1,13 @@
 """Factories for tests that exercise the typed alignment service boundary."""
 
 from pathlib import Path
+from typing import Literal
 
-from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
     AlignmentClipRequest,
+    AlignmentPreviousOffsetsPolicy,
     AlignmentRequest,
 )
 from frame_compare.vsview.alignment_review_contract import (
@@ -19,9 +20,13 @@ def alignment_request(
     *,
     reference: Path,
     comparisons: list[Path],
-    config: AlignmentConfig,
     generated_dir: Path,
     shared_alignment_cache_dir: Path | None = None,
+    max_offset_seconds: float = 30.0,
+    channel_strategy: Literal["mono_downmix", "best_channel"] = "mono_downmix",
+    reference_stream: int | None = None,
+    comparison_streams: dict[str, int] | None = None,
+    previous_offsets: AlignmentPreviousOffsetsPolicy = "disabled",
     fps_num: int = 24,
     fps_den: int = 1,
 ) -> AlignmentRequest:
@@ -46,23 +51,23 @@ def alignment_request(
         )
 
     return AlignmentRequest(
-        reference=clip(reference, selected_audio_stream=config.reference_stream),
+        reference=clip(reference, selected_audio_stream=reference_stream),
         selected_reference_relationship="auto",
         comparisons=[
             clip(
                 comparison,
-                selected_audio_stream=config.comparison_streams.get(comparison.stem),
+                selected_audio_stream=(comparison_streams or {}).get(comparison.stem),
             )
             for comparison in comparisons
         ],
-        previous_offsets=config.previous_offsets,
+        previous_offsets=previous_offsets,
         generated_dir=generated_dir,
         shared_alignment_cache_dir=(
             shared_alignment_cache_dir or generated_dir / "shared-alignment"
         ),
         settings=AlignmentCacheSettings(
-            max_offset_seconds=config.max_offset_seconds,
-            channel_strategy=config.channel_strategy,
+            max_offset_seconds=max_offset_seconds,
+            channel_strategy=channel_strategy,
         ),
     )
 

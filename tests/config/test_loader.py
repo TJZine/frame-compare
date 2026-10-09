@@ -113,6 +113,14 @@ def test_toml_with_utf8_bom_is_accepted(tmp_path: Path) -> None:
     assert config.analysis.random_frame_count == 20
 
 
+def test_config_with_invalid_utf8_raises_config_parse_error(tmp_path: Path) -> None:
+    config_file = tmp_path / "invalid-encoding.toml"
+    config_file.write_bytes(b"[analysis]\nrandom_frame_count = 20\n\xff")
+
+    with pytest.raises(ConfigParseError, match="not valid UTF-8"):
+        load_config(config_path=config_file)
+
+
 def test_validation_error_raises(tmp_path: Path) -> None:
     """Test that invalid config values raise ConfigValidationError."""
     config_file = tmp_path / "invalid.toml"

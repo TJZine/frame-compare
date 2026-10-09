@@ -607,9 +607,11 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
         ("clipboard", False),
         ("browser", False),
     ]
-    assert actions[0].warning == "slow.pics clipboard: failed to copy URL"
+    assert actions[0].warning is not None
+    assert actions[0].warning.text == "slow.pics clipboard: failed to copy URL"
     assert "clipboard secret sentinel" not in str(actions[0].warning)
-    assert actions[1].warning == (
+    assert actions[1].warning is not None
+    assert actions[1].warning.text == (
         "slow.pics browser: failed to open URL: no browser accepted the request"
     )
     assert slowpics_browser_open_attempted(actions) is True
@@ -639,7 +641,8 @@ def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
         )
 
     browser_action = next(action for action in actions if action.kind == "browser")
-    assert browser_action.warning == "slow.pics browser: failed to open URL"
+    assert browser_action.warning is not None
+    assert browser_action.warning.text == "slow.pics browser: failed to open URL"
     assert "browser secret sentinel" not in str(browser_action.warning)
     browser_record = next(
         item for item in captured_logs if item["event"] == "slowpics_browser_open_failed"

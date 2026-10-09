@@ -350,7 +350,7 @@ def test_execute_prep_auto_sampling_failure_warns_and_leaves_full_frame(
 
     assert prep.clips[0].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
     assert any(
-        "active-rect auto detection failed" in warning for warning in prep.preflight_warnings
+        "active-rect auto detection failed" in warning.text for warning in prep.preflight_warnings
     )
 
 

@@ -23,6 +23,7 @@ from frame_compare.orchestration.types import (
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ class RenderArtifacts:
     frame_facts_by_label: dict[str, list[RenderedFrameFacts]]
     clip_facts_by_label: dict[str, RenderedClipFacts]
     screenshot_dir: Path | None
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
     def __post_init__(self) -> None:
         labels = set(self.screenshots_by_label)
@@ -59,7 +60,7 @@ class FramePlanPhaseOutput:
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
         default_factory=dict[int, SelectionDetail]
     )
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,7 @@ class AnalyzePhaseOutput:
     selection_details_by_source_frame: SelectionDetailsByFrame = field(
         default_factory=dict[int, SelectionDetail]
     )
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     replaces_frame_plan_selection: bool = False
     success_summary: str | None = None
 
@@ -83,7 +84,7 @@ class AlignPhaseOutput:
     selected_frames: list[int]
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     success_summary: str | None = None
     # Measured VSView review wait for the human summary (memory only).
     review_seconds: float = 0.0
@@ -120,12 +121,12 @@ class ReportPhaseOutput:
 @dataclass(frozen=True)
 class ConfirmSlowpicsUploadPhaseOutput:
     status: SlowpicsUploadConfirmationStatus
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 @dataclass(frozen=True)
 class PostReportCleanupPhaseOutput:
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 type PhaseOutput = (
@@ -155,7 +156,7 @@ class RunArtifacts:
     report_path: Path | None = None
     report_succeeded: bool = False
     resolved_metadata: TmdbMetadata | None = None
-    warnings: list[str] = field(default_factory=list[str])
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 @dataclass
@@ -164,14 +165,14 @@ class ExecutionState:
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
     selected_frames: list[int] = field(default_factory=list[int])
-    frame_plan_warnings: list[str] = field(default_factory=list[str])
+    frame_plan_warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
     # Measured VSView review wait for the human summary (memory only: never a
     # phase timing, never persisted to the run record or JSON output).
     vsview_review_seconds: float = 0.0
 
     @property
-    def warnings(self) -> list[str]:
+    def warnings(self) -> list[RunWarning]:
         return self.artifacts.warnings
 
 
@@ -189,7 +190,7 @@ class PrepState:
     clips: list[ClipState]
     artifacts: RunArtifacts
     metadata_prefetch: MetadataPrefetch
-    preflight_warnings: list[str]
+    preflight_warnings: list[RunWarning]
     preflight_duration: float
     load_sources_start: float
     analysis_selection_domain: str

@@ -178,6 +178,8 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
+        "tools/checkout_source_commit.sh",
+        ".dockerignore",
         ".github/workflows/docker-integration.yml",
     } == set(workflow_paths)
     assert "paths-ignore" not in docker["on"]["pull_request"]

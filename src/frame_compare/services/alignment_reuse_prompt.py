@@ -19,7 +19,7 @@ from rich.text import Text
 
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME
 from frame_compare.utils.progress_protocol import ProgressReporter
-from frame_compare.utils.terminal import stream_is_tty
+from frame_compare.utils.terminal import interruptible_prompt, stream_is_tty
 from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console, human_console
 from frame_compare.utils.types import AlignmentRequest
 
@@ -225,7 +225,8 @@ def _read_reuse_response(*, no_color: bool) -> bool:
     console = _console(no_color=no_color)
     console.print(Text(f"{_DECISION_PROMPT_INDENT}{REUSE_PREVIOUS_OFFSETS_PROMPT}"), end="")
     try:
-        raw_response = sys.stdin.readline()
+        with interruptible_prompt():
+            raw_response = sys.stdin.readline()
     except OSError:
         _print_prompt_unavailable(no_color=no_color, leading_newline=True)
         return False

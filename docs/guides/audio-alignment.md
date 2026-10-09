@@ -193,15 +193,20 @@ It is retained until the run folder is deleted.
 
 ## Native VSView alignment review
 
-VSView 0.11.0 and the Frame Compare alignment panel are included in the Windows
+VSView 0.12.0 and the Frame Compare alignment panel are included in the Windows
 portable bundle and are optional in native installations through the
 `frame-compare[vsview]` extra. The panel entry point and VSView runtime must be
 installed in the same Python environment; a PATH-only VSView executable is not
 supported. The upstream `recommended` and `full` extras are intentionally not
 selected. The default Docker route does not provide an interactive desktop session.
-The Linux X11 profile has a verifier contract for offscreen VSView/session/metadata/
-result proof; this feature run has static contract proof only, and execution plus
-visible desktop launch remain host-dependent and unverified.
+The [2026-10-07 dependency-refresh handoff](../plans/2026-10-07-dependency-refresh-windows10-handoff.md)
+records a reported Linux-container offscreen pass on macOS Docker Desktop: the
+`gui-linux` image loaded a production-generated three-source L-SMASH session,
+constructed the panel, rendered frame 0 for the named outputs, exercised the typed
+sibling sidecar, and completed cleanup. This is historical evidence for that refresh,
+not a current GUI run; its raw logs were not independently authenticated in this
+checkout. The current Linux X11 wrapper, visible desktop launch, and physical native
+VSView acceptance remain unverified.
 
 Set `audio_alignment.use_vsview = true` to request optional native panel review,
 or use `--force-interactive-alignment` when a successful review is required. Normal

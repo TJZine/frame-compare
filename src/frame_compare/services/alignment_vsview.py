@@ -12,8 +12,10 @@ import structlog
 
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
+from frame_compare.services.alignment_sources import require_current_alignment_clips
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
 from frame_compare.utils.types import AlignmentClipRequest
@@ -193,6 +195,7 @@ def _save_confirmed_offsets(
 ) -> None:
     timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     for comparison in comparisons:
+        raise_if_cancelling()
         key = alignment_key(reference, comparison)
         if key not in confirmed_offsets_by_key:
             continue
@@ -319,6 +322,7 @@ def maybe_launch_alignment_vsview(
     review_summary: AlignmentReviewSummary | None = None,
 ) -> AlignmentVSViewOutcome:
     """Launch one native review and apply only a complete, trusted result."""
+    raise_if_cancelling()
     if not _launch_requested(config):
         return AlignmentVSViewOutcome(None, "not_requested")
 
@@ -405,7 +409,10 @@ def maybe_launch_alignment_vsview(
             _handle_invalid_result(exc, config=config, tty_status=tty_status)
             return AlignmentVSViewOutcome(None, "rejected_result")
 
+        raise_if_cancelling()
         confirmed_offsets = _confirmed_offsets(result)
+        if confirmed_offsets:
+            require_current_alignment_clips([reference, *comparisons])
         _save_confirmed_offsets(
             reference=reference_path,
             comparisons=comparison_paths,

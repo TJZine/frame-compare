@@ -3,23 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
+import frame_compare.analysis.metrics as metrics_owner
 from frame_compare.analysis.errors import (
     ExclusionRecoverySelectionError,
     MetricsCalculationError,
     SelectionError,
 )
+from frame_compare.analysis.metric_identity import (
+    metric_algorithm_id,
+    metric_backend,
+    stable_metric_algorithm_identity_json,
+)
+from frame_compare.analysis.metric_strategies import MetricComputationResult
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
+    MetricsAcquisition,
     MetricsMetadata,
     SelectionBreakdown,
     SelectionDetail,
@@ -41,12 +51,15 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from frame_compare.utils.cache_errors import CacheCorruptionError
+from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.vs.types import SourceInfo
+from tests.analysis._cache_io_test_helpers import valid_cache_metadata_payload
 from tests.orchestration.phase_task_helpers import (
     MINIMAL_CONFIG,
     _clip,
     _context,
     _create_config,
-    _frame_metrics,
 )
 
 if TYPE_CHECKING:
@@ -118,26 +131,24 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
     ctx.preflight_warnings = [
-        "active-rect auto detection skipped reference.mkv: constrained attempt",
-        "probe warning",
+        RunWarning("active-rect auto detection", "skipped", "constrained attempt"),
+        RunWarning(
+            "sources", "warning", "active-rect auto detection skipped reference.mkv: probe warning"
+        ),
     ]
     constrained_metrics = _metrics_for_range(start=40, end=60)
     full_metrics = _metrics_for_range(start=0, end=100)
-    cache_keys: list[str] = []
     calculate_ranges: list[tuple[int, int]] = []
     confirmation_requests: list[FullWindowRetryConfirmationRequest] = []
     progress = ConfirmationProgressSpy()
 
-    def _load_cache(*_args: object, **kwargs: Any) -> CacheLoadResult:
-        cache_keys.append(str(_args[1]))
-        if len(cache_keys) == 1:
-            return CacheLoadResult(success=True, metrics=constrained_metrics)
-        return CacheLoadResult(success=False, reason="not_found")
-
-    def _calculate_metrics(**kwargs: Any) -> FrameMetrics:
+    def _calculate_metrics(**kwargs: Any) -> MetricsAcquisition:
         frame_range = kwargs["metric_frame_range"]
         calculate_ranges.append((frame_range.start, frame_range.end_exclusive))
-        return constrained_metrics if frame_range.start == 40 else full_metrics
+        return MetricsAcquisition(
+            metrics=constrained_metrics if frame_range.start == 40 else full_metrics,
+            disposition="computed",
+        )
 
     def _confirm(
         request: FullWindowRetryConfirmationRequest,
@@ -147,7 +158,6 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
 
     ctx.confirm_full_window_retry = _confirm
     ctx.reporter = cast("ProgressReporter", progress)
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
     monkeypatch.setattr(phase_selection, "calculate_metrics", _calculate_metrics)
 
     output = phase_selection.run_analyze_phase(
@@ -156,7 +166,7 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
         workspace=ctx.workspace,
     )
 
-    assert cache_keys[0] != cache_keys[1]
+    assert calculate_ranges == [(40, 60), (0, 100)]
     assert len(output.selected_frames) == 25
     assert output.selection_breakdown.user == [10]
     assert len(output.selection_breakdown.motion) == 12
@@ -166,12 +176,16 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
         "Motion",
         "Random",
     }
-    assert any("disabled for this run only" in warning for warning in output.warnings)
-    assert any(warning.endswith(": 120") for warning in output.warnings)
-    assert not any(warning.endswith(": 10") for warning in output.warnings)
+    assert any("disabled for this run only" in warning.text for warning in output.warnings)
+    assert any(warning.text.endswith(": 120") for warning in output.warnings)
+    assert not any(warning.text.endswith(": 10") for warning in output.warnings)
     assert config_path.read_bytes() == authored_bytes
     assert confirmation_requests[0].eligible_frame_count == 20
-    assert ctx.preflight_warnings == ["probe warning"]
+    assert ctx.preflight_warnings == [
+        RunWarning(
+            "sources", "warning", "active-rect auto detection skipped reference.mkv: probe warning"
+        )
+    ]
     assert output.replaces_frame_plan_selection is True
 
 
@@ -197,14 +211,11 @@ def test_run_analyze_phase_satisfied_selection_never_prompts(
         AssertionError("valid selection must not prompt")
     )
     monkeypatch.setattr(
-        phase_selection.cache_io,
-        "load_cached_metrics_for_request",
-        lambda *_args, **_kwargs: CacheLoadResult(success=False, reason="not_found"),
-    )
-    monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **_kwargs: _metrics_for_range(start=40, end=60),
+        lambda **_kwargs: MetricsAcquisition(
+            metrics=_metrics_for_range(start=40, end=60), disposition="computed"
+        ),
     )
 
     output = phase_selection.run_analyze_phase(
@@ -244,14 +255,8 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
         },
     )
     ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
-    calls = 0
     prompt_calls = 0
     progress = ConfirmationProgressSpy()
-
-    def _load_cache(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        nonlocal calls
-        calls += 1
-        return CacheLoadResult(success=True, metrics=_metrics_for_range(start=40, end=60))
 
     def _confirm(
         request: FullWindowRetryConfirmationRequest,
@@ -264,11 +269,12 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
 
     ctx.confirm_full_window_retry = _confirm
     ctx.reporter = cast("ProgressReporter", progress)
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **_kwargs: _metrics_for_range(start=40, end=60),
+        lambda **_kwargs: MetricsAcquisition(
+            metrics=_metrics_for_range(start=40, end=60), disposition="computed"
+        ),
     )
 
     with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
@@ -311,17 +317,6 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
         sampled_source_frames=tuple(range(99)),
     )
 
-    def _load_cache(*_args: object, **kwargs: Any) -> CacheLoadResult:
-        frame_range = kwargs["request"].metric_frame_range
-        return CacheLoadResult(
-            success=True,
-            metrics=(
-                sparse_full_metrics
-                if frame_range.start == 0
-                else _metrics_for_range(start=frame_range.start, end=frame_range.end_exclusive)
-            ),
-        )
-
     def _confirm(
         request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
@@ -330,17 +325,17 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
         return "confirmed"
 
     ctx.confirm_full_window_retry = _confirm
-    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **kwargs: (
-            sparse_full_metrics
+        lambda **kwargs: MetricsAcquisition(
+            metrics=sparse_full_metrics
             if kwargs["metric_frame_range"].start == 0
             else _metrics_for_range(
                 start=kwargs["metric_frame_range"].start,
                 end=kwargs["metric_frame_range"].end_exclusive,
-            )
+            ),
+            disposition="computed",
         ),
     )
 
@@ -353,8 +348,8 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
 
     assert prompt_calls == 1
     assert len(ctx.run_warnings) == 1
-    assert "configured lead=1.66667s" in ctx.run_warnings[0]
-    assert "effective lead=0s" in ctx.run_warnings[0]
+    assert "configured lead=1.66667s" in ctx.run_warnings[0].text
+    assert "effective lead=0s" in ctx.run_warnings[0].text
 
 
 @pytest.mark.parametrize(
@@ -438,7 +433,7 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
 
     assert isinstance(exc_info.value.__cause__, MetricsCalculationError)
     assert len(ctx.run_warnings) == 1
-    assert "configured lead=1s, trail=1s" in ctx.run_warnings[0]
+    assert "configured lead=1s, trail=1s" in ctx.run_warnings[0].text
 
 
 def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
@@ -508,81 +503,73 @@ def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path
     assert state.override is not None
 
 
-def test_run_analyze_phase_cache_only_missing_cache_does_not_recompute(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corrupt: bool
 ) -> None:
     ctx = _context(tmp_path)
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     input_videos = [ctx.reference.path]
-
-    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        return CacheLoadResult(success=False, reason="not_found")
-
-    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        raise AssertionError("cache-only analyze phase must not recompute metrics")
-
     monkeypatch.setattr(
-        phase_selection.cache_io, "load_cached_metrics_for_request", _fake_load_cached_metrics
+        phase_selection.cache_io, "compute_cache_key", lambda *_args, **_kwargs: "fp"
     )
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
+    if corrupt:
+        ctx.workspace.cache_dir.mkdir(parents=True)
+        (ctx.workspace.cache_dir / "reference__fp.compframes").write_bytes(b"\xff\xfe")
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    class FailingLoader:
+        def load(self, path: Path) -> SourceInfo:
+            raise AssertionError("cache-only analyze phase must not load video")
+
+    with pytest.raises(
+        CacheCorruptionError if corrupt else MetricsCalculationError,
+        match="Cache file corrupted" if corrupt else "Cached metrics missing",
+    ):
         phase_selection.run_analyze_phase(
             ctx,
             input_videos=input_videos,
             workspace=ctx.workspace,
             require_cache_only=True,
+            vs_loader=cast("VSLoader", FailingLoader()),
         )
 
 
-def test_run_analyze_phase_metadata_mismatch_recomputes_and_reports_cache_miss(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ctx = _context(tmp_path)
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
     input_videos = [ctx.reference.path]
-    metrics = _frame_metrics(
-        luminance=[0.1, 0.9],
-        motion=[0.0, 0.8],
-        frame_count=2,
-        fps=Fraction(24, 1),
-        config_fingerprint="fingerprint",
-        clips=[],
-    )
-    calculate_calls = 0
-
-    def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        return CacheLoadResult(success=False, reason="mismatched_inputs")
-
-    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
-        nonlocal calculate_calls
-        calculate_calls += 1
-        return metrics
-
-    def _fake_select_frames(**_kwargs: object) -> FrameSelection:
-        return FrameSelection(
-            frames=[0],
-            seed=ctx.config.analysis.random_seed,
-            breakdown=SelectionBreakdown(quantile_dark=[0]),
-        )
-
     monkeypatch.setattr(
-        phase_selection.cache_io,
-        "load_cached_metrics_for_request",
-        _fake_load_cached_metrics,
+        phase_selection.cache_io, "compute_cache_key", lambda *_args, **_kwargs: "fp"
     )
-    monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    monkeypatch.setattr(phase_selection, "select_frames", _fake_select_frames)
-
-    output = phase_selection.run_analyze_phase(
-        ctx,
-        input_videos=input_videos,
-        workspace=ctx.workspace,
+    metadata = valid_cache_metadata_payload(ctx.config.analysis, frame_count=1)
+    cache_payload = {
+        "version": phase_selection.cache_io.CACHE_VERSION,
+        "fingerprint": "fp",
+        "luminance": [10**400],
+        "motion": [0.0],
+        "sampled_source_frames": None,
+        "metadata": metadata,
+    }
+    ctx.workspace.cache_dir.mkdir(parents=True)
+    cache_path = ctx.workspace.cache_dir / phase_selection.cache_io.metrics_cache_filename(
+        input_videos, "fp"
     )
+    cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
 
-    assert output.metrics_cache_hit is False
-    assert calculate_calls == 1
+    class FailingLoader:
+        def load(self, path: Path) -> SourceInfo:
+            raise AssertionError("cache-only analyze phase must not load video")
+
+    with pytest.raises(CacheCorruptionError, match="Cache file corrupted"):
+        phase_selection.run_analyze_phase(
+            ctx,
+            input_videos=input_videos,
+            workspace=ctx.workspace,
+            require_cache_only=True,
+            vs_loader=cast("VSLoader", FailingLoader()),
+        )
 
 
 def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
@@ -594,7 +581,7 @@ def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
         return CacheLoadResult(success=False, reason="mismatched_inputs")
 
-    def _fake_calculate_metrics(**_kwargs: object) -> FrameMetrics:
+    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
         raise AssertionError("cache-only analyze phase must not recompute metrics")
 
     monkeypatch.setattr(
@@ -893,7 +880,9 @@ def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
     output = phase_selection.select_initial_frame_plan(ctx)
 
     assert 2 in output.selected_frames
-    assert output.warnings == ["frame selection: dropped user frame(s) outside trims/windowing: 0"]
+    assert [warning.text for warning in output.warnings] == [
+        "frame selection: dropped user frame(s) outside trims/windowing: 0"
+    ]
 
 
 def test_select_initial_frame_plan_labels_user_and_random_frames(
@@ -1042,3 +1031,74 @@ category_preference = "tv"
         year_tolerance=4,
         category_preference="tv",
     )
+
+
+@pytest.mark.parametrize("initial_hit", [False, True])
+def test_run_analyze_phase_reports_actual_acquisition_after_cache_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initial_hit: bool
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.config.analysis = ctx.config.analysis.model_copy(
+        update={"random_frame_count": 1, "motion_frame_count": 0}
+    )
+    computations = 0
+
+    class Loader:
+        def load(self, path: Path) -> SourceInfo:
+            return cast(
+                SourceInfo,
+                SimpleNamespace(clip=SimpleNamespace(num_frames=100), fps=Fraction(24)),
+            )
+
+    def strategy(*_args: object, **_kwargs: object) -> MetricComputationResult:
+        nonlocal computations
+        computations += 1
+        return MetricComputationResult(
+            luminance=[0.1, 0.9],
+            motion=[0.0, 0.8],
+            performance_mode="quality",
+            algorithm_id=metric_algorithm_id(ctx.config.analysis),
+            metric_backend=metric_backend(ctx.config.analysis),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(ctx.config.analysis),
+        )
+
+    monkeypatch.setattr(metrics_owner, "calculate_metric_strategy", strategy)
+    loader = cast("VSLoader", Loader())
+    primed_output = phase_selection.run_analyze_phase(
+        ctx, input_videos=[ctx.reference.path], workspace=ctx.workspace, vs_loader=loader
+    )
+    primed = primed_output.analysis_metrics
+    assert primed is not None
+    cache_path = phase_selection.cache_io.find_metrics_cache_file(
+        ctx.workspace.cache_dir, primed.metadata.config_fingerprint
+    )
+    assert cache_path is not None
+    if not initial_hit:
+        cache_path.unlink()
+    reads = 0
+    real_reader = phase_selection.cache_io.load_cached_metrics
+
+    def reader(cache_dir: Path, fingerprint: str) -> CacheLoadResult:
+        nonlocal reads
+        reads += 1
+        return real_reader(cache_dir, fingerprint)
+
+    def acquire(**kwargs: Any) -> MetricsAcquisition:
+        # Change persisted cache state at the acquisition boundary. An earlier
+        # orchestration prediction would describe the opposite disposition.
+        if initial_hit:
+            cache_path.unlink()
+        else:
+            phase_selection.cache_io.save_metrics_cache(primed, ctx.workspace.cache_dir)
+        return metrics_owner.calculate_metrics(**kwargs)
+
+    monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", reader)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", acquire)
+    computations = 0
+    output = phase_selection.run_analyze_phase(
+        ctx, input_videos=[ctx.reference.path], workspace=ctx.workspace, vs_loader=loader
+    )
+    assert reads == 1
+    assert output.metrics_cache_hit is (not initial_hit)
+    assert computations == int(initial_hit)

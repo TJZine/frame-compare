@@ -275,7 +275,7 @@ def print_pre_review_summary(
         if index:
             line.append(" · ", style="dim")
         if applied:
-            line.append(f"{short} audio applied")
+            line.append(f"{short} alignment applied")
         else:
             line.append(f"{short} needs visual confirmation", style=WARN)
     progress.suspend()

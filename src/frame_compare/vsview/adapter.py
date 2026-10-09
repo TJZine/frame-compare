@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
-import os
 import re
 import subprocess  # nosec B404
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -21,6 +21,8 @@ from time import monotonic
 
 import structlog
 
+from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.subproc import prepare_python_child
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewSession,
@@ -38,13 +40,6 @@ _PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 _STARTUP_STDERR_LIMIT = 4000
 # Keep ``-c``/``-m`` imports out of the caller-controlled media workspace.
 _CHILD_PROCESS_CWD = Path(sys.executable).resolve().parent
-_PYTHON_INJECTION_ENV_KEYS = (
-    "PYTHONHOME",
-    "PYTHONINSPECT",
-    "PYTHONPATH",
-    "PYTHONSTARTUP",
-    "PYTHONUSERBASE",
-)
 _ALIGNMENT_REVIEW_ENTRY_POINT_NAME = "frame-compare-alignment-review"
 _ALIGNMENT_REVIEW_ENTRY_POINT_VALUE = "frame_compare.vsview.alignment_review_panel"
 _MISSING_MODULE_PATTERN = re.compile(
@@ -250,11 +245,7 @@ def launch_alignment_verification_session(
 
 def _build_vsview_child_env(*, no_color: bool) -> dict[str, str]:
     """Build the child-only environment without changing the parent process."""
-    env = os.environ.copy()
-    for key in _PYTHON_INJECTION_ENV_KEYS:
-        env.pop(key, None)
-    env["PYTHONSAFEPATH"] = "1"
-    env["PYTHONNOUSERSITE"] = "1"
+    _, env = prepare_python_child([sys.executable])
     if no_color:
         env["NO_COLOR"] = "1"
     return env
@@ -277,17 +268,7 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
     )
     probe_command = [sys.executable, "-c", probe_code]
     try:
-        result = subprocess.run(  # nosec B603
-            probe_command,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=_STARTUP_PROBE_TIMEOUT_SECONDS,
-            env=env,
-            cwd=_CHILD_PROCESS_CWD,
-            check=False,
-        )
+        result = _run_startup_probe(probe_command, env=env)
     except subprocess.TimeoutExpired as exc:
         timeout_output: str | None = None
         raw_timeout_output = exc.stderr
@@ -328,6 +309,45 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
     )
 
 
+def _run_startup_probe(
+    command: list[str], *, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Poll dependency startup, keeping cancellation and captured pipe cleanup owned."""
+    raise_if_cancelling()
+    command, env = prepare_python_child(command, env=env)
+    process = subprocess.Popen(  # nosec B603
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=env,
+        cwd=_CHILD_PROCESS_CWD,
+    )
+    deadline = monotonic() + _STARTUP_PROBE_TIMEOUT_SECONDS
+    try:
+        while True:
+            raise_if_cancelling()
+            remaining = max(0.0, deadline - monotonic())
+            try:
+                stdout, stderr = process.communicate(timeout=min(0.1, remaining))
+                raise_if_cancelling()
+                return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                if monotonic() >= deadline:
+                    raise
+    except BaseException:
+        _shutdown_vsview_process(process)
+        raise
+    finally:
+        # communicate closes pipes on success; an interrupted poll must also close them.
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+
+
 def _redact_inherited_secrets(text: str, env: dict[str, str]) -> str:
     """Redact exact sensitive environment values inherited by the child process."""
     sensitive_values = {
@@ -345,29 +365,64 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> tuple[int
     for the human summary, never a phase timing.
     """
     # command is a list from _resolve_launch_command; shell=True is never used.
+    raise_if_cancelling()
+    command, env = prepare_python_child(command, env=env)
     start = monotonic()
-    with subprocess.Popen(  # nosec B603
+    process = subprocess.Popen(  # nosec B603
         command,
         stdin=None,
         stdout=None,
         stderr=None,
         env=env,
         cwd=_CHILD_PROCESS_CWD,
-    ) as process:
-        try:
-            returncode = process.wait(timeout=_REVIEW_PROCESS_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired as exc:
-            process.terminate()
+    )
+    try:
+        deadline = start + _REVIEW_PROCESS_TIMEOUT_SECONDS
+        while True:
+            raise_if_cancelling()
+            remaining = max(0.0, deadline - monotonic())
             try:
-                process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+                returncode = process.wait(timeout=min(0.1, remaining))
+                raise_if_cancelling()
+                break
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
-            raise VSViewError(
-                "alignment review timed out before VSView closed",
-                command=tuple(command),
-            ) from exc
+                if monotonic() >= deadline:
+                    raise
+    except subprocess.TimeoutExpired as exc:
+        _shutdown_vsview_process(process)
+        raise VSViewError(
+            "alignment review timed out before VSView closed",
+            command=tuple(command),
+        ) from exc
+    except BaseException:
+        _shutdown_vsview_process(process)
+        raise
     return returncode, max(0.0, monotonic() - start)
+
+
+def _shutdown_vsview_process(process: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
+    """Boundedly terminate and reap a VSView child after an interrupted wait.
+
+    Cleanup must not replace the timeout, cancellation, or other control-flow
+    exception that caused it. In particular, a second interruption while
+    waiting for termination is treated as a cleanup failure and followed by a
+    kill attempt; there is deliberately no ``Popen`` context manager here,
+    because its ``__exit__`` wait is unbounded.
+    """
+    with suppress(BaseException):
+        process.terminate()
+
+    try:
+        process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+        return
+    except BaseException:
+        pass
+
+    with suppress(BaseException):
+        process.kill()
+
+    with suppress(BaseException):
+        process.wait(timeout=_PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
 
 
 def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:

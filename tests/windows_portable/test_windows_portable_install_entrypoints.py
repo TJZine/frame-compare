@@ -65,8 +65,6 @@ def test_windows_source_install_cmd_wrappers_forward_args_and_exit_code(
 
 def test_windows_cmd_launchers_have_absolute_powershell_fallbacks(repo_root: Path) -> None:
     for relative_path in (
-        "install.cmd",
-        "tools/windows_portable/install-from-source.cmd",
         "tools/windows_portable/install.cmd",
         "tools/windows_portable/uninstall.cmd",
         "tools/windows_portable/shim/frame-compare.cmd",
@@ -75,3 +73,127 @@ def test_windows_cmd_launchers_have_absolute_powershell_fallbacks(repo_root: Pat
         source = _read_text_or_fail(repo_root / relative_path).lower()
         assert "%programfiles%\\powershell\\7\\pwsh.exe" in source
         assert "%systemroot%\\system32\\windowspowershell\\v1.0\\powershell.exe" in source
+
+
+@pytest.mark.parametrize(
+    "entrypoint", ("install.ps1", "tools/windows_portable/install-from-source.ps1")
+)
+def test_source_install_requires_ps7_before_bootstrap(repo_root: Path, entrypoint: str) -> None:
+    source = _read_text_or_fail(repo_root / entrypoint)
+    guard = source.index("$PSVersionTable.PSVersion.Major -lt 7")
+    assert "PowerShell 7 or newer is required to build Frame Compare from source." in source
+    boundary = (
+        source.index("Update-ProcessPathFromRegistry\nEnsure-UvOnPath")
+        if "install-from-source.ps1" in entrypoint
+        else source.index("& (Join-Path $PSScriptRoot")
+    )
+    assert guard < boundary
+
+
+@pytest.mark.parametrize(
+    "wrapper", ("install.cmd", "tools/windows_portable/install-from-source.cmd")
+)
+def test_source_cmd_requires_ps7_without_legacy_fallback(repo_root: Path, wrapper: str) -> None:
+    source = _read_text_or_fail(repo_root / wrapper).lower()
+    assert "powershell 7 or newer is required to build frame compare from source." in source
+    assert "windowspowershell" not in source
+    assert source.index("exit /b 9009") < source.index("-noprofile")
+
+
+@pytest.mark.integration
+def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    import os
+    import shutil
+    import subprocess
+
+    if os.name != "nt":
+        pytest.skip("Windows CMD process semantics required")
+    wrapper = tmp_path / "install.cmd"
+    wrapper.write_bytes((repo_root / "install.cmd").read_bytes())
+    marker = tmp_path / "invoked.txt"
+    (tmp_path / "install.ps1").write_text(
+        f"Set-Content -LiteralPath '{marker}' -Value invoked; exit 0",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    # Keep real command discovery, without exposing host executables or its working directory.
+    shutil.copyfile(Path(env["SYSTEMROOT"]) / "System32/where.exe", tmp_path / "where.exe")
+    env["PATH"] = str(tmp_path)
+    # Set the fallback inside CMD; the Windows runner restores the host's ProgramFiles.
+    driver = tmp_path / "invoke.cmd"
+    driver.write_text(
+        "@echo off\n"
+        'set "ProgramFiles=%~dp0no-powershell"\n'
+        'call "%~dp0install.cmd" -SkipSync\n'
+        "exit /b %ERRORLEVEL%\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [env["COMSPEC"], "/d", "/c", str(driver)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode != 0, (proc.stdout, proc.stderr)
+    assert "PowerShell 7 or newer is required" in proc.stdout + proc.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+def test_root_source_installer_prerequisite_at_process_boundary(
+    tmp_path: Path, repo_root: Path, interpreter: str
+) -> None:
+    import os
+    import shutil
+    import subprocess
+
+    if os.name != "nt":
+        pytest.skip("Windows source installer process semantics required")
+    exe = shutil.which(interpreter)
+    if exe is None:
+        pytest.skip(f"{interpreter} not available")
+    copied_repo = tmp_path / "repo"
+    owner = copied_repo / "tools/windows_portable"
+    owner.mkdir(parents=True)
+    for relative in ("install.ps1", "tools/windows_portable/install-from-source.ps1"):
+        (copied_repo / relative).write_bytes((repo_root / relative).read_bytes())
+    (owner / "manifest.windows-x64.json").write_text("{}", encoding="utf-8")
+    # Keep the production installer path; stub only its expensive build/bootstrap boundaries.
+    (owner / "build_portable.ps1").write_text(
+        """
+param($ManifestPath, $OutDir, $CacheDir, $RepoRoot)
+New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $OutDir "install.ps1") -Value '$global:LASTEXITCODE = 0'
+$global:LASTEXITCODE = 0
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f"function uv {{ throw 'uv must not run with SkipSync' }}; & '{copied_repo / 'install.ps1'}' -SkipSync",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if interpreter == "powershell":
+        assert proc.returncode != 0
+        assert "PowerShell 7 or newer is required" in proc.stdout + proc.stderr
+        assert not (copied_repo / "dist").exists()
+        assert not (copied_repo / ".portable_cache").exists()
+    else:
+        assert proc.returncode == 0, proc.stderr
+        assert "Source install complete." in proc.stdout
+        assert (copied_repo / "dist/frame-compare-portable-win-x64/install.ps1").exists()

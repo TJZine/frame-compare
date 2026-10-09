@@ -12,14 +12,9 @@ def test_alignment_config_defaults() -> None:
     """AlignmentConfig keeps its current whole-track defaults."""
     cfg = AlignmentConfig()
     assert cfg.enable is True
-    assert cfg.max_offset_seconds == 30.0
     assert cfg.use_vsview is False
     assert cfg.force_interactive is False
     assert cfg.cache_results is True
-    assert cfg.previous_offsets == "disabled"
-    assert cfg.channel_strategy == "mono_downmix"
-    assert cfg.reference_stream is None
-    assert cfg.comparison_streams == {}
     assert cfg.no_color is False
 
 

@@ -34,6 +34,7 @@ from frame_compare.orchestration.execution_types import (
 from frame_compare.orchestration.phase_output_application import apply_phase_output
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.run_warnings import RunWarning
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state, execution_context
 from .phase_task_helpers import _context, _frame_metrics, _render_artifacts, _workspace
@@ -223,8 +224,14 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
         reference=reference,
         comparisons=[],
     )
-    state = ExecutionState(artifacts=RunArtifacts(warnings=["preflight warning"]))
-    stale_warning = "frame selection: dropped user frame(s) outside trims/windowing: 4"
+    state = ExecutionState(
+        artifacts=RunArtifacts(warnings=[RunWarning("sources", "warning", "preflight warning")])
+    )
+    stale_warning = RunWarning(
+        "frame selection",
+        "warning",
+        "frame selection: dropped user frame(s) outside trims/windowing: 4",
+    )
 
     apply_phase_output(
         ctx=ctx,
@@ -246,13 +253,16 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
                 config_fingerprint="test",
                 clips=[],
             ),
-            warnings=["accepted override warning"],
+            warnings=[RunWarning("analysis", "warning", "accepted override warning")],
             replaces_frame_plan_selection=True,
         ),
     )
 
     assert state.selected_frames == [4, 20]
-    assert state.warnings == ["preflight warning", "accepted override warning"]
+    assert [warning.text for warning in state.warnings] == [
+        "preflight warning",
+        "accepted override warning",
+    ]
     assert state.frame_plan_warnings == []
 
 
@@ -281,7 +291,7 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
     webhook = PostUploadActionResult(
         kind="webhook",
         success=False,
-        warning="webhook: delivery failed",
+        warning=RunWarning("sources", "warning", "webhook: delivery failed"),
     )
 
     apply_phase_output(
@@ -313,17 +323,23 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
         reference=reference,
         comparisons=[],
     )
-    state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
+    state = ExecutionState(
+        artifacts=RunArtifacts(warnings=[RunWarning("sources", "warning", "pre-existing warning")])
+    )
     render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
         screenshot_dir=tmp_path / "screenshots",
     )
-    render.warnings.append("Screenshot geometry alignment skipped: using native geometry.")
+    render.warnings.append(
+        RunWarning(
+            "sources", "warning", "Screenshot geometry alignment skipped: using native geometry."
+        )
+    )
 
     apply_phase_output(ctx=ctx, state=state, output=RenderPhaseOutput(render=render))
 
     assert state.artifacts.render is render
-    assert state.warnings == [
+    assert [warning.text for warning in state.warnings] == [
         "pre-existing warning",
         "Screenshot geometry alignment skipped: using native geometry.",
     ]
@@ -344,7 +360,9 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
         reference=reference,
         comparisons=[comparison],
     )
-    state = ExecutionState(artifacts=RunArtifacts(warnings=["pre-existing warning"]))
+    state = ExecutionState(
+        artifacts=RunArtifacts(warnings=[RunWarning("sources", "warning", "pre-existing warning")])
+    )
 
     apply_phase_output(
         ctx=ctx,
@@ -353,14 +371,20 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
             reference=reference,
             comparisons=[comparison],
             selected_frames=[0, 2, 50],
-            warnings=["align: encode_b low confidence; left unapplied and untrimmed"],
+            warnings=[
+                RunWarning(
+                    "alignment",
+                    "warning",
+                    "align: encode_b low confidence; left unapplied and untrimmed",
+                )
+            ],
         ),
     )
 
     assert ctx.reference is reference
     assert ctx.comparisons == [comparison]
     assert state.selected_frames == [0, 2, 50]
-    assert state.warnings == [
+    assert [warning.text for warning in state.warnings] == [
         "pre-existing warning",
         "align: encode_b low confidence; left unapplied and untrimmed",
     ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 import stat
+from collections.abc import Callable
 from pathlib import Path
 
 _TEMP_NAME_ATTEMPTS = 100
@@ -52,7 +53,13 @@ def _cleanup_temp_after_failure(tmp_name: str, original_error: BaseException) ->
         )
 
 
-def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+def write_text_atomic(
+    path: Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    publish_guard: Callable[[], None] | None = None,
+) -> None:
     """Atomically write text content to a file path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = _open_temp_for_atomic_write(path)
@@ -62,13 +69,20 @@ def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> N
             handle.flush()
             os.fsync(handle.fileno())
         _preserve_existing_target_mode(path, tmp_name)
+        if publish_guard is not None:
+            publish_guard()
         os.replace(tmp_name, path)
-    except Exception as original_error:
+    except BaseException as original_error:
         _cleanup_temp_after_failure(tmp_name, original_error)
         raise
 
 
-def write_bytes_atomic(path: Path, content: bytes) -> None:
+def write_bytes_atomic(
+    path: Path,
+    content: bytes,
+    *,
+    publish_guard: Callable[[], None] | None = None,
+) -> None:
     """Atomically write byte content to a file path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = _open_temp_for_atomic_write(path)
@@ -78,7 +92,9 @@ def write_bytes_atomic(path: Path, content: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         _preserve_existing_target_mode(path, tmp_name)
+        if publish_guard is not None:
+            publish_guard()
         os.replace(tmp_name, path)
-    except Exception as original_error:
+    except BaseException as original_error:
         _cleanup_temp_after_failure(tmp_name, original_error)
         raise

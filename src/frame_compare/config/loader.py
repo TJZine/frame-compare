@@ -112,6 +112,11 @@ def load_config(
         return settings_cls(**cast(Any, merged_overrides))
     except tomllib.TOMLDecodeError as exc:
         raise ConfigParseError(config_path or Path("config/config.toml"), str(exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigParseError(
+            config_path or Path("config/config.toml"),
+            "configuration is not valid UTF-8",
+        ) from exc
     except ValidationError as exc:
         # pydantic errors are compatible with our normalizer but require a cast for strict typing
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))

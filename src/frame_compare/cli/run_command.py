@@ -39,6 +39,8 @@ from frame_compare.orchestration.preflight import (
     validate_and_normalize_config_paths,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal import interruptible_prompt
 from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
@@ -437,10 +439,11 @@ def build_confirm_full_window_retry_callback(
         request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         del request
-        confirmed = deps.confirm_full_window_retry(
-            "Configured lead/trail exclusions leave too little media to satisfy the\n"
-            "requested frame selection. Analyze the full shared clip for this run? [y/N] "
-        )
+        with interruptible_prompt():
+            confirmed = deps.confirm_full_window_retry(
+                "Configured lead/trail exclusions leave too little media to satisfy the\n"
+                "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+            )
         return "confirmed" if confirmed else "declined"
 
     return _confirm_full_window_retry
@@ -483,10 +486,11 @@ def build_confirm_slowpics_upload_callback(
                 (0, 0, 0, 2),
             )
         )
-        confirmed = deps.confirm_upload(
-            f"    Upload to {visibility_text} slow.pics?",
-            default=False,
-        )
+        with interruptible_prompt():
+            confirmed = deps.confirm_upload(
+                f"    Upload to {visibility_text} slow.pics?",
+                default=False,
+            )
         console.print()
         if confirmed:
             return "confirmed"
@@ -790,7 +794,7 @@ def _copy_slowpics_url(
         return PostUploadActionResult(
             kind="clipboard",
             success=False,
-            warning="slow.pics clipboard: failed to copy URL",
+            warning=RunWarning("slow.pics", "warning", "slow.pics clipboard: failed to copy URL"),
         )
     return PostUploadActionResult(
         kind="clipboard",
@@ -815,13 +819,18 @@ def _open_slowpics_url(
         return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning="slow.pics browser: failed to open URL",
+            warning=RunWarning("slow.pics", "warning", "slow.pics browser: failed to open URL"),
         )
     if not opened:
         return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning="slow.pics browser: failed to open URL: no browser accepted the request",
+            warning=RunWarning(
+                "slow.pics",
+                "warning",
+                "slow.pics browser: failed to open URL:",
+                "no browser accepted the request",
+            ),
         )
     return PostUploadActionResult(
         kind="browser",

@@ -90,13 +90,8 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
         "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
     }
     assert captured["config"].enable is True
-    assert captured["config"].max_offset_seconds == 4.5
     assert captured["config"].use_vsview is True
     assert captured["config"].cache_results is False
-    assert captured["config"].channel_strategy == "best_channel"
-    assert captured["config"].reference_stream == 1
-    assert captured["config"].comparison_streams == {"encode": 2}
-    assert captured["config"].previous_offsets == "disabled"
     assert alignment_request.reference.label == "Reference"
     assert alignment_request.comparisons[0].label == "Encode 1"
     assert alignment_request.reference.identity.size_bytes == 0
@@ -378,8 +373,8 @@ def test_run_align_phase_composes_global_source_trims(
     assert output.selected_frames == expected_frames
     if warns:
         assert len(output.warnings) == 1
-        assert "align: Encode B alignment" in output.warnings[0]
-        assert "encode_b" not in output.warnings[0]
+        assert "align: Encode B alignment" in output.warnings[0].text
+        assert "encode_b" not in output.warnings[0].text
         assert output.reference.alignment is None
 
 
@@ -411,7 +406,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
 
     assert output.reference.trim.trim_start_frames == 2
     assert output.selected_frames == [48]
-    assert output.warnings == [
+    assert [warning.text for warning in output.warnings] == [
         "frame selection: dropped user frame(s) outside aligned renderable range: 0"
     ]
 
@@ -815,7 +810,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2]
     assert output.selected_frames == [0, 48, 97]
     assert len(output.warnings) == 1
-    warning = output.warnings[0]
+    warning = output.warnings[0].text
     normalized_warning = warning.replace("_", " ").lower()
     assert "align:" in warning.lower()
     assert "align: Encode B alignment" in warning
@@ -885,45 +880,6 @@ def test_map_aligned_to_source_frame_rejects_negative_aligned_frame(tmp_path: Pa
             clip=ctx.reference,
             aligned_frame=-1,
         )
-
-
-def test_run_align_phase_rejects_applied_result_without_frame_offset_even_when_mixed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode A")
-    comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode B")
-    ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
-
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_a.mkv",
-                frame_offset=None,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_b.mkv",
-                frame_offset=None,
-                time_offset_seconds=None,
-                correlation_score=0.1,
-                algorithm="cross_correlation",
-                source="computed",
-                applied=False,
-                diagnostic="low_confidence",
-            ),
-        ]
-
-    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-
-    with pytest.raises(
-        AudioAlignmentError, match="Applied alignment result is missing frame offset."
-    ):
-        _run_align_phase(ctx, selected_frames=[0, 2, 50, 99])
 
 
 def test_run_align_phase_no_comparisons_is_noop(

@@ -15,6 +15,7 @@ from frame_compare.orchestration.presentation import report_console_width
 from frame_compare.services.release_identity import format_release_descriptor
 from frame_compare.services.types import AlignmentSource
 from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
 
 _MAX_SELECTED_FRAMES = 8
@@ -129,7 +130,7 @@ def _format_stability(summary: AlignmentStabilitySummary) -> str:
 def _has_material_alignment_info(
     *,
     comparisons: Sequence[AlignmentReportComparison],
-    alignment_warnings: Sequence[str],
+    alignment_warnings: list[RunWarning],
 ) -> bool:
     return any(
         comparison.relative_offset_frames not in (None, 0)
@@ -151,7 +152,7 @@ def _render_alignment_table(
     *,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: Sequence[str],
+    alignment_warnings: list[RunWarning],
     verbose: bool,
 ) -> Table:
     table = Table(
@@ -204,7 +205,7 @@ def _render_alignment_table(
             table.add_row("", "")
         table.add_row("warnings", "")
         for warning in alignment_warnings:
-            table.add_row("  warning", f"[yellow]{escape(warning)}[/]")
+            table.add_row("  warning", f"[yellow]{escape(warning.text)}[/]")
 
     if verbose:
         for comparison in comparisons:
@@ -235,7 +236,7 @@ def _render_human_alignment_report(
     stage: str,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: Sequence[str],
+    alignment_warnings: list[RunWarning],
     no_color: bool,
     verbose: bool,
 ) -> None:
@@ -264,7 +265,7 @@ def emit_frame_alignment_report(
     stage: str,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: Sequence[str],
+    alignment_warnings: list[RunWarning],
     json_output: bool,
     quiet: bool,
     no_color: bool = False,

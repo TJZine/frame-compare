@@ -84,7 +84,7 @@ state.mutate(1, { bookmark: true });
 state.mutate(2, { bookmark: true });
 const incoming = state.parseImport(bytes(exported([record(2, 'changed'), record(3)])));
 let preview = state.preview(incoming);
-assert.deepEqual(preview.counts, { add: 1, change: 1, remove: 0, unchanged: 1 });
+assert.deepEqual(preview.counts, { add: 1, change: 0, remove: 0, unchanged: 2 });
 assert.equal(state.apply(preview), true);
 assert.equal(state.get(2).note, '');
 preview = state.preview(incoming, 'merge', 'use-imported');
@@ -94,6 +94,49 @@ preview = state.preview(incoming, 'replace', 'keep-local');
 assert.equal(preview.counts.remove, 1);
 assert.equal(state.apply(preview), true);
 assert.deepEqual(state.all().map((item) => item.frame_ordinal), [2, 3]);
+
+// Count the full-record delta independently of the model's conflict-policy implementation.
+function appliedDelta(before, after) {
+    const left = new Map(before.map(item => [item.frame_ordinal, item]));
+    const right = new Map(after.map(item => [item.frame_ordinal, item]));
+    const counts = { add: 0, change: 0, remove: 0, unchanged: 0 };
+    for (const ordinal of new Set([...left.keys(), ...right.keys()])) {
+        if (!left.has(ordinal)) counts.add += 1;
+        else if (!right.has(ordinal)) counts.remove += 1;
+        else if (JSON.stringify(left.get(ordinal)) === JSON.stringify(right.get(ordinal))) counts.unchanged += 1;
+        else counts.change += 1;
+    }
+    return counts;
+}
+for (const mode of ['merge', 'replace']) {
+    for (const conflict of ['keep-local', 'use-imported']) {
+        const model = R.create({ ...context, storage: new Storage() });
+        model.mutate(0, { note: 'local only' });
+        model.mutate(1, { note: 'local conflict' });
+        model.mutate(2, { bookmark: true });
+        const before = model.all();
+        const selected = model.preview([record(1, 'incoming'), record(2), record(3)], mode, conflict);
+        const keepsConflict = mode === 'merge' && conflict === 'keep-local';
+        assert.deepEqual(selected.counts, {
+            add: 1, change: keepsConflict ? 0 : 1,
+            remove: mode === 'replace' ? 1 : 0,
+            unchanged: 1 + (keepsConflict ? 1 : 0) + (mode === 'merge' ? 1 : 0),
+        });
+        assert.equal(model.apply(selected), true);
+        assert.deepEqual(selected.counts, appliedDelta(before, model.all()));
+        assert.equal(model.get(1).note, keepsConflict ? 'local conflict' : 'incoming');
+        const noChange = model.preview(model.all(), mode, conflict);
+        assert.deepEqual(noChange.counts, { add: 0, change: 0, remove: 0, unchanged: model.all().length });
+        assert.equal(model.apply(noChange), true);
+    }
+}
+const stale = state.preview([record(8)], 'replace');
+state.mutate(2, { note: 'edited after preview' });
+const staleMemory = state.all();
+const staleBytes = storage.value;
+assert.throws(() => state.apply(stale), /stale or invalid/);
+assert.deepEqual(state.all(), staleMemory);
+assert.equal(storage.value, staleBytes);
 
 const beforeMemory = state.all();
 const beforeBytes = storage.value;

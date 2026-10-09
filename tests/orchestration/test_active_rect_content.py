@@ -20,6 +20,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration.active_rect_content import (
     ActiveRectContentDetectionError,
+    ActiveRectFrameSampler,
     ContentActiveRect,
     VSActiveRectFrameSampler,
     detect_content_active_rect,
@@ -338,7 +339,7 @@ def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_f
     assert refined[0].active_rect == ClipActiveRect(0, 10, 100, 60, "content-derived", "auto")
     assert refined[1].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
     assert len(warnings) == 1
-    assert "active-rect auto detection failed for failed.mkv" in warnings[0]
+    assert "active-rect auto detection failed for failed.mkv" in warnings[0].text
 
 
 def test_full_window_retry_can_recompute_content_derived_rect() -> None:
@@ -434,7 +435,7 @@ def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> No
 
     assert refined == [clip]
     assert len(warnings) == 1
-    assert "RuntimeError: iteration boom" in warnings[0]
+    assert "RuntimeError: iteration boom" in warnings[0].text
 
     with pytest.raises(ActiveRectContentDetectionError, match="RuntimeError: iteration boom"):
         refine_auto_content_active_rects_for_clips(
@@ -444,3 +445,26 @@ def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> No
             sampler=IterationFailingSampler(),
             fail_closed=True,
         )
+
+
+def test_auto_refinement_too_few_samples_remains_a_skipped_warning() -> None:
+    from frame_compare.cli.output import _format_warning_panel_text, _warning_presentations
+    from frame_compare.utils.terminal_theme import GLYPHS_UNICODE
+
+    clip = replace(
+        _clip(num_frames=1), active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
+    )
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=[clip],
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=1),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=cast("ActiveRectFrameSampler", object()),
+        fail_closed=False,
+    )
+    assert refined == [clip]
+    assert len(warnings) == 1
+    assert warnings[0].source == "active-rect auto detection"
+    assert warnings[0].severity == "skipped"
+    row = _warning_presentations(warnings, ())[0]
+    assert row.severity == "skipped"
+    assert "– " in _format_warning_panel_text([row], glyphs=GLYPHS_UNICODE)

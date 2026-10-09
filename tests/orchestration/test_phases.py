@@ -202,3 +202,43 @@ def test_execute_phases_fail_fast_failure_marks_failed_and_raises(
         raise AssertionError("Expected RuntimeError from required phase")
 
     assert executed == ["fail"]
+
+
+def test_warn_only_executor_interrupt_is_failed_and_never_applied(tmp_path: Path) -> None:
+    from frame_compare.orchestration.execution_types import FramePlanPhaseOutput
+    from frame_compare.orchestration.phases import PhaseStatus
+    from frame_compare.utils.cancellation import raise_if_cancelling
+
+    context = _make_context(tmp_path)
+    state = ExecutionState()
+    later: list[str] = []
+
+    def interrupted(_context: RunContext) -> FramePlanPhaseOutput:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        raise_if_cancelling()
+        raise AssertionError("interrupt checkpoint returned")
+
+    async def downstream(_context: RunContext) -> None:
+        later.append("later")
+
+    phase = _create_timed_phase(
+        "analyze",
+        "analyze",
+        None,
+        interrupted,
+        state,
+        monotonic,
+        state.phase_timings,
+        state.warnings,
+        warn_only=True,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            execute_phases([phase, Phase("later", downstream)], context, NullProgressReporter())
+        )
+    assert phase.status == PhaseStatus.FAILED
+    assert state.selected_frames == []
+    assert state.warnings == []
+    assert later == []

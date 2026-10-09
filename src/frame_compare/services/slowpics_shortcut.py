@@ -10,7 +10,9 @@ from urllib.parse import urlparse
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_descendant
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 _WINDOWS_RESERVED_FILENAMES = {
@@ -31,7 +33,7 @@ class SlowpicsShortcutResult:
 
     success: bool
     path: Path | None = None
-    warning: str | None = None
+    warning: RunWarning | None = None
 
 
 def create_slowpics_url_shortcut(
@@ -41,17 +43,28 @@ def create_slowpics_url_shortcut(
     collection_title: str,
 ) -> SlowpicsShortcutResult:
     """Create a deterministic Windows InternetShortcut-style file."""
+    raise_if_cancelling()
     try:
         output_dir = _select_shortcut_directory(workspace)
     except (OSError, RuntimeError, PathEscapesRootError) as exc:
         return SlowpicsShortcutResult(
             success=False,
-            warning=f"slow.pics shortcut: failed to resolve URL shortcut directory: {exc}",
+            warning=RunWarning(
+                "slow.pics",
+                "warning",
+                "slow.pics shortcut:",
+                f"failed to resolve URL shortcut directory: {exc}",
+            ),
         )
     if output_dir is None:
         return SlowpicsShortcutResult(
             success=False,
-            warning="slow.pics shortcut: no reserved run directory is available",
+            warning=RunWarning(
+                "slow.pics",
+                "warning",
+                "slow.pics shortcut:",
+                "no reserved run directory is available",
+            ),
         )
 
     shortcut_path = output_dir / _shortcut_filename(
@@ -60,12 +73,17 @@ def create_slowpics_url_shortcut(
     )
     content = f"[InternetShortcut]\nURL={slowpics_url}\n"
     try:
-        write_text_atomic(shortcut_path, content)
+        write_text_atomic(shortcut_path, content, publish_guard=raise_if_cancelling)
     except OSError as exc:
         return SlowpicsShortcutResult(
             success=False,
             path=shortcut_path,
-            warning=f"slow.pics shortcut: failed to write URL shortcut {shortcut_path}: {exc}",
+            warning=RunWarning(
+                "slow.pics",
+                "warning",
+                "slow.pics shortcut:",
+                f"failed to write URL shortcut {shortcut_path}: {exc}",
+            ),
         )
 
     return SlowpicsShortcutResult(success=True, path=shortcut_path)

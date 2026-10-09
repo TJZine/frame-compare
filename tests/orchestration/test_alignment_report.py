@@ -18,6 +18,7 @@ from frame_compare.orchestration.context import (
     ClipState,
 )
 from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.utils.run_warnings import RunWarning
 
 
 @pytest.fixture(autouse=True)
@@ -365,7 +366,11 @@ def test_emit_frame_alignment_report_renders_alignment_warning_context(
         stage="after_align",
         comparisons=[comparison],
         selected_frames=[],
-        alignment_warnings=["align: encode low confidence; left unapplied and untrimmed"],
+        alignment_warnings=[
+            RunWarning(
+                "alignment", "warning", "align: encode low confidence; left unapplied and untrimmed"
+            )
+        ],
         json_output=False,
         quiet=False,
         no_color=True,
@@ -410,8 +415,11 @@ def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_re
         comparisons=[comparison],
         selected_frames=[],
         alignment_warnings=[
-            "align: Comparison 1 alignment may drift across the source. "
-            "The applied constant offset was retained and should be verified."
+            RunWarning(
+                "alignment",
+                "warning",
+                "align: Comparison 1 alignment may drift across the source. The applied constant offset was retained and should be verified.",
+            )
         ],
         json_output=False,
         quiet=False,
@@ -441,7 +449,7 @@ def test_emit_frame_alignment_report_preserves_literal_brackets_in_warnings(
         stage="after_align",
         comparisons=[comparison],
         selected_frames=[],
-        alignment_warnings=["align: encode [low] confidence"],
+        alignment_warnings=[RunWarning("alignment", "warning", "align: encode [low] confidence")],
         json_output=False,
         quiet=False,
         no_color=True,
@@ -469,7 +477,7 @@ def test_emit_frame_alignment_report_prioritizes_normal_alignment_evidence(
         stage="after_align",
         comparisons=[comparison],
         selected_frames=[0, 50],
-        alignment_warnings=["align: confidence warning"],
+        alignment_warnings=[RunWarning("alignment", "warning", "align: confidence warning")],
         json_output=False,
         quiet=False,
         no_color=True,
@@ -485,11 +493,12 @@ def test_emit_frame_alignment_report_prioritizes_normal_alignment_evidence(
 
 
 def test_emit_frame_alignment_report_verbose_retains_row_zero_frames_and_paths(
-    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    reference_path = tmp_path / "reference.mkv"
-    comparison_path = tmp_path / "comparison.mkv"
+    # Reporting does not access these files. Fixed paths keep this assertion
+    # independent of checkout depth and pytest's temporary-directory layout.
+    reference_path = Path("/media/reference.mkv")
+    comparison_path = Path("/media/comparison.mkv")
     comparison = AlignmentReportComparison(
         label="Encode",
         alignment_source="manual",
@@ -584,7 +593,9 @@ def test_emit_frame_alignment_report_wraps_at_narrow_terminal_widths(
             )
         ],
         selected_frames=list(range(12)),
-        alignment_warnings=["align: a long warning that must remain readable"],
+        alignment_warnings=[
+            RunWarning("alignment", "warning", "align: a long warning that must remain readable")
+        ],
         json_output=False,
         quiet=False,
         no_color=True,

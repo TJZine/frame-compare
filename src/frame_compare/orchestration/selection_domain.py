@@ -32,6 +32,7 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.errors import SourceSelectionError
 from frame_compare.services.release_identity import ReleaseIdentity
+from frame_compare.utils.run_warnings import RunWarning
 
 
 @dataclass(frozen=True)
@@ -51,10 +52,14 @@ class FpsMatchDiagnostics:
         messages.extend(f"FPS matched: {changed}" for changed in self.changed_clips)
         return messages
 
-    def warnings(self) -> list[str]:
+    def warnings(self) -> list[RunWarning]:
         if self.reason != "reference fallback; no FPS majority" or self.target_fps is None:
             return []
-        return [f"sources: FPS target {self.target_fps} ({self.reason})"]
+        return [
+            RunWarning(
+                "sources", "warning", f"sources: FPS target {self.target_fps} ({self.reason})"
+            )
+        ]
 
 
 @dataclass(frozen=True)

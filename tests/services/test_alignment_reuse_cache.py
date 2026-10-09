@@ -21,6 +21,7 @@ from frame_compare.services.alignment_reuse_cache import (
     save_reusable_offsets,
     source_set_cache_key,
 )
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
@@ -35,7 +36,7 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
-from tests.alignment_review_test_support import trusted_audio_attempt
+from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
     "insufficient_evidence", 0, None, None, None, None, None, None
@@ -104,7 +105,7 @@ def _result(
         reference_clip=request.reference.path.name,
         comparison_clip=comparison.path.name if comparison_clip is None else comparison_clip,
         frame_offset=frame_offset,
-        time_offset_seconds=1.751,
+        time_offset_seconds=frame_lag(frame_offset) / 8000,
         correlation_score=correlation_score,
         algorithm="cross_correlation",
         source=source,  # type: ignore[arg-type]
@@ -588,7 +589,15 @@ def test_shared_reuse_cache_identity_drift_is_miss(
     request = _request(tmp_path)
     _write_computed(request)
 
-    assert load_reusable_offset_entries(mutate(request, tmp_path)) is None
+    changed_request = mutate(request, tmp_path)
+    if all(
+        clip.identity_is_current()
+        for clip in [changed_request.reference, *changed_request.comparisons]
+    ):
+        assert load_reusable_offset_entries(changed_request) is None
+    else:
+        with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+            load_reusable_offset_entries(changed_request)
 
 
 @pytest.mark.parametrize(
@@ -680,6 +689,25 @@ def test_shared_reuse_cache_corrupt_data_warns_and_misses(
     assert warnings == ["alignment_reuse_cache_unreadable"]
 
 
+def test_shared_reuse_cache_invalid_utf8_warns_and_misses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path)
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_bytes(b"\xff")
+    warnings: list[str] = []
+
+    def _warning(event: str, **_kwargs: object) -> None:
+        warnings.append(event)
+
+    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
+
+    assert load_reusable_offset_entries(request) is None
+    assert warnings == ["alignment_reuse_cache_unreadable"]
+
+
 def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path) -> None:
     request = _request(tmp_path)
     cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
@@ -723,52 +751,51 @@ def test_shared_reuse_cache_does_not_write_ineligible_provenance(
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
 
+def test_shared_reuse_cache_does_not_write_unapplied_results(tmp_path: Path) -> None:
+    request = _request(tmp_path)
+    result = AlignmentResult(
+        reference_clip="ref.mkv",
+        comparison_clip="comp.mkv",
+        frame_offset=None,
+        time_offset_seconds=None,
+        correlation_score=0.0,
+        algorithm="cross_correlation",
+        source="computed",
+        applied=False,
+    )
+    save_reusable_offsets(request, [_provenance(request, result=result)])
+    assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
+
+
 @pytest.mark.parametrize(
-    "result",
+    ("applied", "frame_offset", "time_offset"),
     [
-        AlignmentResult(
-            reference_clip="ref.mkv",
-            comparison_clip="comp.mkv",
-            frame_offset=42,
-            time_offset_seconds=1.751,
-            correlation_score=0.987,
-            algorithm="cross_correlation",
-            source="computed",
-            applied=False,
-        ),
-        AlignmentResult(
-            reference_clip="ref.mkv",
-            comparison_clip="comp.mkv",
-            frame_offset=None,
-            time_offset_seconds=1.751,
-            correlation_score=0.987,
-            algorithm="cross_correlation",
-            source="computed",
-        ),
-        AlignmentResult(
-            reference_clip="ref.mkv",
-            comparison_clip="comp.mkv",
-            frame_offset=42,
-            time_offset_seconds=None,
-            correlation_score=0.987,
-            algorithm="cross_correlation",
-            source="computed",
-        ),
+        (False, 0, 0.0),
+        (False, None, 0.0),
+        (False, 0, None),
+        (True, None, 0.0),
+        (True, 0, None),
+        (True, 0, float("nan")),
+        (True, 0, float("inf")),
+        (True, 0, True),
     ],
 )
-def test_shared_reuse_cache_does_not_write_unapplied_or_incomplete_results(
-    tmp_path: Path,
-    result: AlignmentResult,
+def test_alignment_result_rejects_incomplete_or_nonfinite_authority(
+    applied: bool,
+    frame_offset: int | None,
+    time_offset: float | None,
 ) -> None:
-    request = _request(tmp_path)
-
-    save_reusable_offsets(
-        request,
-        [_provenance(request, result=result)],
-        accepted_at="2026-06-06T12:00:00Z",
-    )
-
-    assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
+    with pytest.raises(ValueError):
+        AlignmentResult(
+            reference_clip="ref.mkv",
+            comparison_clip="comp.mkv",
+            frame_offset=frame_offset,
+            time_offset_seconds=time_offset,
+            correlation_score=0.0,
+            algorithm=None,
+            source="cached",
+            applied=applied,
+        )
 
 
 def test_repeated_accepted_cache_writes_have_identical_bytes(
@@ -778,7 +805,8 @@ def test_repeated_accepted_cache_writes_have_identical_bytes(
     request = _request(tmp_path)
     calls: list[tuple[Path, bytes]] = []
 
-    def _fake_write(path: Path, content: bytes) -> None:
+    def _fake_write(path: Path, content: bytes, *, publish_guard: Callable[[], None]) -> None:
+        publish_guard()
         calls.append((path, content))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
@@ -804,7 +832,8 @@ def test_shared_reuse_cache_locks_entire_read_modify_write(
     events: list[str] = []
 
     @contextmanager
-    def _fake_lock(path: Path) -> Generator[None]:
+    def _fake_lock(path: Path, *, abort_check: Callable[[], None]) -> Generator[None]:
+        abort_check()
         assert path == cache_file.with_name(f"{cache_file.name}.lock")
         events.append("lock_enter")
         try:
@@ -818,7 +847,8 @@ def test_shared_reuse_cache_locks_entire_read_modify_write(
         events.append("read")
         return {"version": CACHE_VERSION, "source_sets": {}}
 
-    def _fake_write(path: Path, content: bytes) -> None:
+    def _fake_write(path: Path, content: bytes, *, publish_guard: Callable[[], None]) -> None:
+        publish_guard()
         assert path == cache_file
         assert events == ["lock_enter", "read"]
         parsed = tomllib.loads(content.decode("utf-8"))
@@ -849,7 +879,7 @@ def test_shared_reuse_cache_write_boundary_failure_warns_without_raising(
     request = _request(tmp_path)
     warnings: list[str] = []
 
-    def fail(*_args: object) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
         raise error
 
     def warning(event: str, **_kwargs: object) -> None:
@@ -977,3 +1007,127 @@ def test_shared_reuse_cache_ignores_unrelated_ineligible_provenance_items(
 
     assert loaded is not None
     assert len(loaded) == 1
+
+
+@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
+def test_frozen_source_drift_rejects_primed_cache_and_write(
+    tmp_path: Path,
+    changed_role: str,
+) -> None:
+    request = _request(tmp_path)
+    _write_computed(request)
+    assert load_reusable_offset_entries(request) is not None
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    original_cache = cache_file.read_bytes()
+    clip = request.reference if changed_role == "reference" else request.comparisons[0]
+    clip.path.write_bytes(b"replacement source with different size")
+
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        load_reusable_offset_entries(request)
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        save_reusable_offsets(request, [_provenance(request)])
+    assert cache_file.read_bytes() == original_cache
+
+
+def test_computed_result_requires_matching_current_time_but_cached_evidence_is_historical() -> None:
+    attempt = trusted_audio_attempt(frame_offset=0)
+    with pytest.raises(ValueError, match="must match"):
+        AlignmentResult(
+            reference_clip="ref",
+            comparison_clip="comp",
+            frame_offset=0,
+            time_offset_seconds=1.0,
+            correlation_score=1.0,
+            algorithm="cross_correlation",
+            source="computed",
+            audio_attempt=attempt,
+        )
+    result = AlignmentResult(
+        reference_clip="ref",
+        comparison_clip="comp",
+        frame_offset=0,
+        time_offset_seconds=0.0,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="cached",
+        audio_attempt=attempt,
+    )
+    assert result.applied and result.frame_offset == 0
+
+
+def test_pending_interrupt_prevents_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    request = _request(tmp_path)
+    target = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            _write_computed(request)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert not target.exists()
+    assert list(target.parent.glob(f".{target.name}.*")) == []
+
+
+def test_owned_lock_wait_aborts_without_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import errno
+
+    from frame_compare.utils import file_lock
+    from frame_compare.utils.cancellation import (
+        _RunInterrupt,
+        cancellation_checkpoint,
+        raise_if_cancelling,
+    )
+
+    path = tmp_path / "cache.lock"
+    real_acquire = file_lock._acquire_platform_lock
+    blocked: list[bool] = []
+
+    def acquire(fd: int) -> None:
+        try:
+            real_acquire(fd)
+        except OSError as exc:
+            assert exc.errno in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}
+            blocked.append(True)
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            raise
+
+    async def wait_for_lock() -> None:
+        with (
+            pytest.raises(_RunInterrupt),
+            file_lock.exclusive_file_lock(path, abort_check=raise_if_cancelling),
+        ):
+            raise AssertionError("contended lock was acquired")
+        await cancellation_checkpoint()
+
+    with file_lock.exclusive_file_lock(path):
+        monkeypatch.setattr(file_lock, "_acquire_platform_lock", acquire)
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(wait_for_lock())
+    assert blocked == [True]
+    with file_lock.exclusive_file_lock(path):
+        pass

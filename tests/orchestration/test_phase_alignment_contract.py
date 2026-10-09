@@ -303,3 +303,87 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
     assert output.comparisons[0].trim.trim_start_frames == 0
     assert output.comparisons[0].trim.trim_end_frame_inclusive == 99
     assert output.comparisons[0].audio_attempt == attempt
+
+
+@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
+def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_role: str,
+) -> None:
+    from frame_compare.services.alignment_reuse_cache import (
+        CACHE_FILE_NAME,
+        comparison_cache_key,
+        load_reusable_offset_entries,
+        save_reusable_offsets,
+    )
+    from frame_compare.services.errors import AudioAlignmentError
+    from frame_compare.services.types import AlignmentProvenance
+    from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
+
+    comparison_path = tmp_path / "comparison_videos" / "encode.mkv"
+    comparison_path.parent.mkdir(parents=True)
+    comparison_path.write_bytes(b"comparison")
+    ctx = _context(tmp_path, comparisons=[_clip(comparison_path, label="Encode")])
+    ctx.config.audio_alignment.cache_results = True
+    ctx.config.audio_alignment.use_vsview = False
+
+    def prepared(clip: ClipState) -> ClipState:
+        stat = clip.path.stat()
+        return replace(
+            clip,
+            probe=replace(
+                clip.probe,
+                fingerprint=replace(
+                    clip.probe.fingerprint,
+                    size_bytes=stat.st_size,
+                    mtime_ns=stat.st_mtime_ns,
+                ),
+            ),
+        )
+
+    ctx.reference = prepared(ctx.reference)
+    ctx.comparisons = [prepared(ctx.comparisons[0])]
+    frozen = phase_alignment._alignment_request_from_context(ctx)
+    accepted = AlignmentResult(
+        reference_clip=frozen.reference.path.name,
+        comparison_clip=frozen.comparisons[0].path.name,
+        frame_offset=3,
+        time_offset_seconds=frame_lag(3) / 8000,
+        correlation_score=1.0,
+        algorithm="cross_correlation",
+        source="computed",
+        audio_attempt=trusted_audio_attempt(frame_offset=3),
+        stability=trusted_audio_attempt(frame_offset=3).stability,
+    )
+    save_reusable_offsets(
+        frozen,
+        [
+            AlignmentProvenance(
+                result=accepted,
+                comparison_cache_key=comparison_cache_key(frozen.comparisons[0]),
+                provenance="computed_this_run",
+                evidence_availability="current_attempt",
+            )
+        ],
+    )
+    assert load_reusable_offset_entries(frozen) is not None
+    cache_file = frozen.shared_alignment_cache_dir / CACHE_FILE_NAME
+    original_cache = cache_file.read_bytes()
+    real_request_factory = phase_alignment._alignment_request_from_context
+
+    def freeze_then_change(context: RunContext) -> AlignmentRequest:
+        request = real_request_factory(context)
+        changed = request.reference if changed_role == "reference" else request.comparisons[0]
+        changed.path.write_bytes(b"changed source after request freezing")
+        return request
+
+    monkeypatch.setattr(phase_alignment, "_alignment_request_from_context", freeze_then_change)
+    calculate_trims = pytest.fail
+    monkeypatch.setattr(phase_alignment, "calculate_alignment_trims", calculate_trims)
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        _run_align_phase(ctx, selected_frames=[0])
+    assert ctx.reference.trim.trim_start_frames == 0
+    assert ctx.comparisons[0].trim.trim_start_frames == 0
+    assert ctx.comparisons[0].alignment is None
+    assert cache_file.read_bytes() == original_cache

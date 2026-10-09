@@ -13,6 +13,7 @@ import structlog
 import tomli_w
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
+from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
@@ -24,6 +25,7 @@ from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
@@ -120,7 +122,7 @@ def _load_cache_data(cache_path: Path) -> dict[str, object] | None:
     try:
         with cache_path.open("rb") as handle:
             data = cast(dict[str, object], tomllib.load(handle))
-    except (tomllib.TOMLDecodeError, OSError) as exc:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as exc:
         log.warning(
             "alignment_reuse_cache_unreadable",
             path=str(cache_path),
@@ -405,6 +407,7 @@ def load_reusable_offset_entries(
     comparisons: list[AlignmentClipRequest] | None = None,
 ) -> dict[str, ReusableAlignmentEntry] | None:
     """Load complete reusable previous-offset entries, or return ``None``."""
+    require_current_alignment_sources(request)
     cache_path = _cache_path(request)
     data = _load_cache_data(cache_path)
     if data is None:
@@ -454,6 +457,7 @@ def load_reusable_offset_entries(
                 exc_info=exc,
             )
             return None
+    require_current_alignment_sources(request)
     return results
 
 
@@ -468,12 +472,7 @@ def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCac
 def _is_write_eligible(provenance: AlignmentProvenance) -> bool:
     result = provenance.result
     origin = _origin_for_provenance(provenance)
-    if (
-        origin is None
-        or not result.applied
-        or result.frame_offset is None
-        or result.time_offset_seconds is None
-    ):
+    if origin is None or not result.applied:
         return False
     if provenance.provenance == "computed_this_run":
         attempt = result.audio_attempt
@@ -553,6 +552,7 @@ def save_reusable_offsets(
 
     If any requested comparison is missing or has ineligible provenance, nothing is written.
     """
+    require_current_alignment_sources(request)
     if not request.comparisons:
         return
     by_comparison_key = {item.comparison_cache_key: item for item in provenances}
@@ -587,11 +587,14 @@ def save_reusable_offsets(
     }
 
     try:
-        with exclusive_file_lock(_cache_lock_path(cache_path)):
+        with exclusive_file_lock(_cache_lock_path(cache_path), abort_check=raise_if_cancelling):
             data = _initial_write_data(cache_path)
             source_sets = cast(dict[str, object], data["source_sets"])
             source_sets[source_set_key] = source_set
-            write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+            require_current_alignment_sources(request)
+            write_bytes_atomic(
+                cache_path, tomli_w.dumps(data).encode("utf-8"), publish_guard=raise_if_cancelling
+            )
     except OSError as exc:
         log.warning(
             "alignment_reuse_cache_write_failed",

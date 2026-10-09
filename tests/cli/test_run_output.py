@@ -14,6 +14,7 @@ from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolida
 from frame_compare.orchestration.progress import uses_rich_progress
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import PlainProgressReporter
+from frame_compare.utils.run_warnings import RunWarning
 
 from .cli_helpers import (
     _invoke_run_with_minimal_workspace,
@@ -68,7 +69,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
         return RunResult(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
-            warnings=["metadata skipped"],
+            warnings=[RunWarning("sources", "skipped", "metadata skipped")],
         )
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -162,7 +163,7 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    warning = "slow.pics webhook: delivery failed"
+    warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(

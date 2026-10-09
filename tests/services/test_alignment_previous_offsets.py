@@ -43,7 +43,7 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
-from tests.alignment_review_test_support import trusted_audio_attempt
+from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
 
 
 def align_clips_from_request(
@@ -75,7 +75,7 @@ def _trusted_computed_result(
         reference_clip=reference.name,
         comparison_clip=comparison.name,
         frame_offset=frame_offset,
-        time_offset_seconds=frame_offset / 24,
+        time_offset_seconds=frame_lag(frame_offset) / 8000,
         correlation_score=0.99,
         algorithm="cross_correlation",
         source="computed",
@@ -113,10 +113,10 @@ def _request_clip(path: Path, *, label: str | None = None) -> AlignmentClipReque
     )
 
 
-def _alignment_cache_settings(config: AlignmentConfig) -> AlignmentCacheSettings:
+def _alignment_cache_settings() -> AlignmentCacheSettings:
     return AlignmentCacheSettings(
-        max_offset_seconds=config.max_offset_seconds,
-        channel_strategy=config.channel_strategy,
+        max_offset_seconds=30.0,
+        channel_strategy="mono_downmix",
     )
 
 
@@ -125,7 +125,7 @@ def _alignment_request(
     *,
     reference: Path,
     comparisons: list[Path],
-    config: AlignmentConfig,
+    previous_offsets: PreviousOffsetReusePolicy = "disabled",
     generated_dir: Path | None = None,
     shared_cache_dir: Path | None = None,
 ) -> AlignmentRequest:
@@ -133,10 +133,10 @@ def _alignment_request(
         reference=_request_clip(reference, label="Reference"),
         selected_reference_relationship="auto",
         comparisons=[_request_clip(comparison) for comparison in comparisons],
-        previous_offsets=config.previous_offsets,
+        previous_offsets=previous_offsets,
         generated_dir=generated_dir or (tmp_path / "generated"),
         shared_alignment_cache_dir=shared_cache_dir or (tmp_path / "shared-alignment"),
-        settings=_alignment_cache_settings(config),
+        settings=_alignment_cache_settings(),
     )
 
 
@@ -152,7 +152,6 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
         tmp_path,
         reference=reference,
         comparisons=[comparison],
-        config=config,
     )
     request = replace(
         request,
@@ -201,12 +200,12 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(cache_results=False, previous_offsets="disabled")
+    config = AlignmentConfig(cache_results=False)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="disabled",
         generated_dir=generated_dir,
     )
     monkeypatch.setattr(
@@ -237,12 +236,12 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     comp.touch()
     generated_dir.mkdir()
     shared_cache_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="always", use_vsview=True)
+    config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="always",
         generated_dir=generated_dir,
         shared_cache_dir=shared_cache_dir,
     )
@@ -250,7 +249,7 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         reference_clip=ref.name,
         comparison_clip=comp.name,
         frame_offset=7,
-        time_offset_seconds=7 / 24,
+        time_offset_seconds=frame_lag(7) / 8000,
         correlation_score=0.87,
         algorithm="cross_correlation",
         source="computed",
@@ -301,12 +300,12 @@ def test_stale_policy_entry_is_not_replayed_or_applied(
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    config = AlignmentConfig(previous_offsets="always", use_vsview=False)
+    config = AlignmentConfig(use_vsview=False)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="always",
     )
     stale_result = _trusted_computed_result(ref, comp, 9)
     with monkeypatch.context() as patch_cache:
@@ -362,12 +361,12 @@ def test_align_clips_from_request_prompt_mode_auto_reuses_computed_offsets_witho
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="prompt", use_vsview=False)
+    config = AlignmentConfig(use_vsview=False)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="prompt",
         generated_dir=generated_dir,
     )
     diagnostics_dir = tmp_path / "alignment_diagnostics"
@@ -435,12 +434,12 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets=policy, use_vsview=True)
+    config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets=policy,
         generated_dir=generated_dir,
     )
     reusable = {
@@ -493,12 +492,12 @@ def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="prompt", use_vsview=True)
+    config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="prompt",
         generated_dir=generated_dir,
     )
     reusable = {
@@ -550,12 +549,12 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
     for path in (ref, comp_confirmed, comp_computed):
         path.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="prompt", use_vsview=True)
+    config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp_confirmed, comp_computed],
-        config=config,
+        previous_offsets="prompt",
         generated_dir=generated_dir,
     )
     reusable = {
@@ -621,12 +620,12 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(previous_offsets="prompt", use_vsview=True)
+    config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="prompt",
         generated_dir=generated_dir,
     )
     reusable = {
@@ -690,12 +689,12 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
     generated_dir.mkdir()
     shared_cache_dir.mkdir()
 
-    config = AlignmentConfig(previous_offsets="always")
+    config = AlignmentConfig()
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp_manual, comp_shared],
-        config=config,
+        previous_offsets="always",
         generated_dir=generated_dir,
         shared_cache_dir=shared_cache_dir,
     )
@@ -708,7 +707,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     reference_clip=ref.name,
                     comparison_clip=comp_manual.name,
                     frame_offset=4,
-                    time_offset_seconds=4 / 24,
+                    time_offset_seconds=frame_lag(4) / 8000,
                     correlation_score=0.91,
                     algorithm="cross_correlation",
                     source="computed",
@@ -723,7 +722,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     reference_clip=ref.name,
                     comparison_clip=comp_shared.name,
                     frame_offset=7,
-                    time_offset_seconds=7 / 24,
+                    time_offset_seconds=frame_lag(7) / 8000,
                     correlation_score=0.93,
                     algorithm="cross_correlation",
                     source="computed",
@@ -780,12 +779,12 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     ref.touch()
     comp.touch()
     generated_dir.mkdir()
-    config = AlignmentConfig(cache_results=True, previous_offsets="disabled")
+    config = AlignmentConfig(cache_results=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp],
-        config=config,
+        previous_offsets="disabled",
         generated_dir=generated_dir,
         shared_cache_dir=shared_cache_dir,
     )
@@ -828,12 +827,12 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
     comp_computed.touch()
     generated_dir.mkdir()
 
-    config = AlignmentConfig(previous_offsets="always", use_vsview=True)
+    config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=ref,
         comparisons=[comp_manual, comp_computed],
-        config=config,
+        previous_offsets="always",
         generated_dir=generated_dir,
     )
     manual_overrides = {
@@ -877,14 +876,16 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
 
 
 @pytest.mark.parametrize(
-    ("config", "error_match"),
+    ("config", "policy", "error_match"),
     [
         (
-            AlignmentConfig(cache_results=False, previous_offsets="prompt"),
+            AlignmentConfig(cache_results=False),
+            "prompt",
             "cache_results",
         ),
         (
-            AlignmentConfig(force_interactive=True, previous_offsets="always"),
+            AlignmentConfig(force_interactive=True),
+            "always",
             "force_interactive",
         ),
     ],
@@ -892,13 +893,63 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
 def test_align_clips_from_request_rejects_invalid_previous_offset_policy_combinations(
     tmp_path: Path,
     config: AlignmentConfig,
+    policy: PreviousOffsetReusePolicy,
     error_match: str,
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
-    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp], config=config)
+    request = _alignment_request(
+        tmp_path, reference=ref, comparisons=[comp], previous_offsets=policy
+    )
 
     with pytest.raises(AudioAlignmentError, match=error_match):
         align_clips_from_request(request, config)
+
+
+def test_confirmed_cache_reuse_rechecks_sources_before_early_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comp.mkv"
+    reference.touch()
+    comparison.touch()
+    request = _alignment_request(
+        tmp_path,
+        reference=reference,
+        comparisons=[comparison],
+        previous_offsets="always",
+    )
+    accepted = AlignmentResult(
+        reference_clip=reference.name,
+        comparison_clip=comparison.name,
+        frame_offset=0,
+        time_offset_seconds=0.0,
+        correlation_score=1.0,
+        algorithm=None,
+        source="manual",
+    )
+    save_reusable_offsets(
+        request,
+        [
+            AlignmentProvenance(
+                result=accepted,
+                comparison_cache_key=comparison_cache_key(request.comparisons[0]),
+                provenance="interactive_confirmed_this_run",
+            )
+        ],
+    )
+    cache_file = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
+    original_cache = cache_file.read_bytes()
+
+    def change_source(**_kwargs: Any) -> None:
+        comparison.write_bytes(b"changed after cache application")
+
+    monkeypatch.setattr(
+        "frame_compare.services.alignment.present_alignment_evidence", change_source
+    )
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        align_clips_from_request(request, AlignmentConfig())
+    assert cache_file.read_bytes() == original_cache

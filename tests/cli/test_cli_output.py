@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -21,10 +22,61 @@ from frame_compare.config.schema_enums import (
 )
 from frame_compare.orchestration import RunRequest, RunResult
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.run_warnings import RunWarning
 
 
 def _console() -> Console:
     return Console(record=True, no_color=True, width=200)
+
+
+def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics() -> None:
+    from frame_compare.cli.output import _format_warning_panel_text, _warning_presentations
+    from frame_compare.services.alignment import format_rejected_alignment_warning
+    from frame_compare.services.types import AlignmentResult
+    from frame_compare.utils.terminal_theme import GLYPHS_UNICODE
+
+    result = AlignmentResult(
+        "ref.mkv",
+        "cmp.mkv",
+        None,
+        None,
+        0.0,
+        None,
+        "computed",
+        applied=False,
+        diagnostic="low_confidence",
+    )
+    neutral_label = "Encode B"
+    adversarial_label = "Encode skipped frames: because ordinary label"
+    rows = [
+        _warning_presentations(
+            [format_rejected_alignment_warning(result, comparison_label=label)], ()
+        )[0]
+        for label in (neutral_label, adversarial_label)
+    ]
+    neutral, adversarial = rows
+    assert (adversarial.source, adversarial.severity, adversarial.detail) == (
+        neutral.source,
+        neutral.severity,
+        neutral.detail,
+    )
+    assert neutral.source == "alignment"
+    assert neutral.severity == "warning"
+    assert neutral.message == "align: Encode B alignment left unapplied"
+    assert neutral.detail == (
+        "because low_confidence; rendering in best-effort reference-frame domain "
+        "without accepted alignment."
+    )
+    assert adversarial.message == neutral.message.replace(neutral_label, adversarial_label)
+    assert adversarial_label in adversarial.message
+    assert adversarial_label not in adversarial.source
+    assert adversarial.detail is not None and adversarial_label not in adversarial.detail
+    rendered = []
+    for row in rows:
+        console = Console(record=True, force_terminal=True, width=240)
+        console.print(_format_warning_panel_text([row], glyphs=GLYPHS_UNICODE))
+        rendered.append(console.export_text(styles=True))
+    assert rendered[1] == rendered[0].replace(neutral_label, adversarial_label)
 
 
 def _console_at_width(width: int) -> Console:
@@ -635,7 +687,7 @@ def test_result_summary_report_path_presentation(external: bool) -> None:
 
 
 def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
-    warnings = [f"warning {index}" for index in range(1, 11)]
+    warnings = [RunWarning("sources", "warning", f"warning {index}") for index in range(1, 11)]
     normal_console = _console()
     print_result_summary(
         normal_console,
@@ -688,7 +740,10 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
             screenshot_dir=_workspace_path("screenshots"),
             slowpics_url="https://slow.pics/c/example",
             report_path=_workspace_path("report.html"),
-            warnings=["metadata skipped", "upload reused"],
+            warnings=[
+                RunWarning("sources", "skipped", "metadata skipped"),
+                RunWarning("slow.pics", "warning", "upload reused"),
+            ],
         ),
         quiet=False,
     )
@@ -742,9 +797,22 @@ def test_result_summary_shows_followup_failure_on_row_not_in_panel() -> None:
         result=RunResult(
             success=True,
             warnings=[
-                "align: encode_b low confidence; left unapplied and untrimmed",
-                "slow.pics upload skipped because report confirmation was unavailable",
-                "align: encode_c low confidence; left unapplied and untrimmed",
+                RunWarning(
+                    "alignment",
+                    "warning",
+                    "align: encode_b low confidence; left unapplied and untrimmed",
+                ),
+                RunWarning(
+                    "slow.pics",
+                    "skipped",
+                    "slow.pics upload skipped",
+                    "because report confirmation was unavailable",
+                ),
+                RunWarning(
+                    "alignment",
+                    "warning",
+                    "align: encode_c low confidence; left unapplied and untrimmed",
+                ),
             ],
         ),
         quiet=False,
@@ -752,7 +820,9 @@ def test_result_summary_shows_followup_failure_on_row_not_in_panel() -> None:
             PostUploadActionResult(
                 kind="clipboard",
                 success=False,
-                warning="slow.pics clipboard: failed to copy URL",
+                warning=RunWarning(
+                    "slow.pics", "warning", "slow.pics clipboard: failed to copy URL"
+                ),
             ),
         ),
     )
@@ -821,22 +891,34 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
             PostUploadActionResult(
                 kind="clipboard",
                 success=False,
-                warning="slow.pics clipboard: failed to copy URL",
+                warning=RunWarning(
+                    "slow.pics", "warning", "slow.pics clipboard: failed to copy URL"
+                ),
             ),
             PostUploadActionResult(
                 kind="browser",
                 success=False,
-                warning="slow.pics browser: failed to open URL: no browser accepted the request",
+                warning=RunWarning(
+                    "slow.pics",
+                    "warning",
+                    "slow.pics browser: failed to open URL:",
+                    "no browser accepted the request",
+                ),
             ),
             PostUploadActionResult(
                 kind="shortcut",
                 success=False,
-                warning="slow.pics shortcut: failed to write URL shortcut Example.url: boom",
+                warning=RunWarning(
+                    "slow.pics",
+                    "warning",
+                    "slow.pics shortcut:",
+                    "failed to write URL shortcut Example.url: boom",
+                ),
             ),
             PostUploadActionResult(
                 kind="webhook",
                 success=False,
-                warning="slow.pics webhook: delivery failed",
+                warning=RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed"),
             ),
         ),
     )
@@ -855,15 +937,24 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
 
 def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows() -> None:
     console = _console()
-    shortcut_warning = "slow.pics shortcut: failed to write URL shortcut Example.url: boom"
-    webhook_warning = "slow.pics webhook: delivery failed"
+    shortcut_warning = RunWarning(
+        "slow.pics",
+        "warning",
+        "slow.pics shortcut:",
+        "failed to write URL shortcut Example.url: boom",
+    )
+    webhook_warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
 
     print_result_summary(
         console,
         result=RunResult(
             success=True,
             slowpics_url="https://slow.pics/c/example",
-            warnings=[shortcut_warning, webhook_warning],
+            warnings=[
+                replace(shortcut_warning),
+                replace(webhook_warning),
+                replace(shortcut_warning),
+            ],
         ),
         quiet=False,
         post_upload_actions=(
@@ -909,7 +1000,9 @@ def test_result_summary_uses_singular_warning_title() -> None:
 
     print_result_summary(
         console,
-        result=RunResult(success=True, warnings=["metadata skipped"]),
+        result=RunResult(
+            success=True, warnings=[RunWarning("sources", "skipped", "metadata skipped")]
+        ),
         quiet=False,
     )
 
@@ -926,7 +1019,7 @@ def test_result_summary_upload_failure_shows_warning_title() -> None:
         console,
         result=RunResult(
             success=True,
-            warnings=["publish: connection reset"],
+            warnings=[RunWarning("sources", "warning", "publish: connection reset")],
         ),
         quiet=False,
     )
@@ -969,7 +1062,7 @@ def test_result_summary_preserves_literal_brackets_in_dynamic_values() -> None:
             screenshot_dir=_workspace_path("screenshots", "[episode]"),
             slowpics_url="https://slow.pics/c/[example]",
             report_path=_workspace_path("reports", "[episode].html"),
-            warnings=["metadata [skipped]"],
+            warnings=[RunWarning("sources", "skipped", "metadata [skipped]")],
         ),
         quiet=False,
     )
@@ -1109,3 +1202,20 @@ def test_result_summary_time_rows(
         assert fragment in output
     for fragment in absent:
         assert fragment not in output
+
+
+def test_post_upload_association_requires_record_equality() -> None:
+    from frame_compare.cli.output import _warning_presentations
+
+    action_warning = RunWarning("slow.pics", "warning", "same emitted text")
+    other_warning = RunWarning("history", "warning", "same emitted text")
+    assert action_warning.text == other_warning.text
+    assert action_warning != other_warning
+    rows = _warning_presentations(
+        [other_warning, replace(action_warning)],
+        (PostUploadActionResult(kind="webhook", success=False, warning=action_warning),),
+    )
+    assert [(row.source, row.action) for row in rows] == [
+        ("history", None),
+        ("slow.pics", "webhook"),
+    ]

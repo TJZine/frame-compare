@@ -256,7 +256,7 @@ def test_real_render_and_metric_fallbacks_apply_cache_limit(
         metrics = calculate_metrics(
             [runtime_clip], config.analysis, tmp_path / "cache", memory_limit_mb=1024
         )
-        assert metrics.metadata.frame_count == 144
+        assert metrics.metrics.metadata.frame_count == 144
         assert core.max_cache_size == 1024
     finally:
         core.max_cache_size = original

@@ -61,17 +61,3 @@ class TonemapSettings:
     use_dovi: bool | None = True
     contrast_recovery: float = 0.3
     gamma_lift: bool = False
-
-
-@dataclass(frozen=True)
-class ColorProps:
-    """Color space properties extracted from frame.
-
-    All fields use VapourSynth integer constants.
-    Defaults to 2 (unspecified) for primaries/transfer/matrix and 1 (limited) for range.
-    """
-
-    primaries: int  # _Primaries (e.g., 1=BT.709, 9=BT.2020)
-    transfer: int  # _Transfer (e.g., 1=BT.709, 16=PQ, 18=HLG)
-    matrix: int  # _Matrix (e.g., 1=BT.709, 9=BT.2020nc)
-    color_range: int  # _ColorRange (0=full, 1=limited)

@@ -185,6 +185,8 @@ const ReviewState = (() => {
         const storageKey = `frame-compare:report-review:v1:${context.reportId}`;
         let storage = options.storage ?? null;
         let records = new Map();
+        let revision = 0;
+        const candidates = new WeakMap();
         let memoryOnly = !storage;
         let unsaved = false;
         let warning = memoryOnly ? PERSISTENCE_WARNING : '';
@@ -244,6 +246,7 @@ const ReviewState = (() => {
                 if (!records.has(frameOrdinal) && records.size >= MAX_RECORDS) throw new ReviewStateError(`Review record limit of ${MAX_RECORDS_LABEL} reached.`);
                 records.set(frameOrdinal, validated);
             }
+            revision += 1;
             persistMutation();
             return records.get(frameOrdinal) || defaultRecord(frameOrdinal);
         }
@@ -276,46 +279,43 @@ const ReviewState = (() => {
                 throw new ReviewStateError('Import preview options are invalid.');
             }
             const imported = mapFrom(validateRecords(importedRecords, context));
-            const ordinals = new Set([...records.keys(), ...imported.keys()]);
+            const candidate = mode === 'replace' ? imported : new Map(records);
+            if (mode === 'merge') {
+                for (const [ordinal, incoming] of imported) {
+                    if (!candidate.has(ordinal) || conflict === 'use-imported') candidate.set(ordinal, incoming);
+                }
+            }
+            const ordinals = new Set([...records.keys(), ...candidate.keys()]);
             const counts = { add: 0, change: 0, remove: 0, unchanged: 0 };
             for (const ordinal of ordinals) {
                 const local = records.get(ordinal);
-                const incoming = imported.get(ordinal);
-                if (!local && incoming) counts.add += 1;
-                else if (local && !incoming) {
-                    if (mode === 'replace') counts.remove += 1;
-                    else counts.unchanged += 1;
-                }
-                else if (sameRecord(local, incoming)) counts.unchanged += 1;
+                const selected = candidate.get(ordinal);
+                if (!local) counts.add += 1;
+                else if (!selected) counts.remove += 1;
+                else if (sameRecord(local, selected)) counts.unchanged += 1;
                 else counts.change += 1;
             }
-            return { mode, conflict, counts, importedRecords: sortedRecords(imported) };
-        }
-
-        function candidateFor(previewValue) {
-            const imported = mapFrom(previewValue.importedRecords);
-            if (previewValue.mode === 'replace') return imported;
-            const candidate = new Map(records);
-            for (const [ordinal, incoming] of imported) {
-                if (!candidate.has(ordinal) || previewValue.conflict === 'use-imported') candidate.set(ordinal, incoming);
-            }
-            return candidate;
+            const previewValue = Object.freeze({
+                mode, conflict, counts: Object.freeze(counts),
+                importedRecords: Object.freeze(sortedRecords(imported).map(record => Object.freeze(record))),
+            });
+            candidates.set(previewValue, { candidate, revision });
+            return previewValue;
         }
 
         function apply(previewValue) {
-            const confirmedPreview = preview(
-                previewValue?.importedRecords,
-                previewValue?.mode,
-                previewValue?.conflict,
-            );
-            const candidateRecords = validateRecords(
-                sortedRecords(candidateFor(confirmedPreview)),
-                context,
-            );
+            // Validate supplied input even when it did not originate at this model.
+            validateRecords(previewValue?.importedRecords, context);
+            const selected = candidates.get(previewValue);
+            if (!selected || selected.revision !== revision) {
+                throw new ReviewStateError('Import preview is stale or invalid. Review choices again.');
+            }
+            const candidateRecords = validateRecords(sortedRecords(selected.candidate), context);
             const candidate = mapFrom(candidateRecords);
             const serialized = serialize(storedDocument(context, candidateRecords));
             if (memoryOnly) {
                 records = candidate;
+                revision += 1;
                 unsaved = true;
                 warning = PERSISTENCE_WARNING;
                 return true;
@@ -326,6 +326,7 @@ const ReviewState = (() => {
                 return false;
             }
             records = candidate;
+            revision += 1;
             unsaved = false;
             warning = '';
             return true;

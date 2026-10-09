@@ -623,3 +623,45 @@ def test_provisional_candidate_cannot_be_constructed_as_applied_authority() -> N
             applied=True,
             audio_attempt=attempt,
         )
+
+
+def test_pending_interrupt_prevents_diagnostic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    attempt = audio_attempt()
+    directory = tmp_path / "diagnostics"
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            alignment_diagnostics.write_alignment_diagnostic(
+                generated_root=tmp_path.parent,
+                diagnostics_dir=directory,
+                comparison_ordinal=1,
+                reference_label="Reference",
+                comparison_label="Comparison",
+                attempt=attempt,
+                evidence_availability="current_attempt",
+                review_outcome="pending",
+                final_result=_result(attempt),
+                final_origin="none",
+            )
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert list(directory.iterdir()) == []

@@ -102,6 +102,10 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
     assert single_mode["emptyStateClearsAlignment"] is True
     assert single_mode["emptyStateClearsLensTransient"] is True
 
+    assert summary["blinkGesturePause"] == {
+        "combinations": 30,
+        "timerAndControlsAgree": True,
+    }
     assert summary["blinkControls"]["reducedMotionPaused"] is True
     assert summary["blinkControls"]["intervalAfterSteps"] == 700
     assert summary["keyboardGuard"] == {
@@ -178,6 +182,12 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "lowerSelectsGrid": True,
         "upperSelectsGrid": True,
     }
+    assert summary["deferredDiffGridNavigation"] == {
+        "active": True,
+        "renders": 2,
+        "currentFrame": "Frame 20",
+        "stalePairCommitBlocked": True,
+    }
     assert summary["proximityStateMachine"] == {
         "thresholds": True,
         "hysteresis": True,
@@ -207,4 +217,36 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
         "leaveDuringLoadHoldsNear": True,
         "leaveDuringLoadFadesAfterLoad": True,
         "noPointerFadesAfterLoad": True,
+    }
+
+    assert summary["mainImageUnavailable"] == {
+        "slider": {
+            "label": "Clip 2",
+            "failedSide": "right",
+            "retryAriaLabel": "Retry Clip 2 image",
+            "recovered": True,
+        },
+        "overlay": {
+            "label": "Clip 1",
+            "failedSide": "left",
+            "retryAriaLabel": "Retry Clip 1 image",
+            "recovered": True,
+        },
+        "diff": {
+            "label": "Clip 2",
+            "failedSide": "right",
+            "retryAriaLabel": "Retry Clip 2 image",
+            "recovered": True,
+        },
+        "blink": {
+            "label": "Clip 2",
+            "failedSide": "right",
+            "retryAriaLabel": "Retry Clip 2 image",
+            "recovered": True,
+        },
+        "staleErrorIgnored": True,
+        "sameImageGenerationIgnored": True,
+        "gridNavigationStaleErrorIgnored": True,
+        "deferredDiffNavigationStaleErrorIgnored": True,
+        "navigationRecovery": True,
     }

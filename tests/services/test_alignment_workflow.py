@@ -37,6 +37,7 @@ from frame_compare.services.alignment_streaming import (
 from frame_compare.services.errors import (
     AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
+    AudioAlignmentError,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.alignment_evidence import MAX_AUDIO_CHUNKS
@@ -142,12 +143,14 @@ def _align(
     comparison: Path,
     config: AlignmentConfig,
     tmp_path: Path,
+    *,
+    max_offset_seconds: float = 30.0,
 ) -> list[AlignmentResult]:
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path / "generated",
+        max_offset_seconds=max_offset_seconds,
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
@@ -282,8 +285,14 @@ def test_planning_budget_rejects_before_decode(
         raise AssertionError("decode must not run after the planning budget refusal")
 
     monkeypatch.setattr(alignment, "collect_paired_audio_chunks", fail_if_decode_runs)
-    config = _config(max_offset_seconds=3600.0) if budget == "fft" else _config()
-    (result,) = _align(reference, comparison, config, tmp_path)
+    config = _config()
+    (result,) = _align(
+        reference,
+        comparison,
+        config,
+        tmp_path,
+        max_offset_seconds=3600.0 if budget == "fft" else 30.0,
+    )
     assert result.applied is False
     assert result.diagnostic == "analysis_budget_exceeded"
     assert result.audio_attempt is not None
@@ -429,13 +438,22 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
     request = alignment_request(
         reference=reference,
         comparisons=[ok, mutated, manual],
-        config=config,
         generated_dir=generated,
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    results = run_request(request, config, reference_fps=FPS)
-    by_name = {result.comparison_clip: result for result in results}
+    computed_results: list[AlignmentResult] = []
+    real_estimate = alignment._estimate_audio_pair
+
+    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
+        result = real_estimate(*args, **kwargs)
+        computed_results.append(result)
+        return result
+
+    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        run_request(request, config, reference_fps=FPS)
+    by_name = {result.comparison_clip: result for result in computed_results}
 
     changed = by_name[mutated.name]
     assert changed.applied is False
@@ -449,10 +467,8 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
     assert untouched.applied is False
     assert untouched.diagnostic == "video_check_unavailable"
 
-    overridden = by_name[manual.name]
-    assert overridden.applied is True
-    assert overridden.source == "manual"
-    assert overridden.frame_offset == 3
+    # Existing manual authority cannot make the drifted source set applicable.
+    assert manual.name not in by_name
 
 
 def test_no_computed_cache_write_without_video_loader(
@@ -466,7 +482,6 @@ def test_no_computed_cache_write_without_video_loader(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=generated,
         shared_alignment_cache_dir=generated / "shared",
         fps_num=FPS.numerator,
@@ -505,7 +520,6 @@ def test_manual_override_wins_without_decoding(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=generated,
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
@@ -528,7 +542,6 @@ def test_entry_identity_mismatch_has_no_attempt(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path / "generated",
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
@@ -557,11 +570,9 @@ def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
         comparison_cleanup=_cleanup(),
     )
     monkeypatch.setattr(alignment, "collect_paired_audio_chunks", lambda *a, **k: failure)
-    config = _config()
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path / "generated",
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
@@ -571,7 +582,7 @@ def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
         _estimate_audio_pair(
             reference,
             comparison,
-            config=config,
+            cache_settings=request.settings,
             fps_reference=FPS,
             reference_request=request.reference,
             comparison_request=request.comparisons[0],

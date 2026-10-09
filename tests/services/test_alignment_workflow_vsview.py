@@ -94,7 +94,6 @@ def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentCo
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     return align_clips_from_request(request, config)
@@ -208,7 +207,6 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
-        config=config,
         generated_dir=tmp_path,
     )
     request = replace(

@@ -1,11 +1,11 @@
 # Windows portable
 
 The Windows portable bundle is the recommended Frame Compare distribution for Windows
-10/11 x64. It includes the supported Python and media runtime, VSView 0.11.0 with its
+10/11 x64. It includes the supported Python and media runtime, VSView 0.12.0 with its
 PySide6 backend and native Frame Compare alignment panel for review, the
 installer, and signed code-only update and rollback tooling.
 
-The portable graph pins the base `vsview==0.11.0` package and the Frame Compare panel
+The portable graph pins the base `vsview==0.12.0` package and the Frame Compare panel
 entry point; its upstream
 `recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
 VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
@@ -69,7 +69,7 @@ full portable ZIP rather than applying a code-only update to a pre-native-panel 
 The updater must fail closed when the installed bundle is schema 2, or when the
 installed and update runtime fingerprints are missing, legacy, malformed, or different.
 
-Extract the ZIP, open the extracted bundle folder, and run:
+Extract the ZIP into a fresh, empty folder, open the extracted bundle folder, and run:
 
 ```powershell
 .\install.cmd
@@ -85,7 +85,7 @@ Open a new terminal after installation so the updated user `PATH` is loaded.
 ## Build the portable bundle from a clone
 
 Use this route only when no suitable published bundle exists or when validating the
-packaging path. It requires Windows 10/11 x64, Git, PowerShell, network access to every
+packaging path. It requires Windows 10/11 x64, Git, PowerShell 7 or newer, network access to every
 pinned upstream artifact, build time, and download-cache space.
 
 From the repository root:
@@ -96,7 +96,10 @@ From the repository root:
 
 The root command delegates to the source installer, builds
 `dist\frame-compare-portable-win-x64`, and installs the same user-level shim as a
-published bundle.
+published bundle. The source route refuses before bootstrap, dependency sync, or output
+changes when PowerShell 7 is unavailable. Run a direct source `.ps1` installer with
+`pwsh`; Windows PowerShell 5.1 remains supported for published-bundle installation,
+launch, and updates.
 
 The source-built bundle, not the repository root, is the application workspace:
 
@@ -157,7 +160,7 @@ review checklist.
 
 ## Native VSView alignment review
 
-The portable bundle includes VSView 0.11.0, PySide6, and the packaged
+The portable bundle includes VSView 0.12.0, PySide6, and the packaged
 `frame-compare-alignment-review` panel entry point in one self-contained Python
 environment. Frame Compare launches VSView through that same environment; a
 PATH-only VSView executable or a separate Python installation is not supported.
@@ -245,8 +248,16 @@ and complete packaged `app/src/frame_compare` tree to match that committed sourc
 borrowing its compatibility fingerprints. Commit the intended release source and rebuild
 the complete bundle before creating the matching update artifact.
 
-When the fingerprint differs, install the complete portable ZIP for that release. Keep
-**Generated data location** external when reports and reusable state must survive that
+When the fingerprint differs, install the complete portable ZIP for that release into a
+fresh, empty folder. Overlaying a full ZIP onto an existing bundle root is unsupported.
+
+Before a full reinstall, preserve the old bundle and its user configuration, input clips,
+and generated data. Copy the authored `config/config.toml` and any bundle-local inputs or
+`generated/` data into the new bundle as needed, or retain their external locations.
+Do not copy application code, runtime files, or update backups from the old bundle.
+Run the new bundle's `install.cmd` to point the installed shim at it. The installed
+AppData fallback configuration and external user data are preserved. Keep
+**Generated data location** external when reports and reusable state must survive
 replacement.
 
 ## Backup and rollback
@@ -257,8 +268,12 @@ frame-compare-update rollback <backup-id>
 frame-compare-update purge-backups --keep 5
 ```
 
-Rollback restores a compatible prior application state. It is not a substitute for a
-complete bundle reinstall across different media-runtime fingerprints.
+Each code-update backup records the media-runtime and requirements-lock identity of
+the bundle that created it. `list-backups` marks backups with missing, malformed, or
+different identity as unavailable. `rollback` refuses those backups before changing any
+file. Identity-less legacy backups cannot be restored or migrated. Compatible backups
+restore only application code; rollback is not a substitute for a complete bundle
+reinstall across different runtime or dependency fingerprints.
 
 ## Uninstall
 

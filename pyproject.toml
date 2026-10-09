@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "typer>=0.27.2",
+    "typer>=0.27.3",
     "rich>=15.0.0",
     "numpy>=2.5.3",
     "httpx>=0.28.1",
@@ -38,10 +38,10 @@ dependencies = [
 
 [project.optional-dependencies]
 vsview = [
-    "vapoursynth==80",
+    "vapoursynth==81",
     "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'",
     "vs-placebo==2.0.4; sys_platform == 'win32'",
-    "vsview==0.11.0",
+    "vsview==0.12.0",
 ]
 
 [project.scripts]
@@ -60,7 +60,7 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.63",
+    "zensical==0.0.68",
 ]
 docker-test = [
     "pytest==9.1.1",
@@ -77,7 +77,7 @@ dev = [
     "pyyaml>=6.0.3",
     "pyright>=1.1.414",
     "nodejs-wheel-binaries>=24.19.0",
-    "ruff>=0.16.8",
+    "ruff>=0.16.10",
     "respx>=0.23.1",
     "pip-audit==2.10.1",
     "pytest-xdist>=3.8.0",

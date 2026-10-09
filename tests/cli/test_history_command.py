@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import tomli_w
 from typer.testing import CliRunner
 
 from frame_compare.cli.entry import app
@@ -83,7 +85,7 @@ def _setup(
             screenshot_dir=run_dir / "screenshots",
             clip_count=2,
             selected_frame_count=4,
-            warnings=(),
+            warnings=[],
             metrics_cache_status="miss",
             phase_timings={"render": 1.0},
             slowpics_url=None,
@@ -166,6 +168,28 @@ def test_history_list_malformed_warning_uses_stderr_and_keeps_json_clean(
     assert "Broken" in result.stderr
     assert "unreadable or unsupported" in result.stderr
     assert "Warning" not in result.stdout
+
+
+def test_history_list_json_isolates_oversized_record(tmp_path: Path) -> None:
+    report = _setup(tmp_path)
+    broken = tmp_path / "generated" / "Broken"
+    broken.mkdir()
+    payload = tomllib.loads((report.parent / "run_result.toml").read_text(encoding="utf-8"))
+    payload["duration_seconds"] = 10**400
+    (broken / "run_result.toml").write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    result = _invoke(tmp_path, ["list", "--json"])
+
+    assert result.exit_code == 0
+    assert result.stdout.count("\n") == 1
+    listed = json.loads(result.stdout)["runs"]
+    assert [(entry["name"], entry["status"]) for entry in listed] == [
+        ("Exact Run", "completed"),
+        ("Broken", "unavailable"),
+    ]
+    assert "Broken" in result.stderr
+    assert "unreadable or unsupported" in result.stderr
+    assert "OverflowError" not in result.stderr
 
 
 def test_history_list_omits_recordless_folder(tmp_path: Path) -> None:
@@ -282,6 +306,21 @@ def test_history_open_browser_false_or_exception_is_typed_failure(
     assert result.stdout == ""
     assert "[FC-4020]" in result.stderr
     assert "browser secret" not in result.stderr
+
+
+def test_history_open_oversized_record_is_typed_failure(tmp_path: Path) -> None:
+    report = _setup(tmp_path)
+    record_path = report.parent / "run_result.toml"
+    payload = tomllib.loads(record_path.read_text(encoding="utf-8"))
+    payload["duration_seconds"] = 10**400
+    record_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    result = _invoke(tmp_path, ["open", "Exact Run"])
+
+    assert result.exit_code == 5
+    assert result.stdout == ""
+    assert "[FC-4020]" in result.stderr
+    assert "result record is unavailable" in result.stderr
 
 
 def test_history_open_rejects_nonexact_name(tmp_path: Path) -> None:

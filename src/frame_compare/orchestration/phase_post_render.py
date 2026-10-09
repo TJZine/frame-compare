@@ -68,11 +68,15 @@ from frame_compare.services.slowpics_upload_plan import (
 )
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from frame_compare.utils.run_warnings import RunWarning
 
 log = structlog.get_logger()
 
-REPORT_CONFIRMATION_UNAVAILABLE_WARNING = (
-    "slow.pics upload skipped because report confirmation was unavailable"
+REPORT_CONFIRMATION_UNAVAILABLE_WARNING = RunWarning(
+    "slow.pics",
+    "skipped",
+    "slow.pics upload skipped",
+    "because report confirmation was unavailable",
 )
 
 __all__ = [
@@ -172,7 +176,7 @@ async def run_publish_phase(
         resolved_tmdb=metadata,
     )
     for warning in collection_resolution.warnings:
-        log.warning("slowpics_tmdb_association_mismatch", warning=warning)
+        log.warning("slowpics_tmdb_association_mismatch", warning=warning.text)
     result = await publish_to_slowpics(
         collection_metadata=collection_resolution.metadata,
         config=ctx.config.slowpics,
@@ -459,7 +463,7 @@ def run_post_report_cleanup_phase(
     ):
         return PostReportCleanupPhaseOutput()
 
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
     deleted_count = 0
     for path in uploaded_file_paths:
         try:
@@ -467,7 +471,7 @@ def run_post_report_cleanup_phase(
             deleted_count += 1
         except OSError as exc:
             message = f"cleanup: failed to delete uploaded screenshot {path}: {exc}"
-            warnings.append(message)
+            warnings.append(RunWarning("cleanup", "warning", message))
             log.warning(
                 "slowpics_uploaded_file_delete_failed",
                 path=str(path),

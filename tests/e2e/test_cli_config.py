@@ -142,3 +142,23 @@ def test_cli_config_and_preset_persistence(
         summary,
         expected,
     )
+
+
+@pytest.mark.e2e
+def test_cli_preset_apply_rejects_invalid_utf8_without_writing_config(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace()
+    preset_path = root.root / "config" / "presets" / "broken.toml"
+    preset_path.parent.mkdir(parents=True, exist_ok=True)
+    preset_path.write_bytes(b"[analysis]\nrandom_frame_count = 20\n\xff")
+    before = root.config_path.read_bytes()
+
+    result = _run(run_cli, root, ["preset", "apply", "broken"])[1]
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "[FC-1005]" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert root.config_path.read_bytes() == before

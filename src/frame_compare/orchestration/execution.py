@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from functools import partial
@@ -53,8 +54,13 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.errors import AudioAlignmentCleanupError
+from frame_compare.utils.cancellation import (
+    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
+    cancellation_checkpoint,
+)
 from frame_compare.utils.progress import align_phase_duration_text
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.run_warnings import RunWarning, WarningSource
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -66,6 +72,19 @@ __all__ = [
 ]
 
 
+_PHASE_WARNING_SOURCES: dict[str, WarningSource] = {
+    "frame_plan": "frame selection",
+    "analyze": "analysis",
+    "align": "alignment",
+    "render": "render",
+    "metadata": "sources",
+    "publish": "slow.pics",
+    "report": "render",
+    "confirm_slowpics_upload": "slow.pics",
+    "post_report_cleanup": "cleanup",
+}
+
+
 def _create_timed_phase(
     name: str,
     timing_key: str,
@@ -74,7 +93,7 @@ def _create_timed_phase(
     state: ExecutionState,
     monotonic_timer: Callable[[], float],
     phase_timings: dict[str, float],
-    warnings: list[str],
+    warnings: list[RunWarning],
     *,
     warn_only: bool = False,
     fatal_exceptions: tuple[type[BaseException], ...] = (),
@@ -89,11 +108,13 @@ def _create_timed_phase(
         start = monotonic_timer()
         align_output: AlignPhaseOutput | None = None
         try:
+            await cancellation_checkpoint()
             maybe_awaitable = executor(ctx)
             if inspect.isawaitable(maybe_awaitable):
                 output = await maybe_awaitable
             else:
                 output = maybe_awaitable
+            await cancellation_checkpoint()
             apply_phase_output(ctx=ctx, state=state, output=output)
             summary = getattr(output, "success_summary", None)
             if isinstance(summary, str):
@@ -110,9 +131,14 @@ def _create_timed_phase(
                 if phase is None:
                     raise RuntimeError("timed phase was not initialized")
                 phase.retain_on_success = retain_if(output)
+        except _RunInterrupt:
+            await cancellation_checkpoint()
+            raise asyncio.CancelledError() from None
         except Exception as exc:
             if warn_only:
-                warnings.append(f"{name}: {exc}")
+                warnings.append(
+                    RunWarning(_PHASE_WARNING_SOURCES[name], "warning", f"{name}: {exc}")
+                )
                 raise
             raise
         finally:
