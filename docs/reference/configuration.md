@@ -137,7 +137,7 @@ and the contract's [screenshot surface](../current-cli-contract.md#config-only-s
 | `color.contrast_recovery` | `0.0` to `1.0` | `0.3` | Contrast recovery strength |
 
 `target_nits`, `tone_curve`, `gamma_lift`, and `contrast_recovery` override the
-preset only when written in the file.
+preset only when explicitly supplied in the configuration file or environment variables.
 
 ## Report
 
