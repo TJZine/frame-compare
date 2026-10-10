@@ -765,7 +765,7 @@ $requiredVsViewDistributions = [ordered]@{
   "shiboken6" = "6.11.2"
   "vapoursynth-bestsource" = "22"
   "vspackrgb" = "2.0.0"
-  "vsview" = "0.12.0"
+  "vsview" = "0.12.1"
   "cyclopts" = "5.2.0"
   "vsjetengine" = "1.8.0"
 }

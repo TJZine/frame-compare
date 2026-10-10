@@ -11,7 +11,7 @@ A version shown here is supported only as part of the complete profile described
 | --- | --- | --- | --- | --- | --- |
 | Python | 3.13.15 | **3.13.16** | 2026-09-30 | Stable maintenance release | Security and maintenance fixes; Docker and Windows retain CPython 3.13. |
 | VapourSynth | R80 | **R81**, commit `dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a` | 2026-10-04 | Formal stable release | Fixes GPU memory sharing, Matroska muxer access violations, logging deadlocks, and frame-request handling. Retains CPython 3.12 ABI3 wheels and API R4.3; Frame Compare keeps its CPU-frame path. |
-| VSView | 0.11.0 | **0.12.0** | 2026-10-07 | Stable Python release | Maintained native viewer. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
+| VSView | 0.12.0 | **0.12.1** | 2026-10-09 | Stable Python release | Maintained native viewer; 0.12.1 fixes non-contiguous buffers for clips whose dimensions are not 64-aligned and CLI `--arg`/`--qt-arg` parsing. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
 | PySide6 | Previous Qt binding | **6.11.2** | Resolved 2026-08-30 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
 | VSJetEngine | 1.7.0 | **1.8.0** | 2026-09-25 | Stable Python release | Current locked VSView dependency resolution; 1.8.0 fixes frame-index tagging during out-of-order rendering and thread-safety races. |
 | VSView support graph | jetpytools 3.1.1; vspackrgb 1.4.0; vsview-cli 1.2.0 | **Cyclopts 5.2.0; jetpytools 3.1.2; vsjetengine 1.8.0; BestSource 22 (tag `R22`, commit `a0fab5708b28920957679825797692f6e4a23674`); vspackrgb 2.0.0** | BestSource 2026-09-16 | Locked Python resolution | Selected base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. BestSource 22 requires VapourSynth R80. |
@@ -61,7 +61,7 @@ and Frame Compare-owned indexes before reuse.
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
-- VSView 0.12.0 with its base dependency graph, PySide6 6.11.2, BestSource,
+- VSView 0.12.1 with its base dependency graph, PySide6 6.11.2, BestSource,
   vspackrgb, and the packaged `frame-compare-alignment-review` panel entry point
   for optional native interactive review. The runtime and panel metadata must come
   from the same environment; a PATH-only VSView executable is unsupported. BestSource
@@ -74,7 +74,7 @@ and Frame Compare-owned indexes before reuse.
 
 ### Debian Trixie / Docker
 
-- CPython 3.13.16 slim-trixie image, with uv 0.12.23 pinned by image digest.
+- CPython 3.13.16 slim-trixie image, with uv 0.13.0 pinned by image digest.
 - VapourSynth R81 manylinux wheel.
 - L-SMASH-Works 1310 built from source against VapourSynth API 4 and the Debian
   FFmpeg development ABI.
@@ -294,7 +294,7 @@ deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
 stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. The Linux GUI verifier contract requires the VSView 0.12.0 image to
+frame property. The Linux GUI verifier contract requires the VSView 0.12.1 image to
 discover and load the exact native panel entry point, construct its inactive panel
 offscreen, load a production-generated L-SMASH session, register named
 `Reference`/`Comparison 1` outputs, render frame 0 for both outputs, and round-trip a

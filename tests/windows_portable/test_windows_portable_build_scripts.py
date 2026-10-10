@@ -324,7 +324,7 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     )
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
-        "vsview-0.12.0-wheel": ("0.12.0", 2279306),
+        "vsview-0.12.1-wheel": ("0.12.1", 2279401),
         "cyclopts-5.2.0-wheel": ("5.2.0", 289196),
         "pyside6-6.11.2-win-amd64-wheel": ("6.11.2", 578382),
         "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
@@ -358,7 +358,7 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     lock = tomllib.loads(_read_text_or_fail(repo_root / "uv.lock"))
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
-        "vsview": "vsview-0.12.0-wheel",
+        "vsview": "vsview-0.12.1-wheel",
         "cyclopts": "cyclopts-5.2.0-wheel",
         "pyside6": "pyside6-6.11.2-win-amd64-wheel",
         "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
@@ -1086,7 +1086,7 @@ def _write_extracted_verifier_fixture(
                 ("shiboken6", "6.11.2"),
                 ("vapoursynth-bestsource", "22"),
                 ("vspackrgb", "2.0.0"),
-                ("VSView", "0.12.0"),
+                ("VSView", "0.12.1"),
                 ("cyclopts", "5.2.0"),
                 ("vsjetengine", "1.8.0"),
             )

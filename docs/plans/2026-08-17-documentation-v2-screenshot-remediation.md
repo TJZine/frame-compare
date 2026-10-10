@@ -3,7 +3,8 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
+Superseded by `docs/plans/2026-10-08-documentation-refresh.md`.
 Scope: V2 documentation screenshot recapture, image provenance, and rendered-site QA
 Owner: Maintainer-directed Codex session on the physical Windows test machine
 

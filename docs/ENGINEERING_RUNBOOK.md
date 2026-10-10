@@ -141,6 +141,13 @@ or different fingerprints, before any unsafe dependency override; each refusal
 requires a complete portable bundle reinstall. Crossing a media-runtime
 fingerprint also requires a complete portable bundle reinstall.
 
+Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
+`pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
+source selection. They also require the supplied complete bundle's application version
+and complete packaged `app/src/frame_compare` tree to match that committed source before
+borrowing its compatibility fingerprints. Commit the intended release source and rebuild
+the complete bundle before creating the matching update artifact.
+
 Locked dependency audit (PowerShell):
 
 ```powershell
@@ -397,7 +404,7 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.12.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+0.12.1, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
 all three outputs, and round-trip/validate the sibling result sidecar. The R81
 dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
 see the [Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)
@@ -410,6 +417,41 @@ documented-only/unverified rather than supported.
 On macOS, an offscreen or synthetic-panel check proves only the Python/Qt/plugin
 contract; if `core.lsmas` is absent, it is not native L-SMASH media proof. Linux X11
 visible-GUI behavior remains unavailable/unverified until a compatible host runs it.
+
+### Alignment Accuracy Benchmark
+
+`tools/alignment_benchmark.py` runs every pair in a maintainer-supplied label
+file through the production alignment path (result cache disabled, per-pair
+diagnostics) and classifies each pair as `correct_applied`, `wrong_applied`,
+`provisional`, `unavailable`, or `correctly_withheld` for pairs that must never
+apply. It prints a sanitized summary (pair ids and categories only) and writes
+the full per-pair JSON plus diagnostics to the output directory. Run it in the Docker test service:
+
+```bash
+mkdir -p /tmp/u5-real-media
+docker compose run --rm \
+  --volume "$PWD/comparison_videos:/media:ro" \
+  --volume "/tmp/u5-real-media:/proof" \
+  frame-compare-test -lc \
+  'python tools/alignment_benchmark.py --labels /media/alignment_labels.json --output /proof'
+```
+
+Label schema (media paths are relative to the label file's directory):
+
+```json
+{
+  "pairs": [
+    {"id": "pair-1", "category": "development", "reference": "A.mkv",
+     "comparison": "B.mkv", "expected_frame": 0, "expected_automatic": "applied"},
+    {"id": "control-1", "category": "negative_control", "reference": "C.mkv",
+     "comparison": "D.mkv", "expected_frame": null,
+     "expected_automatic": "not_applied"}
+  ]
+}
+```
+
+`speed_change` pairs run with the comparison's effective FPS set to the
+reference's probed FPS, matching `sources.match_fps = "assume_reference"`.
 
 ### Windows Portable / Release-Path Verification
 
@@ -435,7 +477,7 @@ Canonical verification path:
 3. Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.12.0,
+   verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.12.1,
    PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before

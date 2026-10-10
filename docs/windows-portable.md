@@ -1,11 +1,11 @@
 # Windows portable
 
 The Windows portable bundle is the recommended Frame Compare distribution for Windows
-10/11 x64. It includes the supported Python and media runtime, VSView 0.12.0 with its
+10/11 x64. It includes the supported Python and media runtime, VSView with its
 PySide6 backend and native Frame Compare alignment panel for review, the
 installer, and signed code-only update and rollback tooling.
 
-The portable graph pins the base `vsview==0.12.0` package and the Frame Compare panel
+The portable graph pins the base `vsview` package and the Frame Compare panel
 entry point; its upstream
 `recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
 VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
@@ -64,11 +64,6 @@ if ($actual -ne $expected) {
 The expected and actual hashes must match exactly. Delete and download both files again
 if verification fails; do not bypass the mismatch.
 
-The first native-panel bundle transition is a complete-runtime migration. Reinstall the
-full portable ZIP rather than applying a code-only update to a pre-native-panel bundle.
-The updater must fail closed when the installed bundle is schema 2, or when the
-installed and update runtime fingerprints are missing, legacy, malformed, or different.
-
 Extract the ZIP into a fresh, empty folder, open the extracted bundle folder, and run:
 
 ```powershell
@@ -77,9 +72,9 @@ Extract the ZIP into a fresh, empty folder, open the extracted bundle folder, an
 
 Open a new terminal after installation so the updated user `PATH` is loaded.
 
-<figure class="fc-doc-figure">
-  <img src="images/windows-portable-install.png" alt="Verified Frame Compare Windows portable checksum followed by successful shim installation and the instruction to open a new terminal.">
-  <figcaption>Verify the release ZIP first, then install the shim and open a new terminal so the updated user PATH is available.</figcaption>
+<figure class="fc-figure">
+  <img src="images/windows-portable-install.png" alt="Windows PowerShell showing a verified SHA-256 checksum followed by a successful shim installation." width="1109" height="119" loading="lazy">
+  <figcaption>Verify the ZIP first, then install the shim and open a new terminal so the updated PATH applies.</figcaption>
 </figure>
 
 ## Build the portable bundle from a clone
@@ -112,12 +107,12 @@ dist/frame-compare-portable-win-x64/
 └── install.cmd
 ```
 
-## Workspace and persistent generated data
+## Workspace and generated data
 
 The bundle includes empty `config/` and `comparison_videos/` directories.
 
 - Put an existing config at `config/config.toml`.
-- Put input clips in `comparison_videos/` to use the default discovery path.
+- Put source videos in `comparison_videos/` to use the default discovery path.
 - Use `frame-compare wizard` to create or review configuration.
 
 A bundle-local `config/config.toml` takes precedence over the installed AppData fallback
@@ -155,54 +150,22 @@ frame-compare run
 The first-use configuration keeps slow.pics automatic upload disabled. Review the local
 report before enabling any publication integration.
 
-See [Your First Comparison](guides/first-comparison.md) for the expected output and
+See [Your first comparison](guides/first-comparison.md) for the expected output and
 review checklist.
 
-## Native VSView alignment review
+## VSView alignment review
 
-The portable bundle includes VSView 0.12.0, PySide6, and the packaged
-`frame-compare-alignment-review` panel entry point in one self-contained Python
-environment. Frame Compare launches VSView through that same environment; a
-PATH-only VSView executable or a separate Python installation is not supported.
+The bundle includes VSView, PySide6, and the packaged `frame-compare-alignment-review`
+panel entry point in one self-contained Python environment; Frame Compare launches
+VSView from that same environment.
 
-When `audio_alignment.use_vsview = true` (or
-`--force-interactive-alignment`) is enabled, Frame Compare generates a session under
-`generated/.../vsview_sessions/`, validates bounded startup readiness, and opens the
-VSView child. Open **Frame Compare Alignment Review** from VSView's Tool Panel. The
-panel is inert for ordinary VSView sessions and does not take over or hide unrelated
-workspaces.
+A PATH-only VSView executable or a separate Python installation is not supported.
 
-The generated workspace contains each source exactly once: one `Reference` output and
-one ordered `Comparison N` output per comparison. Open the panel, unlink playheads,
-and visit every output. Leave each source on the same visible moment. The live source
-lineup records the latest untrimmed source frame, reports `ready / total`, and previews
-the signed `reference - comparison` relationship and trim direction.
+Turn review on with `audio_alignment.use_vsview = true`, or require it for one run with
+`--force-interactive-alignment`.
 
-Choose **Confirm these aligned positions** once every source is ready. It writes one
-typed, atomic sibling sidecar named `vsview_*.alignment-result.json` for the complete
-source set; there is no per-comparison confirmation or later completion step. **Keep
-current alignment** is the secondary whole-set action and retains each comparison's
-existing accepted or manually confirmed authority without confirming a provisional
-candidate.
-
-For known values, expand **Enter alignment manually...** and choose **Source frames** or
-**Known offsets**. Source frames accepts one non-negative untrimmed frame per source;
-known offsets accepts one signed integer per comparison using `reference - comparison`.
-Both bases use the same save action and immediately show the trim meaning. Frame Compare
-checks the session UUID, ordered comparison keys, and authoritative raw source-frame
-bounds before applying any saved result. Closing VSView without saving writes no result.
-Missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds
-results fail closed.
-
-Optional review failures retain the computed/current alignment and print an actionable
-diagnostic. Forced review fails when the same-environment entry point is unavailable,
-startup readiness times out, the child process fails or times out, the review is
-cancelled without a complete result, or result validation fails. The former terminal
-frame-entry prompt, stdin protocol, executable/PATH discovery, and viewer compatibility
-fallbacks are removed. The native panel adds multi-output viewer context, current-frame
-observation, markers, explicit whole-set status, and a typed trust boundary; the tradeoff
-is that closing without saving does not preserve a manual decision and no external
-viewer fallback is available.
+See [VSView alignment review](guides/vsview-review.md) for the workflow, the saved
+result, and troubleshooting.
 
 ## Inspect previous runs
 
@@ -241,17 +204,10 @@ overridden safely because a code-only ZIP does not carry replacement native medi
 components. An unavailable installed app version also fails closed instead of skipping
 the signed source-version range; install the complete portable ZIP instead.
 
-Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
-`pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
-source selection. They also require the supplied complete bundle's application version
-and complete packaged `app/src/frame_compare` tree to match that committed source before
-borrowing its compatibility fingerprints. Commit the intended release source and rebuild
-the complete bundle before creating the matching update artifact.
-
 When the fingerprint differs, install the complete portable ZIP for that release into a
 fresh, empty folder. Overlaying a full ZIP onto an existing bundle root is unsupported.
 
-Before a full reinstall, preserve the old bundle and its user configuration, input clips,
+Before a full reinstall, preserve the old bundle and its user configuration, source videos,
 and generated data. Copy the authored `config/config.toml` and any bundle-local inputs or
 `generated/` data into the new bundle as needed, or retain their external locations.
 Do not copy application code, runtime files, or update backups from the old bundle.
@@ -279,7 +235,7 @@ reinstall across different runtime or dependency fingerprints.
 
 Run `uninstall.cmd` from the current portable bundle root. It removes the installed user
 shim and managed `PATH` entry. It preserves the installed state configuration and leaves
-unknown files in place. It does not silently delete the portable bundle, input clips, or
+unknown files in place. It does not silently delete the portable bundle, source videos, or
 an external generated-data root.
 
 ## Bundle provenance and licenses
@@ -293,7 +249,7 @@ Each complete bundle includes:
 - `licenses/THIRD_PARTY_NOTICES.txt` and copied component notices.
 
 The selected profile and compatibility policy are described in
-[Supported Media Runtime](supported-media-runtime.md). Artifact-level hashes and source
+[Supported media runtime](supported-media-runtime.md). Artifact-level hashes and source
 revisions in the build manifest and generated inventory remain authoritative.
 
 ## Troubleshooting
@@ -303,49 +259,11 @@ revisions in the build manifest and generated inventory remain authoritative.
 | `frame-compare` is not found | Open a new terminal; if still unavailable, rerun `install.cmd` from the bundle’s current location |
 | The shim reports a missing bundle | The portable folder moved; rerun `install.cmd` from its new location |
 | Source build cannot install `uv` | Install it with `winget install --id astral-sh.uv -e --source winget` or `py -m pip install --user uv`, then rerun the installer |
-| No videos are discovered | Put at least two supported clips in `comparison_videos/` or select another contained input directory in the wizard |
+| No videos are discovered | Put at least two supported video files in `comparison_videos/` or select another contained input directory in the wizard |
 | Doctor reports an optional/network warning | Review it against the intended workflow; disabled integrations need no setup |
 | Doctor reports a required media component failure | Reinstall the complete bundle rather than mixing unmanaged replacement DLLs into it |
 | Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
-| Doctor reports the alignment panel is missing | Reinstall the complete bundle or rebuild it; the VSView runtime and `frame-compare-alignment-review` entry point must come from the same environment |
-| Alignment panel is inactive | Open the Frame Compare-generated session; ordinary sessions and untrusted/mixed metadata intentionally remain inert |
-| Panel closes before saving | No result sidecar was written; reopen the generated session, visit every source, and choose **Confirm these aligned positions** or **Keep current alignment** |
-| Native review result is rejected | Generate a fresh session; Frame Compare rejects missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds sidecars |
+| The alignment panel is missing, stays inactive, or rejects a result | See [VSView alignment review](guides/vsview-review.md#troubleshooting) |
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 
 For broader diagnosis, see [Troubleshooting](guides/troubleshooting.md).
-
-## Physical Windows handoff
-
-Hosted Windows verification is required to prove the exact package, embedded runtime,
-same-environment entry-point discovery/loading, offscreen panel construction,
-generated-session metadata, atomic result round trip, and fail-closed result
-validation. This feature run has not executed hosted Windows proof. After that proof
-passes, record these remaining interactive checks on a physical Windows 10/11 x64
-system:
-
-- open a real Frame Compare-generated session through the installed portable launcher;
-- verify the panel is discoverable from VSView's Tool Panel and remains inert in an
-  ordinary VSView session;
-- verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
-  suggestion markers, source-frame bounds, signed relationship, and trim-direction text;
-- unlink playheads, visit every source, use the whole-set positions action, then close
-  VSView and verify Frame Compare applies only the validated offsets;
-- exercise the manual source-frame and known-offset bases plus the whole-set keep-audio
-  action;
-- close or cancel before saving and verify optional mode retains the current result
-  while forced mode fails with an actionable diagnostic;
-- exercise missing/malformed/stale/mixed/duplicate/incomplete/out-of-bounds sidecars,
-  bounded readiness failure, child-process failure, and timeout behavior;
-- use real L-SMASH-backed media to verify native decoder/index diagnostics, then inspect
-  early, middle, late, and final shared-content evidence for drift or edit changes;
-- on the production GPU, verify Vulkan/HDR behavior and compare report output against
-  the prior supported bundle where the release changes runtime behavior.
-
-Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
-screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
-as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
-unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
-its offscreen contract does not establish visible ergonomics. This feature run has not
-completed the physical-Windows ergonomics checks above, so do not claim them from
-offscreen or hosted results.

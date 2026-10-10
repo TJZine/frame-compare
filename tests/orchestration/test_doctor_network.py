@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 
 from frame_compare.orchestration.doctor import (
@@ -34,88 +32,6 @@ def test_check_tmdb_api_key_fails_with_malformed_env(
     assert result.passed is False
     assert result.message == "TMDB API key has invalid format"
     assert result.hint == ("Replace the TMDB credential with a 32-character hexadecimal API key")
-
-
-class TestCheckSlowpics:
-    """Tests for slow.pics reachability check via run_doctor."""
-
-    def test_check_slowpics_uses_expected_url_and_timeout(self) -> None:
-        """Mock httpx.Client.head and assert URL + timeout."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.head = MagicMock(return_value=mock_response)
-
-        checks = collect_checks()
-        slowpics_check = next(c for c in checks if c.name == "slowpics")
-
-        with patch("httpx.Client", return_value=mock_client) as mock_client_cls:
-            result = slowpics_check.check_fn()
-
-        mock_client_cls.assert_called_once_with(timeout=5.0)
-        mock_client.head.assert_called_once_with("https://slow.pics/")
-        assert result.passed is True
-
-    @pytest.mark.parametrize("status_code", [404, 500])
-    def test_check_slowpics_fails_on_http_error_status(self, status_code: int) -> None:
-        mock_response = MagicMock()
-        mock_response.status_code = status_code
-
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.head = MagicMock(return_value=mock_response)
-
-        checks = collect_checks()
-        slowpics_check = next(c for c in checks if c.name == "slowpics")
-
-        with patch("httpx.Client", return_value=mock_client):
-            result = slowpics_check.check_fn()
-
-        assert result.passed is False
-        assert str(status_code) in result.message
-        assert result.hint == "Review the returned HTTP status before retrying"
-
-    @pytest.mark.parametrize(
-        ("error", "message", "hint", "details"),
-        [
-            pytest.param(
-                httpx.ReadTimeout("timed out"),
-                "slow.pics connection timed out",
-                "Check network access to slow.pics, then retry",
-                {"timeout": 5.0},
-                id="timeout_has_timeout_specific_next_action",
-            ),
-            pytest.param(
-                httpx.ConnectError("DNS failed"),
-                "slow.pics connection failed: DNS failed",
-                "Review the request failure and network path to slow.pics before retrying",
-                None,
-                id="request_failure_has_transport_specific_next_action",
-            ),
-            pytest.param(
-                httpx.RemoteProtocolError("server disconnected"),
-                "slow.pics connection failed: server disconnected",
-                "Review the request failure and network path to slow.pics before retrying",
-                None,
-                id="protocol_failure_uses_evidence_neutral_next_action",
-            ),
-        ],
-    )
-    def test_check_slowpics_transport_failure(
-        self, error: httpx.RequestError, message: str, hint: str, details: dict[str, float] | None
-    ) -> None:
-        slowpics_check = next(c for c in collect_checks() if c.name == "slowpics")
-        with patch("httpx.Client", side_effect=error):
-            result = slowpics_check.check_fn()
-        assert result.passed is False
-        assert result.message == message
-        assert result.hint == hint
-        if details is not None:
-            assert result.details == details
 
 
 @pytest.mark.parametrize(

@@ -728,7 +728,7 @@ owners. Its explicit X11 contract is:
 The optional GUI proof is non-CI and non-default. Its verifier contract requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.12.0, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.12.1, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
 result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
@@ -1173,9 +1173,10 @@ Native alignment-review hotspot dispositions for the current implementation:
 - Keep config/env loading centralized; do not add ad hoc env reads deep in domain logic.
 - The orchestration coordinator creates and closes the default shared HTTP client
   when no client is injected through `RunDependencies`; injected clients remain
-  caller-owned. `runner` bridges sync callers to async orchestration. Diagnostics
-  create short-lived reachability clients, and webhook delivery keeps its isolated
-  pinned HTTPS transport.
+  caller-owned. `runner` bridges sync callers to async orchestration. Doctor checks
+  runtime availability and local TMDB configuration without HTTP requests;
+  slow.pics connectivity belongs to the browser-compatible publishing flow.
+  Webhook delivery keeps its isolated pinned HTTPS transport.
 - Keep persistence deterministic: stable ordering, stable JSON/TOML output, atomic writes where owners already use them.
 - Respect the layered import contracts and sibling-domain independence.
 - Treat Docker and Windows portable flows as first-class runtime surfaces, not optional afterthoughts.

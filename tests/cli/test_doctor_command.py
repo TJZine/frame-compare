@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import pytest
 from pytest import MonkeyPatch
@@ -15,6 +16,57 @@ from frame_compare.utils.terminal_theme import GLYPHS_ASCII
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 from .cli_helpers import runner
+
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["human", "json"])
+def test_default_doctor_reports_local_checks_without_http(
+    tmp_path: Path, monkeypatch: MonkeyPatch, json_output: bool
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[tmdb]\nenabled = false\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for key in ("TMDB_API_KEY", "FRAME_COMPARE_TMDB__API_KEY", "FRAME_COMPARE_TMDB__ENABLED"):
+        monkeypatch.delenv(key, raising=False)
+    # Exercise the real default registry and config check while isolating host runtimes.
+    for name in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg", "vsview"):
+        monkeypatch.setattr(
+            f"frame_compare.orchestration.doctor_checks._check_{name}",
+            lambda: CheckResult(passed=True, message="Runtime available"),
+        )
+    with (
+        patch("httpx.Client.send", side_effect=AssertionError("Unexpected HTTP request")) as send,
+        patch(
+            "httpx.AsyncClient.send", side_effect=AssertionError("Unexpected HTTP request")
+        ) as async_send,
+    ):
+        result = runner.invoke(app, ["doctor", "--json"] if json_output else ["doctor"])
+
+    send.assert_not_called()
+    async_send.assert_not_called()
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "slowpics" not in result.stdout
+    assert "slow.pics" not in result.stdout
+    if json_output:
+        payload = json.loads(result.stdout)
+        assert payload["success"] is True
+        assert [entry["id"] for entry in payload["doctor"]["checks"]] == [
+            "vapoursynth",
+            "lsmas",
+            "vs_placebo",
+            "ffms2",
+            "ffmpeg",
+            "vsview",
+            "tmdb_api_key",
+        ]
+        assert _doctor_check_entry(payload, "tmdb_api_key")["message"] == (
+            "TMDB metadata lookup disabled"
+        )
+    else:
+        assert "TMDB metadata lookup disabled" in result.stdout
+        assert "Runtime is ready for comparisons." in result.stdout
+
 
 _AUDITED_HINTS = (
     "Make VapourSynth importable; see https://tjzine.github.io/frame-compare/getting-started/native/#native-source",
@@ -49,9 +101,6 @@ _AUDITED_HINTS = (
         "Check the optional VSView setup, then rerun doctor; see "
         "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
-    "Review the returned HTTP status before retrying",
-    "Check network access to slow.pics, then retry",
-    "Review the request failure and network path to slow.pics before retrying",
     "Fix config/config.toml syntax, then rerun doctor",
     "Fix the reported config/environment validation errors, then rerun doctor",
     "Replace the TMDB credential with a 32-character hexadecimal API key",
@@ -189,9 +238,9 @@ def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatc
             ),
         ),
         DoctorCheck(
-            name="slowpics",
+            name="tmdb_api_key",
             category="network",
-            check_fn=lambda: CheckResult(passed=True, message="slow.pics reachable"),
+            check_fn=lambda: CheckResult(passed=True, message="TMDB API key configured"),
         ),
     ]
     report = run_doctor(checks=checks)
@@ -222,7 +271,7 @@ def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatc
     assert "! FFmpeg FFmpeg not found" in normalized
     assert "\u2013 VSView VSView not installed" in normalized
     assert "hint Install VSView, then rerun doctor" in normalized
-    assert "\u2713 slow.pics slow.pics reachable" in normalized
+    assert "\u2713 TMDB API key TMDB API key configured" in normalized
     assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
     assert result.stdout.count("Runtime is ready for comparisons.") == 1
     assert "Core runtime" not in result.stdout
@@ -280,9 +329,9 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
 
 def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     check = DoctorCheck(
-        name="slowpics",
+        name="tmdb_api_key",
         category="network",
-        check_fn=lambda: CheckResult(passed=False, message="offline"),
+        check_fn=lambda: CheckResult(passed=False, message="TMDB API key not configured"),
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
@@ -302,13 +351,13 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     assert result.exit_code == 0
     assert result.stderr == ""
     normalized = " ".join(result.stdout.split())
-    assert "! slow.pics offline" in normalized
+    assert "! TMDB API key TMDB API key not configured" in normalized
     assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
-    assert "\u2717 slow.pics" not in normalized
+    assert "\u2717 TMDB API key" not in normalized
     assert "Core runtime checks passed" not in result.stdout
 
 
-def test_doctor_network_failure_is_warning_only(monkeypatch: MonkeyPatch) -> None:
+def test_doctor_credential_failure_is_warning_only(monkeypatch: MonkeyPatch) -> None:
     _run_doctor_optional_failure_and_assert(monkeypatch)
 
 

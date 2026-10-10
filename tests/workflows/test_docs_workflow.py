@@ -24,7 +24,7 @@ EXPECTED_PATHS = {
 EXPECTED_ACTIONS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
-    "astral-sh/setup-uv": "c18668ad3cf93ea998bef934396af7bb5c839dc7",
+    "astral-sh/setup-uv": "1c37ad07a6a961277cf70c0d37d6f313000f5884",
     "actions/configure-pages": "45bfe0192ca1faeb007ade9deae92b16b8254a0d",
     "actions/upload-pages-artifact": "fc324d3547104276b827a68afc52ff2a11cc49c9",
     "actions/deploy-pages": "368f82528645a54fb793d4d04e342629a3f51346",
@@ -69,7 +69,7 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
 
     assert _step_by_name(build, "Set up Python")["with"]["python-version"] == "3.13"
     uv_step = _step_by_name(build, "Set up uv")
-    assert uv_step["with"] == {"version": "0.12.23", "enable-cache": "false"}
+    assert uv_step["with"] == {"version": "0.13.0", "enable-cache": "false"}
     assert not re.search(r"version:\s*[\"']?latest[\"']?", source, re.IGNORECASE)
     assert _step_by_name(build, "Install documentation dependencies")["run"] == (
         "uv sync --only-group docs --locked"
@@ -82,7 +82,10 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
     )
     search_scope_check = _step_by_name(build, "Check user documentation search scope")["run"]
     assert 'Path("site/search.json")' in search_scope_check
-    assert '("TODO/", "plans/")' in search_scope_check
+    assert (
+        '("TODO/", "plans/", "reviews/", "prompts/", "images/", "release-evidence/")'
+        in search_scope_check
+    )
 
 
 def test_docs_workflow_gates_pages_steps_and_deployment(repo_root: Path) -> None:
