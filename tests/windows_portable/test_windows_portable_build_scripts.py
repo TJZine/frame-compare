@@ -1086,7 +1086,7 @@ def _write_extracted_verifier_fixture(
                 ("shiboken6", "6.11.2"),
                 ("vapoursynth-bestsource", "22"),
                 ("vspackrgb", "2.0.0"),
-                ("VSView", "0.12.0"),
+                ("VSView", "0.12.1"),
                 ("cyclopts", "5.2.0"),
                 ("vsjetengine", "1.8.0"),
             )
