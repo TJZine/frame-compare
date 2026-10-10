@@ -7,8 +7,6 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from typing import cast
 
-import httpx
-
 from frame_compare.config.errors import ConfigParseError, ConfigValidationError
 from frame_compare.config.loader import load_config
 from frame_compare.errors import JSONValue
@@ -38,7 +36,7 @@ from frame_compare.vs.runtime_contract import (
     runtime_kind,
 )
 
-__all__ = ["SLOWPICS_HEALTHCHECK_URL", "collect_checks"]
+__all__ = ["collect_checks"]
 
 
 # Canonical check ordering
@@ -49,11 +47,9 @@ _CHECK_ORDER: list[tuple[str, str]] = [
     ("ffms2", "optional"),
     ("ffmpeg", "optional"),
     ("vsview", "optional"),
-    ("slowpics", "network"),
     ("tmdb_api_key", "network"),
 ]
 
-SLOWPICS_HEALTHCHECK_URL = "https://slow.pics/"
 _NATIVE_RUNTIME_DOC_URL = (
     "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
 )
@@ -577,46 +573,6 @@ def _check_vsview() -> CheckResult:
     )
 
 
-def _check_slowpics() -> CheckResult:
-    """Check slow.pics reachability per docs/current-architecture.md.
-
-    URL: SLOWPICS_HEALTHCHECK_URL
-    Method: HEAD
-    Timeout: 5.0 seconds
-    Pass if status < 400; fail on status >= 400 or request errors.
-    """
-    timeout = 5.0
-
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.head(SLOWPICS_HEALTHCHECK_URL)
-            if response.status_code < 400:
-                return CheckResult(
-                    passed=True,
-                    message="slow.pics reachable",
-                    details={"status_code": response.status_code},
-                )
-            return CheckResult(
-                passed=False,
-                message=f"slow.pics returned status {response.status_code}",
-                hint="Review the returned HTTP status before retrying",
-                details={"status_code": response.status_code},
-            )
-    except httpx.TimeoutException:
-        return CheckResult(
-            passed=False,
-            message="slow.pics connection timed out",
-            hint="Check network access to slow.pics, then retry",
-            details={"timeout": timeout},
-        )
-    except httpx.RequestError as e:
-        return CheckResult(
-            passed=False,
-            message=f"slow.pics connection failed: {e}",
-            hint="Review the request failure and network path to slow.pics before retrying",
-        )
-
-
 def _check_tmdb_api_key() -> CheckResult:
     """Check TMDB API key is configured through the normal runtime config chain."""
     tmdb_enabled, resolved_api_key, config_error = _resolve_tmdb_config()
@@ -698,8 +654,7 @@ def collect_checks() -> list[DoctorCheck]:
         4. ffms2 (optional)
         5. ffmpeg (optional)
         6. vsview (optional)
-        7. slowpics (network)
-        8. tmdb_api_key (network)
+        7. tmdb_api_key (network; local configuration only)
     """
     check_fns: dict[str, Callable[[], CheckResult]] = {
         "vapoursynth": _check_vapoursynth,
@@ -708,7 +663,6 @@ def collect_checks() -> list[DoctorCheck]:
         "ffms2": _check_ffms2,
         "ffmpeg": _check_ffmpeg,
         "vsview": _check_vsview,
-        "slowpics": _check_slowpics,
         "tmdb_api_key": _check_tmdb_api_key,
     }
     managed_runtime = runtime_kind().casefold() in {"docker", "windows-portable"}

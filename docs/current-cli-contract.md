@@ -2018,6 +2018,10 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 ## `doctor` Command Contract
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
+- `doctor` makes no HTTP requests and does not test slow.pics reachability. The
+  `tmdb_api_key` check validates local configuration and credential format only;
+  it does not contact TMDB. slow.pics connectivity is exercised by the
+  browser-compatible upload flow when publishing is requested.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - Python compatibility remains enforced by package metadata, runtime manifests, and build
   validation; `doctor` does not emit a separate Python-version check.
@@ -2063,7 +2067,7 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
-  optional GUI dependency classes, network failure classes, and TMDB
+  optional GUI dependency classes and TMDB
   configuration/credential classes without guessing a package-manager command or
   install mode; when setup mode is unknown, they point to the repository's current
   setup documentation.

@@ -35,7 +35,6 @@ _DOCTOR_DISPLAY_LABELS = {
     "ffms2": "FFMS2",
     "ffmpeg": "FFmpeg",
     "vsview": "VSView",
-    "slowpics": "slow.pics",
     "tmdb_api_key": "TMDB API key",
 }
 _DOCTOR_GROUPS = (
