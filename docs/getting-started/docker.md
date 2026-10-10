@@ -52,16 +52,18 @@ commands above from the host instead.
 
 ## The index warning
 
-Every comparison run (not a dry run) prints, once per source each time sources load:
+A comparison run (not a dry run) may print this warning when a source has no usable
+L-SMASH index and the loader cannot create or rebuild one beside the media:
 
 `Loading /workspace/comparison_videos/<file> without an L-SMASH index cache after index construction failed`
 
-This behavior is implemented at `src/frame_compare/vs/source.py:210` and was observed
-in the 2026-10-08 Docker run. The run service mounts media read-only, and Frame Compare
-keeps its L-SMASH-Works index beside the media as described in [Output layout](../reference/output-layout.md).
-Each run therefore rebuilds the index in memory, which costs indexing time on every run.
-Frame selection, alignment, and rendering are unaffected. The message is expected on
-this route and needs no action.
+The run service mounts media read-only, and Frame Compare keeps its L-SMASH-Works
+index beside the media as described in [Output layout](../reference/output-layout.md).
+If index construction fails, Frame Compare retries without a disk cache. These
+cache-free source loads rebuild the index in memory and repeat the indexing cost.
+A usable existing Frame Compare-owned index can be reused even on a read-only mount,
+so the warning is not expected on every run. The warning alone needs no action;
+frame selection, alignment, and rendering are unaffected by the cache-free fallback.
 
 ## Next steps
 

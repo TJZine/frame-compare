@@ -54,7 +54,9 @@ than beneath this root. Their filename includes a runtime-scoped token. Ambiguou
 `<media>.lwi` files are not silently adopted.
 
 When media is mounted read-only, as on the default Docker route, no index file can be
-written and each run rebuilds the index; see [Docker](../getting-started/docker.md#the-index-warning).
+written. A usable existing Frame Compare-owned index can still be reused. If no usable
+index is available and index construction fails, the cache-free fallback rebuilds it
+in memory each time the source loads; see [Docker](../getting-started/docker.md#the-index-warning).
 
 ## Portability
 

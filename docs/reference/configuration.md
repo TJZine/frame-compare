@@ -136,12 +136,13 @@ and the contract's [screenshot surface](../current-cli-contract.md#config-only-s
 | `color.gamma_lift` | `true`, `false` | from the preset | Brighten midtones after tonemapping |
 | `color.contrast_recovery` | `0.0` to `1.0` | `0.3` | Contrast recovery strength |
 
-`target_nits`, `tone_curve`, `gamma_lift`, and `contrast_recovery` override the
-preset only when explicitly supplied in the configuration file or environment variables.
-`--tm-target` and `--tm-curve` override `target_nits` and `tone_curve` for one run
-and take precedence over configuration and environment values. `gamma_lift` and
-`contrast_recovery` have no corresponding CLI flags. `--tm-preset` changes the
-preset baseline; explicitly supplied field overrides still take precedence.
+Explicit configuration or environment values for `target_nits`, `tone_curve`,
+`gamma_lift`, and `contrast_recovery` override the preset baseline. `--tm-target`
+and `--tm-curve` override `target_nits` and `tone_curve` for one run and take
+precedence over configuration and environment values. `gamma_lift` and
+`contrast_recovery` can be set only through configuration or environment variables;
+they have no corresponding CLI flags. `--tm-preset` changes the preset baseline;
+explicitly supplied field overrides still take precedence.
 
 ## Report
 
