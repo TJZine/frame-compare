@@ -265,7 +265,7 @@ and the contract's
 
 `color` — guide: `[HDR and tonemapping](../guides/hdr-tonemapping.md)`. After the table:
 "`target_nits`, `tone_curve`, `gamma_lift`, and `contrast_recovery` override the preset
-only when written in the file."
+only when explicitly supplied in the configuration file or environment variables."
 
 | Key | Values | Default | Effect |
 | --- | --- | --- | --- |

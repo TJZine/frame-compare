@@ -99,6 +99,8 @@ Replace the entire file with this content.
   --fc-brass-strong: #ffc078;
   --fc-brass-soft: rgb(233 162 76 / 9%);
   --fc-on-brass: #1a1208;
+  --fc-line: var(--md-default-fg-color--lightest);
+  --fc-muted: var(--md-default-fg-color--light);
   --fc-lift: 0 0 0 0.05rem rgb(255 255 255 / 8%);
 
   --md-default-bg-color: #141414;
