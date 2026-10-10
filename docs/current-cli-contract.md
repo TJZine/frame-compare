@@ -2022,6 +2022,9 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   `tmdb_api_key` check validates local configuration and credential format only;
   it does not contact TMDB. slow.pics connectivity is exercised by the
   browser-compatible upload flow when publishing is requested.
+- Neither human output nor the `doctor.checks` array in `doctor --json` contains a
+  `slowpics` check. Consumers that require that ID or the earlier check count must
+  adjust.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - Python compatibility remains enforced by package metadata, runtime manifests, and build
   validation; `doctor` does not emit a separate Python-version check.

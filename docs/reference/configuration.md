@@ -138,6 +138,10 @@ and the contract's [screenshot surface](../current-cli-contract.md#config-only-s
 
 `target_nits`, `tone_curve`, `gamma_lift`, and `contrast_recovery` override the
 preset only when explicitly supplied in the configuration file or environment variables.
+`--tm-target` and `--tm-curve` override `target_nits` and `tone_curve` for one run
+and take precedence over configuration and environment values. `gamma_lift` and
+`contrast_recovery` have no corresponding CLI flags. `--tm-preset` changes the
+preset baseline; explicitly supplied field overrides still take precedence.
 
 ## Report
 

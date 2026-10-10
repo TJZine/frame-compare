@@ -3,6 +3,13 @@ search:
   exclude: true
 ---
 
+Status: Historical
+Scope: Subordinate specification for the completed
+[documentation refresh](../2026-10-08-documentation-refresh.md).
+
+The instructions below record that workstream's authoring requirements.
+Current behavior is documented in the maintained guides and references.
+
 # Documentation refresh: reference, authority, and repository files
 
 Part of the [documentation refresh plan](../2026-10-08-documentation-refresh.md).

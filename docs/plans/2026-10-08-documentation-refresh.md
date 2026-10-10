@@ -557,7 +557,7 @@ do not change scope, structure, or any decision, so no further review round was 
 
 ### Baseline and dispatch (2026-10-09)
 
-- Checkout: `/Users/tristan/Software/frame-compare`; branch
+- Checkout: repository root; branch
   `agent/e2e-test-strategy`.
 - Initial HEAD: `b9fcd82a66cd641520422e67e0e8ad338df49eae`. The specification
   base remains `80beafdcdabc7ac556f78fada5e7593b89e8880c`; subsequent cancellation

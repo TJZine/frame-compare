@@ -404,7 +404,7 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.12.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+0.12.1, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
 all three outputs, and round-trip/validate the sibling result sidecar. The R81
 dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
 see the [Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)

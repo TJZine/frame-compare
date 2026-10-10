@@ -1,8 +1,9 @@
 # Audio alignment
 
 Frame Compare estimates the offset between the reference and each comparison from their
-audio and applies it only when the video confirms it. Alignment changes which source
-frames are compared; it never retimes or rewrites the files.
+audio. A fresh automatic offset is applied only when video confirmation and all other
+authority checks pass. Alignment changes which source frames are compared; it never
+retimes or rewrites the files.
 
 ## When alignment helps
 
@@ -23,8 +24,8 @@ The terminal distinguishes applied offsets from candidates that still need revie
 
 | Terminal result | Meaning | What to do |
 | --- | --- | --- |
-| `Audio alignment accepted: +Nf - APPLIED` | Audio and video agree on the offset; the trims use it | Check a few frames in the report |
-| `Provisional audio candidate: +Nf - NOT APPLIED` | Audio found an offset that the video did not confirm | Review it in the VSView alignment panel, or keep the current alignment |
+| `Audio alignment accepted: +Nf - APPLIED` | All automatic authority checks pass; the trims use the offset | Check a few frames in the report |
+| `Provisional audio candidate: +Nf - NOT APPLIED` | A candidate exists, but at least one authority check fails; video may still confirm it | Review it in the VSView alignment panel, or keep the current alignment |
 | `No usable audio candidate (<reason>) - NOT APPLIED` | No offset could be established | Check the audio streams, or align manually in the panel |
 | `Accepted audio alignment reused: +Nf - APPLIED` | An offset accepted in an earlier run still matches | Nothing |
 | `Manually confirmed alignment: +Nf - APPLIED` | An offset confirmed in the panel is in use | Nothing |
@@ -33,7 +34,11 @@ The terminal distinguishes applied offsets from candidates that still need revie
 Each line starts with `Comparison N - `. A `+0f` result is a real zero offset, not a
 missing one. `--verbose` adds the evidence counts and `--quiet` keeps only actionable
 warnings. The audio is decoded whole and compared in chunks, then a sample of decoded
-frames confirms the exact offset. The exact thresholds live in the
+frames checks the exact offset. Automatic application requires video confirmation,
+a passed audio authority recount, resolved competing runs and credible chunk
+disagreements, and no confirmed alternative offset. Video confirmation alone does
+not authorize application or writing the candidate to the computed-offset cache.
+The exact thresholds live in the
 [contract](../current-cli-contract.md#config-only-audio-alignment-surface).
 
 ## Choose the audio streams

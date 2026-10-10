@@ -20,7 +20,7 @@ flowchart TD
     K --> L{"Accepted offset reusable?"}
     L -->|Yes| M["Reuse the accepted offset"]
     L -->|No| N["Audio correlation and video confirmation"]
-    N --> O{"Audio and video agree?"}
+    N --> O{"Automatic authority checks pass?"}
     O -->|Yes| Q["Apply the automatic offset"]
     O -->|No| P["Keep the current alignment"]
     M --> V{"VSView review enabled?"}
@@ -74,9 +74,11 @@ arrays. Selection counts and quantile choices are applied after metrics are avai
 ## 4. Alignment
 
 The frame plan is mapped into the aligned comparison domain. Audio correlation proposes
-an offset; Frame Compare applies it only when decoded video confirms the same frame
-offset. Otherwise the candidate is shown as `NOT APPLIED` and the current alignment
-stays.
+an offset. Frame Compare applies a fresh automatic offset only when decoded video
+confirms the frame offset, the audio authority recount passes, competing runs and
+credible chunk disagreements are resolved, and no alternative offset is confirmed.
+A candidate remains `NOT APPLIED` if any authority check fails, even when video
+confirms it; the current alignment stays.
 
 An offset accepted in an earlier run is reused while the sources and settings still
 match. With VSView review enabled, the panel opens after alignment unless a complete set
