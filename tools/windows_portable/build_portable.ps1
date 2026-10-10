@@ -969,7 +969,7 @@ def prove_vsview_distribution_contract() -> None:
         "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "2.0.0",
-        "vsview": "0.12.0",
+        "vsview": "0.12.1",
         "cyclopts": "5.2.0",
         "vsjetengine": "1.8.0",
     }
