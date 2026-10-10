@@ -33,7 +33,7 @@ defines two capture sets:
 | Viewport | 1600 × 1000 at scale 1; Report Information dialog captured at 896 × 666 |
 | Report theme | Viewer default, dark |
 | Capture date | 2026-10-09 |
-| Captured by | Codex U1 capture pass; maintainer acceptance pending |
+| Captured by | Codex U1 capture pass; maintainer accepted the full asset set on 2026-10-10 |
 
 ### Set 2: physical Windows
 

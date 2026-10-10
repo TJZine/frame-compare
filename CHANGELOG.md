@@ -66,7 +66,7 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   exact workspace and config it saved.
 - `run --help` groups options by purpose, and an invalid `--overlay`, `--tm-preset`,
   or `--tm-curve` value lists the allowed choices before any work starts.
-- Update the supported runtime to VapourSynth R81, VSView 0.12.0, CPython 3.13.16,
+- Update the supported runtime to VapourSynth R81, VSView 0.12.1, CPython 3.13.16,
   vsjetengine 1.8.0, vspackrgb 2.0.0, BestSource 22, and Windows FFmpeg
   `n8.1.3-9-g29e619e767`. Install a complete portable bundle for this runtime.
 
