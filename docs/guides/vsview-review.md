@@ -40,6 +40,11 @@ The panel distinguishes the frame you are viewing from the captured position and
 previews the signed offset and which source is trimmed. It shows the audio candidate
 under **Audio evidence** without applying it.
 
+<figure class="fc-figure fc-figure--narrow">
+  <img src="../images/vsview-alignment-panel.webp" alt="VSView alignment panel listing the Reference and Comparison 1 positions as captured and ready to confirm." width="748" height="1142" loading="lazy">
+  <figcaption>When every source shows a captured position, the panel is ready to confirm the whole lineup.</figcaption>
+</figure>
+
 ## Enter known values
 
 Expand **Enter alignment manually...** and choose

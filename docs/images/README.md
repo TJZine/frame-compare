@@ -13,7 +13,7 @@ defines two capture sets:
 1. Set 1 uses macOS, Docker, the official EBU/DVB streams, and headless Chrome
    for report, HDR, and terminal captures (U1).
 2. Set 2 uses the physical Windows host for installer output and the VSView alignment
-   panel (U10); this set is pending.
+   panel (U10).
 
 ## Provenance record
 
@@ -39,19 +39,19 @@ defines two capture sets:
 
 | Field | Recorded value |
 | --- | --- |
-| Source title | Pending U10 |
-| Rights basis | Pending U10 |
-| Attribution | Pending U10 |
-| Physical filenames and SHA-256 | Pending U10 |
-| Display labels | Pending U10 |
-| Frame and category | Pending U10 |
-| Frame Compare commit | Pending U10 |
-| Bundle SHA | Pending U10 |
-| Windows build | Pending U10 |
-| Display scaling | Pending U10 |
-| Report theme | Pending U10 |
-| Capture date | Pending U10 |
-| Captured by | Pending U10 |
+| Source title | EBU/DVB HEVC Test Content: PQ10 and HLG10 natural harbour sequence |
+| Rights basis | EBU-published media, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Attribution | Credit EBU; footage by Frans de Jong; HLG-to-PQ10 conversion by Andrew Cotton (BBC); link to the [EBU/DVB HEVC test-content page](https://dvb.org/specifications/verification-validation/hevc-test-content/) |
+| Physical filenames and SHA-256 | Official `DVB_7680x4320_HEVC_50fps_PQ10.ts` bytes supplied as `pq10-reference.ts`: `33773E7275B83976B0D9A19D3AED47AA0FEDB1280BA2019FE3DD344A05DA8D83`; official `DVB_7680x4320_HEVC_50fps_HLG10.ts` bytes supplied as `hlg10-comparison.ts`: `B9EA646565751BB41CFC1F954172FDF5162C890D35AAC22238F536F6CF425300`; both copied byte-for-byte from `C:\FrameCompareDemo\source\` to `C:\FrameCompareDemo\comparison_videos\` |
+| Display labels | `EBU DVB PQ10 — Reference`; `EBU DVB HLG10 — Comparison` |
+| Frame and category | Frame `1000`, `User`; 6 frames, 2 sources; both panel positions captured at frame `1000` |
+| Frame Compare commit | `9edf1a4c65ad3cb2da9a885c8b866447ac97da80` |
+| Bundle SHA | SHA-256 of `frame-compare-portable-win-x64-capture.zip`: `2ed7d1770cd20f2ab1028644eed24bab9e1d0f8439f53cadbbc28cb989be4ed2` |
+| Windows build | Windows 10 Home x64, version `10.0.19045`, build `19045` |
+| Display scaling | 100%, confirmed by the maintainer |
+| Report theme | Viewer default, dark; native VSView panel captured in dark theme |
+| Capture date | 2026-10-10 |
+| Captured by | Maintainer using Snipping Tool on the physical Windows desktop; Codex prepared the bundle and verified the assets |
 
 ## Asset policy
 
@@ -73,8 +73,8 @@ defines two capture sets:
 | `hdr-diagnostic-overlay.webp` | Top-left 1920 × 1080 crop of the frame-1000 HLG10 diagnostic screenshot | `docs/guides/hdr-tonemapping.md` | 1 |
 | `terminal-dry-run.svg` | Complete human dry-run output | `docs/guides/first-comparison.md` | 1 |
 | `terminal-run-complete.svg` | `Comparison complete` panel from the run | `docs/guides/first-comparison.md` | 1 |
-| `windows-portable-install.png` | Checksum verification through the install script's final terminal instruction | `docs/windows-portable.md` | 2, pending |
-| `vsview-alignment-panel.webp` | VSView alignment panel with both sources captured at frame 1000 and ready to confirm | `docs/guides/vsview-review.md` | 2, pending |
+| `windows-portable-install.png` | Checksum verification through the install script's final terminal instruction | `docs/windows-portable.md` | 2 |
+| `vsview-alignment-panel.webp` | VSView alignment panel with both sources captured at frame 1000 and ready to confirm | `docs/guides/vsview-review.md` | 2 |
 
 ## Deliberate capture decisions
 
@@ -129,4 +129,20 @@ Both SVGs contain zero occurrences of remote font rules, the CDN hostname,
 host home-directory paths, or the maintainer's username.
 No release-group names, private server names, credentials, tokens, cookies, or
 unintended subtitles or watermarks appear in set 1.
-Set 2 privacy and integrity review is pending U10.
+
+Set 2 privacy and integrity review completed on 2026-10-10:
+
+| Asset | Review result |
+| --- | --- |
+| `windows-portable-install.png` | Full-size 1109 × 119 PNG; verified bundle checksum through the successful installer's final terminal instruction; all visible paths use `C:\FrameCompareDemo`; no private strings |
+| `vsview-alignment-panel.webp` | Full-size 748 × 1142 panel capture; Reference and Comparison 1 captured at frame 1000; `2/2 positions captured — ready to confirm`; provisional `+0f` audio candidate marked `NOT APPLIED`; no private strings |
+
+Both images were inspected at full resolution. Their alt text and captions match
+the visible content; no user names, home-directory paths, private release or group
+names, server or share names, API keys, webhook URLs, tokens, cookies, or private
+environment values appear. No unintended subtitles, watermarks, spoilers, or
+misleading UI states appear, and the labels and controls remain readable.
+The WebP uses quality 90 with no EXIF, XMP, or ICC metadata. Neither capture was
+scaled. The installer PNG retains only sRGB, gamma, and DPI metadata.
+Uninstall removed the temporary shim and restored the user PATH exactly to its
+starting value. VSView closed without saving; no alignment-result sidecar exists.

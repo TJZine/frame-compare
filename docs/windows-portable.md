@@ -73,7 +73,7 @@ Extract the ZIP into a fresh, empty folder, open the extracted bundle folder, an
 Open a new terminal after installation so the updated user `PATH` is loaded.
 
 <figure class="fc-figure">
-  <img src="images/windows-portable-install.png" alt="Windows PowerShell showing a verified SHA-256 checksum followed by a successful shim installation." width="1200" height="165" loading="lazy">
+  <img src="images/windows-portable-install.png" alt="Windows PowerShell showing a verified SHA-256 checksum followed by a successful shim installation." width="1109" height="119" loading="lazy">
   <figcaption>Verify the ZIP first, then install the shim and open a new terminal so the updated PATH applies.</figcaption>
 </figure>
 
