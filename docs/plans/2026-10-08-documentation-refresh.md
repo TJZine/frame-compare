@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Audit-driven refresh of user documentation, site design, navigation, and imagery
 Owner: Maintainer; planned by a Claude session on 2026-10-08; implemented by a Codex
 orchestrator with `worker` (U1) and `worker_luna` (U2–U10) chats
@@ -1019,8 +1019,11 @@ PR, branch switch, worktree, dependency/lockfile change, or live-service request
 performed. The three unrelated untracked prompts remain untouched. The authorized
 Gridrace stack stop remains in effect; no restart is performed by this plan.
 
-Final asset acceptance: no explicit maintainer response was recorded at close.
-Status remains Active as step 8 permits; implementation and reviews are complete.
+Final asset acceptance: the maintainer explicitly accepted the full ten-asset set
+from U1 and U10 on 2026-10-10. Status is Historical; implementation, both reviews,
+and asset acceptance are complete. Acceptance arrived after outcome commit
+`cec4bfcd9bbac633b4d87de8fdb754e50b513161`, so a follow-up status commit records it
+without rewriting history.
 
 | Unit | Preset/selection | Actual model | Actual effort |
 | --- | --- | --- | --- |
@@ -1065,9 +1068,9 @@ acceptance was converted to a pass. Known historical limitations remain explicit
 including the unproven cause of the superseded R2 screenshot discrepancy.
 
 Implementation/open status: U1–U10 and both reviews complete, no blocked unit.
-Only explicit maintainer asset acceptance remains open. No implementation or review
-unit is blocked. Unrelated physical release/runtime acceptance plans retain their
-statuses and are outside this documentation refresh.
+The complete asset set is accepted; no item remains open for this documentation
+refresh. Unrelated physical release/runtime acceptance plans retain their statuses
+and are outside this documentation refresh.
 
 | Commit SHA | Subject |
 | --- | --- |
@@ -1087,3 +1090,4 @@ statuses and are outside this documentation refresh.
 | `5b62ebc7bb4c1de46e8881f1122183c4fe6067c9` | docs(reference): correct retained link labels (U7) |
 | `d0d1189c4d7aca2519481ff5916dba7c4d661ce8` | docs(guides): restore specified retained wrapping (U4) |
 | `e6808eabd719c6175c6cf32cc2a871e7ae727687` | docs(images): add physical Windows captures (U10) |
+| `cec4bfcd9bbac633b4d87de8fdb754e50b513161` | docs(plan): record the documentation refresh outcome |
