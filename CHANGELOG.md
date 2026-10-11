@@ -7,7 +7,7 @@ notes used by the guarded publication workflow.
 
 ## Unreleased
 
-## [0.6.0]
+## [0.6.1]
 
 ### Added
 
@@ -18,6 +18,9 @@ notes used by the guarded publication workflow.
 
 ### Changed
 
+- Merging a stable release PR into `main` automatically starts the guarded Windows
+  build and release workflow. Production approval remains required, and published
+  release notes include the full matching versioned changelog section.
 - Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT
   correlation plus container start compensation and bounded L-SMASH video
   confirmation. Fresh results apply only when global audio authority, the exact-frame
@@ -71,6 +74,9 @@ notes used by the guarded publication workflow.
 
 ### Fixed
 
+- Forward signing secrets explicitly through the guarded reusable workflows so
+  the existing repository key and protected environment keys remain available
+  after production approval.
 - Populate guarded GitHub releases from the matching validated changelog section
   instead of a placeholder, and verify the release body through publication.
 - Preserve successful TMDB variant results when another lookup fails, while keeping
