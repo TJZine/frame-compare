@@ -7,6 +7,12 @@ notes used by the guarded publication workflow.
 
 ## Unreleased
 
+### Changed
+
+- Merging a stable release PR into `main` automatically starts the guarded Windows
+  build and release workflow. Production approval remains required, and published
+  release notes include the full matching versioned changelog section.
+
 ## [0.6.0]
 
 ### Added
