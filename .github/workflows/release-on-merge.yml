@@ -1,0 +1,84 @@
+name: Release merged version
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  identify_release:
+    name: Identify merged release PR
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      expected_sha: ${{ steps.release.outputs.expected_sha }}
+    steps:
+      - name: Checkout pushed commit and history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Match version bump to merged release PR
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+          PREVIOUS_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(jq -er '.["."] | select(type == "string")' .release-please-manifest.json)"
+          previous_version="$(git show "$PREVIOUS_SHA:.release-please-manifest.json" | jq -er '.["."]')"
+          if [[ "$version" == "$previous_version" ]]; then
+            echo "No release version change; skipping publication."
+            exit 0
+          fi
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Not a stable version; use the manual RC release entrypoint."
+            exit 0
+          fi
+          matched="$(
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_SHA}/pulls" |
+              jq -r --arg sha "$EXPECTED_SHA" --arg repo "$GITHUB_REPOSITORY" --arg version "$version" '
+                any(.[][];
+                  .merged_at != null and .merge_commit_sha == $sha and
+                  .base.ref == "main" and .base.repo.full_name == $repo and
+                  (.title == ("chore(release): " + $version) or
+                   .title == ("chore(release): prepare Frame Compare v" + $version) or
+                   .title == ("chore(release)!: prepare Frame Compare v" + $version))
+                )'
+          )"
+          if [[ "$matched" != "true" ]]; then
+            echo "Version change is not a merged release PR; skipping publication."
+            exit 0
+          fi
+          printf 'version=%s\ntag=v%s\nexpected_sha=%s\n' \
+            "$version" "$version" "$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and publish approved stable release
+    needs: identify_release
+    if: needs.identify_release.outputs.version != ''
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    concurrency:
+      group: frame-compare-release-${{ needs.identify_release.outputs.tag }}
+      cancel-in-progress: false
+    uses: ./.github/workflows/release.yml
+    with:
+      channel: stable
+      version: ${{ needs.identify_release.outputs.version }}
+      tag: ${{ needs.identify_release.outputs.tag }}
+      expected_sha: ${{ needs.identify_release.outputs.expected_sha }}
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
