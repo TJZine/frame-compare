@@ -117,6 +117,7 @@ def benchmark_passed(records: Sequence[Mapping[str, object]]) -> bool:
 
 def load_labels(path: Path) -> list[LabelledPair]:
     """Parse and validate the label file, failing closed on any defect."""
+    path = path.resolve()
     try:
         payload_raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -165,8 +166,8 @@ def _parse_pair(path: Path, index: int, entry: Any, seen: set[str]) -> LabelledP
     seen.add(pair_id)
     expected_frame, expected_automatic = _parse_expected(where, entry)
     media_root = path.parent
-    reference_path = media_root / reference
-    comparison_path = media_root / comparison
+    reference_path = (media_root / reference).resolve()
+    comparison_path = (media_root / comparison).resolve()
     for role, media_path in (("reference", reference_path), ("comparison", comparison_path)):
         if not media_path.is_file():
             raise ValueError(f"{where} {role} file is missing: {media_path}")

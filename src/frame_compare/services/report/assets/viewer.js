@@ -335,6 +335,7 @@ const ReportViewer = {
             document.body.prepend(status);
             if (this.dom) this.dom.status = status;
         }
+        if (!status.hidden && status.textContent === message && status.dataset.tone === tone) return;
         status.textContent = message;
         status.dataset.tone = tone;
         status.setAttribute('role', tone === 'error' ? 'alert' : 'status');
@@ -368,17 +369,30 @@ const ReportViewer = {
 
     showStageMessage(message, retryActions = []) {
         if (!this.dom.emptyState || !this.dom.stage) return;
+        const previous = this.stageMessageState;
+        if (previous?.message === message
+            && previous.actions.length === retryActions.length
+            && retryActions.every((action, index) => (
+                action.key === previous.actions[index].key
+                && action.ariaLabel === previous.actions[index].ariaLabel
+            ))) {
+            // Keep focused controls, but bind them to the current request generation.
+            previous.actions = retryActions;
+            return;
+        }
+        const messageState = { message, actions: retryActions };
+        this.stageMessageState = messageState;
         const messageElement = document.createElement('span');
         messageElement.textContent = message;
         const children = [messageElement];
-        retryActions.forEach(action => {
+        retryActions.forEach((action, index) => {
             const button = document.createElement('button');
             button.type = 'button';
             button.textContent = 'Retry';
             button.setAttribute('aria-label', action.ariaLabel);
             button.addEventListener('click', event => {
                 event.stopPropagation?.();
-                action.onClick();
+                messageState.actions[index].onClick();
             });
             children.push(button);
         });
@@ -388,6 +402,7 @@ const ReportViewer = {
     },
 
     hideStageMessage() {
+        this.stageMessageState = null;
         if (!this.dom.emptyState || !this.dom.stage) return;
         this.dom.emptyState.replaceChildren();
         this.dom.emptyState.hidden = true;
@@ -2086,8 +2101,16 @@ const ReportViewer = {
             rightAlt = `${ViewerFormat.clipAccessibleName(pairClip)} - Frame ${frameData.number}`;
         }
 
-        this.hideStageMessage();
-        this.clearStatus();
+        const requiredSides = isOverlay ? ['left'] : ['left', 'right'];
+        const resourcesChanged = ['left', 'right'].some(side => {
+            const request = this.state.mainImageRequests[side];
+            return request?.src !== (side === 'left' ? leftSrc : rightSrc)
+                || request.required !== requiredSides.includes(side);
+        });
+        if (resourcesChanged) {
+            this.hideStageMessage();
+            this.clearStatus();
+        }
         this.commitImageState({
             frameData,
             leftSrc,
@@ -2098,7 +2121,7 @@ const ReportViewer = {
             rightClip,
             isOverlay,
             isBlink,
-            requiredSides: isOverlay ? ['left'] : ['left', 'right'],
+            requiredSides,
         });
     },
 
@@ -2295,11 +2318,12 @@ const ReportViewer = {
                 request.attempt,
                 src,
                 Number(image.naturalWidth) > 0 || Number(image.naturalHeight) > 0,
+                false,
             );
         }
     },
 
-    handleMainImageEvent(side, requestToken, attempt, src, succeeded) {
+    handleMainImageEvent(side, requestToken, attempt, src, succeeded, refreshAvailability = true) {
         const request = this.state.mainImageRequests[side];
         if (
             !request
@@ -2312,7 +2336,7 @@ const ReportViewer = {
         request.status = succeeded ? 'ready' : 'error';
         request.image.hidden = !succeeded;
         request.layer.dataset.status = request.status;
-        this.refreshMainImageAvailability();
+        if (refreshAvailability) this.refreshMainImageAvailability();
         if (succeeded) this.lens?.sync?.();
     },
 
@@ -2333,6 +2357,7 @@ const ReportViewer = {
         const labels = unavailable.map(request => `${this.imageUnavailableLabel(request)} image unavailable`);
         const message = labels.join(' · ');
         this.showStageMessage(message, unavailable.map(request => ({
+            key: JSON.stringify([request.side, request.src, request.clipIdx]),
             ariaLabel: `Retry ${this.imageUnavailableLabel(request)} image`,
             onClick: () => this.retryMainImage(request),
         })));

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import tracemalloc
 
 import numpy as np
 import pytest
@@ -16,6 +17,7 @@ from frame_compare.services.alignment_correlation import (
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
+    MAX_AUDIO_CHUNKS,
     AudioOutcomeStatus,
 )
 from tests.services.alignment_synthetic_audio import (
@@ -326,6 +328,36 @@ def test_chunk_count_bound_refuses_long_reference_before_decode() -> None:
         3 * 3600 * AUDIO_ANALYSIS_SAMPLE_RATE, 2 * AUDIO_ANALYSIS_SAMPLE_RATE, 30.0
     )
     assert len(short_plan.chunks) == 1
+
+
+def test_chunk_count_bound_is_checked_before_duration_sized_allocation() -> None:
+    """A bounded 200,000-chunk candidate is rejected before tuple allocation."""
+    samples = 200_000 * 30 * AUDIO_ANALYSIS_SAMPLE_RATE
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(AudioAlignmentError) as exc_info:
+            plan_audio_chunks(samples, samples, 30.0)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert exc_info.value.category == "analysis_budget_exceeded"
+    assert exc_info.value.stage == "planning"
+    assert peak_bytes < 8 * 1024 * 1024
+
+
+def test_chunk_count_bound_admits_exactly_4096_chunks() -> None:
+    """The evidence bound remains inclusive for full 30-second chunks."""
+    samples = MAX_AUDIO_CHUNKS * 30 * AUDIO_ANALYSIS_SAMPLE_RATE
+
+    plan = plan_audio_chunks(samples, samples, 30.0)
+
+    assert len(plan.chunks) == MAX_AUDIO_CHUNKS
+    assert plan.chunks[-1] == (
+        (MAX_AUDIO_CHUNKS - 1) * 30 * AUDIO_ANALYSIS_SAMPLE_RATE,
+        30 * AUDIO_ANALYSIS_SAMPLE_RATE,
+    )
 
 
 def test_add_contract_errors() -> None:

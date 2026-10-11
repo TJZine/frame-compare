@@ -35,9 +35,9 @@ from frame_compare.services.alignment_streaming import (
     PairedAudioCollectionFailure,
 )
 from frame_compare.services.errors import (
+    AlignmentSourceIdentityError,
     AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
-    AudioAlignmentError,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.alignment_evidence import MAX_AUDIO_CHUNKS
@@ -395,8 +395,19 @@ def test_identity_change_mid_collection_is_aborted(
 
     monkeypatch.setattr(alignment, "collect_paired_audio_chunks", touching_collect)
 
-    (result,) = _align(reference, comparison, _config(), tmp_path)
+    computed_results: list[AlignmentResult] = []
+    real_estimate = alignment._estimate_audio_pair
 
+    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
+        result = real_estimate(*args, **kwargs)
+        computed_results.append(result)
+        return result
+
+    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
+    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
+        _align(reference, comparison, _config(), tmp_path)
+
+    (result,) = computed_results
     assert result.applied is False
     assert result.diagnostic == "source_identity_changed"
     assert result.audio_attempt is not None
@@ -451,7 +462,7 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
         return result
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
         run_request(request, config, reference_fps=FPS)
     by_name = {result.comparison_clip: result for result in computed_results}
 
@@ -547,9 +558,19 @@ def test_entry_identity_mismatch_has_no_attempt(
         fps_den=FPS.denominator,
     )
     comparison.write_bytes(b"comparison-mutated")
+    computed_results: list[AlignmentResult] = []
+    real_estimate = alignment._estimate_audio_pair
 
-    (result,) = run_request(request, config, reference_fps=FPS)
+    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
+        result = real_estimate(*args, **kwargs)
+        computed_results.append(result)
+        return result
 
+    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
+    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
+        run_request(request, config, reference_fps=FPS)
+
+    (result,) = computed_results
     assert result.applied is False
     assert result.diagnostic == "source_identity_changed"
     assert result.audio_attempt is None

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from time import monotonic
 from typing import cast
 
 import pytest
@@ -226,6 +228,24 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
     ctx = _context(tmp_path, comparisons=[comparison])
+    comparison.path.write_bytes(b"comparison")
+    clips = []
+    for clip in [ctx.reference, *ctx.comparisons]:
+        stat = clip.path.stat()
+        clips.append(
+            replace(
+                clip,
+                probe=replace(
+                    clip.probe,
+                    fingerprint=replace(
+                        clip.probe.fingerprint,
+                        size_bytes=stat.st_size,
+                        mtime_ns=stat.st_mtime_ns,
+                    ),
+                ),
+            )
+        )
+    ctx.reference, *ctx.comparisons = clips
     ctx.workspace = replace(
         ctx.workspace,
         run_dir=ctx.workspace.generated_root / "run",
@@ -387,3 +407,136 @@ def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
     assert ctx.comparisons[0].trim.trim_start_frames == 0
     assert ctx.comparisons[0].alignment is None
     assert cache_file.read_bytes() == original_cache
+
+
+@pytest.mark.parametrize(
+    "unavailable_kind", ["stream", "timeline", "ffmpeg_error", "ffmpeg_missing"]
+)
+@pytest.mark.parametrize("changed_role", ["reference", "comparison", None])
+@pytest.mark.parametrize("cache_results", [False, True])
+def test_optional_alignment_source_drift_stops_downstream_phases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_role: str | None,
+    cache_results: bool,
+    unavailable_kind: str,
+) -> None:
+    from frame_compare.orchestration.execution import (
+        build_phases_after_align,
+        build_phases_before_align,
+    )
+    from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
+    from frame_compare.orchestration.phases import PhaseStatus, execute_phases
+    from frame_compare.orchestration.types import RunRequest
+    from frame_compare.services import alignment_audio
+    from frame_compare.services.errors import AlignmentSourceIdentityError
+    from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
+    from frame_compare.utils.progress import NullProgressReporter
+    from tests.orchestration.execute_run_helpers import FakeFFmpegRunner
+
+    comparison_path = tmp_path / "comparison_videos" / "encode.mkv"
+    comparison_path.parent.mkdir(parents=True)
+    comparison_path.write_bytes(b"comparison")
+    ctx = _context(tmp_path, comparisons=[_clip(comparison_path, label="Encode")])
+    ctx.workspace = replace(ctx.workspace, run_dir=ctx.workspace.generated_root / "run")
+    ctx.config.audio_alignment.cache_results = cache_results
+    ctx.config.audio_alignment.use_vsview = False
+    ctx.config.audio_alignment.reference_stream = 0
+    ctx.config.audio_alignment.comparison_streams = {"encode": 0}
+
+    def prepared(clip: ClipState) -> ClipState:
+        stat = clip.path.stat()
+        return replace(
+            clip,
+            probe=replace(
+                clip.probe,
+                fingerprint=replace(
+                    clip.probe.fingerprint,
+                    size_bytes=stat.st_size,
+                    mtime_ns=stat.st_mtime_ns,
+                ),
+            ),
+        )
+
+    ctx.reference = prepared(ctx.reference)
+    ctx.comparisons = [prepared(ctx.comparisons[0])]
+
+    def unavailable_probe(_path: Path, **_kwargs: object) -> alignment_audio.ProbedStreams:
+        # Drift while the real service is planning an unavailable audio attempt.
+        # No applied result or cache authority will trigger an acceptance check.
+        if changed_role is not None:
+            changed = ctx.reference if changed_role == "reference" else ctx.comparisons[0]
+            changed.path.write_bytes(b"changed prepared source during unavailable audio probe")
+        if unavailable_kind == "ffmpeg_error":
+            raise FFmpegError("probe failed", returncode=1)
+        if unavailable_kind == "ffmpeg_missing":
+            raise FFmpegNotFoundError()
+        stream = alignment_audio.AudioStreamInfo(
+            audio_stream_index=0,
+            absolute_stream_index=1,
+            codec_name="pcm",
+            channels=1,
+            channel_layout="mono",
+            sample_rate=8000,
+            language=None,
+            is_default=True,
+            is_original=False,
+            is_commentary=False,
+            timeline=alignment_audio.AudioStreamTimeline(
+                start_time=Fraction(0), duration=None, time_base=None, duration_basis="unavailable"
+            ),
+        )
+        return alignment_audio.ProbedStreams(
+            audio=() if unavailable_kind == "stream" else (stream,),
+            video_start=alignment_audio.VideoStreamStart(
+                start_time=Fraction(0), basis="default_zero"
+            ),
+        )
+
+    monkeypatch.setattr(alignment_audio, "probe_streams", unavailable_probe)
+    state = ExecutionState(selected_frames=[0, 1, 2])
+    request = RunRequest(root=tmp_path, skip_metadata=True, no_upload=True)
+    align = build_phases_before_align(
+        request=request,
+        config=ctx.config,
+        monotonic_timer=monotonic,
+        state=state,
+        input_videos=[ctx.reference.path, comparison_path],
+        workspace=ctx.workspace,
+    )[2]
+    downstream = build_phases_after_align(
+        request=request,
+        config=ctx.config,
+        monotonic_timer=monotonic,
+        ffmpeg_runner=FakeFFmpegRunner(),
+        http_client=None,
+        state=state,
+        metadata_prefetch=MetadataPrefetch(metadata=None, was_attempted=False),
+    )
+    run = execute_phases([align, *downstream], ctx, NullProgressReporter())
+    if changed_role is None:
+        asyncio.run(run)
+        assert align.status == (
+            PhaseStatus.COMPLETED if unavailable_kind == "timeline" else PhaseStatus.WARNED
+        ), state.warnings
+        assert downstream[0].status == PhaseStatus.COMPLETED
+        assert state.artifacts.render is not None
+        assert state.artifacts.render.screenshots_by_label
+        assert ctx.comparisons[0].alignment is None
+        detail = {
+            "stream": "audio stream override",
+            "timeline": "selected_audio_timeline_unavailable",
+            "ffmpeg_error": "FFmpeg failed with exit code 1",
+            "ffmpeg_missing": "FFmpeg binary not found",
+        }[unavailable_kind]
+        assert any(detail in warning.text for warning in state.warnings)
+    else:
+        with pytest.raises(AlignmentSourceIdentityError, match="Start a fresh run") as caught:
+            asyncio.run(run)
+        assert caught.value.code == "FC-4005"
+        assert caught.value.category == "source_identity_changed"
+        assert align.status == PhaseStatus.FAILED
+        assert all(phase.status == PhaseStatus.PENDING for phase in downstream)
+        assert state.artifacts.render is None
+        assert ctx.reference.trim.trim_start_frames == 0
+        assert ctx.comparisons[0].trim.trim_start_frames == 0

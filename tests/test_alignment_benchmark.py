@@ -292,6 +292,60 @@ async def test_config_write_replaces_symlink_without_touching_referent(
     assert outside_config.read_text(encoding="utf-8") == "unchanged"
 
 
+async def test_relative_label_media_paths_are_canonicalized_before_nested_symlinks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    fixture_root = tmp_path / "fixture root with spaces"
+    labels_dir = fixture_root / "label set"
+    reference = fixture_root / "reference clip.mkv"
+    comparison = fixture_root / "comparison clip.mkv"
+    labels = labels_dir / "labels.json"
+    labels_dir.mkdir(parents=True)
+    reference.touch()
+    comparison.touch()
+    labels.write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": "pair-1",
+                        "category": "synthetic",
+                        "reference": "../reference clip.mkv",
+                        "comparison": str(comparison),
+                        "expected_frame": 0,
+                        "expected_automatic": "applied",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    (pair,) = script.load_labels(Path("fixture root with spaces/label set/labels.json"))
+
+    assert pair.reference == reference.resolve()
+    assert pair.comparison == comparison.resolve()
+    pair_root = Path("benchmark output") / "pairs" / pair.pair_id
+    prepared = object()
+
+    async def execute_prep(*_args: object, **_kwargs: object) -> object:
+        return prepared
+
+    monkeypatch.setattr(script.preparation, "execute_prep", execute_prep)
+
+    result = await script._prepare_pair(pair, pair_root, object())
+
+    assert result is prepared
+    assert (pair_root / "workspace" / "comparison_videos" / "00-reference.mkv").resolve() == (
+        reference.resolve()
+    )
+    assert (pair_root / "workspace" / "comparison_videos" / "01-comparison.mkv").resolve() == (
+        comparison.resolve()
+    )
+
+
 async def test_results_write_replaces_symlink_without_touching_referent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

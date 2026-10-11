@@ -1186,3 +1186,66 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     slider_attributes = parser.mode_attributes["slider"]
     assert "active" not in (slider_attributes.get("class") or "").split()
     assert slider_attributes["aria-checked"] == "false"
+
+
+@pytest.mark.integration
+def test_blink_keeps_failed_image_retry_focused_across_timer_tick(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    # A real missing sibling resource drives the viewer's image error path.
+    (tmp_path / "screenshots" / "encode" / "10.png").unlink()
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const root = document.documentElement;
+    const waitFor = (predicate, callback, remaining = 100) => {
+        if (predicate()) callback();
+        else if (remaining > 0) setTimeout(() => waitFor(predicate, callback, remaining - 1), 20);
+        else root.dataset.blinkRetryError = 'Timed out waiting for viewer state';
+    };
+    ReportViewer.setMode('blink');
+    ReportViewer.setBlinkIntervalMs(300);
+    ReportViewer.setBlinkPaused(false);
+    waitFor(() => ReportViewer.state.mainImageRequests.right?.status === 'error', () => {
+        const button = document.querySelector('[data-empty-state] button');
+        if (!button) { root.dataset.blinkRetryError = 'Missing Retry'; return; }
+        button.focus();
+        const token = ReportViewer.state.imageRequestToken;
+        let mutations = 0;
+        const observer = new MutationObserver(records => { mutations += records.length; });
+        observer.observe(ReportViewer.dom.status, { childList: true, characterData: true, subtree: true });
+        waitFor(() => ReportViewer.state.imageRequestToken > token, () => {
+            // Pause after a real interval tick so retry observation cannot race another tick.
+            ReportViewer.setBlinkPaused(true);
+            root.dataset.blinkRetryFocus = String(
+                document.activeElement === button && button.isConnected
+                && document.querySelector('[data-empty-state] button') === button
+            );
+            setTimeout(() => {
+                observer.disconnect();
+                root.dataset.blinkRetryQuiet = String(mutations === 0);
+                button.click();
+                waitFor(() => ReportViewer.state.mainImageRequests.right?.attempt === 1
+                    && ReportViewer.state.mainImageRequests.right?.status === 'error', () => {
+                    root.dataset.blinkRetryCurrent = 'true';
+                });
+            }, 0);
+        });
+    });
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    for attribute in (
+        "data-blink-retry-focus",
+        "data-blink-retry-quiet",
+        "data-blink-retry-current",
+    ):
+        assert parser.document_attributes.get(attribute) == "true", parser.document_attributes

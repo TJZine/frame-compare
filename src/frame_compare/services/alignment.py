@@ -59,6 +59,7 @@ from frame_compare.services.alignment_streaming import (
 )
 from frame_compare.services.alignment_vsview import maybe_launch_alignment_vsview
 from frame_compare.services.errors import (
+    AlignmentSourceIdentityError,
     AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
     AudioAlignmentError,
@@ -1361,8 +1362,10 @@ async def align_clips_from_request(
             if review_summary is not None and not review_summary.review_ran:
                 review_summary.review_unresolved = True
 
-        if any(result.applied for result in results_map.values()):
-            require_current_alignment_sources(request)
+        # Even unavailable audio must not send stale prepared facts to rendering.
+        # Observe cancellation first, after the worker has completed owned cleanup.
+        await cancellation_checkpoint()
+        require_current_alignment_sources(request)
         if config.cache_results and shared_write_is_service_eligible(
             request=request,
             provenances=provenances,
@@ -1376,3 +1379,15 @@ async def align_clips_from_request(
     except _RunInterrupt:
         await cancellation_checkpoint()
         raise asyncio.CancelledError() from None
+    except (
+        AlignmentSourceIdentityError,
+        AudioAlignmentCleanupError,
+        AudioAlignmentCancellationError,
+    ):
+        raise
+    except Exception:
+        # Any ordinary alignment failure can become a warning at orchestration.
+        # That fallback is safe only while the prepared source set remains current.
+        await cancellation_checkpoint()
+        require_current_alignment_sources(request)
+        raise

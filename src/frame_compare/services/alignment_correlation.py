@@ -112,6 +112,15 @@ def plan_audio_chunks(
         chunks = ((0, shorter),)
     else:
         chunk_samples = min(max(shorter // 3, min_chunk), max_chunk)
+        complete_chunks, tail_samples = divmod(reference_samples, chunk_samples)
+        planned_chunk_count = complete_chunks + int(tail_samples >= -(-chunk_samples // 2))
+        if planned_chunk_count > MAX_AUDIO_CHUNKS:
+            raise AudioAlignmentError(
+                f"{planned_chunk_count} planned chunks exceed the {MAX_AUDIO_CHUNKS} evidence bound",
+                category="analysis_budget_exceeded",
+                stage="planning",
+            )
+
         kept: list[tuple[int, int]] = []
         start = 0
         while start < reference_samples:
@@ -121,12 +130,6 @@ def plan_audio_chunks(
             start += chunk_samples
         chunks = tuple(kept)
 
-    if len(chunks) > MAX_AUDIO_CHUNKS:
-        raise AudioAlignmentError(
-            f"{len(chunks)} planned chunks exceed the {MAX_AUDIO_CHUNKS} evidence bound",
-            category="analysis_budget_exceeded",
-            stage="planning",
-        )
     lag_samples = int(math.ceil(max_offset_seconds * AUDIO_ANALYSIS_SAMPLE_RATE))
     largest_fft = max(_next_pow2(count + 2 * lag_samples) for _, count in chunks)
     if largest_fft > _MAX_CHUNK_FFT_POINTS:

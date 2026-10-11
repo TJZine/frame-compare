@@ -112,6 +112,17 @@ class AudioAlignmentError(ProcessingError):
         )
 
 
+class AlignmentSourceIdentityError(AudioAlignmentError):
+    """Fatal invalidation of the prepared source set; a fresh run is required."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Alignment sources changed since preparation. Start a fresh run.",
+            category="source_identity_changed",
+            stage="acceptance",
+        )
+
+
 class AudioAlignmentCancellationError(AudioAlignmentError):
     """Internal cooperative cancellation raised by blocking alignment work."""
 

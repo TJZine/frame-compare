@@ -855,7 +855,10 @@ recovery requirement.
 - Alignment cache acceptance and offset persistence recheck prepared source path,
   size, and mtime. A source change after preparation cannot authorize cached trims
   or newly saved offsets; the typed alignment failure requires a fresh run rather
-  than silently replacing the prepared fingerprint. The existing same-path,
+  than silently replacing the prepared fingerprint. This failure stops downstream
+  rendering and publishing even when alignment is optional or audio is unavailable;
+  ordinary unavailable audio remains recoverable when the prepared sources are current.
+  The existing same-path,
   same-size, same-mtime cache reuse policy remains unchanged.
 - Successful low-level TMDB search and alternative-title responses are reused from
   `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data

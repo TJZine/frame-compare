@@ -244,6 +244,8 @@ def test_viewer_state_harness_exercises_pair_scoped_alignment() -> None:
             "retryAriaLabel": "Retry Clip 2 image",
             "recovered": True,
         },
+        "blinkStableRecovery": True,
+        "changedFrameRetryAndSizer": True,
         "staleErrorIgnored": True,
         "sameImageGenerationIgnored": True,
         "gridNavigationStaleErrorIgnored": True,

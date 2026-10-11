@@ -10,11 +10,13 @@ from fractions import Fraction
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
 from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
+    CacheLoadResult,
     FrameMetrics,
     FrameSelection,
     MetricFrameRange,
@@ -175,6 +177,45 @@ def test_cache_policy_accepts_observed_trial_state(
         cache_state=cache_state,
         cache_write_state=cache_write_state,
     )
+
+
+def test_run_tier_unwraps_the_production_metrics_acquisition(tmp_path: Path) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"fixture")
+    frame_range = MetricFrameRange(source_frame_count=4, start=0, end_exclusive=4)
+    metrics = _metrics(mode="quality", start=0, end=4, source_frame_count=4)
+    active_rect = script.BenchmarkActiveRect(
+        rect=None,
+        source="full-frame",
+        detection_mode="aspect_ratio",
+    )
+
+    with patch(
+        "frame_compare.analysis.metrics.load_cached_metrics_for_request",
+        return_value=CacheLoadResult(success=True, metrics=metrics),
+    ):
+        result = script._run_tier(
+            mode="quality",
+            video_paths=[video],
+            analysis_config=AnalysisConfig(random_frame_count=1),
+            cache_dir=tmp_path / "cache",
+            analysis_source_path=video,
+            effective_fps=Fraction(24),
+            active_rect=active_rect,
+            selection_domain=None,
+            metric_frame_range=frame_range,
+            metric_cache_policy="reuse",
+            repetition=0,
+            order_index=0,
+        )
+
+    assert result["metrics"] is metrics
+    assert isinstance(result["metrics"], FrameMetrics)
+    assert isinstance(result["selection"], FrameSelection)
+    assert result["cache_state"] == "hit"
+    assert result["cache_write_state"] == "not_attempted"
+    assert "cache_lookup" in result["phase_timings_seconds"]
 
 
 def test_sampling_json_records_exact_budget_and_bursts() -> None:

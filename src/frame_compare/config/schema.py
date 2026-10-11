@@ -34,7 +34,10 @@ from frame_compare.config.schema_models import (
     SourcesConfig,
     TmdbConfig,
 )
-from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
+from frame_compare.config.schema_sources import (
+    EnvironmentSettingsSource,
+    TomlConfigSettingsSourceNoBOM,
+)
 
 # ─── Root Schema ───────────────────────────────────────────────────────────────
 
@@ -67,7 +70,7 @@ class ConfigSchema(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return (
             init_settings,
-            env_settings,
+            EnvironmentSettingsSource(settings_cls),
             TomlConfigSettingsSourceNoBOM(settings_cls),
             file_secret_settings,
         )

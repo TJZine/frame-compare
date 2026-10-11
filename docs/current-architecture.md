@@ -495,7 +495,10 @@ worker and collector cleanup to finish, and then re-raises the original cancella
 unless that cleanup failed; no partial worker result reaches phase-output application.
 Incomplete child, reader, pipe, or handle cleanup is a distinct fatal alignment error,
 including after cancellation, even when ordinary dependency or decode failures remain
-warning-only for optional alignment. The attempt retains resolved pathless stream
+warning-only for optional alignment. Prepared-source identity invalidation is also
+fatal: after owned cleanup and cancellation handling, even unavailable audio results
+must pass source-currentness validation before downstream rendering can proceed.
+The attempt retains resolved pathless stream
 facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
 compensation, the sub-frame estimate, the A4b authority recount, the video
 observation, and the final decision. Under the shipped

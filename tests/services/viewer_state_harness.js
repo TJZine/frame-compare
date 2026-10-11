@@ -1756,7 +1756,7 @@ async function assertMainImageUnavailableState() {
     const results = {};
 
     for (const { mode, failedSide, clipIndex } of modes) {
-        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        const { viewer, deferredImages, window, document } = loadViewer({ clipCount: 2 });
         viewer.state.mode = mode;
         viewer.updateImages();
         if (mode === 'diff') {
@@ -1781,7 +1781,45 @@ async function assertMainImageUnavailableState() {
         const retryButton = viewer.dom.emptyState.children.find(child => child.tagName === 'BUTTON');
         assert.equal(retryButton.textContent, 'Retry');
         assert.equal(retryButton.getAttribute('aria-label'), `Retry ${label} image`);
+        if (mode === 'blink') {
+            const failedRequest = viewer.state.mainImageRequests[failedSide];
+            const staleError = failedRequest.onError;
+            // Browser-complete failed images synchronously report failure on each install.
+            viewer.dom.leftImg.complete = true;
+            viewer.dom.leftImg.naturalWidth = 1;
+            failedImage.complete = true;
+            failedImage.naturalWidth = 0;
+            failedImage.naturalHeight = 0;
+            let statusWrites = 0;
+            const statusText = viewer.dom.status.textContent;
+            Object.defineProperty(viewer.dom.status, 'textContent', {
+                get: () => statusText,
+                set: () => { statusWrites += 1; },
+                configurable: true,
+            });
+            retryButton.focus();
+            viewer.startBlink();
+            const before = viewer.state.activeClipIdx;
+            viewer.state.blinkInterval.callback();
+            assert.notEqual(viewer.state.activeClipIdx, before);
+            assert.equal(viewer.dom.emptyState.children[1], retryButton);
+            assert.equal(document.activeElement, retryButton);
+            assert.equal(statusWrites, 0);
+            assert.notEqual(viewer.state.mainImageRequests[failedSide], failedRequest);
+            staleError();
+            assert.equal(viewer.dom.emptyState.children[1], retryButton);
+            viewer.setBlinkPaused(true);
+            const paused = viewer.state.activeClipIdx;
+            viewer.state.blinkInterval.callback();
+            assert.equal(viewer.state.activeClipIdx, paused);
+            Object.defineProperty(viewer.dom.status, 'textContent', {
+                value: statusText, writable: true, configurable: true,
+            });
+            failedImage.complete = false;
+            results.blinkStableRecovery = true;
+        }
         retryButton.dispatch('click', { stopPropagation() {} });
+        assert.equal(viewer.state.mainImageRequests[failedSide].attempt, 1);
         window.rafQueue.splice(0).forEach(callback => callback?.());
         failedImage.dispatch('load');
         assert.equal(viewer.dom.emptyState.hidden, true);
@@ -1795,6 +1833,27 @@ async function assertMainImageUnavailableState() {
             retryAriaLabel: retryButton.getAttribute('aria-label'),
             recovered: viewer.dom.emptyState.hidden && viewer.dom.status.hidden,
         };
+    }
+
+    {
+        const { viewer, window } = loadViewer({ clipCount: 2 });
+        viewer.state.mode = 'blink';
+        viewer.updateImages();
+        viewer.dom.leftImg.dispatch('error');
+        const oldButton = viewer.dom.emptyState.children[1];
+        viewer.state.currentFrameIdx = 1;
+        viewer.updateImages();
+        viewer.dom.leftImg.dispatch('error');
+        const newButton = viewer.dom.emptyState.children[1];
+        assert.notEqual(newButton, oldButton);
+        oldButton.dispatch('click', { stopPropagation() {} });
+        assert.equal(viewer.state.mainImageRequests.left.attempt, 0);
+        newButton.dispatch('click', { stopPropagation() {} });
+        assert.equal(viewer.state.mainImageRequests.left.attempt, 1);
+        assert.equal(viewer.dom.sizerImg.getAttribute('src'), null);
+        window.rafQueue.splice(0).forEach(callback => callback?.());
+        assert.equal(viewer.dom.sizerImg.src, viewer.state.data.frames[1].images[0].src);
+        results.changedFrameRetryAndSizer = true;
     }
 
     {

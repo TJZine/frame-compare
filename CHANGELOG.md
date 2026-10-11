@@ -72,6 +72,13 @@ Frame Compare follows Conventional Commits, and Release Please turns the
 
 ### Fixed
 
+- Stop optional alignment runs when a prepared source changes, including when audio
+  is unavailable, before rendering can consume stale source metadata.
+- Accept the documented `FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB` integer override
+  while retaining strict validation for TOML and explicit configuration inputs.
+- Reject excessive metadata-derived audio chunk counts before allocating the plan.
+- Restore analysis benchmark metric acquisition and alignment benchmark media links
+  when the labels file is given as a relative path.
 - Report malformed UTF-8 configuration and presets, invalid filesystem paths,
   and nonfinite lead/trail windows as typed validation errors. Recover from
   oversized numeric values in persisted run history and caches while retaining
@@ -87,7 +94,8 @@ Frame Compare follows Conventional Commits, and Release Please turns the
   retains its existing behavior.
 - Show source-specific unavailable messages and Retry actions when main-stage
   images fail in Slider, Single, Diff or Blink; navigation and successful retry
-  recover without stale image events affecting the current frame.
+  recover without stale image events affecting the current frame. Blink retains
+  focused Retry controls and avoids repeating unchanged error announcements.
 - Preserve an explicitly paused report Blink mode through viewport and Lens
   gestures, and apply the exact review-import file and conflict choices shown
   in its preview.

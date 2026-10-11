@@ -11,6 +11,7 @@ from frame_compare.config.errors import (
     ConfigValidationError,
 )
 from frame_compare.config.loader import (
+    get_default_config,
     load_config,
     load_raw_config,
 )
@@ -208,6 +209,72 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     overrides: dict[str, Any] = {"analysis": {"random_frame_count": 30}}
     config = load_config(config_path=config_file, overrides=overrides)
     assert config.analysis.random_frame_count == 30
+
+
+def test_nested_runtime_memory_limit_environment_value_is_decoded_without_relaxing_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        "[runtime]\nmemory_limit_mb = 1024\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "2048")
+
+    config = load_config(config_path=config_file)
+
+    assert config.runtime.memory_limit_mb == 2048
+
+    with pytest.raises(ConfigValidationError):
+        load_config(
+            config_path=config_file,
+            overrides={"runtime": {"memory_limit_mb": "2048"}},
+        )
+
+    monkeypatch.delenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB")
+    config_file.write_text(
+        '[runtime]\nmemory_limit_mb = "2048"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError):
+        load_config(config_path=config_file)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["511", "512.0", "true", "not-an-integer", "9" * 5000],
+    ids=["below-minimum", "float", "bool", "non-integer", "overlong-decimal"],
+)
+def test_invalid_nested_runtime_memory_limit_environment_value_is_typed_failure(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", value)
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        load_config()
+
+    assert exc_info.value.validation_errors
+
+
+def test_raw_config_ignores_runtime_memory_limit_environment_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[runtime]\nmemory_limit_mb = 1024\n", encoding="utf-8")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "not-an-integer")
+
+    document = load_raw_config(config_file)
+
+    assert document.payload["runtime"] == {"memory_limit_mb": 1024}
+    assert document.config.runtime.memory_limit_mb == 1024
+
+
+def test_default_config_ignores_runtime_memory_limit_environment_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "2048")
+
+    assert get_default_config().runtime.memory_limit_mb is None
 
 
 @pytest.mark.parametrize(
