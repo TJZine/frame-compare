@@ -1204,7 +1204,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const waitFor = (predicate, callback, remaining = 100) => {
         if (predicate()) callback();
         else if (remaining > 0) setTimeout(() => waitFor(predicate, callback, remaining - 1), 20);
-        else root.dataset.blinkRetryError = 'Timed out waiting for viewer state';
+        else {
+            const request = ReportViewer.state.mainImageRequests.right;
+            root.dataset.blinkRetryError = JSON.stringify({
+                attempt: request?.attempt,
+                status: request?.status,
+                src: request?.image.getAttribute('src'),
+                token: request?.token,
+                currentToken: ReportViewer.state.imageRequestToken,
+            });
+        }
     };
     ReportViewer.setMode('blink');
     ReportViewer.setBlinkIntervalMs(300);

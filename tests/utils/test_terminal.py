@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -34,7 +35,10 @@ def test_stream_is_tty_handles_missing_and_broken_streams() -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="Real PTY signal proof requires a POSIX host")
 @pytest.mark.parametrize("prompt", ["reuse", "retry", "upload"])
-def test_first_sigint_interrupts_real_pty_prompt_and_restores_runner(prompt: str) -> None:
+def test_first_sigint_interrupts_real_pty_prompt_and_restores_runner(
+    prompt: str, tmp_path: Path
+) -> None:
+    import errno
     import json
     import pty
     import selectors
@@ -43,9 +47,11 @@ def test_first_sigint_interrupts_real_pty_prompt_and_restores_runner(prompt: str
     import sys
 
     code = """
-import asyncio, json, signal, sys
+import faulthandler, sys
+trace_file = open(sys.argv[2], "w")
+faulthandler.dump_traceback_later(2, file=trace_file)
+import asyncio, json, signal
 from pathlib import Path
-from dataclasses import replace
 import typer
 from rich.console import Console
 from frame_compare.cli.run_command import (
@@ -62,6 +68,7 @@ class Input:
     def __getattr__(self, name):
         return getattr(original_input, name)
     def readline(self, *args):
+        faulthandler.dump_traceback_later(2, file=trace_file)
         print("READY", flush=True)
         return original_input.readline(*args)
 original_input = sys.stdin
@@ -96,16 +103,37 @@ try:
 except KeyboardInterrupt:
     print(json.dumps(observed), flush=True)
     raise SystemExit(130)
+finally:
+    faulthandler.cancel_dump_traceback_later()
+    trace_file.close()
 """
+    stack_path = tmp_path / "prompt-child-stack.txt"
     master, slave = pty.openpty()
     process = subprocess.Popen(  # noqa: S603 - explicit test interpreter and argv
-        [sys.executable, "-c", code, prompt],
+        [sys.executable, "-c", code, prompt, str(stack_path)],
         stdin=slave,
         stderr=slave,
         stdout=subprocess.PIPE,
         text=True,
     )
     os.close(slave)
+
+    def read_pty_stderr() -> bytes:
+        captured = bytearray()
+        while len(captured) < 64 * 1024:
+            try:
+                chunk = os.read(master, 4096)
+            except BlockingIOError:
+                break
+            except OSError as read_error:
+                if read_error.errno != errno.EIO:
+                    raise
+                break  # Linux PTYs report EIO once every slave handle is closed.
+            if not chunk:
+                break
+            captured.extend(chunk)
+        return bytes(captured)
+
     try:
         assert process.stdout is not None
         with selectors.DefaultSelector() as selector:
@@ -117,13 +145,35 @@ except KeyboardInterrupt:
         assert process.returncode == 130, stdout
         observed = json.loads(stdout)
         assert observed == {"restored": True, "count": 1}
-    finally:
+    except (subprocess.TimeoutExpired, AssertionError, ValueError) as error:
+        # Closing the last slave can discard queued PTY output on macOS, so
+        # capture it before killing. Both drains are bounded and nonblocking;
+        # the watchdog writes independently to a regular file.
+        os.set_blocking(master, False)
+        stderr_bytes = read_pty_stderr()
         if process.poll() is None:
             process.kill()
-        process.wait(timeout=3)
-        if process.stdout is not None:
-            process.stdout.close()
-        os.close(master)
+        stdout, _ = process.communicate(timeout=3)
+        stderr = (stderr_bytes + read_pty_stderr()).decode(errors="replace")
+        stack = stack_path.read_text(errors="replace") if stack_path.exists() else "not recorded"
+        reason = (
+            f"timed out after {error.timeout} seconds"
+            if isinstance(error, subprocess.TimeoutExpired)
+            else str(error)
+        )
+        pytest.fail(
+            f"PTY {prompt} child {reason}; stdout={stdout!r}; PTY stderr={stderr!r}; "
+            f"child stack ({stack_path}):\n{stack}"
+        )
+    finally:
+        try:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=3)
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+            os.close(master)
 
 
 def test_interruptible_prompt_leaves_foreign_handler_and_eof_untouched(

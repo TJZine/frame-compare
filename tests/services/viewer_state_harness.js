@@ -131,6 +131,8 @@ function fakeElement() {
             this[name] = value;
         },
         getAttribute(name) {
+            // HTMLImageElement.src assignments reflect into the src attribute.
+            if (name === 'src') return this.src ?? null;
             return attributes.has(name) ? attributes.get(name) : null;
         },
         removeAttribute(name) {
@@ -1820,7 +1822,9 @@ async function assertMainImageUnavailableState() {
         }
         retryButton.dispatch('click', { stopPropagation() {} });
         assert.equal(viewer.state.mainImageRequests[failedSide].attempt, 1);
-        window.rafQueue.splice(0).forEach(callback => callback?.());
+        // Retrying resource I/O must not wait for a rendered animation frame.
+        window.timeoutQueue.splice(0).forEach(callback => callback?.());
+        assert.equal(failedImage.getAttribute('src'), viewer.state.mainImageRequests[failedSide].src);
         failedImage.dispatch('load');
         assert.equal(viewer.dom.emptyState.hidden, true);
         assert.equal(viewer.dom.status.hidden, true);
@@ -1851,8 +1855,15 @@ async function assertMainImageUnavailableState() {
         newButton.dispatch('click', { stopPropagation() {} });
         assert.equal(viewer.state.mainImageRequests.left.attempt, 1);
         assert.equal(viewer.dom.sizerImg.getAttribute('src'), null);
-        window.rafQueue.splice(0).forEach(callback => callback?.());
+        window.timeoutQueue.splice(0).forEach(callback => callback?.());
         assert.equal(viewer.dom.sizerImg.src, viewer.state.data.frames[1].images[0].src);
+        viewer.dom.leftImg.dispatch('error');
+        viewer.dom.emptyState.children[1].dispatch('click', { stopPropagation() {} });
+        viewer.state.currentFrameIdx = 0;
+        viewer.updateImages();
+        window.timeoutQueue.splice(0).forEach(callback => callback?.());
+        assert.equal(viewer.dom.leftImg.src, viewer.state.data.frames[0].images[0].src);
+        assert.equal(viewer.dom.sizerImg.src, viewer.state.data.frames[0].images[0].src);
         results.changedFrameRetryAndSizer = true;
     }
 

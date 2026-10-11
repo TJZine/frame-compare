@@ -2411,11 +2411,9 @@ const ReportViewer = {
                 );
             }
         };
-        if (typeof window.requestAnimationFrame === 'function') {
-            window.requestAnimationFrame(assign);
-        } else {
-            assign();
-        }
+        // Let removal of src settle before reloading, without waiting for a paint.
+        // Animation frames can be suspended while resource retries still need to run.
+        window.setTimeout(assign, 0);
         this.refreshMainImageAvailability();
     },
 
