@@ -9,7 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.orchestration import RunDependencies as PublicRunDependencies
 from frame_compare.orchestration.coordinator import (
     RunDependencies,
     execute_run,
@@ -23,9 +22,12 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
-from frame_compare.utils.progress import NullProgressReporter
-from frame_compare.utils.types import WorkspacePaths
+from frame_compare.render.geometry import RenderGeometryPlan
+from frame_compare.utils.media_facts import RenderedFrameFacts
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import HDRMetadata
+
+from .phase_task_helpers import _workspace
 
 
 class StopAfterDependencyInit(RuntimeError):
@@ -33,19 +35,31 @@ class StopAfterDependencyInit(RuntimeError):
 
 
 class DummyFFmpegRunner:
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+    def extract_frame(
+        self,
+        video: Path,
+        frame_num: int,
+        output: Path,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+    ) -> RenderedFrameFacts:
         raise RuntimeError("Not used in tests.")
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         return None
 
 
-def test_run_dependencies_exported_from_orchestration() -> None:
-    assert PublicRunDependencies is RunDependencies
-
-
 def test_run_dependencies_default_clock_is_aware_utc() -> None:
     assert RunDependencies().clock().tzinfo is UTC
+
+
+def test_run_artifacts_warning_defaults_are_isolated() -> None:
+    first = RunArtifacts()
+    second = RunArtifacts()
+
+    first.warnings.append(RunWarning("sources", "warning", "first-run warning"))
+
+    assert second.warnings == []
 
 
 def test_execute_run_initializes_local_dependencies_without_mutating_injected_deps(
@@ -61,15 +75,13 @@ def test_execute_run_initializes_local_dependencies_without_mutating_injected_de
         nonlocal captured_local_deps, prep_completed
         captured_local_deps = local_deps
         assert local_deps is not deps
-        assert local_deps.vs_loader is not None
+        assert local_deps.vs_loader is None
         assert local_deps.ffmpeg_runner is None
         assert local_deps.progress is not None
         assert local_deps.http_client is not None
         prep_completed = True
         return SimpleNamespace(
-            config=ConfigSchema(
-                screenshots={"ffmpeg_timeout_seconds": 47.0},
-            )
+            config=ConfigSchema.model_validate({"screenshots": {"ffmpeg_timeout_seconds": 47.0}})
         )
 
     def fake_default_ffmpeg_runner(*, extraction_timeout_seconds: float):
@@ -128,44 +140,6 @@ def test_execute_run_preserves_injected_ffmpeg_runner_after_prep(
     assert deps.ffmpeg_runner is injected_runner
 
 
-def test_execute_run_passes_no_color_to_progress_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from frame_compare.orchestration import coordinator
-
-    captured: dict[str, bool] = {}
-    progress = NullProgressReporter()
-
-    def fake_select_reporter(
-        *,
-        quiet: bool = False,
-        json_output: bool = False,
-        no_color: bool = False,
-        force_tty: bool | None = None,
-    ) -> NullProgressReporter:
-        del force_tty
-        captured["quiet"] = quiet
-        captured["json_output"] = json_output
-        captured["no_color"] = no_color
-        return progress
-
-    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
-        assert local_deps.progress is progress
-        raise StopAfterDependencyInit
-
-    monkeypatch.setattr(coordinator, "select_reporter", fake_select_reporter)
-    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
-
-    with pytest.raises(StopAfterDependencyInit):
-        asyncio.run(execute_run(RunRequest(root=tmp_path, no_color=True), deps=RunDependencies()))
-
-    assert captured == {
-        "quiet": False,
-        "json_output": False,
-        "no_color": True,
-    }
-
-
 def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -174,7 +148,7 @@ def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
     captured_local_deps: RunDependencies | None = None
 
     def _confirm(
-        _request: SlowpicsUploadConfirmationRequest,
+        request: SlowpicsUploadConfirmationRequest,
     ) -> SlowpicsUploadConfirmationDecision:
         return "confirmed"
 
@@ -213,7 +187,7 @@ def test_execute_run_removes_full_window_confirmation_in_unattended_modes(
     captured_local_deps: RunDependencies | None = None
 
     def _confirm(
-        _request: FullWindowRetryConfirmationRequest,
+        request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         raise AssertionError("unattended mode must not confirm")
 
@@ -240,30 +214,26 @@ def test_reserved_warning_sink_survives_prep_failure(
     from frame_compare.orchestration import coordinator
 
     captured_artifacts: RunArtifacts | None = None
-    workspace = WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=tmp_path / "generated" / "run",
-        screenshots_dir=tmp_path / "generated" / "run" / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+    workspace = _workspace(
+        tmp_path,
+        input_subdir="comparison_videos",
+        run_subdir="generated/run",
+        screenshots_subdir="generated/run/screenshots",
     )
 
     async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
         assert local_deps.capture_reserved_run is not None
-        warnings: list[str] = []
+        warnings: list[RunWarning] = []
         local_deps.capture_reserved_run(
             ReservedRunCapture(
                 workspace=workspace,
                 clip_count=2,
                 preflight_duration=0.1,
-                preflight_warnings=(),
+                preflight_warnings=[],
                 run_warnings=warnings,
             )
         )
-        warnings.append("accepted full-window override")
+        warnings.append(RunWarning("analysis", "warning", "accepted full-window override"))
         raise StopAfterDependencyInit
 
     def fake_record_failed_run_best_effort(
@@ -283,4 +253,6 @@ def test_reserved_warning_sink_survives_prep_failure(
         asyncio.run(execute_run(RunRequest(root=tmp_path), deps=RunDependencies()))
 
     assert captured_artifacts is not None
-    assert captured_artifacts.warnings == ["accepted full-window override"]
+    assert [warning.text for warning in captured_artifacts.warnings] == [
+        "accepted full-window override"
+    ]

@@ -1,48 +1,40 @@
-# AGENTS.md
+# Frame Compare agent entrypoint
 
-Short entrypoint map for local coding agents.
+Read [`.agents/project.md`](.agents/project.md) for repository contracts, source routes,
+and verification selection. Load only the sections and referenced sources relevant
+to the task; inspect the affected callers and runtime path before changing behavior.
 
-Use the relevant section of [docs/ENGINEERING_RUNBOOK.md](docs/ENGINEERING_RUNBOOK.md)
-for risk, verification, planning, or handoff decisions. Load deeper context only when
-the task needs it:
+Use `develop-code` for implementation; load `design-code`, `review-code`, or
+`verify-code` when that responsibility is needed. These skills own the common
+workflow, not mandatory stages. Use `maintain-workflow` only for explicitly
+requested maintenance. This repository owns its product contracts and commands.
+Use the requested mode: a review or design request does not by itself authorize
+implementation, publication, or release.
 
-- ownership, hotspots, runtime flow, or layering: [docs/current-architecture.md](docs/current-architecture.md)
-- CLI, config, JSON, reports, or other public behavior: [docs/current-cli-contract.md](docs/current-cli-contract.md)
-- import direction: [importlinter.ini](importlinter.ini)
-- dependencies, packaging, or tool configuration: [pyproject.toml](pyproject.toml)
+Working rules:
 
-Always-on defaults:
+- Use the task revision or active checkout; resolve actual PR base/head for reviews.
+  Query the default branch only when a base is needed and no task context identifies
+  one. Never infer the active branch from an old profile.
+- Treat existing owners and patterns as evidence. Improve or replace them when the
+  scoped outcome justifies it; preserve product obligations, not accidental structure.
+- Preserve runtime-free CLI help/version, typed errors, machine-clean JSON stdout,
+  deterministic artifacts, owned resource cleanup, and explicit persistence boundaries.
+- Fresh computed alignment needs the documented audio/video authority before it can
+  affect trims or computed-cache authority. Keep a valid zero offset distinct
+  from unavailable evidence.
+- Honor explicit test constraints for the current task. Choose meaningful proof for
+  changed behavior; neither test count nor E2E-only coverage is a quality target.
+- Keep incidental generated outputs, caches, credentials, and unrelated work out of
+  the change. Keep one canonical copy of instructions and skill bodies.
+- State what actually ran and what remains unverified. A skip or an absent CI job is
+  not a runtime/platform pass.
 
-- Bootstrap with `uv sync --group dev --frozen` if `.venv/bin/*` is missing.
-- Use Codanna for unknown owners, callers, and impact when available; confirm
-  important results in source and use `rg`/direct reads for exact queries.
-- Use the smallest matching repo-local skill set. Prefer one process skill plus only
-  the boundary skills required by the changed surface.
-- Keep code-health scanner state and optional local code-health skills untracked; do not add a repo-local `desloppify` skill unless the task explicitly targets desloppify workflow and the maintainer approves tracking it.
-- Keep Antigravity rules in `.agents/rules/general-guidelines.md` as a thin shim over this entrypoint and the runbook, not a second workflow.
-- Use the repo command canon from the runbook.
-- Let the runbook own public-surface and `docs/plans/` activation policy.
-- Default to one agent. Delegate only independent read-heavy work or an approved,
-  disjoint implementation unit; do not add planner/reviewer passes by habit.
-- Before claiming completion, run risk-matched verification, inspect the diff, and
-  preserve unrelated user changes.
+Specialist procedures remain in [`docs/ENGINEERING_RUNBOOK.md`](docs/ENGINEERING_RUNBOOK.md).
+Current ownership and CLI contracts remain in [`docs/current-architecture.md`](docs/current-architecture.md)
+and [`docs/current-cli-contract.md`](docs/current-cli-contract.md). Keep those sources
+current when the corresponding contract changes.
 
-Where to look next:
-
-- Workflow, risk tiers, verification, handoff: [docs/ENGINEERING_RUNBOOK.md](docs/ENGINEERING_RUNBOOK.md)
-- Runtime flow, boundaries, hotspots: [docs/current-architecture.md](docs/current-architecture.md)
-- CLI command, flag, and persistence contract: [docs/current-cli-contract.md](docs/current-cli-contract.md)
-- Repo-local workflow and boundary skills: [.agents/skills/](.agents/skills/)
-- Antigravity rule shim: [.agents/rules/general-guidelines.md](.agents/rules/general-guidelines.md)
-- Historical exceptions and decisions: [docs/DECISIONS.md](docs/DECISIONS.md)
-
-<!-- desloppify-begin -->
-# desloppify
-
-Use the installed `desloppify` skill/tool only when explicitly requested to run a
-code-health scan, produce a health score, or create a cleanup plan. Keep scanner
-state untracked; do not add a repo-local `desloppify` skill unless the task
-explicitly targets that workflow and maintainer approval for tracking it is
-recorded. Follow the repo command canon and workflow policy in
-`docs/ENGINEERING_RUNBOOK.md`.
-<!-- desloppify-end -->
+Run independent investigation, checks, and implementation in parallel when ownership,
+contracts, and working state permit it. A plan is not a mandatory sequential
+pipeline. Serialize only actual dependencies or conflicting shared resources.

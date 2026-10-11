@@ -2,31 +2,159 @@ import asyncio
 import os
 import subprocess
 import sys
+import textwrap
+from pathlib import Path
+from time import monotonic
 
 import pytest
 
-from frame_compare.utils.subproc import resolve_executable, run_subprocess
+import frame_compare.utils.subproc as subproc_module
+from frame_compare.utils.subproc import (
+    SubprocessAborted,
+    prepare_python_child,
+    resolve_executable,
+    run_subprocess,
+)
 
 
-def test_run_subprocess_check_true():
-    """Assert usage of check=True defaults."""
-    # Running a simple command that succeeds
-    result = run_subprocess([sys.executable, "-c", "print('hello')"])
-    assert result.returncode == 0
-    assert b"hello" in result.stdout
+def test_prepare_python_child_strips_injection_and_keeps_native_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONSTARTUP", "/caller/startup.py")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
+    environment = {
+        "PYTHONHOME": "/caller/python-home",
+        "PYTHONPATH": "/caller/python-path",
+        "PYTHONSTARTUP": "/caller/startup.py",
+        "PYTHONUSERBASE": "/caller/user-base",
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH": "/runtime/plugins",
+        "FRAME_COMPARE_RUNTIME_KIND": "docker",
+    }
+
+    child_argv, child_env = prepare_python_child(
+        [sys.executable, "-c", "print('ok')"], env=environment
+    )
+
+    assert child_argv[:2] == [sys.executable, "-P"]
+    assert child_env["PYTHONSAFEPATH"] == "1"
+    assert "PYTHONHOME" not in child_env
+    assert "PYTHONPATH" not in child_env
+    assert "PYTHONSTARTUP" not in child_env
+    assert "VAPOURSYNTH_EXTRA_PLUGIN_PATH" in child_env
+    assert "FRAME_COMPARE_RUNTIME_KIND" in child_env
+    if subproc_module.site.ENABLE_USER_SITE and not sys.flags.no_user_site:
+        assert "-s" not in child_argv
+        assert child_env["PYTHONUSERBASE"] == "/caller/user-base"
+    else:
+        assert "-s" in child_argv
+        assert "PYTHONUSERBASE" not in child_env
 
 
-def test_run_subprocess_check_false():
-    """Assert non-zero exit does NOT raise; returns CompletedProcess with returncode != 0."""
-    # Running a simple command that fails
-    result = run_subprocess([sys.executable, "-c", "import sys; sys.exit(1)"], check=False)
-    assert result.returncode == 1
+def test_prepare_python_child_real_disabled_user_site_child_uses_no_user_site(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "sitecustomize-imported"
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "PYTHONPATH": str(Path(__file__).parents[2] / "src"),
+            "PYTHONUSERBASE": str(tmp_path / "userbase"),
+        }
+    )
+    script = textwrap.dedent(
+        f"""
+        import os
+        import site
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        from frame_compare.utils.subproc import prepare_python_child
+
+        marker = Path({str(marker)!r})
+        user_site = Path(site.getusersitepackages())
+        user_site.mkdir(parents=True, exist_ok=True)
+        (user_site / "sitecustomize.py").write_text(
+            "from pathlib import Path\\nPath({str(marker)!r}).touch()\\n",
+            encoding="utf-8",
+        )
+        child_argv, child_env = prepare_python_child(
+            [sys.executable, "-c", "import site; print(site.ENABLE_USER_SITE)"],
+            env=os.environ.copy(),
+        )
+        assert "-s" in child_argv
+        assert "PYTHONUSERBASE" not in child_env
+        result = subprocess.run(
+            child_argv,
+            cwd={str(tmp_path)!r},
+            env=child_env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if result.returncode != 0 or result.stdout.strip() != "False" or marker.exists():
+            raise SystemExit(
+                f"child user-site policy failed: {{result.returncode=}}, "
+                f"{{result.stdout=!r}}, {{result.stderr=!r}}, {{marker.exists()=}}"
+            )
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-s", "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
 
 
-def test_run_subprocess_failure():
-    """Assert CalledProcessError raised on exit 1 (when check=True)."""
-    with pytest.raises(subprocess.CalledProcessError):
-        run_subprocess([sys.executable, "-c", "import sys; sys.exit(1)"])
+@pytest.mark.parametrize("abortable", [False, True])
+@pytest.mark.parametrize(
+    ("script", "check", "expected_code", "expected_stdout"),
+    [
+        ("print('hello')", True, 0, b"hello"),
+        ("import sys; sys.exit(1)", False, 1, None),
+        ("import sys; sys.exit(1)", True, None, None),
+    ],
+)
+def test_run_subprocess_exit_handling(
+    script: str,
+    check: bool,
+    expected_code: int | None,
+    expected_stdout: bytes | None,
+    abortable: bool,
+) -> None:
+    argv = [sys.executable, "-c", script]
+    abort = (lambda: False) if abortable else None
+    if expected_code is None:
+        with pytest.raises(subprocess.CalledProcessError):
+            run_subprocess(argv, timeout_seconds=10, abort=abort)
+    else:
+        result = (
+            run_subprocess(argv, timeout_seconds=10, abort=abort)
+            if check
+            else run_subprocess(argv, check=False, timeout_seconds=10, abort=abort)
+        )
+        assert result.returncode == expected_code
+        if expected_stdout is not None:
+            assert expected_stdout in result.stdout
 
 
 def test_run_subprocess_timeout():
@@ -62,76 +190,110 @@ def test_run_subprocess_inside_running_event_loop() -> None:
 
 
 @pytest.mark.parametrize(
-    ("executable", "environment", "requested"),
+    ("executable", "environment", "requested", "state", "message"),
     [
-        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "ffmpeg"),
-        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "FFMPEG.EXE"),
-        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "ffprobe"),
-        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "FFPROBE.EXE"),
+        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "ffmpeg", "valid", None),
+        ("ffmpeg.exe", "FRAME_COMPARE_FFMPEG_EXECUTABLE", "FFMPEG.EXE", "valid", None),
+        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "ffprobe", "valid", None),
+        ("ffprobe.exe", "FRAME_COMPARE_FFPROBE_EXECUTABLE", "FFPROBE.EXE", "valid", None),
+        (
+            "missing-ffmpeg.exe",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+            "ffmpeg",
+            "missing",
+            "missing-ffmpeg",
+        ),
+        (
+            "missing-ffprobe.exe",
+            "FRAME_COMPARE_FFPROBE_EXECUTABLE",
+            "ffprobe",
+            "missing",
+            "missing-ffprobe",
+        ),
+        (
+            "ffmpeg",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+            "ffmpeg",
+            "empty",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE is empty",
+        ),
+        (
+            "ffprobe",
+            "FRAME_COMPARE_FFPROBE_EXECUTABLE",
+            "ffprobe",
+            "empty",
+            "FRAME_COMPARE_FFPROBE_EXECUTABLE is empty",
+        ),
+        pytest.param(
+            "ffmpeg",
+            "FRAME_COMPARE_FFMPEG_EXECUTABLE",
+            "ffmpeg",
+            "nonexec",
+            "ffmpeg",
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="Windows does not expose POSIX execute bits"
+            ),
+        ),
     ],
 )
-def test_resolve_executable_prefers_absolute_media_override(
+def test_resolve_executable_media_overrides(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
     executable: str,
     environment: str,
     requested: str,
+    state: str,
+    message: str | None,
 ) -> None:
     binary = tmp_path / executable
-    binary.write_bytes(b"")
-    binary.chmod(0o755)
-    monkeypatch.setenv(environment, str(binary.resolve()))
+    if state in {"valid", "nonexec"}:
+        binary.write_bytes(b"")
+        binary.chmod(0o755 if state == "valid" else 0o644)
+    monkeypatch.setenv(environment, "" if state == "empty" else str(binary.resolve()))
+    if message is None:
+        assert resolve_executable(requested) == str(binary.resolve())
+    else:
+        with pytest.raises(FileNotFoundError, match=message):
+            resolve_executable(requested)
 
-    assert resolve_executable(requested) == str(binary.resolve())
 
-
-@pytest.mark.parametrize(
-    ("executable", "environment"),
-    [
-        ("ffmpeg", "FRAME_COMPARE_FFMPEG_EXECUTABLE"),
-        ("ffprobe", "FRAME_COMPARE_FFPROBE_EXECUTABLE"),
-    ],
-)
-def test_resolve_executable_fails_closed_for_invalid_media_override(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-    executable: str,
-    environment: str,
+@pytest.mark.parametrize("stop", ["abort", "timeout", "abort-kill"])
+def test_run_subprocess_abort_path_reaps_real_child(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stop: str
 ) -> None:
-    missing = tmp_path / f"missing-{executable}.exe"
-    monkeypatch.setenv(environment, str(missing.resolve()))
+    ready = tmp_path / "ready"
+    processes: list[subprocess.Popen[bytes]] = []
+    original_popen = subprocess.Popen
 
-    with pytest.raises(FileNotFoundError, match=f"missing-{executable}"):
-        resolve_executable(executable)
+    def popen(
+        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
+    ) -> subprocess.Popen[bytes]:
+        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
+        processes.append(process)
+        return process
 
-
-@pytest.mark.parametrize(
-    ("executable", "environment"),
-    [
-        ("ffmpeg", "FRAME_COMPARE_FFMPEG_EXECUTABLE"),
-        ("ffprobe", "FRAME_COMPARE_FFPROBE_EXECUTABLE"),
-    ],
-)
-def test_resolve_executable_fails_closed_for_empty_media_override(
-    monkeypatch: pytest.MonkeyPatch,
-    executable: str,
-    environment: str,
-) -> None:
-    monkeypatch.setenv(environment, "")
-
-    with pytest.raises(FileNotFoundError, match=f"{environment} is empty"):
-        resolve_executable(executable)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
-def test_resolve_executable_rejects_non_executable_media_override(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-) -> None:
-    binary = tmp_path / "ffmpeg"
-    binary.write_bytes(b"")
-    binary.chmod(0o644)
-    monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary.resolve()))
-
-    with pytest.raises(FileNotFoundError, match="ffmpeg"):
-        resolve_executable("ffmpeg")
+    monkeypatch.setattr(subproc_module, "Popen", popen)
+    argv = [
+        sys.executable,
+        "-c",
+        "import pathlib,signal,sys,time; "
+        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if stop == "abort-kill" else "")
+        + "pathlib.Path(sys.argv[1]).touch(); "
+        "print('started', flush=True); time.sleep(30)",
+        str(ready),
+    ]
+    began = monotonic()
+    with pytest.raises(
+        subprocess.TimeoutExpired if stop == "timeout" else SubprocessAborted
+    ) as error:
+        run_subprocess(
+            argv,
+            timeout_seconds=0.4 if stop == "timeout" else 5,
+            abort=lambda: stop.startswith("abort") and ready.exists(),
+        )
+    assert monotonic() - began < (4.5 if stop == "abort-kill" else 3)
+    if isinstance(error.value, subprocess.TimeoutExpired):
+        assert error.value.output is not None and b"started" in error.value.output
+    assert len(processes) == 1
+    assert processes[0].returncode is not None
+    assert ready.exists()

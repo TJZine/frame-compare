@@ -161,6 +161,7 @@ PY
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import os
 import sys
 import types
@@ -190,7 +191,19 @@ reference = proof_dir / "reference.mkv"
 comparison = proof_dir / "comparison.mkv"
 comparison_2 = proof_dir / "comparison_2.mkv"
 unspecified_color_props = {"_Matrix": 2, "_Transfer": 2, "_Primaries": 2}
-session = launch_alignment_verification_session(
+audio_review_by_key = {
+    key: json.dumps(
+        {
+            "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
+            "evidence_availability": "historical_details_unavailable",
+            "audio_attempt": None,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    for key in ("reference:comparison", "reference:comparison_2")
+}
+session, _wait_seconds = launch_alignment_verification_session(
     VSViewSessionRequest(
         reference=reference,
         comparisons=[comparison, comparison_2],
@@ -198,6 +211,7 @@ session = launch_alignment_verification_session(
             "reference:comparison": 0,
             "reference:comparison_2": 0,
         },
+        audio_review_by_key=audio_review_by_key,
         cache_dir=proof_dir / "cache",
         frame_props_by_stem={
             reference.stem: unspecified_color_props,
@@ -316,18 +330,18 @@ try:
     active_panel = AlignmentReviewPanel(active_parent, panel_api)
     active_panel.on_workspace_loaded()
     app.processEvents()
-    if active_panel.progress_label.text() != "0 / 3 sources ready":
+    if active_panel.progress_label.text() != "0/3 positions captured":
         raise SystemExit("alignment panel did not start with an empty three-source lineup")
     for output_index, frame in enumerate((1, 0, 2)):
         panel_api.current_voutput = voutputs[output_index]
         panel_api.current_frame = frame
         active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
         app.processEvents()
-    if active_panel.progress_label.text() != "3 / 3 sources ready":
+    if active_panel.progress_label.text() != "3/3 positions captured \u2014 ready to confirm":
         raise SystemExit("alignment panel did not record every source position")
-    if active_panel.use_positions_button.text() != "Use these aligned positions":
+    if active_panel.use_positions_button.text() != "Confirm these aligned positions":
         raise SystemExit("alignment panel primary action label changed")
-    if active_panel.keep_button.text() != "Keep audio-derived alignment":
+    if active_panel.keep_button.text() != "Keep current alignment":
         raise SystemExit("alignment panel keep action label changed")
     if not active_panel.use_positions_button.isEnabled():
         raise SystemExit("alignment positions action did not become ready for the whole set")

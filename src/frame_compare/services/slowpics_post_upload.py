@@ -60,7 +60,7 @@ def _create_shortcut_actions(
         log.warning(
             "slowpics_shortcut_create_failed",
             path=str(result.path) if result.path is not None else None,
-            warning=result.warning,
+            warning=result.warning.text,
         )
     return (
         PostUploadActionResult(
@@ -96,7 +96,7 @@ async def _deliver_webhook_actions(
     if result.warning is not None:
         log.warning(
             "slowpics_webhook_delivery_failed",
-            warning=result.warning,
+            warning=result.warning.text,
             failure_kind=(result.failure_kind.value if result.failure_kind is not None else None),
             status_code=result.status_code,
         )

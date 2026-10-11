@@ -17,20 +17,6 @@ function Get-RequiredStringProperty([object]$Object, [string]$Name, [string]$Con
   return $value
 }
 
-function Test-IsInteractiveSession() {
-  if (-not [Environment]::UserInteractive) {
-    return $false
-  }
-  try {
-    if ([System.Console]::IsInputRedirected) {
-      return $false
-    }
-  } catch {
-    return $false
-  }
-  return $true
-}
-
 function Assert-SafeRelativePath([string]$PathValue, [string]$Context) {
   if ([string]::IsNullOrWhiteSpace($PathValue)) {
     throw "$Context must not be empty"
@@ -74,24 +60,126 @@ function Get-SafeChildPath([string]$Root, [string]$RelativePath, [string]$Contex
   return $fullCandidate
 }
 
-function Read-ZipEntryBytes([System.IO.Compression.ZipArchiveEntry]$Entry) {
+Set-Variable -Name MaxUpdateArchiveBytes -Option Constant -Value ([int64](128 * 1024 * 1024))
+Set-Variable -Name MaxUpdateEntryCount -Option Constant -Value 4096
+Set-Variable -Name MaxManifestBytes -Option Constant -Value ([int64](4 * 1024 * 1024))
+Set-Variable -Name MaxSignatureBytes -Option Constant -Value ([int64](16 * 1024))
+Set-Variable -Name MaxPayloadEntryBytes -Option Constant -Value ([int64](16 * 1024 * 1024))
+Set-Variable -Name MaxUpdateUncompressedBytes -Option Constant -Value ([int64](128 * 1024 * 1024))
+Set-Variable -Name MaxCompressionRatio -Option Constant -Value 200.0
+
+function Read-ZipEntryBytes(
+  [System.IO.Compression.ZipArchiveEntry]$Entry,
+  [int64]$MaxBytes,
+  [string]$Context
+) {
+  if ($Entry.Length -lt 0 -or $Entry.Length -gt $MaxBytes) {
+    throw "$Context exceeds the $MaxBytes-byte limit."
+  }
   $stream = $Entry.Open()
+  $buffer = New-Object byte[] (64 * 1024)
+  $output = [System.IO.MemoryStream]::new()
   try {
-    $buffer = New-Object byte[] $Entry.Length
-    $offset = 0
-    while ($offset -lt $buffer.Length) {
-      $read = $stream.Read($buffer, $offset, $buffer.Length - $offset)
-      if ($read -le 0) {
+    while ($true) {
+      $read = $stream.Read($buffer, 0, $buffer.Length)
+      if ($read -eq 0) {
+        if ($output.Length -ne $Entry.Length) {
+          throw "$Context length did not match its ZIP metadata."
+        }
+        return $output.ToArray()
+      }
+      if (($output.Length + $read) -gt $MaxBytes) {
+        throw "$Context exceeds the $MaxBytes-byte limit while reading."
+      }
+      $output.Write($buffer, 0, $read)
+    }
+  } finally {
+    $output.Dispose()
+    $stream.Dispose()
+  }
+}
+
+function Copy-ZipEntryToFile(
+  [System.IO.Compression.ZipArchiveEntry]$Entry,
+  [string]$DestinationPath,
+  [int64]$ExpectedBytes
+) {
+  $stream = $null
+  $out = $null
+  $buffer = New-Object byte[] (64 * 1024)
+  $written = [int64]0
+  try {
+    $stream = $Entry.Open()
+    $out = [System.IO.File]::Open(
+      $DestinationPath,
+      [System.IO.FileMode]::Create,
+      [System.IO.FileAccess]::Write,
+      [System.IO.FileShare]::None
+    )
+    while ($true) {
+      $read = $stream.Read($buffer, 0, $buffer.Length)
+      if ($read -eq 0) {
         break
       }
-      $offset += $read
+      if ($written -gt ($ExpectedBytes - $read)) {
+        throw "Extracted payload exceeded its signed byte count: $($Entry.FullName)"
+      }
+      $out.Write($buffer, 0, $read)
+      $written += $read
     }
-    if ($offset -ne $buffer.Length) {
-      throw "Failed to read complete entry bytes for $($Entry.FullName)"
+    if ($written -ne $ExpectedBytes) {
+      throw "Extracted payload size did not match its signed byte count: $($Entry.FullName)"
     }
-    return $buffer
   } finally {
-    $stream.Dispose()
+    if ($null -ne $out) {
+      $out.Dispose()
+    }
+    if ($null -ne $stream) {
+      $stream.Dispose()
+    }
+  }
+}
+
+function Assert-SafeUpdateArchive(
+  [System.IO.Compression.ZipArchive]$Zip,
+  [int64]$ArchiveBytes
+) {
+  if ($ArchiveBytes -le 0 -or $ArchiveBytes -gt $MaxUpdateArchiveBytes) {
+    throw "Update archive size must be between 1 and $MaxUpdateArchiveBytes bytes."
+  }
+  if ($Zip.Entries.Count -le 0 -or $Zip.Entries.Count -gt $MaxUpdateEntryCount) {
+    throw "Update archive entry count must be between 1 and $MaxUpdateEntryCount."
+  }
+
+  $names = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+  $totalUncompressedBytes = [int64]0
+  foreach ($entry in $Zip.Entries) {
+    if ([string]::IsNullOrWhiteSpace($entry.FullName)) {
+      throw "Update archive contains an empty entry name."
+    }
+    Assert-SafeRelativePath -PathValue $entry.FullName -Context "zip entry"
+    if (-not $names.Add($entry.FullName)) {
+      throw "Update archive contains a duplicate entry name: $($entry.FullName)"
+    }
+    if ($entry.Length -lt 0 -or $entry.Length -gt $MaxPayloadEntryBytes) {
+      throw "Update archive entry exceeds the $MaxPayloadEntryBytes-byte limit: $($entry.FullName)"
+    }
+    if ($entry.CompressedLength -lt 0) {
+      throw "Update archive entry has an invalid compressed length: $($entry.FullName)"
+    }
+    if ($totalUncompressedBytes -gt ($MaxUpdateUncompressedBytes - $entry.Length)) {
+      throw "Update archive exceeds the $MaxUpdateUncompressedBytes-byte uncompressed limit."
+    }
+    $totalUncompressedBytes += $entry.Length
+    if ($entry.Length -gt 0) {
+      if ($entry.CompressedLength -eq 0) {
+        throw "Update archive entry has an invalid compression ratio: $($entry.FullName)"
+      }
+      $compressionRatio = [double]$entry.Length / [double]$entry.CompressedLength
+      if ($compressionRatio -gt $MaxCompressionRatio) {
+        throw "Update archive entry exceeds the maximum compression ratio: $($entry.FullName)"
+      }
+    }
   }
 }
 
@@ -196,7 +284,7 @@ function Get-InstallConfig() {
   }
 
   try {
-    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     throw "Invalid config file: $configPath`nRun install.cmd from the portable bundle."
   }
@@ -339,6 +427,30 @@ function Get-BackupRoot([string]$BundlePath) {
   return Join-PathParts -Root $BundlePath -Parts @("app", ".update_backups")
 }
 
+function Get-BackupCompatibilityError([string]$BackupParent, [object]$InstalledCompatibility) {
+  $identityPath = Join-Path $BackupParent "compatibility.json"
+  if (!(Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+    return "backup runtime/requirements identity is missing (legacy backups cannot be restored)"
+  }
+  try {
+    $identity = Get-Content -LiteralPath $identityPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $requirements = Get-RequiredStringProperty -Object $identity -Name "requirements_lock_sha256" -Context "backup identity"
+    $runtime = Get-RequiredStringProperty -Object $identity -Name "media_runtime_fingerprint" -Context "backup identity"
+    if ($requirements -cnotmatch '^[a-f0-9]{64}$' -or $runtime -cnotmatch '^[a-f0-9]{64}$') {
+      return "backup runtime/requirements identity is invalid"
+    }
+  } catch {
+    return "backup runtime/requirements identity is invalid"
+  }
+  if (
+    $requirements -cne [string]$InstalledCompatibility["requirements_lock_sha256"] -or
+    $runtime -cne [string]$InstalledCompatibility["media_runtime_fingerprint"]
+  ) {
+    return "backup runtime/requirements identity differs from the current bundle"
+  }
+  return ""
+}
+
 function Get-PayloadVersionFromManifest([object]$Manifest) {
   return Get-RequiredStringProperty -Object $Manifest -Name "to_app_version" -Context "manifest"
 }
@@ -405,33 +517,27 @@ function Invoke-ListBackups([string]$BundlePath) {
     Write-Host "No backups found."
     return 0
   }
+  $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
   foreach ($dir in $dirs) {
-    Write-Host $dir.Name
+    $compatibilityError = Get-BackupCompatibilityError -BackupParent $dir.FullName -InstalledCompatibility $installedCompatibility
+    if ([string]::IsNullOrWhiteSpace($compatibilityError)) {
+      Write-Host $dir.Name
+    } else {
+      Write-Host "$($dir.Name) (unavailable: $compatibilityError)"
+    }
   }
   return 0
 }
 
-function Read-Choice([string]$Prompt) {
-  return (Read-Host $Prompt).Trim()
-}
-
-function Confirm-Token([string]$Token, [string]$Prompt) {
-  $value = Read-Choice -Prompt $Prompt
-  return $value -ceq $Token
-}
-
 function Verify-ManifestSignature(
   [byte[]]$ManifestBytes,
-  [string]$SignaturePath,
+  [byte[]]$SignatureFileBytes,
   [string]$PublicKeyPath
 ) {
-  if (!(Test-Path -LiteralPath $SignaturePath)) {
-    return $false
-  }
   if (!(Test-Path -LiteralPath $PublicKeyPath)) {
     return $false
   }
-  $signatureText = (Get-Content -LiteralPath $SignaturePath -Raw).Trim()
+  $signatureText = ([System.Text.Encoding]::UTF8.GetString($SignatureFileBytes)).Trim()
   if ([string]::IsNullOrWhiteSpace($signatureText)) {
     return $false
   }
@@ -530,18 +636,34 @@ function Restore-FromBackup([string]$BackupDir, [string]$TargetDir) {
 }
 
 function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
+  $backupRoot = Get-BackupRoot -BundlePath $BundlePath
+  if ($BackupId -notmatch '^\d{14}$') {
+    throw "Invalid backup id format: $BackupId (expected yyyyMMddHHmmss)"
+  }
+  $backupParent = Get-SafeChildPath -Root $backupRoot -RelativePath $BackupId -Context "backup id"
+  $backupDir = Join-Path $backupParent "frame_compare"
+  if (!(Test-Path -LiteralPath $backupDir -PathType Container)) {
+    throw "Backup id not found: $BackupId"
+  }
+  $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
+  $compatibilityError = Get-BackupCompatibilityError -BackupParent $backupParent -InstalledCompatibility $installedCompatibility
+  if (![string]::IsNullOrWhiteSpace($compatibilityError)) {
+    throw "Rollback refused: $compatibilityError."
+  }
+
   $lockInfo = $null
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
-    $backupRoot = Get-BackupRoot -BundlePath $BundlePath
-    if ($BackupId -notmatch '^\d{14}$') {
-      throw "Invalid backup id format: $BackupId (expected yyyyMMddHHmmss)"
-    }
-    $backupParent = Get-SafeChildPath -Root $backupRoot -RelativePath $BackupId -Context "backup id"
-    $backupDir = Join-Path $backupParent "frame_compare"
-    if (!(Test-Path -LiteralPath $backupDir)) {
+    # Another update may have pruned this backup after the unlocked preflight.
+    if (!(Test-Path -LiteralPath $backupDir -PathType Container)) {
       throw "Backup id not found: $BackupId"
     }
+    $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
+    $compatibilityError = Get-BackupCompatibilityError -BackupParent $backupParent -InstalledCompatibility $installedCompatibility
+    if (![string]::IsNullOrWhiteSpace($compatibilityError)) {
+      throw "Rollback refused: $compatibilityError."
+    }
+
     $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
     Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
     Write-Host "Rollback applied from backup: $BackupId"
@@ -556,8 +678,8 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
 
   $resolvedZip = (Resolve-Path -LiteralPath $UpdateZipPath).Path
-  $interactive = Test-IsInteractiveSession
   $lockInfo = $null
+  $zipStream = $null
   $zip = $null
   $tempRoot = Join-PathParts -Root ([System.IO.Path]::GetTempPath()) -Parts @(
     "FrameCompareUpdate",
@@ -573,20 +695,58 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
     Ensure-Directory -Path $tempRoot
 
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($resolvedZip)
-    $entries = @($zip.Entries)
-    foreach ($entry in $entries) {
-      if ([string]::IsNullOrWhiteSpace($entry.FullName)) {
-        continue
-      }
-      Assert-SafeRelativePath -PathValue $entry.FullName -Context "zip entry"
+    $zipStream = [System.IO.File]::Open(
+      $resolvedZip,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read,
+      [System.IO.FileShare]::Read
+    )
+    $archiveBytes = $zipStream.Length
+    if ($archiveBytes -le 0 -or $archiveBytes -gt $MaxUpdateArchiveBytes) {
+      throw "Update archive size must be between 1 and $MaxUpdateArchiveBytes bytes."
     }
 
-    $manifestEntry = $zip.GetEntry("update-manifest.json")
-    if ($null -eq $manifestEntry) {
-      throw "update-manifest.json not found in update zip."
+    $zip = [System.IO.Compression.ZipArchive]::new(
+      $zipStream,
+      [System.IO.Compression.ZipArchiveMode]::Read,
+      $true
+    )
+    if ($zip.Entries.Count -le 0 -or $zip.Entries.Count -gt $MaxUpdateEntryCount) {
+      throw "Update archive entry count must be between 1 and $MaxUpdateEntryCount."
     }
-    $manifestBytes = Read-ZipEntryBytes -Entry $manifestEntry
+
+    $manifestEntry = $null
+    $signatureEntry = $null
+    foreach ($entry in $zip.Entries) {
+      if ($entry.FullName.Equals("update-manifest.json", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($null -ne $manifestEntry) {
+          throw "Update archive contains duplicate update-manifest.json entries."
+        }
+        $manifestEntry = $entry
+      }
+      if ($entry.FullName.Equals("update-manifest.sig", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($null -ne $signatureEntry) {
+          throw "Update archive contains duplicate update-manifest.sig entries."
+        }
+        $signatureEntry = $entry
+      }
+    }
+    if ($null -eq $manifestEntry -or $manifestEntry.FullName -cne "update-manifest.json") {
+      throw "Canonical update-manifest.json not found in update zip."
+    }
+    if ($null -eq $signatureEntry -or $signatureEntry.FullName -cne "update-manifest.sig") {
+      throw "Canonical update-manifest.sig not found in update zip."
+    }
+
+    $manifestBytes = Read-ZipEntryBytes -Entry $manifestEntry -MaxBytes $MaxManifestBytes -Context "update-manifest.json"
+    $signatureFileBytes = Read-ZipEntryBytes -Entry $signatureEntry -MaxBytes $MaxSignatureBytes -Context "update-manifest.sig"
+    $publicKeyPath = Join-Path $PSScriptRoot "update_public_key.xml"
+    if (-not (Verify-ManifestSignature -ManifestBytes $manifestBytes -SignatureFileBytes $signatureFileBytes -PublicKeyPath $publicKeyPath)) {
+      throw "Signature missing or invalid; refusing to apply update."
+    }
+
+    Assert-SafeUpdateArchive -Zip $zip -ArchiveBytes $archiveBytes
+    $entries = @($zip.Entries)
     $manifestText = [System.Text.Encoding]::UTF8.GetString($manifestBytes)
     $manifest = $manifestText | ConvertFrom-Json
 
@@ -597,6 +757,10 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $platform = Get-RequiredStringProperty -Object $manifest -Name "target_platform" -Context "manifest"
     if ($platform -ne "windows-x64") {
       throw "Unsupported update target_platform '$platform'"
+    }
+    $signatureAlgorithm = Get-RequiredStringProperty -Object $manifest -Name "signature_algorithm" -Context "manifest"
+    if ($signatureAlgorithm -cne "rsa-sha256-pkcs1") {
+      throw "Unsupported signature_algorithm '$signatureAlgorithm'"
     }
 
     $expectedRuntimeFingerprint = Get-RequiredStringProperty -Object $manifest -Name "expected_media_runtime_fingerprint" -Context "manifest"
@@ -619,13 +783,17 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     }
     $signatureFile = Get-RequiredStringProperty -Object $manifest -Name "signature_file" -Context "manifest"
     Assert-SafeRelativePath -PathValue $signatureFile -Context "signature_file"
+    if ($signatureFile -cne "update-manifest.sig") {
+      throw "Unsupported signature_file '$signatureFile' (expected 'update-manifest.sig')"
+    }
 
     $fromVersionMin = Get-RequiredStringProperty -Object $manifest -Name "from_app_version_min" -Context "manifest"
     $fromVersionMax = Get-OptionalStringProperty -Object $manifest -Name "from_app_version_max"
     $installedVersion = Get-BundleAppVersion -BundlePath $BundlePath
     if ([string]::IsNullOrWhiteSpace($installedVersion)) {
-      Write-Warning "Installed version could not be determined; skipping version range check. Manifest range=[$fromVersionMin, $fromVersionMax]."
-    } elseif (!(Test-StringInRange -Value $installedVersion -Min $fromVersionMin -Max $fromVersionMax)) {
+      throw "Installed app version could not be determined; refusing code-only update. Reinstall the complete portable bundle."
+    }
+    if (!(Test-StringInRange -Value $installedVersion -Min $fromVersionMin -Max $fromVersionMax)) {
       throw "Installed app version '$installedVersion' is outside supported range [$fromVersionMin, $fromVersionMax]."
     }
 
@@ -655,53 +823,39 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
         throw "Invalid manifest file path (must stay under app/src/frame_compare): $path"
       }
       $zipPayloadPath = "$payloadRoot/$normalizedPath"
-      [void]$expectedZipEntries.Add($zipPayloadPath)
+      if (-not $expectedZipEntries.Add($zipPayloadPath)) {
+        throw "Manifest contains a duplicate file path: $path"
+      }
       if (!$zipEntryMap.ContainsKey($zipPayloadPath)) {
         throw "Payload file missing from zip: $zipPayloadPath"
       }
     }
 
-    foreach ($entryName in $expectedZipEntries) {
-      if (!$zipEntryMap.ContainsKey($entryName)) {
-        continue
-      }
-      $entry = $zipEntryMap[$entryName]
-      $outPath = Get-SafeChildPath -Root $tempRoot -RelativePath $entryName -Context "zip extraction path"
-      Ensure-Directory -Path (Split-Path -Parent $outPath)
-      $stream = $null
-      $out = $null
-      try {
-        $stream = $entry.Open()
-        try {
-          $out = [System.IO.File]::Open($outPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-          $stream.CopyTo($out)
-        } finally {
-          if ($null -ne $out) {
-            $out.Dispose()
-          }
-        }
-      } finally {
-        if ($null -ne $stream) {
-          $stream.Dispose()
-        }
+    foreach ($entry in $entries) {
+      if (-not $expectedZipEntries.Contains($entry.FullName)) {
+        throw "Unexpected file in update archive: $($entry.FullName)"
       }
     }
 
-    $signaturePath = Join-Path $tempRoot (
-      Convert-RelativePathToNative -RelativePath $signatureFile
-    )
-    $publicKeyPath = Join-Path $PSScriptRoot "update_public_key.xml"
-    $signatureValid = Verify-ManifestSignature -ManifestBytes $manifestBytes -SignaturePath $signaturePath -PublicKeyPath $publicKeyPath
-    $unsignedAllowed = $false
-    if (-not $signatureValid) {
-      if (-not $interactive) {
-        throw "Signature missing or invalid; refusing to apply update in non-interactive mode."
+    foreach ($file in $manifestFiles) {
+      $manifestPath = Get-RequiredStringProperty -Object $file -Name "path" -Context "manifest.files[]"
+      $expectedHash = Get-RequiredStringProperty -Object $file -Name "sha256" -Context "manifest.files[]"
+      if ($expectedHash -cnotmatch '^[a-f0-9]{64}$') {
+        throw "Manifest sha256 is invalid for $manifestPath"
       }
-      Write-Host "WARNING: Update signature is missing or invalid."
-      if (!(Confirm-Token -Token "UNSIGNED" -Prompt "Type UNSIGNED to apply anyway (Unsafe), or press Enter to cancel")) {
-        throw "Canceled: unsigned update."
+      $expectedBytesRaw = Get-RequiredStringProperty -Object $file -Name "bytes" -Context "manifest.files[]"
+      $expectedBytes = [int64]0
+      if (-not [int64]::TryParse($expectedBytesRaw, [ref]$expectedBytes) -or $expectedBytes -lt 0) {
+        throw "Manifest bytes is invalid for $manifestPath"
       }
-      $unsignedAllowed = $true
+      $zipPayloadPath = "$payloadRoot/$($manifestPath -replace '\\', '/')"
+      $entry = $zipEntryMap[$zipPayloadPath]
+      if ($entry.Length -ne $expectedBytes) {
+        throw "Payload size mismatch for $manifestPath"
+      }
+      $outPath = Get-SafeChildPath -Root $tempRoot -RelativePath $zipPayloadPath -Context "zip extraction path"
+      Ensure-Directory -Path (Split-Path -Parent $outPath)
+      Copy-ZipEntryToFile -Entry $entry -DestinationPath $outPath -ExpectedBytes $expectedBytes
     }
 
     foreach ($file in $manifestFiles) {
@@ -751,6 +905,9 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $backupDir = Join-Path (Join-Path $backupRoot $backupId) "frame_compare"
     Ensure-Directory -Path (Split-Path -Parent $backupDir)
     Copy-Item -LiteralPath $targetDir -Destination $backupDir -Recurse -Force
+    $backupIdentityPath = Join-Path (Split-Path -Parent $backupDir) "compatibility.json"
+    $backupIdentityJson = $installedCompatibility | ConvertTo-Json
+    [System.IO.File]::WriteAllText($backupIdentityPath, $backupIdentityJson, [System.Text.UTF8Encoding]::new($false))
 
     Copy-DirectoryContents -SourceDir $payloadDir -DestinationDir $newDir
     try {
@@ -825,13 +982,13 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
 
     Invoke-PurgeBackups -BundlePath $BundlePath -Keep 5 | Out-Null
     Write-Host "Update applied successfully."
-    if ($unsignedAllowed) {
-      Write-Host "WARNING: Update was applied using an unsafe unsigned path."
-    }
     return 0
   } finally {
     if ($null -ne $zip) {
       $zip.Dispose()
+    }
+    if ($null -ne $zipStream) {
+      $zipStream.Dispose()
     }
     if (Test-Path -LiteralPath $tempRoot) {
       try {
@@ -915,7 +1072,16 @@ function Invoke-FrameCompareUpdate([object[]]$ArgsValues) {
         throw "Unknown argument for purge-backups: $($argsList[$i])"
       }
     }
-    return Invoke-PurgeBackups -BundlePath $bundlePath -Keep $keep
+    if ($keep -lt 0) {
+      throw "--keep must be >= 0"
+    }
+    $lockInfo = $null
+    try {
+      $lockInfo = Acquire-UpdateLock -BundlePath $bundlePath
+      return Invoke-PurgeBackups -BundlePath $bundlePath -Keep $keep
+    } finally {
+      Release-UpdateLock -LockInfo $lockInfo
+    }
   }
 
   throw "Unknown command: $command. Run frame-compare-update --help"

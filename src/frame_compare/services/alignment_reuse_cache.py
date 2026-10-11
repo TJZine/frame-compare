@@ -7,20 +7,25 @@ import math
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeGuard, cast
+from typing import TypeGuard, cast, get_args
 
 import structlog
 import tomli_w
 
+from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
+from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.types import (
     AlignmentProvenance,
     AlignmentResult,
     AlignmentReuseCacheOrigin,
-    AlignmentStabilityClassification,
-    AlignmentStabilitySummary,
     ReusableAlignmentEntry,
 )
+from frame_compare.utils.alignment_evidence import (
+    AlignmentStabilityClassification,
+    AlignmentStabilitySummary,
+)
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
@@ -69,23 +74,11 @@ def _clip_identity_dict(clip: AlignmentClipRequest) -> dict[str, _TomlValue]:
 
 def _settings_identity_dict(request: AlignmentRequest) -> dict[str, _TomlValue]:
     settings = request.settings
-    data: dict[str, _TomlValue] = {
-        "sample_rate": settings.sample_rate,
+    return {
+        "estimator_policy": ALIGNMENT_ESTIMATOR_POLICY,
         "max_offset_seconds": settings.max_offset_seconds,
-        "correlation_mode": settings.correlation_mode,
-        "preprocessing_mode": settings.preprocessing_mode,
         "channel_strategy": settings.channel_strategy,
-        "confidence_threshold": settings.confidence_threshold,
-        "ambiguity_peak_ratio": settings.ambiguity_peak_ratio,
-        "window_length_seconds": settings.window_length_seconds,
-        "window_stride_seconds": settings.window_stride_seconds,
-        "minimum_valid_windows": settings.minimum_valid_windows,
-        "consensus_minimum_ratio": settings.consensus_minimum_ratio,
-        "refinement_mode": settings.refinement_mode,
     }
-    if settings.refinement_sample_rate is not None:
-        data["refinement_sample_rate"] = settings.refinement_sample_rate
-    return data
 
 
 def _comparison_identity_dict(clip: AlignmentClipRequest) -> dict[str, _TomlValue]:
@@ -129,7 +122,7 @@ def _load_cache_data(cache_path: Path) -> dict[str, object] | None:
     try:
         with cache_path.open("rb") as handle:
             data = cast(dict[str, object], tomllib.load(handle))
-    except (tomllib.TOMLDecodeError, OSError) as exc:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as exc:
         log.warning(
             "alignment_reuse_cache_unreadable",
             path=str(cache_path),
@@ -181,8 +174,6 @@ def _entry_origin(entry: dict[str, object]) -> AlignmentReuseCacheOrigin:
 def _optional_identity_fields_for_table(table_name: str) -> set[str]:
     if table_name in {"reference", "comparison"}:
         return {"trim_end_frame_inclusive", "selected_audio_stream"}
-    if table_name == "settings":
-        return {"refinement_sample_rate"}
     return set()
 
 
@@ -211,7 +202,11 @@ def _table_matches_expected_identity(
         if expected_has_field != cached_has_field:
             return False
 
-    return True
+    # Cached tables must not carry keys outside the expected-plus-optional
+    # set: unknown extras (for example stale estimator tuning fields) miss
+    # rather than load against a partial identity.
+    allowed_fields = set(expected) | _optional_identity_fields_for_table(table_name)
+    return all(key in allowed_fields for key in cached_dict)
 
 
 def _entry_matches_request(
@@ -353,13 +348,7 @@ def _parse_stability(value: object) -> AlignmentStabilitySummary | None:
     if unknown_fields := data.keys() - allowed_fields:
         raise ValueError(f"unsupported stability fields: {sorted(unknown_fields)}")
     classification = data.get("classification")
-    if classification not in {
-        "stable",
-        "possible_drift",
-        "possible_discontinuity",
-        "variable",
-        "insufficient_evidence",
-    }:
+    if classification not in get_args(AlignmentStabilityClassification.__value__):
         raise ValueError("unsupported stability classification")
     valid_windows = data.get("valid_windows")
     if not isinstance(valid_windows, int) or isinstance(valid_windows, bool) or valid_windows < 0:
@@ -418,6 +407,7 @@ def load_reusable_offset_entries(
     comparisons: list[AlignmentClipRequest] | None = None,
 ) -> dict[str, ReusableAlignmentEntry] | None:
     """Load complete reusable previous-offset entries, or return ``None``."""
+    require_current_alignment_sources(request)
     cache_path = _cache_path(request)
     data = _load_cache_data(cache_path)
     if data is None:
@@ -467,6 +457,7 @@ def load_reusable_offset_entries(
                 exc_info=exc,
             )
             return None
+    require_current_alignment_sources(request)
     return results
 
 
@@ -481,14 +472,18 @@ def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCac
 def _is_write_eligible(provenance: AlignmentProvenance) -> bool:
     result = provenance.result
     origin = _origin_for_provenance(provenance)
-    return (
-        origin is not None
-        and result.applied
-        and result.frame_offset is not None
-        and result.time_offset_seconds is not None
-        and (origin != "computed" or result.stability is not None)
-        and (provenance.computed_result is None or provenance.computed_result.stability is not None)
-    )
+    if origin is None or not result.applied:
+        return False
+    if provenance.provenance == "computed_this_run":
+        attempt = result.audio_attempt
+        return (
+            attempt is not None
+            and attempt.decision.state == "trusted_automatic"
+            and result.stability is not None
+        )
+    if provenance.provenance == "shared_computed_offsets":
+        return result.stability is not None
+    return provenance.computed_result is None or provenance.computed_result.stability is not None
 
 
 def _entry_from_provenance(
@@ -557,6 +552,7 @@ def save_reusable_offsets(
 
     If any requested comparison is missing or has ineligible provenance, nothing is written.
     """
+    require_current_alignment_sources(request)
     if not request.comparisons:
         return
     by_comparison_key = {item.comparison_cache_key: item for item in provenances}
@@ -591,11 +587,14 @@ def save_reusable_offsets(
     }
 
     try:
-        with exclusive_file_lock(_cache_lock_path(cache_path)):
+        with exclusive_file_lock(_cache_lock_path(cache_path), abort_check=raise_if_cancelling):
             data = _initial_write_data(cache_path)
             source_sets = cast(dict[str, object], data["source_sets"])
             source_sets[source_set_key] = source_set
-            write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+            require_current_alignment_sources(request)
+            write_bytes_atomic(
+                cache_path, tomli_w.dumps(data).encode("utf-8"), publish_guard=raise_if_cancelling
+            )
     except OSError as exc:
         log.warning(
             "alignment_reuse_cache_write_failed",

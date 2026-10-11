@@ -110,7 +110,7 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   }
 
   try {
-    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     Write-Error -ErrorAction Continue "Invalid config file: $configPath`nRun install.cmd from the portable bundle."
     Set-FrameCompareShimExitCode -ExitCode 11

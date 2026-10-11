@@ -6,11 +6,12 @@ usage() {
 Usage: bash tools/verify_docker_integration.sh [--service NAME] [--no-build] [--no-cache] [--pytest-path PATH]
 
 Runs integration tests inside the Docker image where VapourSynth + FFmpeg are installed.
-Fails if any tests are skipped (the “real deps work” gate).
+Fails if any tests are skipped, xfailed, or xpassed (the “real deps work” gate).
 
 Defaults:
   --service frame-compare-test
-  Runs: pytest -v tests/integration/ tests/vs/
+  Runs: pytest -n 10 --dist loadgroup -v --ignore=tests/integration/test_alignment_streaming_resources.py \
+    tests/e2e/ tests/integration/ tests/vs/
 
 Environment:
   FRAME_COMPARE_REQUIRE_LIBPLACEBO=1  Require app-level libplacebo tonemap to succeed.
@@ -98,6 +99,14 @@ fi
 # Linux daemons that otherwise create a missing bind source as root.
 mkdir -p generated
 
+# Each invocation owns one fresh artifact directory.  Keep previous runs
+# available for debugging and let the workflow upload the complete retained
+# tree after the verifier exits, including when the test command fails.
+mkdir -p generated/e2e
+e2e_artifact_dir="$(mktemp -d generated/e2e/run.XXXXXX)"
+e2e_artifact_name="$(basename "$e2e_artifact_dir")"
+echo "Docker E2E artifacts: $e2e_artifact_dir"
+
 build_args=()
 if [[ "$no_cache" == "1" ]]; then
   build_args+=(--no-cache)
@@ -132,7 +141,19 @@ docker_cmd=(
   --rm
 )
 
-docker_env_args=()
+if ! test_host_uid="$(id -u)" || ! test_host_gid="$(id -g)"; then
+  echo "ERROR: unable to determine the invoking user's UID/GID for the Docker test run" >&2
+  exit 2
+fi
+docker_cmd+=(--user "$test_host_uid:$test_host_gid")
+
+docker_env_args=(
+  -e HOME=/tmp/framecompare-home
+  -e PYTHONUSERBASE=/home/framecompare/.local
+  -e FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+  -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e/$e2e_artifact_name
+  -e FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache
+)
 if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
   docker_env_args+=(-e FRAME_COMPARE_REQUIRE_LIBPLACEBO=1)
 fi
@@ -141,11 +162,14 @@ if [[ "${#docker_env_args[@]}" -gt 0 ]]; then
   docker_cmd+=("${docker_env_args[@]}")
 fi
 
+pytest_cli_args=()
 if [[ "${#pytest_paths[@]}" -eq 0 ]]; then
-  pytest_paths=(tests/integration/ tests/vs/)
+  pytest_paths=(tests/e2e/ tests/integration/ tests/vs/)
+  pytest_cli_args+=(--ignore=tests/integration/test_alignment_streaming_resources.py)
 fi
+pytest_cli_args+=("${pytest_paths[@]}")
 
-printf -v pytest_args ' %q' "${pytest_paths[@]}"
+printf -v pytest_args ' %q' "${pytest_cli_args[@]}"
 
 docker_cmd+=(
   "$service"
@@ -291,7 +315,7 @@ assert_true(
 loader_paths = os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
 assert_true(
     "/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth" in loader_paths,
-    "VapourSynth R79 wheel native-library path missing from LD_LIBRARY_PATH",
+    "VapourSynth R81 wheel native-library path missing from LD_LIBRARY_PATH",
 )
 assert_true("/usr/local/lib" in loader_paths, "/usr/local/lib missing from LD_LIBRARY_PATH")
 
@@ -348,13 +372,13 @@ plugin_dir = Path(vs.get_plugin_dir())
 extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
 plugin_namespaces = sorted(plugin.namespace for plugin in core.plugins())
 
-assert_true(VAPOURSYNTH_RELEASE == "R79", "application runtime contract is not R79")
+assert_true(VAPOURSYNTH_RELEASE == "R81", "application runtime contract is not R81")
 assert_true(
-    release_major == 79 and release_minor == 0,
-    f"expected VapourSynth R79, got {version!r}",
+    release_major == 81 and release_minor == 0,
+    f"expected VapourSynth R81, got {version!r}",
 )
 assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_major!r}")
-assert_true(api_minor == 2, f"expected VapourSynth API minor 2, got {api_minor!r}")
+assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_minor!r}")
 assert_true(plugin_dir.is_dir(), f"VapourSynth plugin directory missing: {plugin_dir}")
 assert_true(extra_plugin_path == "/opt/vapoursynth-extra-plugins", "extra plugin path mismatch")
 assert_true(plugin_namespaces, "core.plugins() returned no plugins")
@@ -678,7 +702,7 @@ assert_true(
 payload = json.loads(doctor_path.read_text(encoding="utf-8"))
 assert_true(payload.get("success") is True, f"doctor failed: {payload}")
 doctor = payload["doctor"]
-assert_true(doctor["baseline_version"] == VAPOURSYNTH_RELEASE, "doctor R79 baseline mismatch")
+assert_true(doctor["baseline_version"] == VAPOURSYNTH_RELEASE, "doctor R81 baseline mismatch")
 assert_true(
     doctor["media_runtime"]["fingerprints"]["full"] == expected_fingerprint,
     "doctor runtime fingerprint mismatch",
@@ -698,7 +722,7 @@ for required_check in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):
         checks[required_check]["status"] == "pass",
         f"doctor check failed: {required_check}",
     )
-assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R79", "doctor VS release")
+assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R81", "doctor VS release")
 assert_true(checks["vapoursynth"]["details"]["api_major"] == 4, "doctor VS API")
 assert_true(
     checks["lsmas"]["details"]["expected_native_release"] == LSMASH_WORKS_RELEASE,
@@ -745,14 +769,14 @@ print("DOCKER_PROOF doctor_json=ok")
 print(f"DOCKER_PROOF generated_fixture_matrix=ok fixtures={';'.join(fixture_results)}")
 print("DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo")
 PY
-python -c "import pytest, pytest_mock" >/dev/null 2>&1 || {
-  echo "ERROR: pytest and pytest-mock are missing from the Docker runtime image" >&2
+python -c "import pytest, pytest_mock, xdist" >/dev/null 2>&1 || {
+  echo "ERROR: pytest, pytest-mock, or pytest-xdist is missing from the Docker runtime image" >&2
   exit 13
 }
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 EOF
 )
-container_cmd+=$'\n'"python -m pytest -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
+container_cmd+=$'\n'"python -m pytest -n 10 --dist loadgroup -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
 
 set +e
 "${docker_cmd[@]}" "$container_cmd" 2>&1 | tee "$tmp_log"
@@ -764,15 +788,15 @@ if [[ "$exit_code" != "0" ]]; then
   exit "$exit_code"
 fi
 
-if grep -Eq '([1-9][0-9]* skipped|skipped=[1-9][0-9]*)' "$tmp_log"; then
-  echo "ERROR: docker integration tests reported skipped tests; this gate requires zero skips" >&2
+if grep -Eq '([1-9][0-9]* (skipped|xfailed|xpassed)|(skipped|xfailed|xpassed)=[1-9][0-9]*)' "$tmp_log"; then
+  echo "ERROR: docker integration tests reported skipped, xfailed, or xpassed tests; this gate requires zero non-passing outcomes" >&2
   exit 3
 fi
 
 required_proof_markers=(
   "DOCKER_PROOF cli=ok"
   "DOCKER_PROOF non_root=ok"
-  "DOCKER_PROOF vapoursynth_import=ok version=R79 api=4.2"
+  "DOCKER_PROOF vapoursynth_import=ok version=R81 api=4.3"
   "DOCKER_PROOF plugin_dir="
   "DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins"
   "DOCKER_PROOF core_plugins="

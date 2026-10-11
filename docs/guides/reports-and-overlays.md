@@ -1,106 +1,164 @@
 # Reports and overlays
 
+The report is a static HTML page for comparing every rendered frame across your
+sources; it opens in any current browser without a server.
+
+<figure class="fc-figure">
+  <img src="../images/report-overview.webp" alt="Frame Compare report in Slider mode comparing the EBU DVB PQ10 reference with the HLG10 comparison at frame 1000." width="1600" height="1000" loading="lazy">
+  <figcaption>Slider mode reveals one source against another across the divider; source labels name each side. Footage © EBU, CC BY 4.0.</figcaption>
+</figure>
+
+## Open and keep a report
+
 Every completed comparison can produce a static HTML report that works without a web
 server. The canonical `report.html` sits at the root of the reserved run folder beside
 `screenshots/`; keeping that folder together preserves relative image loading when the
 result is moved, archived, or opened on another machine.
 
-Set `report.embed_images = true` only when a single larger HTML file is more useful than
-the normal portable folder layout.
+`report.auto_open = true` is the default for an interactive local run. Auto-open is
+suppressed for JSON, quiet, and non-TTY output. A Docker container cannot open the host
+browser; use the host helper and the exact path printed by the run.
 
-## Viewer modes
+Set `report.embed_images = true` when one HTML file is more convenient than a folder;
+the file becomes much larger.
 
-### Single
+```toml
+[report]
+embed_images = true
+```
 
-Single view shows one selected or active source.
+## Views
 
-Use this mode for source-specific inspection and quick checks before entering a dedicated
-pair comparison.
+`report.default_mode` sets the view a report opens in: `slider` (default), `overlay`
+(Single), `diff`, or `blink`. Grid cannot be the default.
 
 ### Slider
 
-Slider mode reveals one source against another across a draggable divider. It is useful
-for spatial differences such as crop, scaling, haloing, texture, denoising, grain, and
-subtle tone changes.
+Slider reveals one source against another across a draggable divider. Use it for spatial
+differences such as crop, scaling, haloing, texture, denoising, grain, and subtle tone
+changes.
+
+### Single
+
+Single shows one source at a time for source-specific checks.
 
 ### Diff
 
-Diff mode emphasizes pixel differences between the selected pair. It is most useful as
-a locator: identify where sources diverge, then switch back to slider or blink to judge
-whether the difference is meaningful.
+Diff highlights pixel differences between the selected pair. Use it to find where
+sources diverge, then judge the difference in Slider or Blink.
 
-<figure class="fc-doc-figure">
-  <img src="../images/report-diff.webp" alt="Controlled-pattern diff locator illustrating how changed regions are highlighted for a selected source pair.">
-  <figcaption>This controlled-pattern image is a changed-region locator, not representative source footage; switch back to slider or blink to judge a natural-image difference.</figcaption>
-</figure>
+### Blink
 
-### Pair blink
-
-Blink alternates the selected pair. It is effective for grain structure, temporal
-artifacts, small exposure changes, and differences that are difficult to see with a
-stationary divider.
-
-Use a comfortable interval and avoid treating browser timing as a frame-accurate video
-playback measurement.
+Blink alternates the selected pair, which reveals grain structure, small exposure
+changes, and differences a stationary divider hides. Browser timing is not frame-accurate
+playback.
 
 ### Grid
 
-Grid mode displays several sources together so outliers are easy to identify. Use it to
-scan all encodes first, then choose a pair for detailed slider, diff, or blink review.
+Grid shows every source together so outliers stand out. Scan here first, then pick a pair
+for Slider, Diff, or Blink.
 
-## Navigation and inspection
+<figure class="fc-figure">
+  <img src="../images/report-grid.webp" alt="Report in Grid view showing the PQ10 reference and HLG10 comparison side by side at frame 1000." width="1600" height="1000" loading="lazy">
+  <figcaption>Grid view keeps every source on screen; pick the outlier, then switch to Slider. Footage © EBU, CC BY 4.0.</figcaption>
+</figure>
 
-The viewer supports:
+## Navigate and inspect
 
-- frame and category navigation;
-- a filmstrip for visual scanning;
-- keyboard-oriented next/previous review;
-- pan, zoom, fit, and viewport synchronization;
-- source and pair selection;
-- a metadata inspector;
-- a lens for close inspection;
-- browser-local review state and notes.
+Move between frames with the frame selector, the arrow buttons, or the filmstrip, which
+filters by category and has Compact, Normal, and Large sizes. Choose the pair with the
+two source selectors and swap them with the button between them. The floating palette
+over the image holds zoom, fit, viewport reset, fullscreen, **Source labels**, and
+**Lens**. `report.include_filmstrip = false` hides the filmstrip, and `Offset: none` in
+the toolbar refers to a spatial image offset, not to timing alignment.
 
-Report payload version 1.2 adds release-aware source presentation without changing
-canonical source identity. Ordinary controls use compact, collision-safe release
-descriptors; constrained grid and lens labels use shorter variants. Explicit source
-labels remain authoritative. The Clips inspector and Report Information retain the
-full primary identity and exact, wrapping filename, so shortened controls do not hide
-the archival source name.
+Source selectors, the optional source labels, and baked overlays serve different
+contexts. Selectors identify the source at the point of selection. Source labels stay
+anchored to the viewport while zooming and panning, and are useful when baked text is
+outside the visible area. Baked text stays with screenshots uploaded to slow.pics and is
+unaffected by the source-labels toggle. When baked text already provides enough context,
+hide source labels to reduce overlapping text; hiding them does not make the report blind
+or anonymous, since source identity can remain in baked overlays, filenames, and report
+metadata.
 
-The v1.2 payload also preserves two distinct frame domains. The selected report frame
-is the common comparison frame. Each visible image carries its own mapped, untrimmed
-source frame, exact picture type, and exact-frame Dolby Vision RPU presence when the
-renderer can prove them. The Frame inspector updates that source list with the current
-Single, Slider, Diff, Blink, or Grid view; it does not present one reference-source
-frame as universal truth.
+Source labels show each source's complete file size. File size is context, not bitrate or
+a measure of quality. The header shows when the report was generated in your browser's
+locale; hover it for the exact timestamp.
 
-The Clips inspector keeps archival source facts compact: complete file size, observed
-signal, actual presentation state, and a non-full active picture when applicable. On
-desktop it uses a wider responsive drawer; on narrower screens it overlays the stage.
-Source names, filenames, and long signal/presentation values wrap without requiring a
-document or Inspector horizontal scrollbar. Open Report Information for the Rendering
-section. It always states whether tonemapping was applied and, when applied, provides
-the full resolved settings in a closed-by-default advanced disclosure. No additional
-report tab or permanent metadata panel is created.
+### Inspector
 
-Visible source HUD labels in Single, Slider, Diff, Blink, and Grid views append that
-same complete file size when available. File size is decision context only: it is not
-bitrate or evidence of visual quality, efficiency, or a comparison winner. Hiding the
-HUD hides the size together with the source labels, including from Grid cell accessible
-names.
+Open the Inspector with **Inspector** or <kbd>I</kbd>. Its **Frame** tab lists every
+source's own frame number and picture type for the current comparison frame. **Clips**
+shows each source's name, filename, picture size, length, file size, presentation, and
+signal. **Image offset** shifts a source spatially and never changes timing. **Review**
+holds bookmarks, tags, notes, and the preferred source.
 
-The primary toolbar keeps frame navigation, view modes, and mode-specific context in
-stable zones at desktop widths. It reflows to two rows and then a narrow stack as space
-decreases, without changing keyboard order or replacing native controls.
+<figure class="fc-figure">
+  <img src="../images/report-inspector.webp" alt="Report with the Inspector open on the Clips tab, listing each source's picture size, length, file size, presentation, and signal." width="1600" height="1000" loading="lazy">
+  <figcaption>The Clips tab shows each source's identity, HDR signal, and how it was presented for review. Footage © EBU, CC BY 4.0.</figcaption>
+</figure>
 
-Viewer state such as the current frame, mode, selected clips, reveal position, viewport,
+### Lens
+
+Turn the lens on with **Lens** or <kbd>L</kbd> to magnify the area under the pointer.
+Lens settings can add a caption naming the magnified source; in Diff it names both
+sources. Drag the lens window's grip to move it.
+
+<figure class="fc-figure">
+  <img src="../images/report-lens.webp" alt="Report in Slider mode with the lens magnifying the area under the pointer." width="1600" height="1000" loading="lazy">
+  <figcaption>The lens magnifies the area under the pointer; drag its grip to move the window. Footage © EBU, CC BY 4.0.</figcaption>
+</figure>
+
+### Report information
+
+The **Report information** button in the header opens the Report Information dialog: the
+title, report ID, generated time, content, the **Opens in** view, the default pair, the
+slow.pics link when uploaded, every source, and a Rendering section that states whether
+tonemapping was applied and with which settings.
+
+<figure class="fc-figure fc-figure--narrow">
+  <img src="../images/report-information.webp" alt="Report Information dialog listing the title, report ID, generated time, content, the Opens in view, the default pair, and the sources." loading="lazy">
+  <figcaption>Report Information holds the report's metadata and rendering settings in one place. Footage © EBU, CC BY 4.0.</figcaption>
+</figure>
+
+### Keyboard shortcuts
+
+| Action | Keys |
+| --- | --- |
+| Previous or next frame | <kbd>←</kbd> <kbd>→</kbd> |
+| First or last frame | <kbd>Home</kbd> <kbd>End</kbd> |
+| Cycle the source | <kbd>↑</kbd> <kbd>↓</kbd> |
+| Select a source directly | <kbd>1</kbd>–<kbd>9</kbd> |
+| Swap the pair | <kbd>X</kbd> |
+| Slider, Single, Diff, Blink, Grid | <kbd>S</kbd> <kbd>O</kbd> <kbd>D</kbd> <kbd>B</kbd> <kbd>G</kbd> |
+| Toggle source labels | <kbd>H</kbd> |
+| Toggle the filmstrip | <kbd>F</kbd> |
+| Toggle the Inspector | <kbd>I</kbd> |
+| Toggle the lens | <kbd>L</kbd> |
+| Pause Blink or change its speed | <kbd>Space</kbd> <kbd>[</kbd> <kbd>]</kbd> |
+| Zoom in or out | <kbd>+</kbd> <kbd>-</kbd> |
+| Reset the viewport | <kbd>R</kbd> or double-click |
+| Open help | <kbd>?</kbd> |
+| Close a panel or exit fullscreen | <kbd>Esc</kbd> |
+
+## Review notes
+
+Viewer state such as the current frame, mode, selected sources, reveal position, viewport,
 and review notes can persist in the browser for that report. It does not rewrite the
 HTML or run directory. Clearing browser storage or opening the report under a different
-URL can remove that local state. Existing v1.1 reports remain self-contained and are not
-migrated. Regenerated v1.2 reports start with fresh browser-local viewer and review state.
-Review JSON is scoped to the exact report ID and payload version; it is not a migration
-format.
+URL can remove that local state.
+
+Exported review JSON applies only to the report it came from.
+
+The Review tab holds the bookmark, tag, note, and **Preferred clip** fields alongside
+**Export review JSON** and **Import review JSON**, the only ways to keep or transfer
+notes outside the browser that made them. A persistent line states how many review
+records are saved in this browser, and a fixed note beside it reminds that notes are
+not stored in the report file. When browser storage is unavailable or a save fails, the
+viewer says changes are kept only for that session instead of claiming a save that did
+not happen; export review JSON while that message is showing to keep the notes. Import
+previews additions, changes, and removals before merge or replace is applied, and an
+import that cannot be validated or saved leaves existing records untouched.
 
 ## Screenshot overlays
 
@@ -114,9 +172,18 @@ Choose a baked screenshot overlay with the `--overlay` run option or
 | `standard` | Minimal provenance plus one selection line, source resolution/size, and transformed output size when relevant |
 | `diagnostic` | Standard context plus only observed signal, applied tonemap, HDR static, exceptional geometry, and proven exact-frame DV facts |
 
+Bake the extra evidence into every screenshot:
+
+```toml
+[screenshots]
+overlay_mode = "diagnostic"
+```
+
+`screenshots.include_frame_number = false` removes the frame number from baked overlays.
+
 Frame numbering distinguishes the comparison frame from each mapped source frame when
 they differ. The denominator, when shown, is the untrimmed source total. Picture type is
-read from the exact selected original source frame; unknown values are simply omitted,
+read from the exact selected original source frame; unknown values are omitted,
 and screenshot generation still succeeds.
 
 File size is the complete container storage cost, formatted with binary MiB/GiB/TiB
@@ -130,9 +197,6 @@ Frame Compare uses its bundled Inter Regular font for deterministic overlay typo
 and glyph coverage across packaged Windows and Docker runtimes. The bundled font is
 distributed under the SIL Open Font License 1.1.
 
-The ordinary report is not a blind-comparison artifact: source identity can appear in
-baked overlays, physical filenames, report metadata, and viewer labels.
-
 ## Recommended review sequence
 
 1. Start in grid mode to identify obvious outliers.
@@ -144,22 +208,17 @@ baked overlays, physical filenames, report metadata, and viewer labels.
 7. Check several categories and both early and late aligned frames.
 8. Record notes only after confirming source identity and alignment.
 
-## Opening behavior
-
-`report.auto_open = true` is the default for an interactive local run. Auto-open is
-suppressed for JSON, quiet, and non-TTY output. A Docker container cannot open the host
-browser; use the host helper and the exact path printed by the run.
-
-## Archiving or sharing a local report
+## Archive or share a report
 
 - Keep `report.html` and `screenshots/` together.
 - Archive the complete run folder, not selected individual files.
 - Prefer `report.embed_images = true` only when a single-file artifact is required.
 - Review filenames and metadata before sharing; they may disclose source names.
 - Browser-local notes are not automatically included in the run folder.
-- Version 1.2 report metadata is archival raw evidence and resolved rendering state;
-  moving the complete report folder does not turn local paths into identity data.
+
+The ordinary report is not a blind-comparison artifact: source identity can appear in
+baked overlays, physical filenames, report metadata, and viewer labels.
 
 For exact opening precedence, persistence, and report-generation behavior, see the
 [report contract](../current-cli-contract.md#report-auto-open-ownership) and
-[Current Architecture](../current-architecture.md#report-viewer).
+[Current architecture](../current-architecture.md#report-viewer).

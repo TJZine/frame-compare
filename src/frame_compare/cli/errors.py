@@ -7,6 +7,7 @@ from enum import IntEnum
 from rich.markup import escape
 
 from frame_compare.errors import FrameCompareError, JSONValue
+from frame_compare.utils.terminal_theme import FAIL, MUTED, WARN
 
 
 class ExitCode(IntEnum):
@@ -47,18 +48,18 @@ def format_error_console(
 ) -> str:
     """Format error for Rich console output with styled code and hint."""
     output = (
-        f"[bold red]\u2717[/] Error [red]{escape(f'[{error.code}]')}[/]: "
+        f"[bold {FAIL}]\u2717[/] Error [{FAIL}]{escape(f'[{error.code}]')}[/]: "
         f"{escape(error.context.message)}\n"
     )
     if error.hint:
-        output += f"  [yellow]Hint:[/] {escape(error.hint)}\n"
+        output += f"  [{WARN}]Hint:[/] {escape(error.hint)}\n"
 
     if (verbose or verbose_hint is None) and error.context.details:
-        output += "\n  [dim]Details:[/]\n"
+        output += f"\n  [{MUTED}]Details:[/]\n"
         for k, v in error.context.details.items():
-            output += f"    [dim]{escape(str(k))}:[/] {escape(str(v))}\n"
+            output += f"    [{MUTED}]{escape(str(k))}:[/] {escape(str(v))}\n"
     elif error.context.details and verbose_hint is not None:
-        output += f"\n  [dim]For more details, run with {escape(verbose_hint)}[/]"
+        output += f"\n  [{MUTED}]For more details, run with {escape(verbose_hint)}[/]"
 
     return output.rstrip()
 

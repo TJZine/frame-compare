@@ -11,8 +11,10 @@ from pytest import MonkeyPatch
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolidated_fps_report
-from frame_compare.orchestration.progress import select_reporter, uses_rich_progress
+from frame_compare.orchestration.progress import uses_rich_progress
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.progress import PlainProgressReporter
+from frame_compare.utils.run_warnings import RunWarning
 
 from .cli_helpers import (
     _invoke_run_with_minimal_workspace,
@@ -36,7 +38,7 @@ def test_run_respects_no_color_env_var_presence_even_if_empty(
         def print(self, *_args: object, **_kwargs: object) -> None:
             return
 
-    monkeypatch.setattr("frame_compare.cli.entry.Console", FakeConsole)
+    monkeypatch.setattr("frame_compare.cli.entry.human_console", FakeConsole)
     monkeypatch.setattr(
         "frame_compare.cli.entry.runner.run",
         lambda _request, dependencies=None: RunResult(
@@ -62,13 +64,12 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         print("Clip Overview", file=sys.stderr)
         print("Frame Alignment", file=sys.stderr)
         return RunResult(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
-            warnings=["metadata skipped"],
+            warnings=[RunWarning("sources", "skipped", "metadata skipped")],
         )
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -79,7 +80,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     stdout = _normalize_cli_output(result.stdout)
     stderr = _normalize_cli_output(result.stderr)
     assert "Run plan" in stdout
-    assert "Comparison completed" in stdout
+    assert "Comparison complete" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
     assert "Clip Overview" not in stdout
@@ -95,13 +96,7 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
     tmp_path: Path,
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
-        reporter = select_reporter(
-            quiet=_request.quiet,
-            json_output=_request.json_output,
-            no_color=_request.no_color,
-            force_tty=False,
-        )
+        reporter = PlainProgressReporter()
         emit_consolidated_fps_report(
             stage="after_load_sources",
             clips=[
@@ -168,7 +163,7 @@ def test_run_json_is_machine_only_and_omits_post_upload_actions(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    warning = "slow.pics webhook: delivery failed"
+    warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(

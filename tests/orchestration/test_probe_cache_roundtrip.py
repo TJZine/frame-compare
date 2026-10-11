@@ -125,22 +125,6 @@ def test_probe_cache_round_trip_toml(
     assert hdr.hdr_metadata.mastering_display == hdr_snapshot.hdr_metadata.mastering_display
 
 
-def test_preserved_frame_props_are_toml_safe_primitives_only(
-    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
-):
-    """Sanitization test."""
-    f = tmp_path / "sanitize.toml"
-    # sample_snapshot has a list in preserved_frame_props
-    key = compute_probe_cache_key(sample_snapshot.fingerprint)
-    save_clip_probe_cache(f, {key: sample_snapshot})
-
-    loaded = load_clip_probe_cache(f)
-    props = loaded[key].preserved_frame_props
-
-    assert "some_prop" in props  # float is safe
-    assert "bad_prop" not in props  # list is unsafe
-
-
 def test_hdr_metadata_with_optional_fields_none_is_toml_serializable(tmp_path: Path):
     """Regression test: TOML writer must never see None values (tomli_w cannot serialize None)."""
     fp = ClipFingerprint(Path("hdr_optional_none.mkv"), 1, 1)

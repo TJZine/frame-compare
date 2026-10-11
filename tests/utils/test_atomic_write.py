@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -14,12 +15,15 @@ def test_write_text_atomic_replaces_existing_file(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "new"
 
 
-def test_write_text_atomic_writes_empty(tmp_path: Path) -> None:
-    target = tmp_path / "out.txt"
-
-    write_text_atomic(target, "", encoding="utf-8")
-
-    assert target.read_text(encoding="utf-8") == ""
+@pytest.mark.parametrize(("filename", "content"), [("out.txt", ""), ("out.bin", b"")])
+def test_atomic_write_empty_content(tmp_path: Path, filename: str, content: str | bytes) -> None:
+    target = tmp_path / filename
+    if isinstance(content, str):
+        write_text_atomic(target, content, encoding="utf-8")
+        assert target.read_text(encoding="utf-8") == ""
+    else:
+        write_bytes_atomic(target, content)
+        assert target.read_bytes() == b""
 
 
 def test_write_text_atomic_uses_normal_new_file_permissions(tmp_path: Path) -> None:
@@ -47,14 +51,16 @@ def test_write_text_atomic_does_not_read_process_umask(
     assert target.read_text(encoding="utf-8") == "content"
 
 
-def test_write_text_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
-    target = tmp_path / "out.txt"
-
+@pytest.mark.parametrize("filename", ["out.txt", "out.bin"])
+def test_atomic_write_rejects_none_and_cleans_up(tmp_path: Path, filename: str) -> None:
+    target = tmp_path / filename
     with pytest.raises(TypeError):
-        write_text_atomic(target, None, encoding="utf-8")  # type: ignore[arg-type]
-
+        if filename == "out.txt":
+            write_text_atomic(target, cast(str, None), encoding="utf-8")
+        else:
+            write_bytes_atomic(target, cast(bytes, None))
     assert not target.exists()
-    assert list(tmp_path.glob(".out.txt.*")) == []
+    assert list(tmp_path.glob(f".{filename}.*")) == []
 
 
 def test_write_text_atomic_cleans_up_on_fsync_failure(
@@ -82,24 +88,6 @@ def test_write_bytes_atomic_creates_parent_dirs(tmp_path: Path) -> None:
     assert target.read_bytes() == b"abc"
 
 
-def test_write_bytes_atomic_writes_empty(tmp_path: Path) -> None:
-    target = tmp_path / "out.bin"
-
-    write_bytes_atomic(target, b"")
-
-    assert target.read_bytes() == b""
-
-
-def test_write_bytes_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
-    target = tmp_path / "out.bin"
-
-    with pytest.raises(TypeError):
-        write_bytes_atomic(target, None)  # type: ignore[arg-type]
-
-    assert not target.exists()
-    assert list(tmp_path.glob(".out.bin.*")) == []
-
-
 def test_write_bytes_atomic_preserves_existing_file_permissions(tmp_path: Path) -> None:
     target = tmp_path / "out.bin"
     target.write_bytes(b"old")
@@ -112,22 +100,30 @@ def test_write_bytes_atomic_preserves_existing_file_permissions(tmp_path: Path) 
     assert (target.stat().st_mode & 0o777) == expected_mode
 
 
-def test_write_text_atomic_does_not_replace_target_on_os_replace_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("filename", "error_type"),
+    [("out.toml", OSError), ("out.bin", PermissionError)],
+)
+def test_atomic_write_preserves_target_when_replace_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    error_type: type[OSError],
 ) -> None:
-    target = tmp_path / "out.toml"
-    target.write_text("old", encoding="utf-8")
+    target = tmp_path / filename
+    target.write_bytes(b"old")
 
-    def _boom(_src: str, _dst: Path) -> None:
-        raise OSError("replace failed")
+    def fail_replace(_src: str, _dst: Path) -> None:
+        raise error_type("replace failed")
 
-    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _boom)
-
-    with pytest.raises(OSError, match="replace failed"):
-        write_text_atomic(target, "new", encoding="utf-8")
-
-    assert target.read_text(encoding="utf-8") == "old"
-    assert list(tmp_path.glob(".out.toml.*")) == []
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", fail_replace)
+    with pytest.raises(error_type, match="replace failed"):
+        if filename == "out.toml":
+            write_text_atomic(target, "new", encoding="utf-8")
+        else:
+            write_bytes_atomic(target, b"new")
+    assert target.read_bytes() == b"old"
+    assert list(tmp_path.glob(f".{filename}.*")) == []
 
 
 def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
@@ -155,19 +151,33 @@ def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
     assert "cleanup failed" in "\n".join(exc_info.value.__notes__)
 
 
-def test_write_bytes_atomic_does_not_replace_target_on_os_replace_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("binary", [False, True])
+def test_publish_guard_runs_after_fsync_and_cleans_temp_on_base_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binary: bool,
 ) -> None:
-    target = tmp_path / "out.bin"
+    import os
+
+    target = tmp_path / "existing"
     target.write_bytes(b"old")
+    events: list[str] = []
+    real_fsync = os.fsync
 
-    def _boom(_src: str, _dst: Path) -> None:
-        raise PermissionError("replace failed")
+    def fsync(fd: int) -> None:
+        real_fsync(fd)
+        events.append("fsynced")
 
-    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _boom)
+    def guard() -> None:
+        assert events == ["fsynced"]
+        assert next(tmp_path.glob(".existing.*")).read_bytes() == b"new"
+        raise KeyboardInterrupt()
 
-    with pytest.raises(PermissionError, match="replace failed"):
-        write_bytes_atomic(target, b"new")
-
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", fsync)
+    with pytest.raises(KeyboardInterrupt):
+        if binary:
+            write_bytes_atomic(target, b"new", publish_guard=guard)
+        else:
+            write_text_atomic(target, "new", publish_guard=guard)
     assert target.read_bytes() == b"old"
-    assert list(tmp_path.glob(".out.bin.*")) == []
+    assert list(tmp_path.glob(".existing.*")) == []

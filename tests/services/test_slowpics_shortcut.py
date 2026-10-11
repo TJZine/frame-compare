@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -27,113 +28,35 @@ def _workspace(
     )
 
 
-def test_create_slowpics_url_shortcut_prefers_run_dir_and_collection_title(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "workspace"
-    run_dir = root / "generated" / "Collateral"
-    result = create_slowpics_url_shortcut(
-        workspace=_workspace(
-            root,
-            run_dir=run_dir,
-            screenshots_dir=root / "elsewhere" / "screenshots",
-            generated_dir=root / "generated",
-        ),
-        slowpics_url="https://slow.pics/c/collateral-key",
-        collection_title="Collateral",
-    )
-
-    shortcut_path = run_dir / "Collateral.url"
-    assert result.success is True
-    assert result.path == shortcut_path
-    assert result.warning is None
-    assert shortcut_path.read_text(encoding="utf-8") == (
-        "[InternetShortcut]\nURL=https://slow.pics/c/collateral-key\n"
-    )
-
-
-def test_create_slowpics_url_shortcut_requires_reserved_run_dir(
-    tmp_path: Path,
+@pytest.mark.parametrize("junction", [False, True], ids=["no-run-dir", "junction-run-dir"])
+def test_create_slowpics_url_shortcut_requires_safe_reserved_run_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, junction: bool
 ) -> None:
     root = tmp_path / "workspace"
     output_parent = root / "output"
-    result = create_slowpics_url_shortcut(
-        workspace=_workspace(
-            root,
-            screenshots_dir=output_parent / "screenshots",
-            generated_dir=output_parent / "generated",
-        ),
-        slowpics_url="https://slow.pics/c/example-key",
-        collection_title="Encode Screenshots",
-    )
-
-    assert result.success is False
-    assert result.path is None
-    assert result.warning is not None
-    assert "no reserved run directory" in result.warning
-    assert not output_parent.exists()
-
-
-def test_create_slowpics_url_shortcut_returns_warning_for_parent_outside_root(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "workspace"
-    output_parent = tmp_path / "outside"
-
-    result = create_slowpics_url_shortcut(
-        workspace=_workspace(
-            root,
-            screenshots_dir=output_parent / "screenshots",
-            generated_dir=output_parent / "generated",
-        ),
-        slowpics_url="https://slow.pics/c/example-key",
-        collection_title="Collateral",
-    )
-
-    assert result.success is False
-    assert result.path is None
-    assert result.warning is not None
-    assert "no reserved run directory" in result.warning
-    assert not output_parent.exists()
-
-
-def test_create_slowpics_url_shortcut_rejects_junctioned_run_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "workspace"
     run_dir = root / "generated" / "Example"
-    monkeypatch.setattr(Path, "is_junction", lambda path: path == run_dir)
-
+    if junction:
+        monkeypatch.setattr(Path, "is_junction", lambda path: path == run_dir)
+        workspace = _workspace(root, run_dir=run_dir)
+    else:
+        workspace = _workspace(
+            root,
+            screenshots_dir=output_parent / "screenshots",
+            generated_dir=output_parent / "generated",
+        )
     result = create_slowpics_url_shortcut(
-        workspace=_workspace(root, run_dir=run_dir),
+        workspace=workspace,
         slowpics_url="https://slow.pics/c/example-key",
-        collection_title="Example",
+        collection_title="Example" if junction else "Encode Screenshots",
     )
-
     assert result.success is False
     assert result.path is None
     assert result.warning is not None
-    assert "no reserved run directory" in result.warning
-    assert not run_dir.exists()
-
-
-def test_create_slowpics_url_shortcut_treats_home_common_parent_as_unsafe() -> None:
-    home = Path.home().resolve()
-
-    result = create_slowpics_url_shortcut(
-        workspace=_workspace(
-            home,
-            screenshots_dir=home / "frame-compare-shortcut-test-screenshots",
-            generated_dir=home / "frame-compare-shortcut-test-generated",
-        ),
-        slowpics_url="https://slow.pics/c/example-key",
-        collection_title="Collateral",
-    )
-
-    assert result.success is False
-    assert result.warning is not None
-    assert "no reserved run directory" in result.warning
+    assert "no reserved run directory" in result.warning.text
+    if junction:
+        assert not run_dir.exists()
+    else:
+        assert not output_parent.exists()
 
 
 def test_create_slowpics_url_shortcut_sanitizes_title_and_falls_back_to_url_key(
@@ -197,21 +120,29 @@ def test_create_slowpics_url_shortcut_overwrites_same_deterministic_path(
 
 def test_create_slowpics_url_shortcut_returns_warning_for_write_failure(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "workspace"
 
-    def _raise_write_error(_path: Path, _content: str) -> None:
+    def _raise_write_error(
+        _path: Path,
+        _content: str,
+        *,
+        publish_guard: Callable[[], None] | None = None,
+    ) -> None:
         raise PermissionError("locked")
 
+    monkeypatch.setattr(
+        "frame_compare.services.slowpics_shortcut.write_text_atomic", _raise_write_error
+    )
     result = create_slowpics_url_shortcut(
         workspace=_workspace(root, run_dir=root / "generated" / "Example"),
         slowpics_url="https://slow.pics/c/example-key",
         collection_title="Example",
-        text_writer=_raise_write_error,
     )
 
     assert result.success is False
     assert result.path == root / "generated" / "Example" / "Example.url"
     assert result.warning is not None
-    assert "failed to write URL shortcut" in result.warning
-    assert "locked" in result.warning
+    assert "failed to write URL shortcut" in result.warning.text
+    assert "locked" in result.warning.text

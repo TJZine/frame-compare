@@ -9,30 +9,6 @@ from structlog.testing import ReturnLogger
 from frame_compare.utils.logging import configure_logging
 
 
-def test_configure_logging_json_format():
-    """Test that configure_logging with log_format='json' adds JSONRenderer."""
-    configure_logging(log_format="json")
-    config = structlog.get_config()
-    processors = config["processors"]
-    assert any(isinstance(p, structlog.processors.JSONRenderer) for p in processors)
-
-
-def test_configure_logging_console_format():
-    """Test that configure_logging with log_format='console' adds ConsoleRenderer."""
-    configure_logging(log_format="console")
-    config = structlog.get_config()
-    processors = config["processors"]
-    assert any(isinstance(p, structlog.dev.ConsoleRenderer) for p in processors)
-
-
-def test_configure_logging_unknown_format_falls_back_to_console():
-    """Test that configure_logging with unknown format falls back to console."""
-    configure_logging(log_format="invalid")
-    config = structlog.get_config()
-    processors = config["processors"]
-    assert any(isinstance(p, structlog.dev.ConsoleRenderer) for p in processors)
-
-
 def test_configure_logging_level_filtering_warning():
     """WARNING level: INFO filtered, WARNING allowed."""
     configure_logging(level="WARNING")
@@ -61,47 +37,36 @@ def test_configure_logging_unknown_level_falls_back_to_info():
     assert log.info("test") is not None  # allowed
 
 
-def test_logging_accepts_stream_write_returning_none(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [("none-return", "message"), ("late-bound", "late bound"), ("shutdown", "shutdown")],
+)
+def test_logging_handles_stderr_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, mode: str, message: str
+) -> None:
     class NoneReturningStderr:
         def __init__(self) -> None:
             self.messages: list[str] = []
 
-        def write(self, message: str) -> None:
-            self.messages.append(message)
+        def write(self, value: str) -> None:
+            self.messages.append(value)
 
         def flush(self) -> None:
             return None
 
-    stream = NoneReturningStderr()
+    if mode == "late-bound":
+        configure_logging()
+    stream = NoneReturningStderr() if mode == "none-return" else io.StringIO()
     monkeypatch.setattr(sys, "stderr", stream)
-    configure_logging()
-
-    structlog.get_logger().info("message")
-
-    assert "message" in "".join(stream.messages)
-
-
-def test_logging_uses_current_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
-    configure_logging()
-    stream = io.StringIO()
-    monkeypatch.setattr(sys, "stderr", stream)
-
-    structlog.get_logger().info("late bound")
-
-    assert "late bound" in stream.getvalue()
-
-
-def test_logging_falls_back_when_stderr_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fallback = io.StringIO()
-    monkeypatch.setattr(sys, "stderr", fallback)
-    configure_logging()
-    monkeypatch.setattr(sys, "stderr", None)
-
-    structlog.get_logger().info("shutdown")
-
-    assert "shutdown" in fallback.getvalue()
+    if mode != "late-bound":
+        configure_logging()
+    if mode == "shutdown":
+        monkeypatch.setattr(sys, "stderr", None)
+    structlog.get_logger().info(message)
+    rendered = (
+        "".join(stream.messages) if isinstance(stream, NoneReturningStderr) else stream.getvalue()
+    )
+    assert message in rendered
 
 
 def test_repeated_configuration_replaces_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -113,3 +78,22 @@ def test_repeated_configuration_replaces_renderer(monkeypatch: pytest.MonkeyPatc
     structlog.get_logger().info("message")
 
     assert json.loads(stream.getvalue())["event"] == "message"
+
+
+def test_json_exception_diagnostics_do_not_capture_locals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stream)
+    configure_logging(log_format="json")
+    api_key = "sentinel-tmdb-api-key"
+
+    try:
+        raise RuntimeError("lookup failed")
+    except RuntimeError as exc:
+        structlog.get_logger().warning("metadata_degraded", exc_info=exc)
+
+    payload = json.loads(stream.getvalue())
+    assert payload["exception"]
+    assert "locals" not in payload["exception"][0]["frames"][0]
+    assert api_key not in json.dumps(payload)

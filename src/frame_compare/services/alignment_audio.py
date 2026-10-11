@@ -1,23 +1,44 @@
-"""FFmpeg and ffprobe helpers for audio alignment."""
+"""ffprobe stream probing and FFmpeg recipes for whole-track audio alignment."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
 from typing import cast
 
-import numpy as np
-
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentChannelStrategy
+from frame_compare.utils.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    AudioDurationBasis,
+    AudioMetadataMatch,
+    AudioPairSide,
+    AudioStartBasis,
+    SelectedAudioStreamEvidence,
+)
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
-_FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
+
+MAX_RETIME_RATE = 384_000
+
+
+@dataclass(frozen=True)
+class AudioStreamTimeline:
+    """Selected stream timing normalized to its own zero-based audio timeline."""
+
+    start_time: Fraction
+    duration: Fraction | None
+    time_base: Fraction | None
+    duration_basis: AudioDurationBasis
+    input_start_time: Fraction = Fraction(0)
+    start_time_basis: AudioStartBasis = "default_zero"
+    input_start_time_basis: AudioStartBasis = "default_zero"
 
 
 @dataclass(frozen=True)
@@ -34,6 +55,36 @@ class AudioStreamInfo:
     is_default: bool
     is_original: bool
     is_commentary: bool
+    timeline: AudioStreamTimeline = field(
+        default_factory=lambda: AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=None,
+            time_base=None,
+            duration_basis="unavailable",
+        )
+    )
+
+
+@dataclass(frozen=True)
+class VideoStreamStart:
+    """Start time of the first non-attached-pic video stream (A5 compensation)."""
+
+    start_time: Fraction
+    basis: AudioStartBasis
+
+
+@dataclass(frozen=True)
+class AudioStreamSelection:
+    """Resolved audio stream plus the companion video start for A5 compensation."""
+
+    stream: AudioStreamInfo
+    video_start: VideoStreamStart
+
+
+@dataclass(frozen=True)
+class ProbedStreams:
+    audio: tuple[AudioStreamInfo, ...]
+    video_start: VideoStreamStart
 
 
 def _decode_stderr(stderr: bytes) -> str:
@@ -61,6 +112,47 @@ def _parse_optional_int(value: object) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _parse_optional_fraction(value: object) -> Fraction | None:
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        return None
+    try:
+        parsed = Fraction(Decimal(str(value).strip()))
+    except (InvalidOperation, OverflowError, ValueError, ZeroDivisionError):
+        return None
+    return parsed
+
+
+def _parse_optional_duration(value: object) -> Fraction | None:
+    parsed = _parse_optional_fraction(value)
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _parse_time_base(value: object) -> Fraction | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = Fraction(value)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _parse_duration_tag(value: object) -> Fraction | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = Fraction(Decimal(parts[2]))
+    except (InvalidOperation, OverflowError, ValueError, ZeroDivisionError):
+        return None
+    duration = hours * 3600 + minutes * 60 + seconds
+    return duration if duration > 0 else None
 
 
 def _parse_flag(value: object) -> bool:
@@ -143,7 +235,12 @@ def probe_fps(video_path: Path) -> Fraction:
 
 
 def _parse_audio_stream(
-    stream_obj: object, *, audio_stream_index: int, video_path: Path
+    stream_obj: object,
+    *,
+    audio_stream_index: int,
+    video_path: Path,
+    input_start_time: Fraction,
+    input_start_time_basis: AudioStartBasis,
 ) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
         raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
@@ -161,6 +258,28 @@ def _parse_audio_stream(
     tags_obj = stream.get("tags", {})
     tags_dict = cast(dict[str, object], tags_obj) if isinstance(tags_obj, dict) else {}
 
+    parsed_start_time = _parse_optional_fraction(stream.get("start_time"))
+    start_time = parsed_start_time if parsed_start_time is not None else Fraction(0)
+    time_base = _parse_time_base(stream.get("time_base"))
+    duration_ts = _parse_optional_int(stream.get("duration_ts"))
+    duration: Fraction | None = None
+    duration_basis: AudioDurationBasis = "unavailable"
+    if duration_ts is not None and duration_ts > 0 and time_base is not None:
+        duration = duration_ts * time_base
+        duration_basis = "duration_ts"
+    if duration is None:
+        duration = _parse_optional_duration(stream.get("duration"))
+        if duration is not None:
+            duration_basis = "stream_duration"
+    if duration is None:
+        duration = _parse_duration_tag(tags_dict.get("DURATION") or tags_dict.get("duration"))
+        if duration is not None:
+            duration = max(Fraction(0), duration - start_time)
+            duration_basis = "stream_tag"
+    if duration is not None and duration <= 0:
+        duration = None
+        duration_basis = "unavailable"
+
     return AudioStreamInfo(
         audio_stream_index=audio_stream_index,
         absolute_stream_index=absolute_stream_index,
@@ -173,22 +292,47 @@ def _parse_audio_stream(
         is_original=_parse_flag(disposition_dict.get("original")),
         is_commentary=_is_commentary_tag(disposition_dict.get("comment"))
         or _is_commentary_tag(tags_dict.get("comment")),
+        timeline=AudioStreamTimeline(
+            start_time=start_time,
+            duration=duration,
+            time_base=time_base,
+            duration_basis=duration_basis,
+            input_start_time=input_start_time,
+            start_time_basis="metadata" if parsed_start_time is not None else "default_zero",
+            input_start_time_basis=input_start_time_basis,
+        ),
     )
 
 
-def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
+def _parse_video_start(stream: dict[str, object]) -> VideoStreamStart | None:
+    """Return the start of the first non-attached-pic video stream, if present."""
+    if stream.get("codec_type") != "video":
+        return None
+    disposition_obj = stream.get("disposition", {})
+    disposition_dict = (
+        cast(dict[str, object], disposition_obj) if isinstance(disposition_obj, dict) else {}
+    )
+    if _parse_flag(disposition_dict.get("attached_pic")):
+        return None
+    parsed_start_time = _parse_optional_fraction(stream.get("start_time"))
+    if parsed_start_time is None:
+        return VideoStreamStart(start_time=Fraction(0), basis="default_zero")
+    return VideoStreamStart(start_time=parsed_start_time, basis="metadata")
+
+
+def probe_streams(video_path: Path) -> ProbedStreams:
+    """Probe audio streams and the companion video start in one ffprobe call."""
     payload = _load_ffprobe_json(
         [
             "ffprobe",
             "-v",
             "error",
-            "-select_streams",
-            "a",
             "-show_entries",
             (
-                "stream=index,codec_name,channels,channel_layout,sample_rate:"
-                "stream_disposition=default,original,comment:"
-                "stream_tags=language,comment"
+                "stream=index,codec_type,codec_name,channels,channel_layout,sample_rate,"
+                "start_time,duration,duration_ts,time_base:"
+                "stream_disposition=default,original,comment,attached_pic:"
+                "stream_tags=language,comment,DURATION:format=start_time"
             ),
             "-of",
             "json",
@@ -201,14 +345,40 @@ def _probe_audio_streams(video_path: Path) -> list[AudioStreamInfo]:
     if not isinstance(streams_obj, list):
         raise FFmpegError(f"ffprobe returned invalid audio stream list for {video_path.name}", 0)
     stream_items = cast(list[object], streams_obj)
+    format_obj = payload.get("format")
+    format_dict = cast(dict[str, object], format_obj) if isinstance(format_obj, dict) else {}
+    parsed_input_start_time = _parse_optional_fraction(format_dict.get("start_time"))
+    input_start_time = (
+        parsed_input_start_time if parsed_input_start_time is not None else Fraction(0)
+    )
 
-    streams = [
-        _parse_audio_stream(stream_obj, audio_stream_index=index, video_path=video_path)
-        for index, stream_obj in enumerate(stream_items)
-    ]
-    if not streams:
+    audio: list[AudioStreamInfo] = []
+    video_start = VideoStreamStart(start_time=Fraction(0), basis="default_zero")
+    video_found = False
+    for raw_item in stream_items:
+        if not isinstance(raw_item, dict):
+            raise FFmpegError(f"ffprobe returned invalid stream data for {video_path.name}", 0)
+        stream_item = cast(dict[str, object], raw_item)
+        if stream_item.get("codec_type") == "audio":
+            audio.append(
+                _parse_audio_stream(
+                    stream_item,
+                    audio_stream_index=len(audio),
+                    video_path=video_path,
+                    input_start_time=input_start_time,
+                    input_start_time_basis=(
+                        "metadata" if parsed_input_start_time is not None else "default_zero"
+                    ),
+                )
+            )
+        elif not video_found:
+            parsed = _parse_video_start(stream_item)
+            if parsed is not None:
+                video_start = parsed
+                video_found = True
+    if not audio:
         raise AudioAlignmentError(f"no audio streams found in {video_path.name}")
-    return streams
+    return ProbedStreams(audio=tuple(audio), video_start=video_start)
 
 
 def _reference_stream_sort_key(stream: AudioStreamInfo) -> tuple[int, int, int, int]:
@@ -275,7 +445,7 @@ def _comparison_stream_sort_key(
 
 
 def _select_audio_stream_override(
-    streams: list[AudioStreamInfo],
+    streams: tuple[AudioStreamInfo, ...],
     *,
     video_path: Path,
     stream_override: int,
@@ -291,39 +461,149 @@ def _select_audio_stream_override(
     )
 
 
-def select_reference_audio_stream(
-    video_path: Path,
+def select_audio_pair(
+    reference: ProbedStreams,
+    comparison: ProbedStreams,
     *,
-    stream_override: int | None = None,
-) -> AudioStreamInfo:
-    """Choose the reference anchor stream deterministically from ffprobe metadata."""
-    streams = _probe_audio_streams(video_path)
-    if stream_override is not None:
-        return _select_audio_stream_override(
-            streams,
-            video_path=video_path,
-            stream_override=stream_override,
+    reference_path: Path,
+    comparison_path: Path,
+    reference_override: int | None,
+    comparison_override: int | None,
+) -> tuple[AudioStreamSelection, AudioStreamSelection]:
+    """Choose the reference and comparison audio streams, preferring a shared language (M3)."""
+    fixed_comparison = (
+        _select_audio_stream_override(
+            comparison.audio,
+            video_path=comparison_path,
+            stream_override=comparison_override,
         )
-    return min(streams, key=_reference_stream_sort_key)
+        if comparison_override is not None
+        else None
+    )
+    if reference_override is not None:
+        reference_stream = _select_audio_stream_override(
+            reference.audio,
+            video_path=reference_path,
+            stream_override=reference_override,
+        )
+    else:
+        default = min(reference.audio, key=_reference_stream_sort_key)
+        comparison_languages = {
+            stream.language
+            for stream in (comparison.audio if fixed_comparison is None else (fixed_comparison,))
+            if not stream.is_commentary and stream.language is not None
+        }
+        if default.language is not None and default.language not in comparison_languages:
+            shared = [
+                stream
+                for stream in reference.audio
+                if not stream.is_commentary and stream.language in comparison_languages
+            ]
+            reference_stream = min(shared, key=_reference_stream_sort_key) if shared else default
+        else:
+            reference_stream = default
+    comparison_stream = (
+        fixed_comparison
+        if fixed_comparison is not None
+        else min(
+            comparison.audio,
+            key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
+        )
+    )
+    return (
+        AudioStreamSelection(stream=reference_stream, video_start=reference.video_start),
+        AudioStreamSelection(stream=comparison_stream, video_start=comparison.video_start),
+    )
 
 
-def select_matching_audio_stream(
-    video_path: Path,
+def _bounded_evidence_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return " ".join(value.split())[:256]
+
+
+def _metadata_match(reference: object | None, comparison: object | None) -> AudioMetadataMatch:
+    if reference is None or comparison is None:
+        return "unknown"
+    return "match" if reference == comparison else "mismatch"
+
+
+def selected_stream_evidence(
+    stream: AudioStreamInfo,
     *,
-    reference_stream: AudioStreamInfo,
-    stream_override: int | None = None,
-) -> AudioStreamInfo:
-    """Choose the comparison stream that best matches the selected reference stream."""
-    streams = _probe_audio_streams(video_path)
-    if stream_override is not None:
-        return _select_audio_stream_override(
-            streams,
-            video_path=video_path,
-            stream_override=stream_override,
+    role: AudioPairSide,
+    source_identity_digest: str,
+    explicit_override: bool,
+    video_start: VideoStreamStart,
+    timeline_scale: Fraction,
+    reference_stream: AudioStreamInfo | None = None,
+) -> SelectedAudioStreamEvidence:
+    """Project the resolved choice into bounded, pathless diagnostic facts."""
+    timeline = stream.timeline
+    duration = timeline.duration
+    time_base = timeline.time_base
+    if role == "reference":
+        rank = (
+            (stream.audio_stream_index,)
+            if explicit_override
+            else _reference_stream_sort_key(stream)
         )
-    return min(
-        streams,
-        key=lambda candidate: _comparison_stream_sort_key(reference_stream, candidate),
+        language_match: AudioMetadataMatch = "not_applicable"
+        commentary_match: AudioMetadataMatch = "not_applicable"
+    else:
+        if reference_stream is None:
+            raise ValueError("comparison stream evidence requires the reference stream")
+        rank = (
+            (stream.audio_stream_index,)
+            if explicit_override
+            else _comparison_stream_sort_key(reference_stream, stream)
+        )
+        language_match = _metadata_match(reference_stream.language, stream.language)
+        commentary_match = _metadata_match(
+            reference_stream.is_commentary,
+            stream.is_commentary,
+        )
+    return SelectedAudioStreamEvidence(
+        role=role,
+        source_identity_digest=source_identity_digest,
+        audio_stream_index=stream.audio_stream_index,
+        absolute_stream_index=stream.absolute_stream_index,
+        selection_method="explicit_override" if explicit_override else "automatic_metadata",
+        selection_rank=rank,
+        codec_name=_bounded_evidence_text(stream.codec_name),
+        sample_rate=stream.sample_rate,
+        channels=stream.channels,
+        channel_layout=_bounded_evidence_text(stream.channel_layout),
+        language=_bounded_evidence_text(stream.language),
+        is_default=stream.is_default,
+        is_original=stream.is_original,
+        is_commentary=stream.is_commentary,
+        language_match=language_match,
+        commentary_match=commentary_match,
+        stream_start_num=timeline.start_time.numerator,
+        stream_start_den=timeline.start_time.denominator,
+        stream_start_basis=timeline.start_time_basis,
+        input_start_num=timeline.input_start_time.numerator,
+        input_start_den=timeline.input_start_time.denominator,
+        input_start_basis=timeline.input_start_time_basis,
+        time_base_num=time_base.numerator if time_base is not None else None,
+        time_base_den=time_base.denominator if time_base is not None else None,
+        duration_num=duration.numerator if duration is not None else None,
+        duration_den=duration.denominator if duration is not None else None,
+        duration_basis=timeline.duration_basis,
+        video_start_num=video_start.start_time.numerator,
+        video_start_den=video_start.start_time.denominator,
+        video_start_basis=video_start.basis,
+        timeline_scale_num=timeline_scale.numerator,
+        timeline_scale_den=timeline_scale.denominator,
+    )
+
+
+def normalized_extraction_recipe() -> str:
+    """Describe extraction without retaining media paths or a concrete command line."""
+    return (
+        "ffmpeg -i <role_input> -map 0:a:<selected_ordinal> -vn "
+        "[channel] -af <channel>[,aresample=<r1>,asetrate=<r2>],aresample=8000 -f f32le -"
     )
 
 
@@ -343,102 +623,59 @@ def _best_channel_audio_filter(stream: AudioStreamInfo | None) -> str:
     return "pan=mono|c0=c0"
 
 
-def _channel_strategy_args(
+def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
+    """Exact resample/relabel rates that stretch audio time by ``timeline_scale``.
+
+    Returns ``None`` for a scale of 1. Raises ``AudioAlignmentError`` with
+    category ``selected_audio_timeline_unavailable`` when a rate would exceed
+    ``MAX_RETIME_RATE``.
+    """
+    if timeline_scale == 1:
+        return None
+    p, q = timeline_scale.numerator, timeline_scale.denominator
+    m = -(-AUDIO_ANALYSIS_SAMPLE_RATE // min(p, q))
+    if max(p, q) * m > MAX_RETIME_RATE:
+        raise AudioAlignmentError(
+            "retimed audio rate is not supported",
+            category="selected_audio_timeline_unavailable",
+            stage="planning",
+        )
+    return p * m, q * m
+
+
+def collection_argv(
+    video_path: Path,
+    stream: AudioStreamInfo,
     *,
     channel_strategy: AlignmentChannelStrategy,
-    stream: AudioStreamInfo | None,
+    timeline_scale: Fraction,
 ) -> list[str]:
+    """Build the canonical whole-track 8 kHz mono float32 FFmpeg recipe."""
+    filters: list[str] = []
     if channel_strategy == "mono_downmix":
-        return ["-ac", "1"]
-    return ["-af", _best_channel_audio_filter(stream)]
-
-
-def extract_audio(
-    video_path: Path,
-    sample_rate: int,
-    *,
-    audio_stream_index: int,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-    stream: AudioStreamInfo | None = None,
-) -> np.ndarray:
-    """Extract audio using FFmpeg with an explicit mapped audio stream."""
-    argv = [
+        channel_args = ["-ac", "1"]
+    else:
+        channel_args = []
+        filters.append(_best_channel_audio_filter(stream))
+    rates = retime_rates(timeline_scale)
+    if rates is None:
+        filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
+    else:
+        first_rate, second_rate = rates
+        filters.append(f"aresample={first_rate}")
+        filters.append(f"asetrate={second_rate}")
+        filters.append(f"aresample={AUDIO_ANALYSIS_SAMPLE_RATE}")
+    return [
         "ffmpeg",
         "-i",
         str(video_path),
         "-map",
-        f"0:a:{audio_stream_index}",
+        f"0:a:{stream.audio_stream_index}",
         "-vn",
-        *_channel_strategy_args(channel_strategy=channel_strategy, stream=stream),
-        "-ar",
-        str(sample_rate),
+        *channel_args,
+        "-af",
+        ",".join(filters),
         "-f",
         "f32le",
         "-",
     ]
-
-    try:
-        proc = run_subprocess(argv, timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS)
-    except FileNotFoundError:
-        raise FFmpegNotFoundError() from None
-    except TimeoutExpired as e:
-        raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
-    except CalledProcessError as e:
-        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
-    except OSError as e:
-        raise FFmpegError(f"ffmpeg audio extraction could not start: {e}", 1) from e
-
-    if not proc.stdout:
-        raise AudioAlignmentError(f"empty audio track in {video_path.name}")
-
-    payload_len = len(proc.stdout)
-    if payload_len % np.dtype(np.float32).itemsize != 0:
-        raise AudioAlignmentError(
-            f"invalid audio payload from {video_path.name}: {payload_len} bytes"
-        )
-
-    return np.frombuffer(proc.stdout, dtype=np.float32)
-
-
-def extract_reference_audio(
-    video_path: Path,
-    sample_rate: int,
-    *,
-    stream_override: int | None = None,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-) -> tuple[np.ndarray, AudioStreamInfo]:
-    """Select and extract the reference anchor stream."""
-    stream = select_reference_audio_stream(video_path, stream_override=stream_override)
-    return (
-        extract_audio(
-            video_path,
-            sample_rate,
-            audio_stream_index=stream.audio_stream_index,
-            channel_strategy=channel_strategy,
-            stream=stream,
-        ),
-        stream,
-    )
-
-
-def extract_matching_audio(
-    video_path: Path,
-    sample_rate: int,
-    *,
-    reference_stream: AudioStreamInfo,
-    stream_override: int | None = None,
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix",
-) -> np.ndarray:
-    """Select and extract the comparison stream that matches the reference anchor."""
-    stream = select_matching_audio_stream(
-        video_path,
-        reference_stream=reference_stream,
-        stream_override=stream_override,
-    )
-    return extract_audio(
-        video_path,
-        sample_rate,
-        audio_stream_index=stream.audio_stream_index,
-        channel_strategy=channel_strategy,
-        stream=stream,
-    )

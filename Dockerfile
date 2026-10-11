@@ -1,20 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 0: Pinned Python dependency tooling
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.12.7@sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.0@sha256:cdc6093146eb3ff6a40107b38f008b789e050e77ad87865e381d9917da55a168 AS uv
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build supplemental VapourSynth plugins
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS builder
+FROM python:3.13.16-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS builder
 
 # Deterministic media-runtime pins. Every Git checkout verifies both the exact
 # commit and a content-derived digest of the complete tracked source tree.
-ARG VAPOURSYNTH_VERSION=79
-ARG VAPOURSYNTH_SOURCE_COMMIT=acabf605b2205b32d65859bb2736405719d2fafd
-ARG VAPOURSYNTH_SOURCE_TREE_SHA256=f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527
-ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
-ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
+ARG VAPOURSYNTH_VERSION=81
+ARG VAPOURSYNTH_SOURCE_COMMIT=dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a
+ARG VAPOURSYNTH_SOURCE_TREE_SHA256=c05ae1a5c0cd05cef1c0946d48e653c8f0e3de91d694cef56149c256ab249844
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=2e3429524728889328897945564235440910a032ebbc879620ba3ff900758b52
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=ed4c9e7fd99a58ce91042a8428745fe4a20696309f52f1bd8202f86141567cd3
 ARG LSMASH_COMMIT=d186eb95388710a7a91f6fd353169b457ebbb9db
 ARG LSMASH_SOURCE_TREE_SHA256=89c0277c1533c3958fd16f093c2b0bd13a51fcacb748bf88e36f40eff2a7f651
 ARG OBUPARSE_COMMIT=a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8
@@ -75,12 +75,8 @@ RUN printf '%s\n' \
         "${VAPOURSYNTH_SOURCE_TREE_SHA256}" \
         /tmp/vapoursynth-src && \
     vs_include_dir="$(python -c 'import vapoursynth; print(vapoursynth.get_include())')" && \
-    test -f /tmp/vapoursynth-src/include/VapourSynth.h && \
-    test -f /tmp/vapoursynth-src/include/VSHelper.h && \
     test -f /tmp/vapoursynth-src/include/VapourSynth4.h && \
     test -f /tmp/vapoursynth-src/include/VSHelper4.h && \
-    cp /tmp/vapoursynth-src/include/VapourSynth.h "${vs_include_dir}/" && \
-    cp /tmp/vapoursynth-src/include/VSHelper.h "${vs_include_dir}/" && \
     cp /tmp/vapoursynth-src/include/VapourSynth4.h "${vs_include_dir}/" && \
     cp /tmp/vapoursynth-src/include/VSHelper4.h "${vs_include_dir}/" && \
     mkdir -p /opt/media-runtime-licenses && \
@@ -128,7 +124,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
     cd /build && \
     rm -rf /build/l-smash
 
-# Build L-SMASH-Works 1310 against the R79 API R4.2 wheel headers and
+# Build L-SMASH-Works 1310 against the R81 API4 wheel headers and
 # Debian Trixie's runtime-matched FFmpeg development libraries. Upstream's
 # Meson path is deprecated, but remains the narrow VapourSynth-only build and
 # avoids pulling unrelated optional dependencies into the runtime baseline.
@@ -225,12 +221,12 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS runtime
+FROM python:3.13.16-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS runtime
 
-ARG VAPOURSYNTH_VERSION=79
+ARG VAPOURSYNTH_VERSION=81
 ARG VS_PLACEBO_VERSION=2.0.4
-ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=6f1e37f0ed8eb73e61c3c231fd7f7a0f7acfa893e98d026686e9c81e52c9ce06
-ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=50d031d07b1839ba362cf314e212edb0760c7ca2a7625a051a0bcbf22aaf9d1c
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=2e3429524728889328897945564235440910a032ebbc879620ba3ff900758b52
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=ed4c9e7fd99a58ce91042a8428745fe4a20696309f52f1bd8202f86141567cd3
 ARG VS_PLACEBO_X86_64_WHEEL_SHA256=d38796b739ae231e12e7b4f9449b3cb29cc4a5fa9cd50e8147fdd9a202797fff
 ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=eb025cb3f8d723eeaa64dc19b26fa1a0a05b948eb0cedeb8645680d9695ba97d
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
@@ -274,7 +270,7 @@ RUN ldconfig && \
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
     LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=61e9aac2ad8af8039bd32a455759f803aba63fc2052f4dd2d9a92bea5bf21eb0 \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=916760dd9ca2156521326493fbe92c395118d6f1ee36cc421d9bb9e2f66a8697 \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \

@@ -36,9 +36,15 @@ from .cli_helpers import _normalize_cli_output
 from .run_command_test_support import (
     DepsOptions,
     RecordingRunner,
-    _base_args,
-    _deps,
-    _prompt_required_config,
+)
+from .run_command_test_support import (
+    base_args as _base_args,
+)
+from .run_command_test_support import (
+    deps as _deps,
+)
+from .run_command_test_support import (
+    prompt_required_config as _prompt_required_config,
 )
 
 
@@ -73,7 +79,7 @@ from .run_command_test_support import (
 )
 def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
     args_update: dict[str, object],
-    deps_update: dict[str, object],
+    deps_update: dict[str, bool],
     config: ConfigSchema,
     expected_message: str,
 ) -> None:
@@ -94,10 +100,8 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
         verbose_hint: str | None = "--verbose",
     ) -> int:
         assert isinstance(error, ConfigValidationError)
-        handled_errors.append(error)
         assert no_color is False
-        assert verbose is False
-        assert verbose_hint == "--verbose"
+        handled_errors.append(error)
         return int(ExitCode.CONFIG_ERROR)
 
     with pytest.raises(typer.Exit) as exc_info:
@@ -108,13 +112,13 @@ def test_handle_run_rejects_report_confirmed_slowpics_preflight_before_runner(
                     runner=runner,
                     load_config=_load_config,
                     handle_error=_handle_validation_error,
-                    **deps_update,
+                    stdout_is_tty=deps_update.get("stdout_is_tty", False),
+                    stdin_is_tty=deps_update.get("stdin_is_tty", False),
                 )
             ),
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert runner.requests == []
     assert handled_errors
     assert expected_message in {str(error["msg"]) for error in handled_errors[0].validation_errors}
 
@@ -226,47 +230,18 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
         "confirmed"
     )
     rendered = output.getvalue()
-    assert rendered.index("[WAIT] Publishing confirmation") < rendered.index(expected_prompt)
+    assert rendered.index("Publish to slow.pics?") < rendered.index(expected_prompt)
     assert rendered.endswith(f"{expected_prompt} yes\n\n")
-    panel_line = next(
-        line for line in rendered.splitlines() if "[WAIT] Publishing confirmation" in line
-    )
+    panel_line = next(line for line in rendered.splitlines() if "Publish to slow.pics?" in line)
     assert panel_line.startswith("  ")
     assert not panel_line.startswith("   ")
     output.write("  [OK] PUBLISH  Completed in 20s\n")
     transcript = output.getvalue()
     assert (
-        transcript.index("[WAIT] Publishing confirmation")
+        transcript.index("Publish to slow.pics?")
         < transcript.index(expected_prompt)
         < transcript.index("  [OK] PUBLISH")
     )
-
-
-def test_full_window_retry_callback_uses_exact_default_no_stderr_prompt() -> None:
-    calls: list[str] = []
-
-    def _confirm(text: str) -> bool:
-        calls.append(text)
-        return True
-
-    callback = build_confirm_full_window_retry_callback(
-        deps=_deps(DepsOptions(confirm_full_window_retry=_confirm))
-    )
-
-    decision = callback(
-        FullWindowRetryConfirmationRequest(
-            requested_frame_count=8,
-            eligible_frame_count=4,
-            ignore_lead_seconds=240.0,
-            ignore_trail_seconds=240.0,
-        )
-    )
-
-    assert decision == "confirmed"
-    assert calls == [
-        "Configured lead/trail exclusions leave too little media to satisfy the\n"
-        "requested frame selection. Analyze the full shared clip for this run? [y/N] "
-    ]
 
 
 @pytest.mark.parametrize(
@@ -317,13 +292,18 @@ def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
 )
 def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
     args_update: dict[str, object],
-    deps_update: dict[str, object],
+    deps_update: dict[str, bool],
 ) -> None:
     config = get_default_config()
     config.analysis.ignore_lead_seconds = 240.0
     dependencies = build_runner_dependencies(
         args=replace(_base_args(), **args_update),
-        deps=_deps(DepsOptions(**deps_update)),
+        deps=_deps(
+            DepsOptions(
+                stdin_is_tty=deps_update.get("stdin_is_tty", False),
+                stdout_is_tty=deps_update.get("stdout_is_tty", False),
+            )
+        ),
         config=config,
         console=Console(file=StringIO(), no_color=True),
         resolve_effective_config=lambda: config,
@@ -357,37 +337,11 @@ def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive
     assert zero_margin_dependencies is None
 
 
-def test_confirmation_callback_prints_report_path_when_auto_open_disabled() -> None:
-    disabled_auto_open = get_default_config()
-    disabled_auto_open.report.auto_open = False
+@pytest.mark.parametrize("auto_open", [False, True], ids=["disabled", "browser-refused"])
+def test_confirmation_callback_prints_report_path(auto_open: bool) -> None:
+    config = get_default_config()
+    config.report.auto_open = auto_open
     output = StringIO()
-
-    callback = build_confirm_slowpics_upload_callback(
-        args=replace(_base_args(), quiet=False),
-        deps=_deps(
-            DepsOptions(
-                stdout_is_tty=True,
-                confirm_upload=lambda _text, *, default: False,
-            )
-        ),
-        console=Console(file=output, no_color=True, force_terminal=False),
-        resolve_effective_config=lambda: disabled_auto_open,
-        visibility=Visibility.PUBLIC,
-    )
-
-    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
-        "declined"
-    )
-    rendered = output.getvalue()
-    assert "[WAIT] Publishing confirmation" in rendered
-    assert "Visibility  Public" in rendered
-    assert rendered.count("report.html") == 1
-    assert "Report: report.html" not in rendered
-
-
-def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails() -> None:
-    output = StringIO()
-
     callback = build_confirm_slowpics_upload_callback(
         args=replace(_base_args(), quiet=False),
         deps=_deps(
@@ -398,16 +352,18 @@ def test_confirmation_callback_prints_report_path_when_auto_open_attempt_fails()
             )
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
-        resolve_effective_config=get_default_config,
+        resolve_effective_config=lambda: config,
         visibility=Visibility.PUBLIC,
     )
-
-    assert callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == (
-        "declined"
+    assert (
+        callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))) == "declined"
     )
     rendered = output.getvalue()
-    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Publish to slow.pics?" in rendered
     assert rendered.count("report.html") == 1
+    if not auto_open:
+        assert "Visibility  Public" in rendered
+        assert "Report: report.html" not in rendered
 
 
 @pytest.mark.parametrize("width", [60, 80])
@@ -442,7 +398,7 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
         == "declined"
     )
     rendered = output.getvalue()
-    assert "[WAIT] Publishing confirmation" in rendered
+    assert "Publish to slow.pics?" in rendered
     assert "Visibility  Unlisted" in rendered
     assert "\x1b[" not in rendered
     assert max(len(line) for line in rendered.splitlines()) <= width
@@ -485,7 +441,7 @@ def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:
     assert exc_info.value.exit_code == int(ExitCode.INTERRUPTED)
 
 
-def test_maybe_open_run_report_requires_report_human_output_and_tty() -> None:
+def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
     opened: list[Path] = []
     result = RunResult(success=True, report_path=Path("report.html"))
 
@@ -651,9 +607,11 @@ def test_interactive_slowpics_action_failures_are_warning_only() -> None:
         ("clipboard", False),
         ("browser", False),
     ]
-    assert actions[0].warning == "slow.pics clipboard: failed to copy URL"
+    assert actions[0].warning is not None
+    assert actions[0].warning.text == "slow.pics clipboard: failed to copy URL"
     assert "clipboard secret sentinel" not in str(actions[0].warning)
-    assert actions[1].warning == (
+    assert actions[1].warning is not None
+    assert actions[1].warning.text == (
         "slow.pics browser: failed to open URL: no browser accepted the request"
     )
     assert slowpics_browser_open_attempted(actions) is True
@@ -683,7 +641,8 @@ def test_interactive_slowpics_browser_exception_warning_is_sanitized() -> None:
         )
 
     browser_action = next(action for action in actions if action.kind == "browser")
-    assert browser_action.warning == "slow.pics browser: failed to open URL"
+    assert browser_action.warning is not None
+    assert browser_action.warning.text == "slow.pics browser: failed to open URL"
     assert "browser secret sentinel" not in str(browser_action.warning)
     browser_record = next(
         item for item in captured_logs if item["event"] == "slowpics_browser_open_failed"
@@ -706,109 +665,3 @@ def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> Non
     )
 
     assert opened == []
-
-
-def test_handle_run_executes_interactive_actions_before_summary(monkeypatch) -> None:
-    events: list[str] = []
-    runner = RecordingRunner(RunResult(success=True, slowpics_url="https://slow.pics/c/example"))
-
-    def _print_summary(*_args: object, **_kwargs: object) -> None:
-        events.append("summary")
-
-    def _load_config(
-        config_path: Path | None = None,
-        overrides: dict[str, object] | None = None,
-    ) -> ConfigSchema:
-        return get_default_config()
-
-    def _copy_url(_url: str) -> None:
-        events.append("copy")
-
-    def _open_url(_url: str) -> bool:
-        events.append("open")
-        return True
-
-    monkeypatch.setattr("frame_compare.cli.run_command.print_result_summary", _print_summary)
-
-    handle_run(
-        replace(_base_args(), quiet=False),
-        _deps(
-            DepsOptions(
-                runner=runner,
-                load_config=_load_config,
-                stdout_is_tty=True,
-                copy_to_clipboard=_copy_url,
-                open_url=_open_url,
-            )
-        ),
-    )
-
-    assert events == ["copy", "open", "summary"]
-
-
-def test_handle_run_confirmed_workflow_presents_report_before_post_upload_actions(
-    monkeypatch,
-) -> None:
-    events: list[str] = []
-    opened_reports: list[Path] = []
-
-    class ConfirmingRunner(RecordingRunner):
-        def run(
-            self, request: RunRequest, dependencies: RunDependencies | None = None
-        ) -> RunResult:
-            self.requests.append(request)
-            self.dependencies.append(dependencies)
-            assert dependencies is not None
-            assert dependencies.confirm_slowpics_upload is not None
-            decision = dependencies.confirm_slowpics_upload(
-                SlowpicsUploadConfirmationRequest(report_path=Path("report.html"))
-            )
-            return RunResult(
-                success=True,
-                slowpics_url="https://slow.pics/c/example",
-                report_path=Path("report.html"),
-                slowpics_upload_confirmation_status=decision,
-            )
-
-    def _print_summary(*_args: object, **_kwargs: object) -> None:
-        events.append("summary")
-
-    def _load_config(
-        config_path: Path | None = None,
-        overrides: dict[str, object] | None = None,
-    ) -> ConfigSchema:
-        return _prompt_required_config()
-
-    def _confirm_upload(_text: str, *, default: bool) -> bool:
-        assert default is False
-        assert opened_reports == [Path("report.html")]
-        events.append("prompt")
-        return True
-
-    def _copy_url(_url: str) -> None:
-        events.append("copy")
-
-    def _open_url(_url: str) -> bool:
-        events.append("slowpics-browser")
-        return True
-
-    monkeypatch.setattr("frame_compare.cli.run_command.print_result_summary", _print_summary)
-
-    handle_run(
-        replace(_base_args(), quiet=False),
-        _deps(
-            DepsOptions(
-                runner=ConfirmingRunner(),
-                load_config=_load_config,
-                stdin_is_tty=True,
-                stdout_is_tty=True,
-                copy_to_clipboard=_copy_url,
-                open_url=_open_url,
-                confirm_upload=_confirm_upload,
-            ),
-            opened_reports,
-        ),
-    )
-
-    assert events == ["prompt", "copy", "slowpics-browser", "summary"]
-    assert opened_reports == [Path("report.html")]

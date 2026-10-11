@@ -36,6 +36,15 @@ htmlcov
 
 # Agent workflow artifacts
 .agent-workflow
+.agent
+.handoff
+.codanna
+.desloppify
+.hypothesis
+.tmp
+.uv_cache
+site
+tools/old_*.py
 
 # Documentation (not needed in image)
 docs

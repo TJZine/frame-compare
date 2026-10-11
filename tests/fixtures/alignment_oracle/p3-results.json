@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "purpose": "p3_continuous_decode_oracle_scalar_evidence",
+  "fixture_source": {
+    "duration_seconds": {
+      "oracle_extract": 12,
+      "policy_matrix": 150,
+      "maximum_allowed": 180
+    },
+    "source_rates": [44100, 48000],
+    "requested_rates": [4000, 8000, 48000],
+    "packet_samples": [960, 1001],
+    "fps": ["24/1", "24000/1001"],
+    "oracle_recipe_sha256": "3b051dcb968392678046e835516eab454b863b888c69f36a40df96fbc5b60612",
+    "clean_recipe_sha256": "a37615c304db35451faed6a199ea2ac71174146a4a2c56b27d1f141768b65966",
+    "weak_dissent_recipe_sha256": "21c2f069e3be023a73e4b0ccb6271505b20a7031ed283081bb64b60c64eda10e",
+    "localized_edit_recipe_sha256": "e5b9259f6385a9ed0a3670341ee1750370754cd51b0b86738e79f94b4225e0b5",
+    "holdout_seeds": {
+      "weak_dissent": [7701, 7702, 7703, 7704],
+      "localized_edit": [8801, 8802, 8803, 8804],
+      "step_and_drift": [9101, 9102, 9103, 9104]
+    }
+  },
+  "environments": {
+    "native_macos_arm64": {
+      "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 9.0.1 Copyright (c) 2007-2026 the FFmpeg developers",
+      "alignment_runtime_fingerprint": "c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92",
+      "runtime_kind": "unmanaged",
+      "platform": "macOS-27.0-arm64-arm-64bit-Mach-O"
+    },
+    "docker_linux_arm64": {
+      "ffmpeg": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 7.1.5-0+deb13u1 Copyright (c) 2007-2026 the FFmpeg developers",
+      "alignment_runtime_fingerprint": "ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8",
+      "runtime_kind": "docker",
+      "platform": "Linux-6.12.76-linuxkit-aarch64-with-glibc2.41",
+      "package": "7:7.1.5-0+deb13u1"
+    },
+    "windows_x64_portable": {
+      "status": "outstanding_not_executed",
+      "expected_release": "n8.1.2-34-g9b6c8969e0"
+    }
+  },
+  "matrix": {
+    "clean_zero_and_signed": {
+      "cases": 6,
+      "accepted": 6,
+      "false_rejects": 0,
+      "minimum_score": 0.9999336239930832,
+      "both_sources_compared_to_own_oracle": true,
+      "maximum_pcm_grid_lag_samples": 0,
+      "maximum_resampled_waveform_delta": 0.17351511120796204
+    },
+    "weak_dissent": {
+      "cases": 80,
+      "accepted": 80,
+      "false_rejects": 0,
+      "weak_score_range": [0.2152675274718276, 0.23373965616436304],
+      "weak_offset_range_samples": [-2400, 2401],
+      "minimum_strong_score": 0.9691901406627084
+    },
+    "localized_edit": {
+      "cases": 80,
+      "credible_conflict": 80,
+      "false_accepts": 0,
+      "nonzero_score_range": [0.9997668861872178, 0.999811440634269]
+    },
+    "insertion_deletion_and_drift": {
+      "cases": 32,
+      "accepted": 0
+    },
+    "signal_and_repetition_negatives": {
+      "cases": 10,
+      "accepted": 0,
+      "families": ["silence", "very_quiet_independent", "unrelated", "steady_tone", "repeated"]
+    },
+    "one_survivor_four_failures": {
+      "accepted": false,
+      "reason": "insufficient_temporal_support"
+    },
+    "stream_selection": {
+      "automatic_wrong_stream": "no_candidate",
+      "explicit_matching_override": "accepted_zero"
+    },
+    "temporal_boundaries": {
+      "durations_seconds": [3, 30, 31, 65, 90, 150],
+      "short_full_overlap": "accepted",
+      "medium_disjoint_early_late": "accepted",
+      "medium_overlap_only": "insufficient_temporal_support",
+      "long_three_without_last_third": "insufficient_temporal_support",
+      "long_three_distributed": "accepted"
+    }
+  },
+  "runtime_discrepancies": {
+    "native_positive_start_aac": {
+      "source_rate": 44100,
+      "requested_rate": 48000,
+      "stream_start_seconds": 2,
+      "requested_count": 2048,
+      "bounded_count": 945,
+      "continuous_oracle_count": 2048,
+      "measured_grid_lag_samples": 29,
+      "asymmetric_pair_oracle_prefix_equal": true,
+      "bounded_pair_sample_offset": 1115,
+      "bounded_pair_frame_offset_24fps": 1,
+      "bounded_pair_score": 0.8713582429603048,
+      "bounded_pair_peak_ratio": 6.485486119359482,
+      "reference_media_sha256": "cee1ca21ce97bbc21873c8535363ee4fa4137853b7fc7d3eb88a191aeb25416e",
+      "comparison_media_sha256": "bc0315e4909030c6b9cbcb0adcd3ca3f6e49cc3426f7a0eafdf1996714907068"
+    },
+    "docker_aac_seek_grid": {
+      "source_48000_requested_8000_max_lag_samples": 3,
+      "source_48000_requested_8000_allowance_samples": 1,
+      "source_44100_requested_48000_max_lag_samples": 10,
+      "source_44100_requested_48000_allowance_samples": 6,
+      "source_48000_requested_8000_media_sha256": "cc9a2d0b6d9f964927eeef4711c307a4a5d532ca9f6eff2e43fda2548547255d",
+      "source_44100_requested_48000_media_sha256": "844ef85977c0afd6be26a626bcb3797dc5880c1303ca0d99d46f5bf10a60e4a2"
+    }
+  },
+  "packet_observations": {
+    "pcm_48000_960": {"packet_count": 600, "duration_seconds": [0.02, 0.02]},
+    "pcm_48000_1001": {"packet_count": 576, "duration_seconds": [0.02, 0.02]},
+    "pcm_44100_1001": {"packet_count": 529, "duration_seconds": [0.022, 0.022]},
+    "aac_48000": {"packet_count": 564, "first_pts_seconds": -0.021},
+    "aac_44100": {"packet_count": 518, "first_pts_seconds": -0.023}
+  },
+  "resources": {
+    "maximum_oracle_source_bytes": 34560000,
+    "maximum_oracle_pair_bytes": 69120000,
+    "cap_bytes": 268435456,
+    "decode_lifetime": "sequential",
+    "temporary_cleanup": "TemporaryDirectory context plus memmap release",
+    "oracle_timeout_seconds": 180
+  },
+  "disposition": "primary_extraction_discrepancy_demonstrated_p5_before_p4"
+}

@@ -20,6 +20,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration.active_rect_content import (
     ActiveRectContentDetectionError,
+    ActiveRectFrameSampler,
     ContentActiveRect,
     VSActiveRectFrameSampler,
     detect_content_active_rect,
@@ -95,12 +96,101 @@ def _pillarbox_frame(
     return frame
 
 
-def test_stable_top_bottom_letterbox_bars_produce_content_rect() -> None:
-    frames = [_letterbox_frame(top=10, bottom=10) for _index in range(8)]
-
-    rect = detect_content_active_rect(frames)
-
-    assert rect == ContentActiveRect(x=0, y=10, width=100, height=60)
+@pytest.mark.parametrize(
+    ("frames", "expected"),
+    [
+        pytest.param(
+            [_letterbox_frame(top=10, bottom=10) for _index in range(8)],
+            ContentActiveRect(x=0, y=10, width=100, height=60),
+            id="stable_top_bottom_letterbox_bars_produce_content_rect",
+        ),
+        pytest.param(
+            [_letterbox_frame(top=10, bottom=10, bar_value=0.075) for _index in range(8)],
+            ContentActiveRect(x=0, y=10, width=100, height=60),
+            id="limited_range_off_black_bars_are_detected_when_stable",
+        ),
+        pytest.param(
+            [_pillarbox_frame(left=12, right=12) for _index in range(8)],
+            ContentActiveRect(x=12, y=0, width=76, height=80),
+            id="stable_left_right_pillarbox_bars_produce_content_rect",
+        ),
+        pytest.param(
+            [_content_pattern(80, 100) for _index in range(8)],
+            None,
+            id="no_bars_returns_no_detection",
+        ),
+        pytest.param(
+            [
+                *[_letterbox_frame(top=10, bottom=10) for _index in range(4)],
+                *[_letterbox_frame(top=19, bottom=9) for _index in range(4)],
+            ],
+            None,
+            id="inconsistent_margins_return_no_detection",
+        ),
+        pytest.param(
+            [
+                *[_letterbox_frame(top=10, bottom=10) for _index in range(4)],
+                *[_content_pattern(80, 100) for _index in range(12)],
+            ],
+            None,
+            id="sparse_scene_specific_bars_do_not_meet_sample_agreement",
+        ),
+        pytest.param(
+            [np.full((80, 100), 0.06, dtype=np.float32) for _index in range(8)],
+            None,
+            id="all_dark_frames_return_no_detection",
+        ),
+        pytest.param(
+            [
+                np.concatenate(
+                    (
+                        np.full((10, 100), 0.065, dtype=np.float32),
+                        np.full((60, 100), 0.085, dtype=np.float32),
+                        np.full((10, 100), 0.065, dtype=np.float32),
+                    )
+                )
+                for _index in range(8)
+            ],
+            None,
+            id="fade_like_low_contrast_frames_return_no_detection",
+        ),
+        pytest.param(
+            list(
+                np.random.default_rng(seed=1234)
+                .uniform(0.05, 0.45, size=(8, 80, 100))
+                .astype(np.float32)
+            ),
+            None,
+            id="noisy_content_near_borders_does_not_overcrop",
+        ),
+        pytest.param(
+            [_letterbox_frame(top=20, bottom=20) for _index in range(8)],
+            None,
+            id="crop_removing_more_than_max_axis_fraction_returns_no_detection",
+        ),
+        pytest.param(
+            [_letterbox_frame(top=4, bottom=4) for _index in range(8)],
+            None,
+            id="tiny_margins_below_threshold_return_no_detection",
+        ),
+        pytest.param(
+            [_letterbox_frame(top=9, bottom=9) for _index in range(8)],
+            ContentActiveRect(x=0, y=9, width=100, height=62),
+            id="odd_detected_margins_preserve_source_frame_identity",
+        ),
+        pytest.param(
+            [_letterbox_frame(top=10, bottom=10)], None, id="one_frame_evidence_is_rejected"
+        ),
+    ],
+)
+def test_detect_content_active_rect(
+    frames: list[npt.NDArray[np.float32]],
+    expected: ContentActiveRect | None,
+) -> None:
+    if expected is None:
+        assert detect_content_active_rect(frames) is None
+    else:
+        assert detect_content_active_rect(frames) == expected
 
 
 def test_detector_streams_frames_without_retaining_previous_arrays() -> None:
@@ -165,91 +255,6 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
     assert source_references[0]() is None
 
 
-def test_limited_range_off_black_bars_are_detected_when_stable() -> None:
-    frames = [_letterbox_frame(top=10, bottom=10, bar_value=0.075) for _index in range(8)]
-
-    rect = detect_content_active_rect(frames)
-
-    assert rect == ContentActiveRect(x=0, y=10, width=100, height=60)
-
-
-def test_stable_left_right_pillarbox_bars_produce_content_rect() -> None:
-    frames = [_pillarbox_frame(left=12, right=12) for _index in range(8)]
-
-    rect = detect_content_active_rect(frames)
-
-    assert rect == ContentActiveRect(x=12, y=0, width=76, height=80)
-
-
-def test_no_bars_returns_no_detection() -> None:
-    frames = [_content_pattern(80, 100) for _index in range(8)]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_inconsistent_margins_return_no_detection() -> None:
-    frames = [
-        *[_letterbox_frame(top=10, bottom=10) for _index in range(4)],
-        *[_letterbox_frame(top=19, bottom=9) for _index in range(4)],
-    ]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_sparse_scene_specific_bars_do_not_meet_sample_agreement() -> None:
-    frames = [
-        *[_letterbox_frame(top=10, bottom=10) for _index in range(4)],
-        *[_content_pattern(80, 100) for _index in range(12)],
-    ]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_all_dark_frames_return_no_detection() -> None:
-    frames = [np.full((80, 100), 0.06, dtype=np.float32) for _index in range(8)]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_fade_like_low_contrast_frames_return_no_detection() -> None:
-    frame = np.full((80, 100), 0.065, dtype=np.float32)
-    frame[10:70, :] = 0.085
-    frames = [frame.copy() for _index in range(8)]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_noisy_content_near_borders_does_not_overcrop() -> None:
-    rng = np.random.default_rng(seed=1234)
-    frames = [rng.uniform(0.05, 0.45, size=(80, 100)).astype(np.float32) for _index in range(8)]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_crop_removing_more_than_max_axis_fraction_returns_no_detection() -> None:
-    frames = [_letterbox_frame(top=20, bottom=20) for _index in range(8)]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_tiny_margins_below_threshold_return_no_detection() -> None:
-    frames = [_letterbox_frame(top=4, bottom=4) for _index in range(8)]
-
-    assert detect_content_active_rect(frames) is None
-
-
-def test_odd_detected_margins_preserve_source_frame_identity() -> None:
-    frames = [_letterbox_frame(top=9, bottom=9) for _index in range(8)]
-
-    rect = detect_content_active_rect(frames)
-
-    assert rect == ContentActiveRect(x=0, y=9, width=100, height=62)
-
-
-def test_one_frame_evidence_is_rejected() -> None:
-    assert detect_content_active_rect([_letterbox_frame(top=10, bottom=10)]) is None
-
-
 def test_sample_indices_use_trimmed_selection_window_source_domain() -> None:
     clip = _clip(num_frames=100, trim_start_frames=5)
     selection_window = SelectionWindow(start_frame=10, end_frame_exclusive=30)
@@ -284,7 +289,9 @@ def test_auto_refinement_does_not_sample_static_non_full_frame_rects() -> None:
     ]
 
     class FailingSampler:
-        def sample_luma_frames(self, _clip: ClipState, _indices: list[int]) -> list[object]:
+        def sample_luma_frames(
+            self, clip: ClipState, source_frame_indices: Sequence[int]
+        ) -> list[npt.NDArray[np.float32]]:
             raise AssertionError("sampler should not be called")
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
@@ -315,11 +322,11 @@ def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_f
         def sample_luma_frames(
             self,
             clip: ClipState,
-            indices: list[int],
+            source_frame_indices: Sequence[int],
         ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
             if clip.path.name == "failed.mkv":
                 raise RuntimeError("sample boom")
-            return [_letterbox_frame(top=10, bottom=10) for _index in indices]
+            return [_letterbox_frame(top=10, bottom=10) for _index in source_frame_indices]
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
         clips=clips,
@@ -332,7 +339,7 @@ def test_normal_auto_refinement_keeps_successful_clip_when_later_clip_sampling_f
     assert refined[0].active_rect == ClipActiveRect(0, 10, 100, 60, "content-derived", "auto")
     assert refined[1].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
     assert len(warnings) == 1
-    assert "active-rect auto detection failed for failed.mkv" in warnings[0]
+    assert "active-rect auto detection failed for failed.mkv" in warnings[0].text
 
 
 def test_full_window_retry_can_recompute_content_derived_rect() -> None:
@@ -344,10 +351,10 @@ def test_full_window_retry_can_recompute_content_derived_rect() -> None:
     class FullWindowSampler:
         def sample_luma_frames(
             self,
-            _clip: ClipState,
-            indices: list[int],
+            clip: ClipState,
+            source_frame_indices: Sequence[int],
         ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
-            return [_pillarbox_frame(left=12, right=12) for _index in indices]
+            return [_pillarbox_frame(left=12, right=12) for _index in source_frame_indices]
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
         clips=[clip],
@@ -381,10 +388,10 @@ def test_full_window_retry_clears_stale_content_rect_when_full_window_has_no_cro
     class NoCropSampler:
         def sample_luma_frames(
             self,
-            _clip: ClipState,
-            indices: list[int],
+            clip: ClipState,
+            source_frame_indices: Sequence[int],
         ) -> list[np.ndarray[tuple[int, int], np.dtype[np.float32]]]:
-            return [_content_pattern(80, 100) for _index in indices]
+            return [_content_pattern(80, 100) for _index in source_frame_indices]
 
     refined, warnings = refine_auto_content_active_rects_for_clips(
         clips=clips,
@@ -412,8 +419,8 @@ def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> No
     class IterationFailingSampler:
         def sample_luma_frames(
             self,
-            _clip: ClipState,
-            _indices: Sequence[int],
+            clip: ClipState,
+            source_frame_indices: Sequence[int],
         ) -> Iterator[npt.NDArray[np.float32]]:
             yield _letterbox_frame(top=10, bottom=10)
             raise RuntimeError("iteration boom")
@@ -428,7 +435,7 @@ def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> No
 
     assert refined == [clip]
     assert len(warnings) == 1
-    assert "RuntimeError: iteration boom" in warnings[0]
+    assert "RuntimeError: iteration boom" in warnings[0].text
 
     with pytest.raises(ActiveRectContentDetectionError, match="RuntimeError: iteration boom"):
         refine_auto_content_active_rects_for_clips(
@@ -438,3 +445,26 @@ def test_auto_refinement_maps_failure_raised_during_iterator_consumption() -> No
             sampler=IterationFailingSampler(),
             fail_closed=True,
         )
+
+
+def test_auto_refinement_too_few_samples_remains_a_skipped_warning() -> None:
+    from frame_compare.cli.output import _format_warning_panel_text, _warning_presentations
+    from frame_compare.utils.terminal_theme import GLYPHS_UNICODE
+
+    clip = replace(
+        _clip(num_frames=1), active_rect=ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
+    )
+    refined, warnings = refine_auto_content_active_rects_for_clips(
+        clips=[clip],
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=1),
+        detection=ScreenshotActiveRectDetection.AUTO,
+        sampler=cast("ActiveRectFrameSampler", object()),
+        fail_closed=False,
+    )
+    assert refined == [clip]
+    assert len(warnings) == 1
+    assert warnings[0].source == "active-rect auto detection"
+    assert warnings[0].severity == "skipped"
+    row = _warning_presentations(warnings, ())[0]
+    assert row.severity == "skipped"
+    assert "– " in _format_warning_panel_text([row], glyphs=GLYPHS_UNICODE)

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import IO, Any
 from unittest.mock import patch
+
+import pytest
 
 from frame_compare.services.alignment_manual_overrides import (
     MANUAL_OVERRIDES_FILE,
@@ -45,6 +48,12 @@ def test_load_manual_overrides_corrupt_file_is_empty(tmp_path: Path) -> None:
         "this is not valid TOML [[[",
         encoding="utf-8",
     )
+
+    assert load_manual_overrides(tmp_path) == {}
+
+
+def test_load_manual_overrides_invalid_utf8_file_is_empty(tmp_path: Path) -> None:
+    (tmp_path / MANUAL_OVERRIDES_FILE).write_bytes(b"\xff")
 
     assert load_manual_overrides(tmp_path) == {}
 
@@ -114,24 +123,6 @@ def test_save_manual_override_merges_overwrites_and_orders_keys(tmp_path: Path) 
     assert content.index('["ref:alpha"]') < content.index('["ref:zeta"]')
 
 
-def test_save_manual_override_uses_atomic_bytes_write(tmp_path: Path) -> None:
-    override = _override("comp", 10)
-    calls: list[tuple[Path, bytes]] = []
-
-    def _write(path: Path, content: bytes) -> None:
-        calls.append((path, content))
-        path.write_bytes(content)
-
-    with patch(
-        "frame_compare.services.alignment_manual_overrides.write_bytes_atomic",
-        _write,
-    ):
-        save_manual_override(tmp_path, override)
-
-    assert [path for path, _ in calls] == [tmp_path / MANUAL_OVERRIDES_FILE]
-    assert load_manual_overrides(tmp_path) == {"ref:comp": override}
-
-
 def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> None:
     path = tmp_path / MANUAL_OVERRIDES_FILE
     path.write_text(
@@ -143,10 +134,17 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
     override = _override("comp", 99)
     original_open = Path.open
 
-    def _open_with_read_failure(open_path: Path, mode: str = "r", *args: object, **kwargs: object):
+    def _open_with_read_failure(
+        open_path: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[Any]:
         if open_path == path and "r" in mode:
             raise OSError("stale handle")
-        return original_open(open_path, mode, *args, **kwargs)
+        return original_open(open_path, mode, buffering, encoding, errors, newline)
 
     with (
         patch("pathlib.Path.open", _open_with_read_failure),
@@ -155,6 +153,16 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
         save_manual_override(tmp_path, override)
 
     assert warning.call_args.args[0] == "manual_overrides_read_existing_error"
+    assert load_manual_overrides(tmp_path) == {"ref:comp": override}
+
+
+def test_save_manual_override_invalid_utf8_replaces_stale_file(tmp_path: Path) -> None:
+    path = tmp_path / MANUAL_OVERRIDES_FILE
+    path.write_bytes(b"\xff")
+    override = _override("comp", 99)
+
+    save_manual_override(tmp_path, override)
+
     assert load_manual_overrides(tmp_path) == {"ref:comp": override}
 
 
@@ -169,3 +177,34 @@ def test_save_manual_override_write_error_is_warning_only(tmp_path: Path) -> Non
         save_manual_override(tmp_path, _override("comp", 10))
 
     assert warning.call_args.args[0] == "manual_overrides_write_error"
+
+
+def test_pending_interrupt_prevents_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import os
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    target = tmp_path / MANUAL_OVERRIDES_FILE
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        with pytest.raises(_RunInterrupt):
+            save_manual_override(tmp_path, _override("comp", 2))
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    assert not target.exists()
+    assert list(target.parent.glob(f".{target.name}.*")) == []

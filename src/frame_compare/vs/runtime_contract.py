@@ -53,11 +53,11 @@ MEDIA_RUNTIME_SCOPES: Final[tuple[MediaRuntimeScope, ...]] = (
     "full",
 )
 
-VAPOURSYNTH_RELEASE: Final = "R79"
+VAPOURSYNTH_RELEASE: Final = "R81"
 VAPOURSYNTH_API_MAJOR: Final = 4
-VAPOURSYNTH_SOURCE_COMMIT: Final = "acabf605b2205b32d65859bb2736405719d2fafd"
+VAPOURSYNTH_SOURCE_COMMIT: Final = "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a"
 VAPOURSYNTH_SOURCE_TREE_SHA256: Final = (
-    "f7c7081a875dbb07487ed94a819385228794ef106d042949313a9ed71a655527"
+    "c05ae1a5c0cd05cef1c0946d48e653c8f0e3de91d694cef56149c256ab249844"
 )
 
 LSMASH_SOURCE_COMMIT: Final = "d186eb95388710a7a91f6fd353169b457ebbb9db"
@@ -96,8 +96,8 @@ LIBDOVI_SOURCE_TREE_SHA256: Final = (
     "e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26"
 )
 
-WINDOWS_FFMPEG_RELEASE: Final = "n8.1.2-34-g9b6c8969e0"
-WINDOWS_FFMPEG_ARTIFACT_ID: Final = "ffmpeg-btbn-win64-lgpl-8.1-2026-07-31"
+WINDOWS_FFMPEG_RELEASE: Final = "n8.1.3-9-g29e619e767"
+WINDOWS_FFMPEG_ARTIFACT_ID: Final = "ffmpeg-btbn-win64-lgpl-8.1-2026-09-30"
 _WINDOWS_FFMPEG_ARTIFACT_MATCH = re.fullmatch(
     r"ffmpeg-btbn-win64-lgpl-\d+\.\d+-(?P<build_date>\d{4}-\d{2}-\d{2})",
     WINDOWS_FFMPEG_ARTIFACT_ID,
@@ -108,8 +108,8 @@ WINDOWS_FFMPEG_EXECUTABLE_TOKEN: Final = (
     f"{WINDOWS_FFMPEG_RELEASE}-"
     f"{date.fromisoformat(_WINDOWS_FFMPEG_ARTIFACT_MATCH.group('build_date')):%Y%m%d}"
 )
-WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
-WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "a99e8230eae00d1cee38f23076a7a1f55cd984e2"
+WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "29e619e767cde9045a75c29bc9a8278ae7b3a98b"
+WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "6c9aec5fc9a72ec3abedd1fa84db141fa18cf52b"
 WINDOWS_QT_DEPLOYMENT_PROFILE: Final = "pyside6-addons-no-webengine-v1"
 WINDOWS_PYSIDE6_RELEASE: Final = "6.11.2"
 WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE: Final = "7.1.5"
@@ -299,7 +299,10 @@ def _scope_components(
             "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         }
     if scope == "alignment":
-        return {"standalone_ffmpeg": _standalone_ffmpeg_identity(profile)}
+        return {
+            "decoder": _decoder_identity(profile),
+            "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
+        }
     if scope == "index":
         return {
             "decoder": _decoder_identity(profile),

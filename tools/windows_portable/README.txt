@@ -2,7 +2,8 @@ Frame Compare - Portable Edition
 ================================
 
 INSTALL (enables `frame-compare` globally for current user):
-  1. Run `install.cmd` from the portable bundle root.
+  1. Extract the complete ZIP into a fresh, empty folder, then run `install.cmd`
+     from the portable bundle root. Windows PowerShell 5.1 and PowerShell 7 are supported.
   2. Open a new terminal.
   3. Run: frame-compare --help
 
@@ -31,9 +32,15 @@ NOTES:
     installed updater, rollback, reinstall, and uninstall never manage that
     external data. A moved bundle can change cache identity for source clips moved
     with it because their source paths changed.
-  - For source builds (`tools\windows_portable\install-from-source.cmd`), use:
+  - Source builds require PowerShell 7 or newer before bootstrap or output changes.
+    For source builds (`tools\windows_portable\install-from-source.cmd`), use:
       .\dist\frame-compare-portable-win-x64\
     as the bundle root (not the repository root).
+  - A complete runtime reinstall requires a fresh, empty folder. Overlaying a full
+    ZIP onto an existing bundle root is unsupported. Preserve user configuration,
+    input clips, and generated data; copy only those user files to the new bundle
+    if they were bundle-local. AppData fallback configuration and external data
+    remain preserved. Do not copy application/runtime files or old update backups.
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:
@@ -74,7 +81,7 @@ OPTIONAL (Native VSView Alignment Review):
 
 UPDATING (Code-Only Update Package):
   Apply an update zip:
-    frame-compare-update apply .\frame-compare-update-win-x64-0.1.1.zip
+    frame-compare-update apply .\frame-compare-update-win-x64-0.6.0.zip
 
   List and restore backups:
     frame-compare-update list-backups
@@ -82,12 +89,20 @@ UPDATING (Code-Only Update Package):
     frame-compare-update purge-backups --keep 5
 
   Safety behavior:
-    - Signature verification defaults to Cancel when missing/invalid.
+    - Each backup records its bundle's media-runtime and requirements-lock identity.
+      list-backups marks missing, malformed, or mismatched identity as unavailable;
+      rollback refuses it before any file change. Legacy backups without identity
+      cannot be restored or migrated.
+    - Signature verification is mandatory. Missing or invalid signatures are always
+      refused; the updater has no interactive unsigned bypass.
+    - Archive processing is bounded before extraction by compressed size, entry count,
+      per-entry and total uncompressed size, and compression-ratio limits.
+    - If the installed app version cannot be established, the updater fails closed and
+      requires a complete portable reinstall rather than skipping the signed range.
     - Pre-native-panel bundles with bundle_info schema_version 2 are refused and
       require a complete portable reinstall; there is no bypass.
     - Dependency fingerprint mismatch always refuses a code-only update and requires
       a complete portable reinstall; there is no bypass.
-    - Non-interactive sessions fail safely instead of prompting.
 
 RELEASE SIGNING (Maintainers):
   One-time key generation is MAINTAINER-ONLY. Run it in a separate, ordinary
@@ -113,9 +128,9 @@ RELEASE SIGNING (Maintainers):
     Run with pwsh (PowerShell 7+) on CI / modern Windows. Signing and verification use
     PKCS#1/SHA256 with RSA XML keys; the scripts import XML keys through cross-platform
     RSA parameters and keep a Windows PowerShell 5.1-compatible legacy fallback.
-    pwsh -File .\tools\windows_portable\build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-0.1.1.zip
+    pwsh -File .\tools\windows_portable\build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-0.6.0.zip
     $env:SIGNING_KEY_XML_PATH = "<secure-private-key.xml>"
-    pwsh -File .\tools\windows_portable\sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-0.1.1.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
+    pwsh -File .\tools\windows_portable\sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-0.6.0.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
 
     CI guidance:
       - Prefer injecting the signing key path via a masked secret into SIGNING_KEY_XML_PATH.
@@ -124,10 +139,11 @@ RELEASE SIGNING (Maintainers):
         WINDOWS_UPDATE_SIGNING_KEY_XML secret exists only in the approved
         release-candidate and production environments.
 
-  Unsigned zips are for local/dev only and require unsafe confirmation in the updater.
-  That confirmation never bypasses the media-runtime fingerprint boundary: a
-  code-only update with a missing, legacy, malformed, or different native runtime
-  fingerprint is refused and requires a complete portable bundle reinstall.
+  The updater does not apply unsigned zips, including local/development packages.
+  Build-update refuses dirty application/version sources and packages committed HEAD,
+  matching the source-selection rule used by the complete portable bundle builder. It
+  also refuses a supplied full bundle whose app version or packaged application source
+  differs from that commit before borrowing the bundle's compatibility fingerprints.
 
 THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:

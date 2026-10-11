@@ -6,6 +6,7 @@ See docs/current-architecture.md for the canonical phase ordering semantics.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -14,7 +15,15 @@ import structlog
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.progress import phase_display_label, start_phase_progress
+from frame_compare.orchestration.progress import (
+    phase_display_label,
+    start_phase_progress,
+    uses_rich_progress,
+)
+from frame_compare.utils.cancellation import (
+    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
+    cancellation_checkpoint,
+)
 from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
@@ -51,6 +60,11 @@ class Phase:
     fatal_exceptions: tuple[type[BaseException], ...] = ()
     retain_on_success: bool | None = None
     skip_detail: PhaseSkipDetail | None = None
+    success_summary: str | None = None
+    duration_text: str | None = None
+    # Overrides the completion status only on the success path (for example an
+    # Align phase whose review never ran completes as WARNED, not COMPLETED).
+    success_status: ProgressPhaseStatus | None = None
 
     @property
     def progress_label(self) -> str:
@@ -71,6 +85,7 @@ async def execute_phases(
         Exception: Propagates any exception from a required phase.
     """
     for phase in phases:
+        await cancellation_checkpoint()
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
             skip_detail = (
@@ -89,7 +104,16 @@ async def execute_phases(
                 total=phase.progress_total,
             )
             reporter.set_description("Skipped")
-            reporter.complete_phase(ProgressPhaseStatus.SKIPPED)
+            summary = skip_detail if isinstance(skip_detail, str) else None
+            if summary:
+                # The Rich durable line appends the summary after the phase
+                # label, so carry the detail there with a lower-case first
+                # letter. Plain and log reporters ignore summaries.
+                summary = summary[:1].lower() + summary[1:]
+            reporter.complete_phase(
+                ProgressPhaseStatus.SKIPPED,
+                summary=summary,
+            )
             continue
 
         phase.status = PhaseStatus.RUNNING
@@ -101,7 +125,12 @@ async def execute_phases(
         )
         phase_progress_status = ProgressPhaseStatus.COMPLETED
         try:
-            await phase.execute(context)
+            try:
+                await phase.execute(context)
+            except (_RunInterrupt, asyncio.CancelledError):
+                await cancellation_checkpoint()
+                raise asyncio.CancelledError() from None
+            await cancellation_checkpoint()
         except Exception as exc:
             if not phase.warn_only or isinstance(exc, phase.fatal_exceptions):
                 phase.status = PhaseStatus.FAILED
@@ -117,14 +146,34 @@ async def execute_phases(
                     error=str(exc),
                     exc_info=exc,
                 )
+        except BaseException:
+            # Cancellation and other control-flow exceptions do not inherit
+            # from Exception.  They still need a terminal lifecycle status so
+            # progress cannot report a cancelled phase as completed.
+            phase.status = PhaseStatus.FAILED
+            phase_progress_status = ProgressPhaseStatus.FAILED
+            raise
         else:
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)
         finally:
+            resolved_status = phase_progress_status
+            if (
+                resolved_status == ProgressPhaseStatus.COMPLETED
+                and phase.success_status is not None
+                and uses_rich_progress(reporter)
+            ):
+                resolved_status = phase.success_status
             if phase.retain_on_success is None:
-                reporter.complete_phase(phase_progress_status)
+                reporter.complete_phase(
+                    resolved_status,
+                    summary=phase.success_summary,
+                    duration_text=phase.duration_text,
+                )
             else:
                 reporter.complete_phase(
-                    phase_progress_status,
+                    resolved_status,
                     retain=phase.retain_on_success,
+                    summary=phase.success_summary,
+                    duration_text=phase.duration_text,
                 )

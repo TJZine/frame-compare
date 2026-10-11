@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from subprocess import CalledProcessError, CompletedProcess, TimeoutExpired
 from typing import TYPE_CHECKING, Protocol
@@ -91,6 +91,7 @@ class DefaultFFmpegRunner:
         output_dir: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        abort: Callable[[], bool] | None = None,
     ) -> list[RenderedFrameFacts]:
         """Extract ordered frames in one decode pass into numbered staging files."""
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -104,6 +105,7 @@ class DefaultFFmpegRunner:
         completed = self._run_extraction(
             argv,
             timeout_message="ffmpeg timed out while extracting frames",
+            abort=abort,
         )
         picture_types = parse_showinfo_picture_types(completed.stderr, len(frame_nums))
         return [
@@ -116,9 +118,14 @@ class DefaultFFmpegRunner:
         argv: list[str],
         *,
         timeout_message: str,
+        abort: Callable[[], bool] | None = None,
     ) -> CompletedProcess[bytes]:
         try:
-            return run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
+            if abort is None:
+                return run_subprocess(argv, timeout_seconds=self._extraction_timeout_seconds)
+            return run_subprocess(
+                argv, timeout_seconds=self._extraction_timeout_seconds, abort=abort
+            )
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
         except TimeoutExpired as exc:

@@ -7,7 +7,6 @@ progress reporter selection.
 
 import sys
 
-from rich.console import Console
 from rich.rule import Rule
 
 from frame_compare.utils.progress import (
@@ -18,6 +17,7 @@ from frame_compare.utils.progress import (
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
+from frame_compare.utils.terminal_theme import ACCENT, human_console
 
 _PHASE_DISPLAY_LABELS = {
     "frame_plan": "PLAN",
@@ -31,10 +31,27 @@ _PHASE_DISPLAY_LABELS = {
     "post_report_cleanup": "CLEANUP",
 }
 
+_PHASE_RICH_LABELS = {
+    "frame_plan": "Plan",
+    "analyze": "Analyze",
+    "align": "Align",
+    "render": "Render",
+    "metadata": "Metadata",
+    "publish": "Publish",
+    "report": "Report",
+    "confirm_slowpics_upload": "Confirm",
+    "post_report_cleanup": "Cleanup",
+}
+
 
 def phase_display_label(name: str) -> str:
     """Return the human progress label for an internal phase name."""
     return _PHASE_DISPLAY_LABELS.get(name, name.replace("_", " ").upper())
+
+
+def rich_phase_label(name: str) -> str:
+    """Return the title-case Rich progress label for an internal phase name."""
+    return _PHASE_RICH_LABELS.get(name, phase_display_label(name))
 
 
 def uses_rich_progress(reporter: ProgressReporter) -> bool:
@@ -50,9 +67,8 @@ def emit_execution_section_start(
     """Open the interactive runtime section."""
     if not uses_rich_progress(reporter):
         return
-    console = Console(stderr=True, no_color=no_color)
-    console.print(Rule("[bold bright_cyan]Execution[/]", style="dim cyan"))
-    console.print()
+    console = human_console(stderr=True, no_color=no_color)
+    console.print(Rule(f"[bold {ACCENT}]Execution[/]", style="dim", align="left"))
 
 
 def emit_execution_section_end(
@@ -63,7 +79,7 @@ def emit_execution_section_end(
     """Close the interactive runtime section."""
     if not uses_rich_progress(reporter):
         return
-    Console(stderr=True, no_color=no_color).print(Rule(style="dim cyan"))
+    human_console(stderr=True, no_color=no_color).print(Rule(style="dim"))
 
 
 def start_phase_progress(
@@ -73,9 +89,26 @@ def start_phase_progress(
     display_label: str,
     total: int,
 ) -> None:
-    """Start progress with human labels except for structured log output."""
+    """Start progress with human labels except for structured log output.
+
+    The Rich reporter uses title-case labels; every other reporter keeps the
+    current uppercase labels.
+    """
     if isinstance(reporter, LogProgressReporter):
         reporter.start_phase(name, total=total)
+        return
+    if isinstance(reporter, RichProgressReporter):
+        # Rich carries skip detail only as the completion summary (lower-cased
+        # by the caller), never in the label, so the bare title-case label is
+        # used here for every phase.
+        rich_label = rich_phase_label(name)
+        if name == "align":
+            reporter.start_phase(rich_label, total=1)
+            return
+        reporter.start_phase(rich_label, total=total)
+        return
+    if name == "align":
+        reporter.start_phase(display_label, total=1)
         return
     reporter.start_phase(display_label, total=total)
 
@@ -84,17 +117,13 @@ def select_reporter(
     quiet: bool = False,
     json_output: bool = False,
     no_color: bool = False,
-    force_tty: bool | None = None,
 ) -> ProgressReporter:
     """Select the appropriate progress reporter based on CLI flags and environment.
 
     Selection Priority:
     1. quiet=True -> NullProgressReporter
     2. json_output=True -> LogProgressReporter
-    3. force_tty is not None:
-       - True -> RichProgressReporter(no_color=no_color)
-       - False -> PlainProgressReporter
-    4. TTY detection (sys.stdout/sys.stderr isatty):
+    3. TTY detection (sys.stdout/sys.stderr isatty):
        - Interactive -> RichProgressReporter(no_color=no_color)
        - Non-interactive -> PlainProgressReporter
 
@@ -102,7 +131,6 @@ def select_reporter(
         quiet: If True, suppress all progress output.
         json_output: If True, use structured logging instead of interactive bars.
         no_color: If True, disable color in Rich progress output.
-        force_tty: Override TTY detection. None = auto-detect.
 
     Returns:
         An instance implementing the ProgressReporter protocol.
@@ -112,11 +140,6 @@ def select_reporter(
 
     if json_output:
         return LogProgressReporter()
-
-    if force_tty is not None:
-        if force_tty:
-            return RichProgressReporter(no_color=no_color)
-        return PlainProgressReporter()
 
     if stream_is_tty(sys.stdout) or stream_is_tty(sys.stderr):
         return RichProgressReporter(no_color=no_color)

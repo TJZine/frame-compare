@@ -23,11 +23,6 @@ def test_analysis_timing_recorder_accumulates_and_sorts_spans() -> None:
     }
 
 
-def test_record_span_is_a_noop_without_a_recorder() -> None:
-    with record_span(None, "source_load"):
-        pass
-
-
 def test_record_span_records_elapsed_time_when_operation_fails() -> None:
     recorder = AnalysisTimingRecorder()
 

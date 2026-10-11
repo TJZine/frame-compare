@@ -1,313 +1,348 @@
-"""Audio alignment correlation estimators."""
+"""Whole-track chunked GCC-PHAT audio alignment estimator (pure numeric).
+
+Estimates one constant frame offset by tiling chunks over the whole track,
+correlating each against the comparison with GCC-PHAT, judging chunks by peak
+prominence (PSR), and requiring chunks to agree on the lag. Operates on
+in-memory arrays at the shared utils analysis rate; streaming decode feeds it
+later.
+"""
 
 from __future__ import annotations
 
+import math
+import statistics
 from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
 
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentCorrelationMode
+from frame_compare.utils.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    MAX_AUDIO_CHUNKS,
+    AudioOutcomeStatus,
+)
 
 FloatArray = npt.NDArray[np.float64]
 
-_EPSILON = 1e-12
-_REFINEMENT_RADIUS_SECONDS = 0.005
-_REFINEMENT_MAX_POINTS = 65_536
+_MAX_CHUNK_SECONDS = 30
+_MIN_CHUNK_SECONDS = 5
+_MAX_CHUNK_FFT_POINTS = 2**22
+_ACTIVITY_FLOOR_DBFS = -50
+_PSR_EXCLUSION_SAMPLES = 160
+_CREDIBLE_PSR = 25.0
+_AGREEMENT_SAMPLES = 16
+_REQUIRED_AGREEING = 3
+
+_ACTIVITY_FLOOR = 10.0 ** (_ACTIVITY_FLOOR_DBFS / 20)
 
 
 @dataclass(frozen=True)
-class CorrelationEstimate:
-    """Correlation estimate in sample units at the coarse extraction sample rate."""
+class ChunkPlan:
+    """Chunking of the reference stream plus the symmetric lag search radius."""
 
-    sample_offset: int
-    score: float
-    peak_ratio: float
-
-
-def _as_finite_signal(signal: npt.ArrayLike, *, name: str) -> FloatArray:
-    array = np.asarray(signal, dtype=np.float64).reshape(-1)
-    if array.size == 0:
-        raise AudioAlignmentError("empty audio signal prevents correlation")
-    if not bool(np.all(np.isfinite(array))):
-        raise AudioAlignmentError(f"{name} audio signal contains non-finite samples")
-    return array
+    chunk_samples: int
+    lag_samples: int
+    chunks: tuple[tuple[int, int], ...]
 
 
-def _preprocess_signal(signal: FloatArray, *, mode: str) -> FloatArray:
-    if mode == "none":
-        return signal
-    if mode != "standard":
-        raise AudioAlignmentError(f"unsupported alignment preprocessing mode: {mode}")
+@dataclass(frozen=True)
+class ChunkObservation:
+    """Per-chunk result. ``agrees`` is resolved by ``finish()`` against the global lag."""
 
-    centered = signal - float(np.mean(signal))
-    rms = float(np.sqrt(np.mean(centered * centered)))
-    if rms <= _EPSILON:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
-    return centered / rms
-
-
-def _linear_correlation(
-    reference: FloatArray,
-    comparison: FloatArray,
-    *,
-    mode: AlignmentCorrelationMode,
-) -> FloatArray:
-    correlation_size = reference.size + comparison.size - 1
-    fft_size = 1 << (correlation_size - 1).bit_length()
-
-    reference_fft = np.fft.rfft(reference, fft_size)
-    comparison_fft = np.fft.rfft(comparison, fft_size)
-    cross_power = reference_fft * np.conj(comparison_fft)
-    if mode == "gcc_phat":
-        magnitude = np.abs(cross_power)
-        cross_power = np.divide(
-            cross_power,
-            magnitude,
-            out=np.zeros_like(cross_power),
-            where=magnitude > _EPSILON,
-        )
-    elif mode != "raw_fft":
-        raise AudioAlignmentError(f"unsupported alignment correlation mode: {mode}")
-
-    correlation_raw = np.fft.irfft(cross_power, fft_size)
-    return np.concatenate(
-        (
-            correlation_raw[-(comparison.size - 1) :],
-            correlation_raw[: reference.size],
-        )
-    )
+    index: int
+    reference_start: int
+    reference_count: int
+    active: bool
+    lag: int | None
+    psr: float | None
+    credible: bool
+    agrees: bool
 
 
-def _peak_from_correlation(
-    correlation: FloatArray,
-    *,
-    reference_size: int,
-    max_offset_samples: int | None,
-) -> tuple[int, float, float]:
-    if max_offset_samples is not None:
-        bounded = max(0, max_offset_samples)
-        center = reference_size - 1
-        start_idx = max(0, center - bounded)
-        end_idx = min(correlation.size, center + bounded + 1)
-        if start_idx >= end_idx:
-            raise AudioAlignmentError("max_offset_seconds produced an empty search window")
-    else:
-        start_idx = 0
-        end_idx = correlation.size
+@dataclass(frozen=True)
+class ChunkRun:
+    """Credible chunks sharing one lag, in index order; non-credible gaps are skipped."""
 
-    search = correlation[start_idx:end_idx]
-    peak_idx = int(np.argmax(search)) + start_idx
-    peak = float(correlation[peak_idx])
-    runner_up = _runner_up_peak(
-        correlation,
-        peak_idx=peak_idx,
-        start_idx=start_idx,
-        end_idx=end_idx,
-    )
-
-    offset = reference_size - 1 - peak_idx
-    return offset, peak, _peak_ratio(peak, runner_up)
+    first_index: int
+    last_index: int
+    lag: int
+    chunk_count: int
 
 
-def _runner_up_peak(
-    correlation: FloatArray,
-    *,
-    peak_idx: int,
-    start_idx: int,
-    end_idx: int,
-) -> float | None:
-    search_size = end_idx - start_idx
-    if search_size <= 1:
-        return None
+@dataclass(frozen=True)
+class ChunkedAudioEstimate:
+    """Decision over all planned chunks."""
 
-    # Adjacent samples usually belong to the same broad correlation peak. Suppress a
-    # small neighborhood and compare against the next distinct candidate peak.
-    exclusion_radius = max(1, min(64, search_size // 100))
-    candidate = np.array(correlation[start_idx:end_idx], copy=True)
-    local_peak_idx = peak_idx - start_idx
-    suppress_start = max(0, local_peak_idx - exclusion_radius)
-    suppress_end = min(candidate.size, local_peak_idx + exclusion_radius + 1)
-    candidate[suppress_start:suppress_end] = -np.inf
-    if not bool(np.any(np.isfinite(candidate))):
-        return None
-    return float(np.max(candidate))
+    outcome: AudioOutcomeStatus
+    global_lag: int | None
+    observations: tuple[ChunkObservation, ...]
+    runs: tuple[ChunkRun, ...]
+    active_count: int
+    credible_count: int
+    agreeing_count: int
 
 
-def _peak_ratio(peak: float, runner_up: float | None) -> float:
-    if runner_up is None:
-        return float("inf")
-    if peak <= _EPSILON:
-        return 0.0
-    if runner_up <= _EPSILON:
-        return float("inf")
-    return peak / runner_up
+def _next_pow2(value: int) -> int:
+    if value <= 1:
+        return 1
+    return 1 << (value - 1).bit_length()
 
 
-def correlate_audio(
-    reference: npt.ArrayLike,
-    comparison: npt.ArrayLike,
-    *,
-    max_offset_samples: int | None = None,
-    correlation_mode: AlignmentCorrelationMode = "raw_fft",
-    preprocessing_mode: str = "none",
-) -> CorrelationEstimate:
-    """Estimate sample offset using the requested correlation mode."""
-    reference_signal = _preprocess_signal(
-        _as_finite_signal(reference, name="reference"),
-        mode=preprocessing_mode,
-    )
-    comparison_signal = _preprocess_signal(
-        _as_finite_signal(comparison, name="comparison"),
-        mode=preprocessing_mode,
-    )
-
-    norm_ref = float(np.linalg.norm(reference_signal))
-    norm_comp = float(np.linalg.norm(comparison_signal))
-    if norm_ref <= _EPSILON or norm_comp <= _EPSILON:
-        raise AudioAlignmentError("zero-norm audio signal prevents correlation")
-
-    correlation = _linear_correlation(
-        reference_signal,
-        comparison_signal,
-        mode=correlation_mode,
-    )
-    sample_offset, peak, peak_ratio = _peak_from_correlation(
-        correlation,
-        reference_size=reference_signal.size,
-        max_offset_samples=max_offset_samples,
-    )
-    return CorrelationEstimate(
-        sample_offset=sample_offset,
-        score=float(peak / (norm_ref * norm_comp)),
-        peak_ratio=peak_ratio,
-    )
-
-
-def _candidate_offsets(
-    *,
-    coarse_offset: int,
-    sample_rate: int,
-    refinement_sample_rate: int,
-    max_offset_samples: int,
-) -> list[float]:
-    radius = min(max_offset_samples, max(1, int(round(sample_rate * _REFINEMENT_RADIUS_SECONDS))))
-    ratio = max(1.0, refinement_sample_rate / sample_rate)
-    step = 1.0 / ratio
-    count_each_side = int(round(radius / step))
-    candidates = [
-        coarse_offset + (index * step) for index in range(-count_each_side, count_each_side + 1)
-    ]
-    lower_bound = -max_offset_samples
-    upper_bound = max_offset_samples
-    return [candidate for candidate in candidates if lower_bound <= candidate <= upper_bound]
-
-
-def _sample_positions(start: float, stop: float) -> FloatArray:
-    sample_count = int(np.floor(stop - start))
-    if sample_count <= 1:
-        return np.array([], dtype=np.float64)
-    if sample_count > _REFINEMENT_MAX_POINTS:
-        return np.linspace(start, stop - 1.0, _REFINEMENT_MAX_POINTS, dtype=np.float64)
-    return np.arange(start, start + sample_count, dtype=np.float64)
-
-
-def _normalized_overlap_score(
-    reference: FloatArray,
-    comparison: FloatArray,
-    *,
-    offset: float,
-) -> float | None:
-    start = max(0.0, -offset)
-    stop = min(float(reference.size), float(comparison.size) - offset)
-    positions = _sample_positions(start, stop)
-    if positions.size == 0:
-        return None
-
-    reference_values = np.interp(positions, np.arange(reference.size, dtype=np.float64), reference)
-    comparison_values = np.interp(
-        positions + offset,
-        np.arange(comparison.size, dtype=np.float64),
-        comparison,
-    )
-    reference_values = reference_values - float(np.mean(reference_values))
-    comparison_values = comparison_values - float(np.mean(comparison_values))
-    denom = float(np.linalg.norm(reference_values) * np.linalg.norm(comparison_values))
-    if denom <= _EPSILON:
-        return None
-    return float(np.dot(reference_values, comparison_values) / denom)
-
-
-def _refine_locally(
-    reference: FloatArray,
-    comparison: FloatArray,
-    *,
-    coarse_offset: int,
-    coarse_score: float,
-    coarse_peak_ratio: float,
-    sample_rate: int,
-    refinement_sample_rate: int,
-    max_offset_samples: int,
-) -> CorrelationEstimate:
-    best_offset = float(coarse_offset)
-    best_score = coarse_score
-    for candidate in _candidate_offsets(
-        coarse_offset=coarse_offset,
-        sample_rate=sample_rate,
-        refinement_sample_rate=refinement_sample_rate,
-        max_offset_samples=max_offset_samples,
-    ):
-        score = _normalized_overlap_score(reference, comparison, offset=candidate)
-        if score is not None and score > best_score:
-            best_offset = candidate
-            best_score = score
-    return CorrelationEstimate(
-        sample_offset=int(round(best_offset)),
-        score=best_score,
-        peak_ratio=coarse_peak_ratio,
-    )
-
-
-def estimate_alignment_offset(
-    reference: npt.ArrayLike,
-    comparison: npt.ArrayLike,
-    *,
-    config: AlignmentConfig,
-) -> CorrelationEstimate:
-    """Estimate ``reference - comparison`` alignment from extracted audio."""
-    max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
-    estimate = correlate_audio(
-        reference,
-        comparison,
-        max_offset_samples=max_offset_samples,
-        correlation_mode=config.correlation_mode,
-        preprocessing_mode=config.preprocessing_mode,
-    )
-    if config.refinement_mode == "disabled":
-        return CorrelationEstimate(-estimate.sample_offset, estimate.score, estimate.peak_ratio)
-    if config.refinement_mode != "local":
+def plan_audio_chunks(
+    reference_samples: int,
+    comparison_samples: int,
+    max_offset_seconds: float,
+) -> ChunkPlan:
+    """Tile the reference stream into chunks searched over ``±M`` lag samples."""
+    if reference_samples < 1 or comparison_samples < 1:
         raise AudioAlignmentError(
-            f"unsupported alignment refinement mode: {config.refinement_mode}"
+            "need at least one sample per stream to plan audio chunks",
+            category="insufficient_signal",
+            stage="planning",
+        )
+    if not math.isfinite(max_offset_seconds) or max_offset_seconds < 1:
+        raise ValueError(f"max_offset_seconds must be finite and >= 1, got {max_offset_seconds!r}")
+
+    min_chunk = _MIN_CHUNK_SECONDS * AUDIO_ANALYSIS_SAMPLE_RATE
+    max_chunk = _MAX_CHUNK_SECONDS * AUDIO_ANALYSIS_SAMPLE_RATE
+    shorter = min(reference_samples, comparison_samples)
+    if shorter < min_chunk:
+        chunk_samples = shorter
+        chunks = ((0, shorter),)
+    else:
+        chunk_samples = min(max(shorter // 3, min_chunk), max_chunk)
+        complete_chunks, tail_samples = divmod(reference_samples, chunk_samples)
+        planned_chunk_count = complete_chunks + int(tail_samples >= -(-chunk_samples // 2))
+        if planned_chunk_count > MAX_AUDIO_CHUNKS:
+            raise AudioAlignmentError(
+                f"{planned_chunk_count} planned chunks exceed the {MAX_AUDIO_CHUNKS} evidence bound",
+                category="analysis_budget_exceeded",
+                stage="planning",
+            )
+
+        kept: list[tuple[int, int]] = []
+        start = 0
+        while start < reference_samples:
+            count = min(chunk_samples, reference_samples - start)
+            if count >= -(-chunk_samples // 2):
+                kept.append((start, count))
+            start += chunk_samples
+        chunks = tuple(kept)
+
+    lag_samples = int(math.ceil(max_offset_seconds * AUDIO_ANALYSIS_SAMPLE_RATE))
+    largest_fft = max(_next_pow2(count + 2 * lag_samples) for _, count in chunks)
+    if largest_fft > _MAX_CHUNK_FFT_POINTS:
+        raise AudioAlignmentError(
+            f"chunk FFT of {largest_fft} points exceeds the {_MAX_CHUNK_FFT_POINTS} budget",
+            category="analysis_budget_exceeded",
+            stage="planning",
+        )
+    return ChunkPlan(chunk_samples=chunk_samples, lag_samples=lag_samples, chunks=chunks)
+
+
+def _chunk_psr(correlation: FloatArray, peak: int) -> float:
+    side = np.concatenate(
+        (
+            correlation[: max(0, peak - _PSR_EXCLUSION_SAMPLES)],
+            correlation[min(correlation.size, peak + _PSR_EXCLUSION_SAMPLES + 1) :],
+        )
+    )
+    # An empty side has no median; treat it as 0 so the peak test below still applies.
+    median = float(np.median(side)) if side.size else 0.0
+    mad = float(np.median(np.abs(side - median))) if side.size else 0.0
+    if mad == 0:
+        return float("inf") if correlation[peak] > median else 0.0
+    return float((correlation[peak] - median) / (1.4826 * mad))
+
+
+class ChunkedCorrelation:
+    """Streaming-shaped accumulator: one ``add`` per planned chunk, then ``finish``.
+
+    Keeps only the running global correlation sum plus scalar observations, so
+    memory stays bounded independent of track length.
+    """
+
+    def __init__(self, plan: ChunkPlan) -> None:
+        self._plan = plan
+        self._next_index = 0
+        self._global = np.zeros(2 * plan.lag_samples + 1, dtype=np.float64)
+        self._observations: list[ChunkObservation] = []
+
+    def add(
+        self,
+        index: int,
+        reference: npt.ArrayLike,
+        comparison_window: npt.ArrayLike,
+    ) -> ChunkObservation:
+        """Correlate one chunk. Chunks must be added in plan order, each exactly once."""
+        if index != self._next_index or index >= len(self._plan.chunks):
+            raise ValueError(
+                f"audio chunks must be added in plan order, expected {self._next_index}, got {index}"
+            )
+        reference_start, reference_count = self._plan.chunks[index]
+        lag_samples = self._plan.lag_samples
+        reference_signal = np.asarray(reference, dtype=np.float64).reshape(-1)
+        window_signal = np.asarray(comparison_window, dtype=np.float64).reshape(-1)
+        if reference_signal.size != reference_count:
+            raise AudioAlignmentError(
+                f"chunk {index} needs {reference_count} reference samples, "
+                f"got {reference_signal.size}",
+                category="correlation_failed",
+                stage="correlation",
+            )
+        if window_signal.size != reference_count + 2 * lag_samples:
+            raise AudioAlignmentError(
+                f"chunk {index} needs {reference_count + 2 * lag_samples} comparison "
+                f"samples, got {window_signal.size}",
+                category="correlation_failed",
+                stage="correlation",
+            )
+        if not bool(np.all(np.isfinite(reference_signal))):
+            raise AudioAlignmentError(
+                f"chunk {index} reference signal contains non-finite samples",
+                category="non_finite_signal",
+                stage="correlation",
+                role="reference",
+            )
+        if not bool(np.all(np.isfinite(window_signal))):
+            raise AudioAlignmentError(
+                f"chunk {index} comparison signal contains non-finite samples",
+                category="non_finite_signal",
+                stage="correlation",
+                role="comparison",
+            )
+
+        observation = ChunkObservation(
+            index=index,
+            reference_start=reference_start,
+            reference_count=reference_count,
+            active=False,
+            lag=None,
+            psr=None,
+            credible=False,
+            agrees=False,
+        )
+        reference_rms = float(np.sqrt(np.mean(reference_signal * reference_signal)))
+        window_rms = float(np.sqrt(np.mean(window_signal * window_signal)))
+        if reference_rms <= _ACTIVITY_FLOOR or window_rms <= _ACTIVITY_FLOOR:
+            self._observations.append(observation)
+            self._next_index += 1
+            return observation
+
+        # N >= n + 2M, so no circular wrap affects the searched lags;
+        # index m of xc corresponds to lag = M - m.
+        size = _next_pow2(reference_count + 2 * lag_samples)
+        cross_power = np.conj(np.fft.rfft(reference_signal, size)) * np.fft.rfft(
+            window_signal, size
+        )
+        cross_power /= np.maximum(np.abs(cross_power), 1e-12)
+        chunk_correlation = np.fft.irfft(cross_power, size)[: 2 * lag_samples + 1]
+        peak = int(np.argmax(chunk_correlation))
+        lag = lag_samples - peak
+        psr = _chunk_psr(chunk_correlation, peak)
+        self._global += chunk_correlation
+        observation = ChunkObservation(
+            index=index,
+            reference_start=reference_start,
+            reference_count=reference_count,
+            active=True,
+            lag=lag,
+            psr=psr,
+            credible=psr >= _CREDIBLE_PSR,
+            agrees=False,
+        )
+        self._observations.append(observation)
+        self._next_index += 1
+        return observation
+
+    def finish(self) -> ChunkedAudioEstimate:
+        """Decide one global lag from all planned chunks."""
+        if self._next_index != len(self._plan.chunks):
+            raise ValueError(
+                f"need all {len(self._plan.chunks)} chunks before finish, got {self._next_index}"
+            )
+        lag_samples = self._plan.lag_samples
+        active = [item for item in self._observations if item.active]
+        if not active:
+            return ChunkedAudioEstimate(
+                outcome="no_usable_audio",
+                global_lag=None,
+                observations=tuple(self._observations),
+                runs=(),
+                active_count=0,
+                credible_count=0,
+                agreeing_count=0,
+            )
+        global_lag = lag_samples - int(np.argmax(self._global))
+        credible = [item for item in active if item.credible]
+        agreeing = [
+            item
+            for item in credible
+            if item.lag is not None and abs(item.lag - global_lag) <= _AGREEMENT_SAMPLES
+        ]
+        agreeing_count = len(agreeing)
+        credible_count = len(credible)
+        required = max(1, min(_REQUIRED_AGREEING, len(self._plan.chunks)))
+        # agreeing / credible >= 0.8, compared as integers.
+        passed = agreeing_count >= required and agreeing_count * 5 >= credible_count * 4
+        if not passed:
+            outcome: AudioOutcomeStatus = "no_single_offset"
+        elif abs(global_lag) >= lag_samples - _AGREEMENT_SAMPLES:
+            outcome = "search_edge"
+        else:
+            outcome = "agreed"
+        agreeing_ids = {item.index for item in agreeing}
+        observations = tuple(
+            ChunkObservation(
+                index=item.index,
+                reference_start=item.reference_start,
+                reference_count=item.reference_count,
+                active=item.active,
+                lag=item.lag,
+                psr=item.psr,
+                credible=item.credible,
+                agrees=item.index in agreeing_ids,
+            )
+            for item in self._observations
+        )
+        runs = _credible_runs(credible)
+        return ChunkedAudioEstimate(
+            outcome=outcome,
+            global_lag=global_lag,
+            observations=observations,
+            runs=runs,
+            active_count=len(active),
+            credible_count=credible_count,
+            agreeing_count=agreeing_count,
         )
 
-    reference_signal = _preprocess_signal(
-        _as_finite_signal(reference, name="reference"),
-        mode=config.preprocessing_mode,
-    )
-    comparison_signal = _preprocess_signal(
-        _as_finite_signal(comparison, name="comparison"),
-        mode=config.preprocessing_mode,
-    )
-    refinement_sample_rate = config.refinement_sample_rate or config.sample_rate
-    refined = _refine_locally(
-        reference_signal,
-        comparison_signal,
-        coarse_offset=estimate.sample_offset,
-        coarse_score=estimate.score,
-        coarse_peak_ratio=estimate.peak_ratio,
-        sample_rate=config.sample_rate,
-        refinement_sample_rate=refinement_sample_rate,
-        max_offset_samples=max_offset_samples,
-    )
-    return CorrelationEstimate(-refined.sample_offset, refined.score, refined.peak_ratio)
+
+def _credible_runs(credible: list[ChunkObservation]) -> tuple[ChunkRun, ...]:
+    """Group credible chunks into runs sharing one lag (diagnostic, index order)."""
+    runs: list[ChunkRun] = []
+    member_lags: list[int] = []
+    member_indices: list[int] = []
+
+    def close_run() -> None:
+        if member_indices:
+            runs.append(
+                ChunkRun(
+                    first_index=member_indices[0],
+                    last_index=member_indices[-1],
+                    lag=int(statistics.median_low(member_lags)),
+                    chunk_count=len(member_indices),
+                )
+            )
+
+    for item in credible:
+        if item.lag is None:
+            raise ValueError(f"credible chunk {item.index} is missing its lag")
+        if member_indices and abs(item.lag - member_lags[0]) > _AGREEMENT_SAMPLES:
+            close_run()
+            member_lags = []
+            member_indices = []
+        member_lags.append(item.lag)
+        member_indices.append(item.index)
+    close_run()
+    return tuple(runs)

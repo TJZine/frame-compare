@@ -167,7 +167,7 @@ def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Pa
     assert prepare["if"] == "inputs.prepare_release_assets"
     assert "Expected exactly one signed update zip" in prepare["run"]
     assert attest["if"] == "inputs.prepare_release_assets"
-    assert attest["uses"] == "actions/attest@a1948c3f048ba23858d222213b7c278aabede763"
+    assert attest["uses"] == "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
     assert attest["with"]["subject-path"] == (
         "dist/release-assets/frame-compare-portable-win-x64-${{ inputs.release_tag }}.zip\n"
         "dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip\n"

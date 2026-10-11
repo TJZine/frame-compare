@@ -1,10 +1,11 @@
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
 
-from frame_compare.render.encoders import render_frame
+from frame_compare.render.encoders import render_frame_detailed
 from frame_compare.render.types import EncoderSettings, RenderRequest
 
 # Skip policy at module level
@@ -31,7 +32,7 @@ def test_vs_render_creates_valid_png(tmp_path: Path):
         encoder_settings=EncoderSettings(),
     )
 
-    result = render_frame(request, renderer="vapoursynth")
+    result = render_frame_detailed(request, renderer="vapoursynth").path
 
     assert result == output_path
     assert output_path.exists()
@@ -64,7 +65,7 @@ def test_vs_render_converts_rgbs_to_png(tmp_path: Path):
         encoder_settings=EncoderSettings(),
     )
 
-    result = render_frame(request, renderer="vapoursynth")
+    result = render_frame_detailed(request, renderer="vapoursynth").path
 
     assert result == output_path
     assert output_path.exists()
@@ -73,4 +74,6 @@ def test_vs_render_converts_rgbs_to_png(tmp_path: Path):
         assert img.format == "PNG"
         extrema = img.getextrema()
         assert extrema is not None
-        assert all(channel_max > 0 for _, channel_max in extrema)
+        assert all(
+            channel_max > 0 for _, channel_max in cast(tuple[tuple[float, float], ...], extrema)
+        )

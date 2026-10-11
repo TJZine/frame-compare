@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Windows initial-release evidence — 2026-07-28
 
 This record captures non-secret Windows evidence for commit

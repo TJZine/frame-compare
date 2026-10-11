@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+import site
+import sys
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 from shutil import which
-from subprocess import CompletedProcess, run
+from subprocess import CompletedProcess, Popen, TimeoutExpired, run
+from tempfile import TemporaryFile
+from time import monotonic
+from typing import BinaryIO
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
     "ffprobe": "FRAME_COMPARE_FFPROBE_EXECUTABLE",
 }
+_PYTHON_INJECTION_ENV_KEYS = (
+    "PYTHONHOME",
+    "PYTHONINSPECT",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PYTHONNOUSERSITE",
+)
 
 
 def _is_executable_file(path: Path) -> bool:
@@ -76,12 +89,46 @@ def _normalize_argv(argv: Sequence[str], cwd: Path | None) -> list[str]:
     return normalized
 
 
+def prepare_python_child(
+    argv: Sequence[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    """Prepare a child Python command with the parent's trusted import policy.
+
+    Safe-path mode excludes the working and script directories from imports.
+    Caller-controlled Python injection variables are removed, while an enabled
+    parent user site and its ``PYTHONUSERBASE`` remain available to the child.
+    When the parent has user-site imports disabled, ``-s`` keeps the child from
+    discovering a user site of its own.
+    """
+    if not argv:
+        raise ValueError("argv must contain at least one element")
+
+    child_env = dict(os.environ if env is None else env)
+    for key in _PYTHON_INJECTION_ENV_KEYS:
+        child_env.pop(key, None)
+
+    user_site_enabled = site.ENABLE_USER_SITE and not sys.flags.no_user_site
+    python_flags = ["-P"]
+    if user_site_enabled:
+        if env is not None and "PYTHONUSERBASE" in env:
+            child_env["PYTHONUSERBASE"] = env["PYTHONUSERBASE"]
+    else:
+        child_env.pop("PYTHONUSERBASE", None)
+        python_flags.append("-s")
+
+    child_env["PYTHONSAFEPATH"] = "1"
+    return [str(argv[0]), *python_flags, *(str(part) for part in argv[1:])], child_env
+
+
 def run_subprocess(
     argv: Sequence[str],
     *,
     timeout_seconds: float | None = None,
     cwd: Path | None = None,
     check: bool = True,
+    abort: Callable[[], bool] | None = None,
 ) -> CompletedProcess[bytes]:
     """
     Execute a command with explicit argv validation and captured output.
@@ -91,9 +138,12 @@ def run_subprocess(
         timeout_seconds: Maximum execution time in seconds
         cwd: Working directory
         check: Whether to raise CalledProcessError on non-zero exit code
+        abort: Optional owner-provided check for stopping and reaping the child
     """
     resolved_cwd = _resolve_cwd(cwd)
     normalized_argv = _normalize_argv(argv, resolved_cwd)
+    if abort is not None:
+        return _run_abortable(normalized_argv, resolved_cwd, timeout_seconds, check, abort)
     return run(
         normalized_argv,
         cwd=resolved_cwd,
@@ -104,4 +154,71 @@ def run_subprocess(
     )
 
 
-__all__ = ["resolve_executable", "run_subprocess"]
+class SubprocessAborted(Exception):
+    """The owner stopped a process; incomplete output is not a successful result."""
+
+
+def _reap_stopped_process(process: Popen[bytes]) -> None:
+    # Keep the original failure, including a repeated interrupt, during cleanup.
+    with suppress(BaseException):
+        process.terminate()
+    try:
+        process.wait(timeout=2.0)
+        return
+    except BaseException:
+        pass
+    with suppress(BaseException):
+        process.kill()
+    with suppress(BaseException):
+        process.wait(timeout=2.0)
+
+
+def _read_captured_output(stream: BinaryIO) -> bytes:
+    size = os.fstat(stream.fileno()).st_size
+    stream.seek(0)
+    return stream.read(size)
+
+
+def _run_abortable(
+    argv: list[str],
+    cwd: Path | None,
+    timeout_seconds: float | None,
+    check: bool,
+    abort: Callable[[], bool],
+) -> CompletedProcess[bytes]:
+    if abort():
+        raise SubprocessAborted()
+
+    # Files avoid Windows pipe-reader threads, whose read/close can outlive a
+    # drain deadline when a descendant retains an inherited write handle.
+    with TemporaryFile() as stdout_file, TemporaryFile() as stderr_file:
+        process = Popen(argv, cwd=cwd, stdout=stdout_file, stderr=stderr_file, shell=False)
+        try:
+            deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
+            while True:
+                if abort():
+                    raise SubprocessAborted()
+                remaining = None if deadline is None else deadline - monotonic()
+                if timeout_seconds is not None and remaining is not None and remaining <= 0:
+                    raise TimeoutExpired(argv, timeout_seconds)
+                try:
+                    process.wait(timeout=0.1 if remaining is None else min(0.1, remaining))
+                    break
+                except TimeoutExpired:
+                    pass
+        except BaseException as exc:
+            _reap_stopped_process(process)
+            if isinstance(exc, TimeoutExpired):
+                with suppress(BaseException):
+                    exc.stdout = _read_captured_output(stdout_file)
+                    exc.stderr = _read_captured_output(stderr_file)
+            raise
+        stdout = _read_captured_output(stdout_file)
+        stderr = _read_captured_output(stderr_file)
+    result = CompletedProcess(argv, process.returncode, stdout, stderr)
+    if check:
+        result.check_returncode()
+    return result
+
+
+__all__ = ["SubprocessAborted", "prepare_python_child", "resolve_executable", "run_subprocess"]

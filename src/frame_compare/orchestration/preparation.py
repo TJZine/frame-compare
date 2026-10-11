@@ -30,6 +30,7 @@ from frame_compare.orchestration.active_rect_content import (
 )
 from frame_compare.orchestration.analysis_policy import (
     needs_analysis,
+    validate_cache_mode_flags,
     validate_skip_analysis_frame_selection_contract,
 )
 from frame_compare.orchestration.analysis_source import resolve_analysis_source
@@ -89,10 +90,12 @@ from frame_compare.services.run_info import (
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cancellation import cancellation_checkpoint, raise_if_cancelling
 from frame_compare.utils.paths import (
     require_managed_descendant,
     require_managed_immediate_child,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -123,9 +126,10 @@ async def _resolve_run_directory(
     input_videos: list[Path],
     deps: RunDependencies,
     preflight_duration: float,
-    preflight_warnings: tuple[str, ...],
-    run_warnings: list[str],
+    preflight_warnings: list[RunWarning],
+    run_warnings: list[RunWarning],
 ) -> tuple[WorkspacePaths, MetadataPrefetch]:
+    await cancellation_checkpoint()
     metadata = None
     was_attempted = False
     tmdb_facts = _skipped_run_info_tmdb_prefetch_facts(
@@ -156,10 +160,10 @@ async def _resolve_run_directory(
                 filenames=[input_videos[0].name],
                 error_type=type(exc).__name__,
                 error=str(exc),
-                exc_info=exc,
             )
 
     filenames = [video.name for video in input_videos]
+    raise_if_cancelling()
     run_dir = reserve_run_folder(
         generated_root=workspace.generated_root,
         filenames=filenames,
@@ -181,6 +185,17 @@ async def _resolve_run_directory(
     except (OSError, RuntimeError) as exc:
         _cleanup_empty_reserved_run_dir(run_dir.path, original_error=exc)
         raise GeneratedDataReservationError(workspace.generated_root, exc) from exc
+    if deps.capture_reserved_run is not None:
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=new_workspace,
+                clip_count=len(input_videos),
+                preflight_duration=preflight_duration,
+                preflight_warnings=preflight_warnings,
+                run_warnings=run_warnings,
+            )
+        )
+    raise_if_cancelling()
     try:
         write_run_info(
             run_info_path,
@@ -195,16 +210,6 @@ async def _resolve_run_directory(
     except OSError as exc:
         _cleanup_empty_reserved_run_dir(resolved_run_dir, original_error=exc)
         raise
-    if deps.capture_reserved_run is not None:
-        deps.capture_reserved_run(
-            ReservedRunCapture(
-                workspace=new_workspace,
-                clip_count=len(input_videos),
-                preflight_duration=preflight_duration,
-                preflight_warnings=preflight_warnings,
-                run_warnings=run_warnings,
-            )
-        )
     return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
 
 
@@ -298,7 +303,6 @@ def _validate_cache_state(
         cache_result = cache_io.load_cached_metrics_for_request(
             workspace.cache_dir,
             fingerprint,
-            clips=[],
             request=metric_request,
         )
         if not cache_result.success:
@@ -327,6 +331,7 @@ def _cached_probe_snapshots_for_cache_only(
     entries_by_key = dict(cached_entries)
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
+        raise_if_cancelling()
         stats = path.stat()
         fingerprint = ClipFingerprint(
             path=path,
@@ -375,10 +380,12 @@ def _persist_probe_snapshots_for_run(
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
 
+    raise_if_cancelling()
     # Run-local cache gets only this run's entries.
     save_clip_probe_cache(run_cache_path, current_entries)
 
     # Shared cache merges current entries on top of any existing entries.
+    raise_if_cancelling()
     merge_shared_clip_probe_cache(shared_cache_path, current_entries)
 
 
@@ -392,12 +399,13 @@ def _probe_input_videos(
     labels_by_path: dict[Path, str],
     release_identities_by_path: dict[Path, ReleaseIdentity],
     explicit_labels_by_path: dict[Path, bool],
-) -> tuple[list[ClipState], list[str], list[str]]:
+) -> tuple[list[ClipState], list[str], list[RunWarning]]:
     cache_paths = _probe_cache_paths_for_run(workspace)
     entries_by_key = _load_probe_cache_entries(cache_paths)
     snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
 
     for path in input_videos:
+        raise_if_cancelling()
         stats = path.stat()
         fingerprint = ClipFingerprint(
             path=path,
@@ -473,7 +481,7 @@ def _refine_auto_active_rects_after_selection_window(
     config: ConfigSchema,
     deps: RunDependencies,
     fail_closed: bool,
-) -> tuple[list[ClipState], list[str]]:
+) -> tuple[list[ClipState], list[RunWarning]]:
     if config.screenshots.active_rect_detection != ScreenshotActiveRectDetection.AUTO:
         return clips, []
 
@@ -506,7 +514,7 @@ def _probe_input_videos_from_snapshots(
     release_identities_by_path: dict[Path, ReleaseIdentity],
     explicit_labels_by_path: dict[Path, bool],
     snapshots_by_path: dict[Path, ClipProbeSnapshot],
-) -> tuple[list[ClipState], list[str], list[str]]:
+) -> tuple[list[ClipState], list[str], list[RunWarning]]:
     result = build_selection_domain_clips_with_diagnostics(
         ordered_paths=input_videos,
         snapshots_by_path=snapshots_by_path,
@@ -525,10 +533,10 @@ async def execute_prep(
     deps: RunDependencies,
 ) -> PrepState:
     preflight_start = deps.monotonic_timer()
-    if request.no_cache and request.from_cache_only:
-        raise MetricsCalculationError(
-            "Flags --no-cache and --from-cache-only are mutually exclusive."
-        )
+    validate_cache_mode_flags(
+        no_cache=request.no_cache,
+        from_cache_only=request.from_cache_only,
+    )
 
     preflight = prepare_preflight(
         root=request.root,
@@ -540,6 +548,10 @@ async def execute_prep(
     load_sources_start = deps.monotonic_timer()
     workspace = preflight.workspace
     config = resolve_effective_config(preflight.config, request.cli_config_overrides())
+    if deps.vs_loader is None:
+        from frame_compare.vs.loader import DefaultVSLoader
+
+        deps.vs_loader = DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
     validate_skip_analysis_frame_selection_contract(
         skip_analysis=request.skip_analysis,
         config=config.analysis,
@@ -588,7 +600,7 @@ async def execute_prep(
     prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
     full_window_retry_override = None
     load_source_diagnostics: list[str] = []
-    source_warnings: list[str] = []
+    source_warnings: list[RunWarning] = []
 
     if request.from_cache_only and analysis_required:
         prevalidated_snapshots_by_path = _cached_probe_snapshots_for_cache_only(
@@ -634,7 +646,7 @@ async def execute_prep(
         )
         prevalidated_analysis_clip = prevalidated_analysis_selection.clip
         if prevalidated_analysis_selection.warning is not None:
-            load_source_diagnostics.append(prevalidated_analysis_selection.warning)
+            load_source_diagnostics.append(prevalidated_analysis_selection.warning.text)
         prevalidated_selection_domain = build_analysis_selection_domain_token(
             clips=prevalidated_clips,
             analysis_clip=prevalidated_analysis_clip,
@@ -661,7 +673,7 @@ async def execute_prep(
         input_videos=input_videos,
         deps=deps,
         preflight_duration=preflight_duration,
-        preflight_warnings=tuple(preflight.warnings),
+        preflight_warnings=list(preflight.warnings),
         run_warnings=artifacts.warnings,
     )
 
@@ -720,7 +732,7 @@ async def execute_prep(
             )
             analysis_clip = analysis_selection.clip
             if analysis_selection.warning is not None:
-                load_source_diagnostics.append(analysis_selection.warning)
+                load_source_diagnostics.append(analysis_selection.warning.text)
             selection_domain = build_analysis_selection_domain_token(
                 clips=clips,
                 analysis_clip=analysis_clip,

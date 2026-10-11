@@ -20,7 +20,7 @@ const ReportViewer = {
         alignY: 0,
         pairAlignments: {},
         blinkInterval: null,
-        blinkPaused: false,
+        blinkPauseRequested: false,
         blinkIntervalMs: 700,
         storageKey: null,
         activeCategoryKey: ALL_CATEGORY_FILTER_KEY,
@@ -32,24 +32,16 @@ const ReportViewer = {
         categoryFilterKeys: new Map(),
         imageLoadPromises: new Map(),
         imageRequestToken: 0,
+        mainImageRequests: {
+            left: null,
+            right: null,
+        },
         helpRestoreFocus: null,
         infoRestoreFocus: null,
         inspectorRestoreFocus: null,
         rawAlignX: null,
         rawAlignY: null,
         paletteOrientation: 'horizontal'
-    },
-
-    clipDisplay(clip, profile = 'control') {
-        return ViewerFormat.clipDisplay(clip, profile);
-    },
-
-    clipFilename(clip) {
-        return ViewerFormat.clipFilename(clip);
-    },
-
-    clipAccessibleName(clip) {
-        return ViewerFormat.clipAccessibleName(clip);
     },
 
     init() {
@@ -61,12 +53,14 @@ const ReportViewer = {
             return;
         }
 
+        this.localizeTimestamps();
+
         try {
             this.state.data = this.normalizePayload(this.readPayload());
             this.state.mode = this.validPayloadMode(this.state.data.default_mode)
                 ? this.state.data.default_mode
                 : 'slider';
-            this.state.storageKey = this.viewportStorageKey();
+            this.state.storageKey = this.viewerStorageKey();
             this.state.categoryFilterKeys = this.buildCategoryFilterKeys();
             this.applyDefaultSelection();
             this.restorePersistedState();
@@ -78,8 +72,10 @@ const ReportViewer = {
             }
             this.bindHelpEvents();
             this.updateOverlayVisibility();
-            this.updateInspectorTabs();
-            this.updateInspectorVisibility();
+            this.viewport.updateFitButtons();
+            this.inspector.updateTabs();
+            this.inspector.updateVisibility();
+            this.inspector.renderReportInformation();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -175,6 +171,7 @@ const ReportViewer = {
             reviewImportCancel: document.querySelector('[data-review-import-cancel]'),
             btnAlignToggle: document.getElementById('btn-align-toggle'),
             alignPopover: document.getElementById('align-popover'),
+            lensSettingsPopover: document.getElementById('lens-settings-popover'),
             btnOverlays: document.getElementById('btn-overlays'),
             ...this.inspector.cacheDOM(),
         };
@@ -338,6 +335,7 @@ const ReportViewer = {
             document.body.prepend(status);
             if (this.dom) this.dom.status = status;
         }
+        if (!status.hidden && status.textContent === message && status.dataset.tone === tone) return;
         status.textContent = message;
         status.dataset.tone = tone;
         status.setAttribute('role', tone === 'error' ? 'alert' : 'status');
@@ -360,16 +358,53 @@ const ReportViewer = {
         this.dom.status.hidden = true;
     },
 
-    showStageMessage(message) {
+    localizeTimestamps(root) {
+        const scope = root || (typeof document !== 'undefined' ? document : null);
+        const elements = scope?.querySelectorAll?.('time[datetime]') || [];
+        elements.forEach?.(element => {
+            const text = ViewerFormat.formatTimestamp(element.getAttribute('datetime'));
+            if (text) element.textContent = text;
+        });
+    },
+
+    showStageMessage(message, retryActions = []) {
         if (!this.dom.emptyState || !this.dom.stage) return;
-        this.dom.emptyState.textContent = message;
+        const previous = this.stageMessageState;
+        if (previous?.message === message
+            && previous.actions.length === retryActions.length
+            && retryActions.every((action, index) => (
+                action.key === previous.actions[index].key
+                && action.ariaLabel === previous.actions[index].ariaLabel
+            ))) {
+            // Keep focused controls, but bind them to the current request generation.
+            previous.actions = retryActions;
+            return;
+        }
+        const messageState = { message, actions: retryActions };
+        this.stageMessageState = messageState;
+        const messageElement = document.createElement('span');
+        messageElement.textContent = message;
+        const children = [messageElement];
+        retryActions.forEach((action, index) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Retry';
+            button.setAttribute('aria-label', action.ariaLabel);
+            button.addEventListener('click', event => {
+                event.stopPropagation?.();
+                messageState.actions[index].onClick();
+            });
+            children.push(button);
+        });
+        this.dom.emptyState.replaceChildren(...children);
         this.dom.emptyState.hidden = false;
         this.dom.stage.classList.add('rv-viewer-stage--empty');
     },
 
     hideStageMessage() {
+        this.stageMessageState = null;
         if (!this.dom.emptyState || !this.dom.stage) return;
-        this.dom.emptyState.textContent = '';
+        this.dom.emptyState.replaceChildren();
         this.dom.emptyState.hidden = true;
         this.dom.stage.classList.remove('rv-viewer-stage--empty');
     },
@@ -527,6 +562,7 @@ const ReportViewer = {
         this.dom.btnAlignToggle.classList.toggle('active', isOpen);
         this.dom.btnAlignToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         this.dom.alignPopover.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+        this.viewport?.updatePaletteProximity?.();
 
         if (isOpen) {
             this.focusElement(this.dom.alignmentPreset);
@@ -638,7 +674,6 @@ const ReportViewer = {
                 this.pointerInteraction.lensPointHandled = false;
                 this.pointerInteraction.lensTouchStart = null;
                 this.viewport.startPinchFromTrackedPointers();
-                if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
                 return;
             }
@@ -648,12 +683,12 @@ const ReportViewer = {
                     clientX: e.clientX,
                     clientY: e.clientY,
                 };
+                this.updateBlinkControls();
                 e.preventDefault();
                 return;
             }
             if (this.viewport.shouldPanFromPointer(e)) {
                 this.viewport.startPanFromPointer(e);
-                if (this.state.mode === 'blink') this.state.blinkPaused = true;
                 e.preventDefault();
             } else if (this.state.mode === 'slider') {
                 this.pointerInteraction.isDragging = true;
@@ -663,7 +698,9 @@ const ReportViewer = {
             }
         });
 
+        this.viewport.initPaletteProximity();
         this.dom.stage.addEventListener('pointermove', (e) => {
+            this.viewport.schedulePaletteProximity(e.clientX, e.clientY);
             if (this.isViewerChromeEvent(e)) return;
             const lensMove = this.lens.handleStagePointerMove(e);
             this.viewport.trackPointerPosition(e);
@@ -694,16 +731,21 @@ const ReportViewer = {
                 e.preventDefault();
             }
         });
-        this.dom.stage.addEventListener('pointerup', (e) => this.viewport.stopPointerInteraction(e));
+        this.dom.stage.addEventListener('pointerup', (e) => {
+            this.viewport.stopPointerInteraction(e);
+            this.viewport.updatePaletteProximity(e.clientX, e.clientY);
+        });
         this.dom.stage.addEventListener('pointercancel', (e) => {
             this.viewport.stopPointerInteraction(e, { cancelled: true });
+            this.viewport.updatePaletteProximity(e.clientX, e.clientY);
         });
+        this.dom.stage.addEventListener('pointerleave', () => this.viewport.handleStagePointerLeave());
         this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
     },
 
     isViewerChromeEvent(e) {
-        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens, .rv-lens-settings'));
+        return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens, .rv-lens-settings, .rv-empty-state'));
     },
 
     handleViewportDoubleClick(e) {
@@ -733,7 +775,6 @@ const ReportViewer = {
             clientX: start.clientX,
             clientY: start.clientY,
         };
-        if (this.state.mode === 'blink') this.state.blinkPaused = true;
         if (this.viewport.shouldPanFromPointer(e)) {
             this.viewport.startPanFromPointer(origin);
             this.viewport.updatePanFromPointer(e);
@@ -831,7 +872,7 @@ const ReportViewer = {
     },
 
     bindBlinkEvents() {
-        this.dom.btnBlinkPause.addEventListener('click', () => this.setBlinkPaused(!this.state.blinkPaused));
+        this.dom.btnBlinkPause.addEventListener('click', () => this.setBlinkPaused(!this.state.blinkPauseRequested));
         this.dom.blinkSpeed.addEventListener('change', (e) => this.setBlinkIntervalMs(Number(e.target.value)));
     },
 
@@ -964,11 +1005,16 @@ const ReportViewer = {
         );
     },
 
-    applyDefaultSelection() {
-        const selection = this.state.data.default_selection || {};
+    defaultPairIndexes() {
+        const selection = (this.state.data || {}).default_selection || {};
         const left = this.clipIndexOrDefault(selection.left_clip_index, 0);
         const rightFallback = this.clipCount() > 1 ? 1 : left;
         const right = this.clipIndexOrDefault(selection.right_clip_index, rightFallback);
+        return [left, right];
+    },
+
+    applyDefaultSelection() {
+        const [left, right] = this.defaultPairIndexes();
 
         this.state.leftClipIdx = left;
         this.state.rightClipIdx = right;
@@ -1020,7 +1066,7 @@ const ReportViewer = {
         }
     },
 
-    viewportStorageKey() {
+    viewerStorageKey() {
         const reportId = this.state.data?.report_id || 'unknown-report';
         return `frame-compare:report-viewer:${reportId}:viewport`;
     },
@@ -1086,7 +1132,7 @@ const ReportViewer = {
         if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
-    persistViewportState() {
+    persistViewerState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
         this.viewport.storeCurrentPairAlignment();
@@ -1161,14 +1207,14 @@ const ReportViewer = {
         }
         this.state.filmstripCollapsed = Boolean(collapsed);
         this.updateFilmstripPanel();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     setFilmstripSize(size, options = {}) {
         if (!this.validFilmstripSize(size)) return;
         this.state.filmstripSize = size;
         this.updateFilmstripPanel();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     updateFilmstripPanel() {
@@ -1183,7 +1229,7 @@ const ReportViewer = {
 
         this.dom.btnFilmstripToggle.disabled = !hasThumbnails;
         this.dom.btnFilmstripToggle.textContent = hasThumbnails
-            ? (collapsed ? 'Show timeline' : 'Hide timeline')
+            ? (collapsed ? 'Show filmstrip' : 'Hide filmstrip')
             : 'Filmstrip disabled';
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-expanded',
@@ -1192,12 +1238,12 @@ const ReportViewer = {
         this.dom.btnFilmstripToggle.setAttribute(
             'aria-label',
             hasThumbnails
-                ? `${collapsed ? 'Expand' : 'Collapse'} timeline controls`
+                ? `${collapsed ? 'Expand' : 'Collapse'} filmstrip controls`
                 : 'Filmstrip disabled'
         );
         this.dom.btnFilmstripToggle.setAttribute(
             'title',
-            hasThumbnails ? 'Toggle timeline (F)' : 'Filmstrip disabled'
+            hasThumbnails ? 'Toggle filmstrip (F)' : 'Filmstrip disabled'
         );
 
         this.dom.filmstripSizeBtns.forEach(btn => {
@@ -1213,7 +1259,7 @@ const ReportViewer = {
         if (!this.validPaletteOrientation(orientation)) return;
         this.state.paletteOrientation = orientation;
         this.updatePaletteOrientation();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     updatePaletteOrientation() {
@@ -1222,7 +1268,6 @@ const ReportViewer = {
 
         if (this.dom.btnPaletteOrientation) {
             const isVertical = this.state.paletteOrientation === 'vertical';
-            this.dom.btnPaletteOrientation.textContent = isVertical ? '↕' : '↔';
             this.dom.btnPaletteOrientation.setAttribute('aria-label', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
             this.dom.btnPaletteOrientation.setAttribute('title', `Switch to ${isVertical ? 'horizontal' : 'vertical'} orientation`);
         }
@@ -1235,46 +1280,6 @@ const ReportViewer = {
         return this.reviewController;
     },
 
-    setInspectorOpen(open, options = {}) {
-        this.inspector.setOpen(open, options);
-    },
-
-    isInspectorVisible() {
-        return this.inspector.isVisible();
-    },
-
-    updateInspectorVisibility() {
-        this.inspector.updateVisibility();
-    },
-
-    inspectorFocusableElements() {
-        return this.inspector.focusableElements();
-    },
-
-    setInspectorFocusable(enabled) {
-        this.inspector.setFocusable(enabled);
-    },
-
-    safeHttpUrl(url) {
-        return this.inspector.safeHttpUrl(url);
-    },
-
-    updateInspectorSlowpics() {
-        this.inspector.renderSlowpics();
-    },
-
-    setInspectorTab(tab, options = {}) {
-        this.inspector.setTab(tab, options);
-    },
-
-    handleInspectorTabKey(e) {
-        this.inspector.handleTabKey(e);
-    },
-
-    updateInspectorTabs() {
-        this.inspector.updateTabs();
-    },
-
     setText(element, text) {
         if (element) element.textContent = String(text ?? '');
     },
@@ -1283,54 +1288,12 @@ const ReportViewer = {
         return this.state.data?.frames?.[this.state.currentFrameIdx] || null;
     },
 
-    currentClipRole(index) {
-        return this.inspector.currentClipRole(index);
-    },
-
-    stableClipRole(index) {
-        return ViewerFormat.stableClipRole(index, this.referenceClipIndex());
-    },
-
-    modeLabel(mode = this.state.mode) {
-        return ViewerFormat.modeLabel(mode);
-    },
-
-    formatFps(value) {
-        return ViewerFormat.formatFps(value);
-    },
-
-    formatFileSize(value) {
-        return ViewerFormat.formatFileSize(value);
-    },
-
-    signalCodeLabel(kind, value) {
-        return ViewerFormat.signalCodeLabel(kind, value);
-    },
-
-    formatSignal(signal) {
-        return ViewerFormat.formatSignal(signal);
-    },
-
-    formatPresentation(clip) {
-        return ViewerFormat.formatPresentation(clip);
-    },
-
-    formatToneCurve(value) {
-        return ViewerFormat.formatToneCurve(value);
-    },
-
-    formatActivePicture(active) {
-        return ViewerFormat.formatActivePicture(active);
-    },
-
-    formatTonemapSummary() {
-        return ViewerFormat.formatTonemapSummary(this.state.data?.rendering?.tonemap);
-    },
-
     updateRenderingSummary() {
         if (typeof document?.querySelector !== 'function') return;
         const summary = document.querySelector('[data-rendering-tonemap-summary]');
-        if (summary) this.setText(summary, this.formatTonemapSummary());
+        if (summary) {
+            this.setText(summary, ViewerFormat.formatTonemapSummary(this.state.data?.rendering?.tonemap));
+        }
     },
 
     visibleSourceIndexes() {
@@ -1351,16 +1314,9 @@ const ReportViewer = {
     },
 
     currentPairLabel() {
-        const left = this.clipDisplay(this.state.data.clips[this.state.leftClipIdx]);
-        const right = this.clipDisplay(this.state.data.clips[this.state.rightClipIdx]);
+        const left = ViewerFormat.clipDisplay(this.state.data.clips[this.state.leftClipIdx]);
+        const right = ViewerFormat.clipDisplay(this.state.data.clips[this.state.rightClipIdx]);
         return `${left} vs ${right}`;
-    },
-
-    visibleFramePositionText() {
-        const visibleIndexes = this.visibleFrameIndexes();
-        const position = this.visibleFramePosition(visibleIndexes);
-        if (position === -1) return `Not shown of ${visibleIndexes.length}`;
-        return `${position + 1} of ${visibleIndexes.length} shown`;
     },
 
     updateInspectorData() {
@@ -1370,20 +1326,20 @@ const ReportViewer = {
         delete this.state.pairAlignments[this.viewport.currentPairAlignmentKey()];
         this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
         this.viewport.applyAlignment();
-        this.persistViewportState();
+        this.persistViewerState();
     },
 
     resetAllPairAlignments() {
         this.state.pairAlignments = {};
         this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
         this.viewport.applyAlignment();
-        this.persistViewportState();
+        this.persistViewerState();
     },
 
     setOverlaysHidden(hidden, options = {}) {
         this.state.overlaysHidden = Boolean(hidden);
         this.updateOverlayVisibility();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
     },
 
     updateOverlayVisibility() {
@@ -1393,11 +1349,11 @@ const ReportViewer = {
         this.dom.btnOverlays.setAttribute('aria-pressed', overlaysVisible ? 'true' : 'false');
         this.dom.btnOverlays.setAttribute(
             'aria-label',
-            overlaysVisible ? 'Hide HUD' : 'Show HUD'
+            overlaysVisible ? 'Hide source labels' : 'Show source labels'
         );
         this.dom.btnOverlays.setAttribute(
             'title',
-            `${overlaysVisible ? 'Hide' : 'Show'} HUD (H)`
+            `${overlaysVisible ? 'Hide' : 'Show'} source labels (H)`
         );
         this.gridView?.updateCellRoles();
     },
@@ -1414,11 +1370,22 @@ const ReportViewer = {
         this.state.blinkIntervalMs = normalized;
         this.updateBlinkControls();
         if (this.state.mode === 'blink') this.restartBlink();
-        if (options.save !== false) this.persistViewportState();
+        if (options.save !== false) this.persistViewerState();
+    },
+
+    blinkGestureActive() {
+        const pointer = this.pointerInteraction;
+        return Boolean(pointer && (
+            pointer.isPanning || pointer.pinchActive || pointer.lensPointHandled
+        ));
+    },
+
+    isBlinkPaused() {
+        return this.state.blinkPauseRequested || this.blinkGestureActive();
     },
 
     setBlinkPaused(paused) {
-        this.state.blinkPaused = Boolean(paused);
+        this.state.blinkPauseRequested = Boolean(paused);
         this.updateBlinkControls();
     },
 
@@ -1431,18 +1398,19 @@ const ReportViewer = {
 
     updateBlinkControls() {
         const isBlink = this.state.mode === 'blink';
+        const paused = this.isBlinkPaused();
         this.dom.blinkControls.hidden = !isBlink;
-        this.dom.btnBlinkPause.disabled = !isBlink;
+        this.dom.btnBlinkPause.disabled = !isBlink || this.blinkGestureActive();
         this.dom.blinkSpeed.disabled = !isBlink;
         this.dom.blinkSpeed.value = String(this.state.blinkIntervalMs);
-        this.dom.btnBlinkPause.textContent = this.state.blinkPaused ? 'Resume' : 'Pause';
-        this.dom.btnBlinkPause.setAttribute('aria-pressed', this.state.blinkPaused ? 'true' : 'false');
+        this.dom.btnBlinkPause.textContent = paused ? 'Resume' : 'Pause';
+        this.dom.btnBlinkPause.setAttribute('aria-pressed', paused ? 'true' : 'false');
         this.dom.btnBlinkPause.setAttribute(
             'aria-label',
-            this.state.blinkPaused ? 'Resume blink' : 'Pause blink'
+            paused ? 'Resume blink' : 'Pause blink'
         );
         this.dom.blinkStatus.textContent = isBlink
-            ? (this.state.blinkPaused ? 'Blink paused' : `Blink ${this.state.blinkIntervalMs / 1000}s`)
+            ? (paused ? 'Blink paused' : `Blink ${this.state.blinkIntervalMs / 1000}s`)
             : '';
     },
 
@@ -1539,12 +1507,7 @@ const ReportViewer = {
         if (this.dom.activeFilterBadge) {
             const isFiltered = this.state.activeCategoryKey !== ALL_CATEGORY_FILTER_KEY;
             if (isFiltered) {
-                const activeBtn = Array.from(this.dom.filterChips)
-                    .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
-                const label = activeBtn
-                    ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
-                    : this.state.activeCategoryKey;
-                this.dom.activeFilterBadge.textContent = `Filtered: ${label}`;
+                this.dom.activeFilterBadge.textContent = `Filtered: ${this.frameFilterName()}`;
                 this.dom.activeFilterBadge.hidden = false;
             } else {
                 this.dom.activeFilterBadge.hidden = true;
@@ -1566,6 +1529,16 @@ const ReportViewer = {
 
     visibleFramePosition(visibleIndexes = this.visibleFrameIndexes()) {
         return visibleIndexes.indexOf(this.state.currentFrameIdx);
+    },
+
+    frameFilterName() {
+        if (this.state.activeCategoryKey === ALL_CATEGORY_FILTER_KEY) return 'All';
+        const activeBtn = Array.from(this.dom.filterChips || [])
+            .find(btn => btn.dataset.categoryKey === this.state.activeCategoryKey);
+        const label = activeBtn
+            ? activeBtn.textContent.replace(/\s*\(\d+\)\s*$/, '')
+            : this.state.activeCategoryKey;
+        return label;
     },
 
     updateFrameNavigationControls() {
@@ -1603,9 +1576,9 @@ const ReportViewer = {
                 this.closeAlignmentPopover();
                 return;
             }
-            if (this.isInspectorVisible()) {
+            if (this.inspector.isVisible()) {
                 e.preventDefault();
-                this.setInspectorOpen(false);
+                this.inspector.setOpen(false);
                 return;
             }
             if (document.fullscreenElement) {
@@ -1627,14 +1600,14 @@ const ReportViewer = {
 
         if (e.key === 'i' || e.key === 'I') {
             e.preventDefault();
-            this.setInspectorOpen(!this.state.inspectorOpen);
+            this.inspector.setOpen(!this.state.inspectorOpen);
             return;
         }
 
         if (this.state.mode === 'blink') {
             if (e.key === ' ') {
                 e.preventDefault();
-                this.setBlinkPaused(!this.state.blinkPaused);
+                this.setBlinkPaused(!this.state.blinkPauseRequested);
                 return;
             }
             if (e.key === '[') {
@@ -1689,6 +1662,7 @@ const ReportViewer = {
             case 'o': case 'O': this.setMode('overlay'); break;
             case 'd': case 'D': this.setMode('diff'); break;
             case 'b': case 'B': this.setMode('blink'); break;
+            case 'g': case 'G': this.setMode('grid'); break;
             case 'x': case 'X': this.swapPairClips(); break;
             case 'h': case 'H': this.setOverlaysHidden(!this.state.overlaysHidden); break;
             case 'f': case 'F': this.setFilmstripCollapsed(!this.state.filmstripCollapsed); break;
@@ -1731,11 +1705,11 @@ const ReportViewer = {
         // Start blink if entering
         if (mode === 'blink' && !this.state.blinkInterval) {
             if (this.reducedMotionActive()) {
-                this.state.blinkPaused = true;
+                this.state.blinkPauseRequested = true;
             }
             this.startBlink();
         } else if (mode !== 'blink') {
-            this.state.blinkPaused = false;
+            this.state.blinkPauseRequested = false;
         }
 
         this.dom.modeBtns.forEach(btn => {
@@ -1766,7 +1740,7 @@ const ReportViewer = {
 
     startBlink() {
         this.state.blinkInterval = setInterval(() => {
-            if (this.state.blinkPaused) return;
+            if (this.isBlinkPaused()) return;
 
             this.state.activeClipIdx = this.state.activeClipIdx === this.state.leftClipIdx
                 ? this.state.rightClipIdx
@@ -1900,13 +1874,24 @@ const ReportViewer = {
         return Boolean(closestEditable);
     },
 
-    clipOverlayLabel(clip, role = '') {
-        const identity = ViewerFormat.sourceHudLabel(clip);
-        return role ? `${role.toUpperCase()}: ${identity}` : identity;
-    },
-
-    sourceHudLabel(clip, profile = 'control') {
-        return ViewerFormat.sourceHudLabel(clip, profile);
+    renderStageLabel(element, clip) {
+        if (!element) return;
+        const { name, meta } = ViewerFormat.stageLabelSegments(clip);
+        if (!name && !meta) {
+            element.replaceChildren();
+            return;
+        }
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'rv-stage-label-name';
+        nameSpan.textContent = name ?? '';
+        if (!meta) {
+            element.replaceChildren(nameSpan);
+            return;
+        }
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'rv-stage-label-meta';
+        metaSpan.textContent = ` · ${meta}`;
+        element.replaceChildren(nameSpan, metaSpan);
     },
 
     humanizeCategory(cat) {
@@ -1950,15 +1935,13 @@ const ReportViewer = {
         }
     },
 
-    blinkStageLabels(leftClipLabel, rightClipLabel) {
-        return {
-            left: `FIRST: ${leftClipLabel}`,
-            right: `SECOND: ${rightClipLabel}`,
-        };
+    invalidatePendingImageState() {
+        this.state.imageRequestToken += 1;
+        return this.state.imageRequestToken;
     },
 
     commitImageState(imageState) {
-        const requestToken = ++this.state.imageRequestToken;
+        const requestToken = this.invalidatePendingImageState();
         const commit = () => {
             if (requestToken !== this.state.imageRequestToken) return;
             this.applyImageState(imageState);
@@ -1996,26 +1979,22 @@ const ReportViewer = {
             rightSrc,
             leftAlt,
             rightAlt,
-            leftLabelTxt,
-            rightLabelTxt,
+            leftClip,
+            rightClip,
             isOverlay,
             isBlink,
+            requiredSides = ['left', 'right'],
         } = imageState;
 
-        if (this.dom.leftImg.getAttribute('src') !== leftSrc) {
-            if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
-                this.dom.sizerImg.src = leftSrc;
-            }
-            this.dom.leftImg.src = leftSrc;
-        }
-        if (this.dom.rightImg.getAttribute('src') !== rightSrc) {
-            this.dom.rightImg.src = rightSrc;
+        if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
+            this.dom.sizerImg.src = leftSrc;
         }
 
         this.dom.leftImg.alt = leftAlt;
         this.dom.rightImg.alt = rightAlt;
-        this.dom.labelLeft.textContent = leftLabelTxt;
-        this.dom.labelRight.textContent = rightLabelTxt;
+        this.renderStageLabel(this.dom.labelLeft, leftClip);
+        if (rightClip) this.renderStageLabel(this.dom.labelRight, rightClip);
+        else this.dom.labelRight?.replaceChildren?.();
         this.dom.labelLeft.classList.toggle(
             'rv-overlay-label--active',
             isBlink && this.state.activeClipIdx === this.state.leftClipIdx,
@@ -2023,6 +2002,20 @@ const ReportViewer = {
         this.dom.labelRight.classList.toggle(
             'rv-overlay-label--active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx,
+        );
+        this.installMainImageRequest(
+            'left',
+            leftSrc,
+            isOverlay ? this.state.activeClipIdx : this.state.leftClipIdx,
+            requiredSides.includes('left'),
+            this.state.imageRequestToken,
+        );
+        this.installMainImageRequest(
+            'right',
+            rightSrc,
+            this.state.rightClipIdx,
+            requiredSides.includes('right'),
+            this.state.imageRequestToken,
         );
         this.updateCurrentFrameMetadata(frameData);
 
@@ -2038,6 +2031,7 @@ const ReportViewer = {
             'active',
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
         );
+        this.refreshMainImageAvailability();
         this.lens?.sync();
     },
 
@@ -2051,6 +2045,7 @@ const ReportViewer = {
         }
 
         if (this.state.mode === 'grid') {
+            this.invalidatePendingImageState();
             this.hideStageMessage();
             this.clearStatus();
             this.gridView.render();
@@ -2058,7 +2053,8 @@ const ReportViewer = {
         }
 
         let leftSrc, rightSrc;
-        let leftLabelTxt, rightLabelTxt;
+        let leftClip = null;
+        let rightClip = null;
         let leftAlt, rightAlt;
         const isOverlay = this.state.mode === 'overlay';
         const isBlink = this.state.mode === 'blink';
@@ -2066,8 +2062,8 @@ const ReportViewer = {
         if (this.state.mode === 'slider' || this.state.mode === 'diff' || this.state.mode === 'blink') {
             const leftImage = frameData.images?.[this.state.leftClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
-            const leftClip = this.state.data.clips[this.state.leftClipIdx];
-            const rightClip = this.state.data.clips[this.state.rightClipIdx];
+            leftClip = this.state.data.clips[this.state.leftClipIdx];
+            rightClip = this.state.data.clips[this.state.rightClipIdx];
             if (!leftImage?.src || !rightImage?.src || !leftClip || !rightClip) {
                 this.showStageMessage('Selected frame image data is unavailable.');
                 this.showStatus('Selected frame image data is unavailable.', 'error');
@@ -2077,22 +2073,8 @@ const ReportViewer = {
             leftSrc = leftImage.src;
             rightSrc = rightImage.src;
 
-            if (this.state.mode === 'blink') {
-                const blinkLabels = this.blinkStageLabels(
-                    this.clipOverlayLabel(leftClip),
-                    this.clipOverlayLabel(rightClip),
-                );
-                leftLabelTxt = blinkLabels.left;
-                rightLabelTxt = blinkLabels.right;
-            } else if (this.state.mode === 'diff') {
-                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Base');
-                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Compare');
-            } else {
-                leftLabelTxt = this.clipOverlayLabel(leftClip, 'Left');
-                rightLabelTxt = this.clipOverlayLabel(rightClip, 'Right');
-            }
-            leftAlt = `${this.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
-            rightAlt = `${this.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
+            leftAlt = `${ViewerFormat.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
+            rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
             // For Diff mode, right layer is the "compare" one which gets difference blend
             // Left layer is base.
@@ -2102,8 +2084,8 @@ const ReportViewer = {
             const activeImage = frameData.images?.[this.state.activeClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
-            const rightClip = this.state.data.clips[this.state.rightClipIdx];
-            if (!activeImage?.src || !rightImage?.src || !activeClip || !rightClip) {
+            const pairClip = this.state.data.clips[this.state.rightClipIdx];
+            if (!activeImage?.src || !rightImage?.src || !activeClip || !pairClip) {
                 this.showStageMessage('Selected frame image data is unavailable.');
                 this.showStatus('Selected frame image data is unavailable.', 'error');
                 this.clearFrameImages();
@@ -2113,29 +2095,43 @@ const ReportViewer = {
             // Right layer remains hidden; keep its source tied to the comparison pair.
             rightSrc = rightImage.src;
 
-            leftLabelTxt = this.clipOverlayLabel(activeClip);
-            rightLabelTxt = "";
-            leftAlt = `${this.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
-            rightAlt = `${this.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
+            leftClip = activeClip;
+            rightClip = null;
+            leftAlt = `${ViewerFormat.clipAccessibleName(activeClip)} - Frame ${frameData.number}`;
+            rightAlt = `${ViewerFormat.clipAccessibleName(pairClip)} - Frame ${frameData.number}`;
         }
 
-        this.hideStageMessage();
-        this.clearStatus();
+        const requiredSides = isOverlay ? ['left'] : ['left', 'right'];
+        const resourcesChanged = ['left', 'right'].some(side => {
+            const request = this.state.mainImageRequests[side];
+            return request?.src !== (side === 'left' ? leftSrc : rightSrc)
+                || request.required !== requiredSides.includes(side);
+        });
+        if (resourcesChanged) {
+            this.hideStageMessage();
+            this.clearStatus();
+        }
         this.commitImageState({
             frameData,
             leftSrc,
             rightSrc,
             leftAlt,
             rightAlt,
-            leftLabelTxt,
-            rightLabelTxt,
+            leftClip,
+            rightClip,
             isOverlay,
             isBlink,
+            requiredSides,
         });
     },
 
     clearFrameImages() {
-        this.state.imageRequestToken += 1;
+        this.invalidatePendingImageState();
+        ['left', 'right'].forEach(side => {
+            const request = this.state.mainImageRequests[side];
+            this.detachMainImageRequest(request);
+            this.state.mainImageRequests[side] = null;
+        });
         this.gridView?.clear();
         this.lens?.clearTransient?.();
         if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
@@ -2149,8 +2145,10 @@ const ReportViewer = {
         }
         this.dom.leftLayer?.classList?.remove('active', 'rv-layer--aligned-active');
         this.dom.rightLayer?.classList?.remove('active');
-        if (this.dom.labelLeft) this.dom.labelLeft.textContent = '';
-        if (this.dom.labelRight) this.dom.labelRight.textContent = '';
+        if (this.dom.leftLayer) this.dom.leftLayer.dataset.status = 'empty';
+        if (this.dom.rightLayer) this.dom.rightLayer.dataset.status = 'empty';
+        if (this.dom.labelLeft) this.dom.labelLeft.replaceChildren?.();
+        if (this.dom.labelRight) this.dom.labelRight.replaceChildren?.();
         this.updateCurrentFrameMetadata(null);
     },
 
@@ -2170,9 +2168,9 @@ const ReportViewer = {
         this.dom.leftSelect.value = this.state.leftClipIdx;
         this.dom.rightSelect.value = this.state.rightClipIdx;
         this.dom.activeSelect.value = this.state.activeClipIdx;
-        this.dom.leftSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.leftClipIdx]);
-        this.dom.rightSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.rightClipIdx]);
-        this.dom.activeSelect.title = this.clipAccessibleName(this.state.data.clips[this.state.activeClipIdx]);
+        this.dom.leftSelect.title = ViewerFormat.clipAccessibleName(this.state.data.clips[this.state.leftClipIdx]);
+        this.dom.rightSelect.title = ViewerFormat.clipAccessibleName(this.state.data.clips[this.state.rightClipIdx]);
+        this.dom.activeSelect.title = ViewerFormat.clipAccessibleName(this.state.data.clips[this.state.activeClipIdx]);
         this.updateOverlayVisibility();
         this.updateFilmstripPanel();
         this.updatePaletteOrientation();
@@ -2199,7 +2197,7 @@ const ReportViewer = {
         });
         this.scrollActiveFilmstripItem();
         this.preloadImages();
-        this.persistViewportState();
+        this.persistViewerState();
     },
 
     preloadImages() {
@@ -2245,6 +2243,180 @@ const ReportViewer = {
 
     preloadImage(src) {
         void this.ensureImageReady(src);
+    },
+
+    imageUnavailableLabel(request) {
+        const clip = this.state.data?.clips?.[request?.clipIdx];
+        return ViewerFormat.clipDisplay(clip, 'micro') || 'Selected source';
+    },
+
+    detachMainImageRequest(request) {
+        if (!request?.image) return;
+        request.image.removeEventListener?.('load', request.onLoad);
+        request.image.removeEventListener?.('error', request.onError);
+        request.onLoad = null;
+        request.onError = null;
+    },
+
+    installMainImageRequest(side, src, clipIdx, required, requestToken, options = {}) {
+        const image = this.dom[`${side}Img`];
+        const layer = this.dom[`${side}Layer`];
+        if (!image || !layer) return;
+
+        const previous = this.state.mainImageRequests[side];
+        const preserveStatus = !options.force
+            && previous?.src === src
+            && previous.required === required
+            && ['ready', 'error'].includes(previous.status);
+        this.detachMainImageRequest(previous);
+
+        const request = {
+            side,
+            image,
+            layer,
+            src,
+            clipIdx,
+            required,
+            token: requestToken,
+            attempt: options.attempt || 0,
+            status: preserveStatus ? previous.status : 'loading',
+            onLoad: null,
+            onError: null,
+        };
+        this.state.mainImageRequests[side] = request;
+
+        request.onLoad = () => this.handleMainImageEvent(
+            side,
+            requestToken,
+            request.attempt,
+            src,
+            true,
+        );
+        request.onError = () => this.handleMainImageEvent(
+            side,
+            requestToken,
+            request.attempt,
+            src,
+            false,
+        );
+        image.addEventListener('load', request.onLoad);
+        image.addEventListener('error', request.onError);
+        layer.dataset.status = request.status;
+        image.hidden = request.status !== 'ready';
+
+        if (!preserveStatus && !options.deferSrc && image.getAttribute('src') !== src) {
+            image.src = src;
+        }
+        if (
+            !options.deferSrc
+            && image.complete === true
+            && image.getAttribute('src') === src
+        ) {
+            this.handleMainImageEvent(
+                side,
+                requestToken,
+                request.attempt,
+                src,
+                Number(image.naturalWidth) > 0 || Number(image.naturalHeight) > 0,
+                false,
+            );
+        }
+    },
+
+    handleMainImageEvent(side, requestToken, attempt, src, succeeded, refreshAvailability = true) {
+        const request = this.state.mainImageRequests[side];
+        if (
+            !request
+            || request.token !== this.state.imageRequestToken
+            || request.token !== requestToken
+            || request.attempt !== attempt
+            || request.src !== src
+        ) return;
+
+        request.status = succeeded ? 'ready' : 'error';
+        request.image.hidden = !succeeded;
+        request.layer.dataset.status = request.status;
+        if (refreshAvailability) this.refreshMainImageAvailability();
+        if (succeeded) this.lens?.sync?.();
+    },
+
+    refreshMainImageAvailability() {
+        const unavailable = ['left', 'right']
+            .map(side => this.state.mainImageRequests[side])
+            .filter(request => (
+                request?.token === this.state.imageRequestToken
+                && request.required
+                && request.status === 'error'
+            ));
+        if (unavailable.length === 0) {
+            this.hideStageMessage();
+            this.clearStatus();
+            return;
+        }
+
+        const labels = unavailable.map(request => `${this.imageUnavailableLabel(request)} image unavailable`);
+        const message = labels.join(' · ');
+        this.showStageMessage(message, unavailable.map(request => ({
+            key: JSON.stringify([request.side, request.src, request.clipIdx]),
+            ariaLabel: `Retry ${this.imageUnavailableLabel(request)} image`,
+            onClick: () => this.retryMainImage(request),
+        })));
+        this.showStatus(message, 'error');
+    },
+
+    retryMainImage(request) {
+        const side = request?.side;
+        if (
+            !request
+            || !side
+            || request.token !== this.state.imageRequestToken
+            || this.state.mainImageRequests[side] !== request
+            || request.status !== 'error'
+        ) return;
+
+        const attempt = request.attempt + 1;
+        this.installMainImageRequest(
+            side,
+            request.src,
+            request.clipIdx,
+            request.required,
+            request.token,
+            { attempt, force: true, deferSrc: true },
+        );
+        const retryRequest = this.state.mainImageRequests[side];
+        const sizerImage = side === 'left'
+            && this.dom.sizerImg?.getAttribute('src') === retryRequest.src
+            ? this.dom.sizerImg
+            : null;
+        retryRequest.image.removeAttribute('src');
+        sizerImage?.removeAttribute('src');
+        const assign = () => {
+            if (
+                this.state.mainImageRequests[side] !== retryRequest
+                || retryRequest.token !== this.state.imageRequestToken
+            ) return;
+            if (sizerImage) sizerImage.src = retryRequest.src;
+            retryRequest.image.src = retryRequest.src;
+            if (
+                retryRequest.image.complete === true
+                && retryRequest.image.getAttribute('src') === retryRequest.src
+            ) {
+                this.handleMainImageEvent(
+                    side,
+                    retryRequest.token,
+                    retryRequest.attempt,
+                    retryRequest.src,
+                    Number(retryRequest.image.naturalWidth) > 0
+                        || Number(retryRequest.image.naturalHeight) > 0,
+                );
+            }
+        };
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(assign);
+        } else {
+            assign();
+        }
+        this.refreshMainImageAvailability();
     },
 
     ensureImageReady(src) {

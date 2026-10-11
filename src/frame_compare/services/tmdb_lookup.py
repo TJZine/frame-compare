@@ -260,22 +260,25 @@ async def _request_tmdb_json(
     config: MetadataConfig,
     client: httpx.AsyncClient,
 ) -> object:
+    failure: TmdbError | None = None
     try:
         response = await _request_tmdb_search(url, params, config, client)
         _raise_for_tmdb_response(response)
         return _decode_tmdb_json(response)
-    except httpx.TimeoutException as e:
-        raise TmdbError("Request timed out") from e
-    except httpx.RequestError as e:
-        # Avoid including the request URL (which can contain the API key) in error messages.
-        raise TmdbError("Request failed") from e
-    except httpx.HTTPStatusError as e:
-        raise TmdbError(f"HTTP error occurred: {e.response.status_code}") from e
-    except Exception as e:
-        if isinstance(e, TmdbError | TmdbRateLimitedError):
+    except httpx.TimeoutException:
+        failure = TmdbError("Request timed out")
+    except httpx.RequestError:
+        failure = TmdbError("Request failed")
+    except httpx.HTTPStatusError as exc:
+        failure = TmdbError(f"HTTP error occurred: {exc.response.status_code}")
+    except Exception as exc:
+        if isinstance(exc, TmdbError | TmdbRateLimitedError):
             raise
-        # Avoid leaking request details (e.g., query params) via exception stringification.
-        raise TmdbError("Unexpected error during TMDB lookup") from e
+        failure = TmdbError("Unexpected error during TMDB lookup")
+
+    # Raise after leaving the handler so the raw HTTPX exception and its
+    # credential-bearing request URL are not retained as exception context.
+    raise failure
 
 
 async def _search_tmdb_endpoint(
@@ -385,37 +388,3 @@ async def fetch_tmdb_alternative_titles(
 def is_valid_tmdb_api_key(api_key: str) -> bool:
     """Return whether a TMDB API key matches the API v3 key format."""
     return TMDB_KEY_REGEX.fullmatch(api_key) is not None
-
-
-async def lookup_tmdb(
-    parsed: ParsedMetadata,
-    config: MetadataConfig,
-    client: httpx.AsyncClient,
-    *,
-    cache: TmdbCache | None = None,
-) -> TmdbMetadata | None:
-    """
-    Look up media on TMDB.
-
-    Preconditions:
-    - If config.api_key is None, return None without making a request
-    - If config.api_key is not a valid 32-character hex string, raise
-      TmdbError with message containing "Invalid API key format"
-
-    Args:
-        parsed: Metadata from filename parsing
-        config: TMDB configuration
-        client: HTTP client (injected, not owned)
-
-    Returns:
-        TmdbMetadata if found, None otherwise
-
-    Raises:
-        TmdbError: If API key is invalid format, or API call fails
-        TmdbRateLimitedError: If rate limited (HTTP 429)
-    """
-    if cache is None:
-        results = await search_tmdb(parsed, config, client)
-    else:
-        results = await search_tmdb(parsed, config, client, cache=cache)
-    return results[0] if results else None

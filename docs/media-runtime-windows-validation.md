@@ -29,14 +29,18 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.15 |
-| VapourSynth | R79, API R4.2 |
+| Python | 3.13.16 |
+| VapourSynth | R81, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
-| FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7` |
-| L-SMASH index token | `lsw1310-56c451f754fd` |
+| BestSource (VSView/UI only) | 22 |
+| VSView / CLI parser | 0.12.0 / Cyclopts 5.2.0 |
+| vspackrgb | 2.0.0 (Rust extension) |
+| PySide6 family | 6.11.2 |
+| FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |
+| Full runtime fingerprint | `b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320` |
+| L-SMASH index token | `lsw1310-f125953022b6` |
 
 ## 1. Exact source and repository gates
 
@@ -199,7 +203,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R79 independently from API R4.2.
+- VapourSynth reports R81 independently from API R4.3.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
@@ -300,7 +304,7 @@ Verify all of the following:
 
 - A legacy adjacent `<media>.lwi` is ignored and not deleted.
 - The candidate creates
-  `<media>.frame-compare-lsw1310-56c451f754fd.lwi`.
+  `<media>.frame-compare-lsw1310-f125953022b6.lwi`.
 - A second run reuses the candidate-owned index.
 - A corrupt candidate-owned index is removed and regenerated once.
 - A missing index is created normally.
@@ -322,16 +326,19 @@ Verify with old and newly generated data:
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the immediate predecessor to this 1310 candidate:
-the R79 / L-SMASH-Works 1296 bundle with full runtime fingerprint
-`59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd`.
+Keep one untouched installation of the immediate predecessor to this R81 candidate:
+the R80 / VSView 0.11.0 / vspackrgb 1.4.0 / August 2026 FFmpeg bundle with
+full runtime fingerprint
+`a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8`.
+Retain an older schema-2 installation separately when available for the
+pre-native-panel refusal case.
 
 Required cases:
 
 1. Build the candidate code-only update ZIP and its manifest.
 2. Attempt to apply it to the previous bundle.
-3. Confirm refusal occurs before file replacement because the previous bundle is
-   pre-native-panel schema 2 (and its native-runtime fingerprint differs).
+3. Confirm refusal occurs before file replacement because the previous bundle's
+   full media-runtime fingerprint differs from the candidate's.
 4. With otherwise matching candidate fingerprints, confirm a schema-2 bundle still
    refuses before file replacement.
 5. Confirm an unsafe Python-dependency override does not bypass that refusal.
@@ -362,7 +369,40 @@ For each run retain:
 Confirm deterministic repeatability from a clean generated-data directory and from a
 warm candidate cache.
 
-## 10. Completion record
+## 10. Native VSView panel acceptance
+
+Hosted Windows verification is required to prove the exact package, embedded runtime,
+same-environment entry-point discovery/loading, offscreen panel construction,
+generated-session metadata, atomic result round trip, and fail-closed result
+validation. After that proof
+passes, record these remaining interactive checks on a physical Windows 10/11 x64
+system:
+
+- open a real Frame Compare-generated session through the installed portable launcher;
+- verify the panel is discoverable from VSView's Tool Panel and remains inert in an
+  ordinary VSView session;
+- verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
+  suggestion markers, source-frame bounds, signed relationship, and trim-direction text;
+- unlink playheads, visit every source, use the whole-set positions action, then close
+  VSView and verify Frame Compare applies only the validated offsets;
+- exercise the manual source-frame and known-offset bases plus the whole-set keep-audio
+  action;
+- close or cancel before saving and verify optional mode retains the current result
+  while forced mode fails with an actionable diagnostic;
+- exercise missing/malformed/stale/mixed/duplicate/incomplete/out-of-bounds sidecars,
+  bounded readiness failure, child-process failure, and timeout behavior;
+- use real L-SMASH-backed media to verify native decoder/index diagnostics, then inspect
+  early, middle, late, and final shared-content evidence for drift or edit changes;
+- on the production GPU, verify Vulkan/HDR behavior and compare report output against
+  the prior supported bundle where the release changes runtime behavior.
+
+Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
+screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
+as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
+unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
+its offscreen contract does not establish visible ergonomics.
+
+## 11. Completion record
 
 Summarize the physical pass in the pull request with:
 

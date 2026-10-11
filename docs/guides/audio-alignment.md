@@ -1,9 +1,9 @@
-# Audio alignment and VSView
+# Audio alignment
 
-Frame Compare can estimate timing offsets between the reference and comparison sources,
-reuse a previously accepted source relationship, and optionally open the native VSView
-alignment-review panel for human verification. Alignment changes which source frames
-are compared; it does not retime or rewrite the input files.
+Frame Compare estimates the offset between the reference and each comparison from their
+audio. A fresh automatic offset is applied only when video confirmation and all other
+authority checks pass. Alignment changes which source frames are compared; it never
+retimes or rewrites the files.
 
 ## When alignment helps
 
@@ -18,109 +18,72 @@ Alignment is useful when sources contain the same program but differ because of:
 It is not a general edit-matching system. Different cuts, replaced music, silence,
 commentary tracks, or unrelated audio can make correlation ambiguous or invalid.
 
-## Recommended workflow
+## What the results mean
 
-1. Let automatic alignment compute an offset.
-2. Review confidence and warnings.
-3. Use the native VSView panel for optional alignment review when the route is
-   available and the evidence needs visual confirmation. It is not part of automatic
-   correlation: position each source in the viewer, then save the complete lineup once.
-4. Verify dialogue, cuts, and motion in the final report.
-5. Reuse an accepted result only while the same source identities and alignment-affecting
-   settings remain valid.
+The terminal distinguishes applied offsets from candidates that still need review:
 
-## Audio stream selection
+| Terminal result | Meaning | What to do |
+| --- | --- | --- |
+| `Audio alignment accepted: +Nf - APPLIED` | All automatic authority checks pass; the trims use the offset | Check a few frames in the report |
+| `Provisional audio candidate: +Nf - NOT APPLIED` | A candidate exists, but at least one authority check fails; video may still confirm it | Review it in the VSView alignment panel, or keep the current alignment |
+| `No usable audio candidate (<reason>) - NOT APPLIED` | No offset could be established | Check the audio streams, or align manually in the panel |
+| `Accepted audio alignment reused: +Nf - APPLIED` | An offset accepted in an earlier run still matches | Nothing |
+| `Manually confirmed alignment: +Nf - APPLIED` | An offset confirmed in the panel is in use | Nothing |
+| `Manually confirmed alignment reused: +Nf - APPLIED` | An offset confirmed in the panel in an earlier run still matches | Nothing |
 
-The alignment service uses the selected audio streams and preprocessing strategy from
+Each line starts with `Comparison N - `. A `+0f` result is a real zero offset, not a
+missing one. `--verbose` adds the evidence counts and `--quiet` keeps only actionable
+warnings. The audio is decoded whole and compared in chunks, then a sample of decoded
+frames checks the exact offset. Automatic application requires video confirmation,
+a passed audio authority recount, resolved competing runs and credible chunk
+disagreements, and no confirmed alternative offset. Video confirmation alone does
+not authorize application or writing the candidate to the computed-offset cache.
+The exact thresholds live in the
+[contract](../current-cli-contract.md#config-only-audio-alignment-surface).
+
+## Choose the audio streams
+
+The alignment service uses the selected audio streams from
 configuration. Confirm that the sources are using corresponding language, mix, and
 content. A stereo theatrical mix and a commentary track can correlate poorly even when
-the video is the same.
+the video is the same. Without overrides, the reference switches from its
+default-ranked stream to its best-ranked stream in a shared language when its
+default language is missing from the comparison.
 
 When automatic stream selection is unsuitable, use the audio-alignment configuration
 surface documented in the
-[CLI Behavioral Contract](../current-cli-contract.md#config-only-audio-alignment-surface).
+[CLI behavioral contract](../current-cli-contract.md#config-only-audio-alignment-surface).
 
-## Previous offset reuse
+```toml
+[audio_alignment]
+reference_stream = 1
+comparison_streams = { "Encode-A" = 0 }
+```
 
-Accepted computed or interactively confirmed offsets can be stored in the shared alignment
-reuse cache. Reuse is keyed by the source set, fingerprints, trims, effective FPS,
-selected reference relationship, audio stream choices, alignment settings, and relevant
-runtime identity.
+`comparison_streams` keys are filename stems. Stream numbers count audio streams from 0.
 
-A cache miss simply returns to normal alignment. Corrupt or unsupported reuse data is
-ignored with a warning rather than treated as authoritative evidence.
+## Sources with different frame rates
 
-Computed alignment may also classify bounded evidence across the source as stable,
-possible drift, possible discontinuity, variable, or insufficient. This summary is
-diagnostic only: Frame Compare always retains the selected constant offset and trims.
-Material non-stable evidence produces one concise warning and should be verified at
-multiple points. Stable and insufficient evidence do not warn. Alignment reuse cache
-schema v2 requires the compact summary and the reference-minus-comparison sign
-convention. Schema-v1 entries are ignored and recomputed; there is no cache migration
-or compatibility path. Run-local `manual_overrides.toml` remains a v1 file with the
-same path and offset semantics.
+Set `match_fps` or `effective_fps` first. The audio is then stretched onto the effective
+timeline, so a 24 fps release of 23.976 content or a PAL 25 fps release keeps a constant
+offset. Drift for other reasons is not applied. See
+[Sources, references, and labels](sources-and-labels.md#correct-timing-metadata).
 
-## Native VSView alignment review
+## Reuse an accepted offset
 
-VSView 0.10.3 and the Frame Compare alignment panel are included in the Windows
-portable bundle and are optional in native installations through the
-`frame-compare[vsview]` extra. The panel entry point and VSView runtime must be
-installed in the same Python environment; a PATH-only VSView executable is not
-supported. The upstream `recommended` and `full` extras are intentionally not
-selected. The default Docker route does not provide an interactive desktop session.
-The Linux X11 profile has a verifier contract for offscreen VSView/session/metadata/
-result proof; this feature run has static contract proof only, and execution plus
-visible desktop launch remain host-dependent and unverified.
+An applied automatic offset is cached and reused whenever the source files, trims,
+effective FPS, stream choices, alignment settings, and runtime still match. A cache
+miss recomputes the alignment, and corrupt entries are ignored with a warning.
 
-Set `audio_alignment.use_vsview = true` to request optional native panel review,
-or use `--force-interactive-alignment` when a successful review is required. Normal
-mode keeps launch and startup-failure presentation concise. Use `--verbose` for the
-generated command and bounded startup diagnostics. If optional VSView verification
-cannot start, Frame Compare retains the computed audio alignment and directs you to
-`frame-compare doctor`; forced interactive mode still fails.
+Offsets confirmed in the panel are also cached, but reused only when `previous_offsets`
+is `prompt` or `always`. The default `disabled` never reuses them. Provisional and
+unavailable results are never cached.
 
-Successful sessions continue to inherit native L-SMASH-Works decoder/index output.
-BestSource is a VSView/UI-only capability and does not replace Frame Compare's source
-loader, analysis, probe, render, index, or cache-key behavior. The generated session
-uses documented `from vsview import set_output` registration with explicit `Reference`
-and `Comparison N` names, while preserving source order, multi-comparison behavior,
-Frame Compare overlays, and BT.709 preview defaults.
+## Review the evidence
 
-The terminal reports only the generated session, bounded readiness, inherited decoder
-diagnostics, and the final review outcome. It does not prompt for frames or read
-review input. Open **Frame Compare Alignment Review** from VSView's Tool Panel, unlink
-the playheads, and visit `Reference` and every `Comparison N` output. Leave each on the
-same visible moment. The live source lineup records one current untrimmed source frame
-per output, reports `ready / total`, and previews `reference - comparison` plus the
-plain-language trim direction.
-
-Select **Use these aligned positions** once the complete lineup is ready. It writes one
-ordered result for the whole source set; the reference appears once and the decision is
-made for the full lineup in one action. **Keep audio-derived alignment** is
-the secondary whole-set option. It retains the alignment Frame Compare entered with,
-including the no-change case when no trusted suggestion exists.
-
-For a known value, expand **Enter alignment manually...**. **Source frames** accepts one
-non-negative untrimmed frame per source; **Known offsets** accepts one signed integer per
-comparison using `reference - comparison`. Both bases feed the same whole-set save
-action and explain the trim direction immediately. Positive offsets trim the reference;
-negative offsets trim that comparison. Manual fields are an escape hatch, not a second
-result workflow.
-
-The result sidecar is written atomically only by a complete whole-set action; closing
-VSView without saving writes no result. Missing, malformed, stale, mixed-session,
-duplicate, incomplete, or out-of-bounds sidecars are rejected before any offset is
-applied. Missing modern `_Range` is reported once but remains unset, preserving
-VSView's native range inference; other native diagnostics remain inherited.
-
-The native-panel workflow uses each source exactly once, named outputs, public
-VSView callbacks, current frame/property surfaces, explicit lineup status and trim
-guidance, and a typed fail-closed result boundary. Existing v1 shared alignment entries
-are not reused; they are rebuilt as schema v2.
-
-No alignment screenshot is embedded here until the physical-Windows VSView acceptance
-pass supplies a current, provenance-recorded capture. macOS and headless Docker proof
-does not establish native desktop ergonomics.
+Each run writes `alignment_diagnostics/comparison-<n>.json` in the run folder for every
+computed attempt. It contains no media paths, audio, or credentials; its source digests
+are pseudonymous, and editing or deleting it changes nothing.
 
 During verification, inspect multiple evidence points:
 
@@ -133,21 +96,18 @@ During verification, inspect multiple evidence points:
 An offset that looks correct at one frame can still be wrong for variable timing or a
 different edit.
 
-## Failure modes
+For visual confirmation, use [VSView alignment review](vsview-review.md).
+
+Automatic correlation is a strong starting point, not a substitute for visual review.
+For a publication-bound comparison, manually check the final report even when the
+alignment cache hits and no warning is emitted.
+
+## Common problems
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
 | Low or unstable correlation | Silence, replaced music, wrong stream, or different edit | Select corresponding audio, increase evidence, or verify manually |
 | Good early match but later drift | FPS or timing mismatch | Recheck effective FPS and source structure; do not treat a constant offset as sufficient |
-| VSView/panel cannot launch | Missing same-environment UI dependencies or desktop/runtime issue | Run `doctor`, install `frame-compare[vsview]` in the environment that runs Frame Compare, use the Windows portable bundle, or continue without optional review |
-| Panel stays inactive | The session is ordinary, metadata is malformed/mixed, or the generated script/result identity is not trusted | Generate a fresh session through Frame Compare; do not open a hand-authored script or provide a PATH-only VSView executable |
-| Panel closes before saving | No complete typed result sidecar was written | Reopen the generated session, visit every source, and use **Use these aligned positions** or **Keep audio-derived alignment** |
-| Review result is rejected | Sidecar is missing, malformed, stale, duplicated, incomplete, or outside raw source-frame bounds | Discard the sidecar, generate a fresh session, and repeat the panel review; forced mode fails closed |
+| The VSView panel will not open or rejects a result | Panel setup or session problem | See [VSView alignment review](vsview-review.md#troubleshooting) |
 | Reused offset no longer looks correct | Source or runtime changed outside the reusable identity assumptions | Reject reuse, clear the alignment cache entry, and recompute |
 | Selected frames disappear after alignment | Shared overlap is smaller than the initial reference-domain plan | Reduce trims or requested counts and review the warning/error context |
-
-## Validation standard
-
-Automatic correlation is a strong starting point, not a substitute for visual review.
-For a publication-bound comparison, manually check the final report even when the
-alignment cache hits and no warning is emitted.

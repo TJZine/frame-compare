@@ -8,8 +8,11 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import structlog
+
+from frame_compare.utils.subproc import prepare_python_child
 
 log = structlog.get_logger()
 
@@ -17,6 +20,7 @@ _REQUIRE_LIBPLACEBO_ENV = "FRAME_COMPARE_REQUIRE_LIBPLACEBO"
 _DISABLE_LIBPLACEBO_ENV = "FRAME_COMPARE_DISABLE_LIBPLACEBO"
 _LIBPLACEBO_PROBE_ENV = "FRAME_COMPARE_LIBPLACEBO_PROBE"
 _LIBPLACEBO_PROBE_TIMEOUT_SECONDS = 5.0
+_CHILD_PROCESS_CWD = Path(sys.executable).resolve().parent
 
 
 @dataclass(slots=True)
@@ -63,12 +67,15 @@ def probe_libplacebo_runtime() -> bool:
     )
     env = os.environ.copy()
     env[_LIBPLACEBO_PROBE_ENV] = "1"
+    probe_argv, env = prepare_python_child([sys.executable, "-c", probe_script], env=env)
 
     try:
-        # argv uses sys.executable and a static probe script; shell=True is never used.
+        # -P excludes the cwd and script directory. The helper strips Python
+        # injection variables while retaining trusted user-site and native paths.
         result = subprocess.run(  # nosec B603
-            [sys.executable, "-c", probe_script],
+            probe_argv,
             env=env,
+            cwd=_CHILD_PROCESS_CWD,
             capture_output=True,
             text=True,
             timeout=_LIBPLACEBO_PROBE_TIMEOUT_SECONDS,

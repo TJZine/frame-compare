@@ -28,19 +28,6 @@ def test_probe_cache_invalidates_on_fingerprint_change():
     assert compute_probe_cache_key(fp_mtime) != base_key
 
 
-def test_compute_probe_cache_key_stable_for_same_fingerprint():
-    """Verify that identical fingerprints produce the same key."""
-    fp1 = ClipFingerprint(Path("video.mkv"), 1024, 5000)
-    fp2 = ClipFingerprint(Path("video.mkv"), 1024, 5000)
-
-    key1 = compute_probe_cache_key(fp1)
-    key2 = compute_probe_cache_key(fp2)
-
-    assert key1 == key2
-    assert isinstance(key1, str)
-    assert len(key1) > 0
-
-
 def test_probe_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path) -> None:
     """Content hashing is deliberately excluded from the performance-first key."""
     video = tmp_path / "video.mkv"

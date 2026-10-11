@@ -2,7 +2,7 @@
 
 import contextlib
 import re
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,7 @@ RICH_BOX_DRAWING_RE = re.compile(r"[\u2500-\u257f]")
 def isolated_cli_filesystem(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[Path]:
+) -> Generator[Path]:
     """Run one CLI test block in a pytest-owned temporary working directory."""
     index = 0
     while True:

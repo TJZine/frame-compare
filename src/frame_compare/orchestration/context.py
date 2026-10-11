@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.services.types import AlignmentSource, AlignmentStabilitySummary
+from frame_compare.services.types import AlignmentSource
+from frame_compare.utils.alignment_evidence import (
+    AlignmentStabilitySummary,
+    AudioAlignmentAttempt,
+)
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
@@ -128,6 +133,7 @@ class ClipState:
 
     trim: ClipTrimState = field(default_factory=ClipTrimState)
     alignment: ClipAlignmentState | None = None
+    audio_attempt: AudioAlignmentAttempt | None = None
     active_rect: ClipActiveRect | None = None
     release_identity: ReleaseIdentity | None = None
     label_is_explicit: bool = False
@@ -135,7 +141,7 @@ class ClipState:
     def effective_num_frames(self) -> int:
         """Return effective frame count after applied trims.
 
-        This MUST be used as the frame domain for FramePlan and rendering decisions.
+        This MUST be used as the frame domain for selection and rendering decisions.
         """
         end_inclusive = (
             self.trim.trim_end_frame_inclusive
@@ -184,6 +190,6 @@ class RunContext:
     analysis_metrics: FrameMetrics | None = None
     confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
     full_window_retry_override: FullWindowRetryOverride | None = None
-    run_warnings: list[str] | None = None
-    preflight_warnings: list[str] | None = None
+    run_warnings: list[RunWarning] | None = None
+    preflight_warnings: list[RunWarning] | None = None
     no_color: bool = False

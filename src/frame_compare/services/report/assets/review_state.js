@@ -10,7 +10,7 @@ const ReviewState = (() => {
     const MAX_RECORDS_LABEL = MAX_RECORDS.toLocaleString('en-US');
     const TAGS = new Set([null, 'artifact', 'detail', 'motion', 'color', 'other']);
     const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-    const PERSISTENCE_WARNING = 'Review changes will not persist in this browser; export to keep them.';
+    const PERSISTENCE_WARNING = 'Changes are kept only for this session. Export review JSON to keep them.';
     const REPORT_MISMATCH = 'This review belongs to a different report. No changes were made.';
     const encoder = new TextEncoder();
 
@@ -185,6 +185,8 @@ const ReviewState = (() => {
         const storageKey = `frame-compare:report-review:v1:${context.reportId}`;
         let storage = options.storage ?? null;
         let records = new Map();
+        let revision = 0;
+        const candidates = new WeakMap();
         let memoryOnly = !storage;
         let unsaved = false;
         let warning = memoryOnly ? PERSISTENCE_WARNING : '';
@@ -224,7 +226,7 @@ const ReviewState = (() => {
                 return true;
             } catch {
                 unsaved = true;
-                warning = 'Review changes could not be saved; export to keep them.';
+                warning = PERSISTENCE_WARNING;
                 return false;
             }
         }
@@ -244,6 +246,7 @@ const ReviewState = (() => {
                 if (!records.has(frameOrdinal) && records.size >= MAX_RECORDS) throw new ReviewStateError(`Review record limit of ${MAX_RECORDS_LABEL} reached.`);
                 records.set(frameOrdinal, validated);
             }
+            revision += 1;
             persistMutation();
             return records.get(frameOrdinal) || defaultRecord(frameOrdinal);
         }
@@ -276,46 +279,43 @@ const ReviewState = (() => {
                 throw new ReviewStateError('Import preview options are invalid.');
             }
             const imported = mapFrom(validateRecords(importedRecords, context));
-            const ordinals = new Set([...records.keys(), ...imported.keys()]);
+            const candidate = mode === 'replace' ? imported : new Map(records);
+            if (mode === 'merge') {
+                for (const [ordinal, incoming] of imported) {
+                    if (!candidate.has(ordinal) || conflict === 'use-imported') candidate.set(ordinal, incoming);
+                }
+            }
+            const ordinals = new Set([...records.keys(), ...candidate.keys()]);
             const counts = { add: 0, change: 0, remove: 0, unchanged: 0 };
             for (const ordinal of ordinals) {
                 const local = records.get(ordinal);
-                const incoming = imported.get(ordinal);
-                if (!local && incoming) counts.add += 1;
-                else if (local && !incoming) {
-                    if (mode === 'replace') counts.remove += 1;
-                    else counts.unchanged += 1;
-                }
-                else if (sameRecord(local, incoming)) counts.unchanged += 1;
+                const selected = candidate.get(ordinal);
+                if (!local) counts.add += 1;
+                else if (!selected) counts.remove += 1;
+                else if (sameRecord(local, selected)) counts.unchanged += 1;
                 else counts.change += 1;
             }
-            return { mode, conflict, counts, importedRecords: sortedRecords(imported) };
-        }
-
-        function candidateFor(previewValue) {
-            const imported = mapFrom(previewValue.importedRecords);
-            if (previewValue.mode === 'replace') return imported;
-            const candidate = new Map(records);
-            for (const [ordinal, incoming] of imported) {
-                if (!candidate.has(ordinal) || previewValue.conflict === 'use-imported') candidate.set(ordinal, incoming);
-            }
-            return candidate;
+            const previewValue = Object.freeze({
+                mode, conflict, counts: Object.freeze(counts),
+                importedRecords: Object.freeze(sortedRecords(imported).map(record => Object.freeze(record))),
+            });
+            candidates.set(previewValue, { candidate, revision });
+            return previewValue;
         }
 
         function apply(previewValue) {
-            const confirmedPreview = preview(
-                previewValue?.importedRecords,
-                previewValue?.mode,
-                previewValue?.conflict,
-            );
-            const candidateRecords = validateRecords(
-                sortedRecords(candidateFor(confirmedPreview)),
-                context,
-            );
+            // Validate supplied input even when it did not originate at this model.
+            validateRecords(previewValue?.importedRecords, context);
+            const selected = candidates.get(previewValue);
+            if (!selected || selected.revision !== revision) {
+                throw new ReviewStateError('Import preview is stale or invalid. Review choices again.');
+            }
+            const candidateRecords = validateRecords(sortedRecords(selected.candidate), context);
             const candidate = mapFrom(candidateRecords);
             const serialized = serialize(storedDocument(context, candidateRecords));
             if (memoryOnly) {
                 records = candidate;
+                revision += 1;
                 unsaved = true;
                 warning = PERSISTENCE_WARNING;
                 return true;
@@ -326,6 +326,7 @@ const ReviewState = (() => {
                 return false;
             }
             records = candidate;
+            revision += 1;
             unsaved = false;
             warning = '';
             return true;
@@ -373,7 +374,7 @@ const ReviewState = (() => {
             const status = model.status();
             const saved = status.unsaved
                 ? 'Unsaved changes.'
-                : `${status.count} review record${status.count === 1 ? '' : 's'} saved locally.`;
+                : `${status.count} review record${status.count === 1 ? '' : 's'} saved in this browser.`;
             showMessage(status.warning || saved, Boolean(status.warning), announce);
         }
 
@@ -397,7 +398,7 @@ const ReviewState = (() => {
         function populatePreferredOptions() {
             const options = [new Option('No preferred clip', '')];
             viewer.state.data.clips.forEach((clip, index) => {
-                options.push(new Option(viewer.clipDisplay(clip), `clip:${index}`));
+                options.push(new Option(ViewerFormat.clipDisplay(clip), `clip:${index}`));
             });
             viewer.dom.reviewPreferred.replaceChildren(...options);
         }

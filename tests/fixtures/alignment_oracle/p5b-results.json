@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "purpose": "p5b_grid_preserving_extraction_scalar_evidence",
+  "experiment_scope": {
+    "production_changed": false,
+    "original_incident_media_used": false,
+    "single_design": "seek one selected-stream time-base tick before the existing five-second context with noaccurate_seek, retain decoded preroll through resampling, normalize output time base to 1/requested_rate, and crop with atrim start_pts/end_pts on the selected-stream output-sample origin",
+    "validated_origin": "selected-stream start PTS plus requested logical sample index on the post-resample 1/requested_rate time base, checked independently against each source's continuous-decode oracle",
+    "unchanged_bounds": {
+      "ffmpeg_window_timeout_seconds": 120,
+      "output_sample_cap": true,
+      "sequential_pair_lifetime": true,
+      "fft_scoring_and_window_caps": true
+    },
+    "recipe_identity": "6d9fd7a33b38fc638915ab696e0c7c003d86b3bef3fba0a20d12afd62c4b58ce"
+  },
+  "environments": {
+    "native_macos_arm64": {
+      "ffmpeg": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 9.0.1 Copyright (c) 2007-2026 the FFmpeg developers",
+      "alignment_runtime_fingerprint": "c80bfdcab67879f3a2b3de41cae7fef0e5050e573eb9e67feaab7eb569544e92",
+      "runtime_kind": "unmanaged"
+    },
+    "docker_linux_arm64": {
+      "ffmpeg": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 7.1.5-0+deb13u1 Copyright (c) 2007-2026 the FFmpeg developers",
+      "debian_ffmpeg_package": "7:7.1.5-0+deb13u1",
+      "alignment_runtime_fingerprint": "ca074d4ae26c3d19750d08587153239914f08847dc588de499eac01815ba78a8",
+      "runtime_kind": "docker"
+    },
+    "windows_x64_portable": {
+      "status": "outstanding_not_executed"
+    }
+  },
+  "positive_start_aac": {
+    "native_macos_arm64": {
+      "baseline_origin_window": {
+        "bounded_count": 945,
+        "oracle_count": 2048,
+        "lag_samples": 29
+      },
+      "design_origin_window": {
+        "bounded_count": 2048,
+        "oracle_count": 2048,
+        "lag_samples": 0
+      },
+      "baseline_asymmetric_pair": {
+        "sample_offset": 1115,
+        "frame_offset": 1,
+        "score": 0.8713582429603048,
+        "quality_eligible": false
+      },
+      "design_asymmetric_pair": {
+        "sample_offset": 0,
+        "frame_offset": 0,
+        "score": 1.0,
+        "quality_eligible": true
+      }
+    },
+    "docker_linux_arm64": {
+      "baseline_origin_window": {
+        "bounded_count": 2048,
+        "oracle_count": 2048,
+        "lag_samples": 0
+      },
+      "design_origin_window": {
+        "bounded_count": 2048,
+        "oracle_count": 2048,
+        "lag_samples": 0
+      },
+      "baseline_asymmetric_pair": {
+        "sample_offset": 0,
+        "frame_offset": 0,
+        "score": 0.9999999999999999,
+        "quality_eligible": true
+      },
+      "design_asymmetric_pair": {
+        "sample_offset": 0,
+        "frame_offset": 0,
+        "score": 0.9999999999999999,
+        "quality_eligible": true
+      }
+    }
+  },
+  "aac_seek_grid_holdouts": {
+    "native_macos_arm64": {
+      "48000_to_8000": {
+        "allowance_samples": 1,
+        "baseline_max_lag_samples": 0,
+        "design_max_lag_samples": 2,
+        "design_within_allowance": false
+      },
+      "44100_to_48000": {
+        "allowance_samples": 6,
+        "baseline_max_lag_samples": 1,
+        "design_max_lag_samples": 1,
+        "design_within_allowance": true,
+        "design_minimum_oracle_correlation": 0.9335095988695936
+      }
+    },
+    "docker_linux_arm64": {
+      "48000_to_8000": {
+        "allowance_samples": 1,
+        "baseline_max_lag_samples": 3,
+        "design_max_lag_samples": 3,
+        "design_within_allowance": false
+      },
+      "44100_to_48000": {
+        "allowance_samples": 6,
+        "baseline_max_lag_samples": 10,
+        "design_max_lag_samples": 10,
+        "design_within_allowance": false,
+        "design_minimum_oracle_correlation": 0.9336318557269901
+      }
+    },
+    "finding": "A validated post-resample crop origin repairs the positive-start boundary but does not make bounded AAC resampling use the continuous-decode sample phase. The remaining lag depends on runtime, conversion rate, and seek position."
+  },
+  "holdouts": {
+    "clean_signal_repetition_and_stream_selection": {
+      "native_outcomes_preserved": true,
+      "docker_outcomes_preserved": true,
+      "families": [
+        "clean_zero",
+        "very_quiet_independent",
+        "unrelated",
+        "silence",
+        "steady_tone",
+        "repeated",
+        "wrong_stream",
+        "explicit_matching_stream"
+      ]
+    },
+    "weak_dissent": {
+      "cases_per_runtime": 80,
+      "native_accepted": 80,
+      "docker_accepted": 80
+    },
+    "localized_edit": {
+      "cases_per_runtime": 80,
+      "native_credible_conflicts": 80,
+      "docker_credible_conflicts": 80,
+      "native_false_accepts": 0,
+      "docker_false_accepts": 0
+    }
+  },
+  "production": {
+    "extraction_recipe_changed": false,
+    "estimator_policy_changed": false,
+    "shared_cache_identity_changed": false
+  },
+  "disposition": "STOP — the one bounded grid-preserving design fails the two-runtime oracle grid gate; retain production v5 extraction and require a newly authorized focused extraction design before P4"
+}

@@ -6,18 +6,29 @@ import asyncio
 import ipaddress
 import json
 import math
+import os
 import socket
 import ssl
+import subprocess
+import sys
+import tempfile
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from threading import Event
+from typing import Protocol, cast
 from urllib.parse import urlparse
 
 from frame_compare import __version__
+from frame_compare.utils.run_warnings import RunWarning
 
 WEBHOOK_TIMEOUT_SECONDS = 10.0
+WEBHOOK_RESOLUTION_POLL_SECONDS = 0.05
+WEBHOOK_RESOLUTION_SHUTDOWN_SECONDS = 1.0
+WEBHOOK_RESOLUTION_MAX_ADDRESSES = 64
+WEBHOOK_RESOLUTION_MAX_BYTES = 8192
 WEBHOOK_ATTEMPTS = 3
 WEBHOOK_CONTENT_TYPE = "application/json"
 WEBHOOK_RETRY_BASE_DELAY_SECONDS = 1.0
@@ -26,10 +37,12 @@ WEBHOOK_USER_AGENT = (
     f"DiscordBot (https://github.com/TJZine/frame-compare, {__version__}) "
     f"frame-compare/{__version__}"
 )
-WEBHOOK_FAILURE_WARNING = "slow.pics webhook: delivery failed"
-WEBHOOK_VALIDATION_WARNING = (
-    "slow.pics webhook: delivery skipped because the configured webhook URL "
-    "is not an allowed external HTTPS endpoint"
+WEBHOOK_FAILURE_WARNING = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
+WEBHOOK_VALIDATION_WARNING = RunWarning(
+    "slow.pics",
+    "warning",
+    "slow.pics webhook: delivery skipped",
+    "because the configured webhook URL is not an allowed external HTTPS endpoint",
 )
 
 type WebhookResolver = Callable[[str, int], tuple[str, ...]]
@@ -45,6 +58,10 @@ class _WebhookResponseSocket(Protocol):
 
 class WebhookDeliveryUncertainError(OSError):
     """The request may have reached the endpoint, so retrying could duplicate it."""
+
+
+class _WebhookDeliveryCancelled(Exception):
+    """Stop a synchronous webhook worker after its owning task is cancelled."""
 
 
 class WebhookFailureKind(StrEnum):
@@ -65,7 +82,7 @@ class SlowpicsWebhookResult:
 
     success: bool
     detail: str | None = None
-    warning: str | None = None
+    warning: RunWarning | None = None
     failure_kind: WebhookFailureKind | None = None
     status_code: int | None = None
 
@@ -109,44 +126,214 @@ async def deliver_slowpics_webhook(
     connector: WebhookConnector | None = None,
     sleeper: WebhookSleeper | None = None,
 ) -> SlowpicsWebhookResult:
-    """Deliver a slow.pics URL to a configured webhook with isolated HTTP state."""
-    resolved_resolver = resolve_webhook_addresses if resolver is None else resolver
+    """Deliver with isolated HTTP state and drain owned work before cancellation.
+
+    Injected callables remain caller-owned: blocking injected work must finish
+    before cancellation can propagate, and must supply its own deadlines.
+    """
+    cancellation_event = Event()
+
+    def owned_resolver(hostname: str, port: int) -> tuple[str, ...]:
+        return resolve_webhook_addresses(hostname, port, cancellation_event=cancellation_event)
+
+    resolved_resolver = owned_resolver if resolver is None else resolver
     resolved_connector = send_pinned_https_webhook_request if connector is None else connector
-    resolved_sleeper = time.sleep if sleeper is None else sleeper
-    return await asyncio.to_thread(
-        _deliver_slowpics_webhook_sync,
-        webhook_url=webhook_url,
-        slowpics_url=slowpics_url,
-        resolver=resolved_resolver,
-        connector=resolved_connector,
-        sleeper=resolved_sleeper,
-    )
-
-
-def resolve_webhook_addresses(hostname: str, port: int) -> tuple[str, ...]:
-    """Resolve a webhook hostname to candidate IP address strings."""
-    try:
-        results = socket.getaddrinfo(
-            hostname,
-            port,
-            family=socket.AF_UNSPEC,
-            type=socket.SOCK_STREAM,
-            proto=socket.IPPROTO_TCP,
+    worker = asyncio.create_task(
+        _run_slowpics_webhook_worker(
+            webhook_url=webhook_url,
+            slowpics_url=slowpics_url,
+            resolver=resolved_resolver,
+            connector=resolved_connector,
+            sleeper=sleeper,
+            cancellation_event=cancellation_event,
         )
+    )
+    try:
+        # Shield the thread-backed task so cancellation is handled by the
+        # owner below rather than abandoning a worker that can still retry.
+        worker_result = await asyncio.shield(worker)
+        if isinstance(worker_result, Exception):
+            raise worker_result
+        return worker_result
+    except asyncio.CancelledError:
+        cancellation_event.set()
+        # A Python thread cannot be forcefully stopped.  Drain it before
+        # propagating cancellation; the worker cooperatively exits before
+        # another attempt and the default retry wait is interruptible.
+        while True:
+            # A second cancellation can interrupt this await. Keep draining
+            # until the thread-backed worker has actually completed.
+            with suppress(BaseException):
+                await asyncio.shield(worker)
+            if worker.done():
+                break
+        raise
+
+
+async def _run_slowpics_webhook_worker(
+    *,
+    webhook_url: str,
+    slowpics_url: str,
+    resolver: WebhookResolver,
+    connector: WebhookConnector,
+    sleeper: WebhookSleeper | None,
+    cancellation_event: Event,
+) -> SlowpicsWebhookResult | Exception:
+    """Run the thread-backed delivery while consuming its private stop signal."""
+    try:
+        return await asyncio.to_thread(
+            _deliver_slowpics_webhook_sync,
+            webhook_url=webhook_url,
+            slowpics_url=slowpics_url,
+            resolver=resolver,
+            connector=connector,
+            sleeper=sleeper,
+            cancellation_event=cancellation_event,
+        )
+    except _WebhookDeliveryCancelled:
+        # A shielded task that raises after its owner is cancelled is reported
+        # as an unhandled exception by newer asyncio versions.  The owning
+        # coroutine always re-raises cancellation, so this result is internal.
+        return SlowpicsWebhookResult(success=False)
+    except Exception as error:
+        # Keep the shielded task successful so repeated owner cancellation
+        # cannot make asyncio report a racing worker failure as unhandled.
+        # The normal owner path immediately re-raises the captured error.
+        return error
+
+
+# The fixed script imports only stdlib modules. The configured interpreter and
+# its startup are trusted: an embedded ._pth with `import site` can override -S
+# and run site hooks before this script. Output/deadline checks cover startup too.
+_WEBHOOK_RESOLVER_CODE = """
+import json
+import socket
+import sys
+try:
+    results = socket.getaddrinfo(sys.argv[1], int(sys.argv[2]),
+        family=socket.AF_UNSPEC, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
+    addresses = list(dict.fromkeys(result[4][0] for result in results))
+    if len(addresses) > 64 or any(not isinstance(a, str) or len(a) > 64 for a in addresses):
+        addresses = []
+except (OSError, UnicodeError, ValueError):
+    addresses = []
+sys.stdout.write(json.dumps(addresses, separators=(",", ":")))
+"""
+
+
+def resolve_webhook_addresses(
+    hostname: str,
+    port: int,
+    *,
+    cancellation_event: Event | None = None,
+) -> tuple[str, ...]:
+    """Resolve with an owned child, bounded deadline, and cooperative cancellation.
+
+    Only hostname, port, and required OS startup plumbing cross this boundary;
+    application environment is excluded. The configured interpreter's startup
+    hooks remain trusted even with -I/-S. Injected resolver callables in delivery
+    remain caller-owned and must supply their own operation bounds.
+    """
+    if (
+        not 1 <= len(hostname) <= 253
+        or not all(32 < ord(char) < 127 for char in hostname)
+        or type(port) is not int
+        or not 1 <= port <= 65535
+    ):
+        return ()
+    stop = cancellation_event if cancellation_event is not None else Event()
+    _raise_if_cancelled(stop)
+    deadline = time.monotonic() + WEBHOOK_TIMEOUT_SECONDS
+    # A temporary file avoids pipe deadlocks and requires no reader thread. The
+    # fixed child bounds its output; the parent separately bounds and validates it.
+    try:
+        with tempfile.TemporaryFile() as output:
+            process = subprocess.Popen(
+                [sys.executable, "-I", "-S", "-c", _WEBHOOK_RESOLVER_CODE, hostname, str(port)],
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                env=_webhook_resolver_environment(),
+            )
+            try:
+                while True:
+                    _raise_if_cancelled(stop)
+                    remaining = _remaining_timeout_seconds(deadline)
+                    try:
+                        process.wait(timeout=min(WEBHOOK_RESOLUTION_POLL_SECONDS, remaining))
+                    except subprocess.TimeoutExpired:
+                        continue
+                    _raise_if_cancelled(stop)
+                    if process.returncode != 0:
+                        return ()
+                    output.seek(0)
+                    data = output.read(WEBHOOK_RESOLUTION_MAX_BYTES + 1)
+                    break
+            finally:
+                original_error = sys.exception()
+                try:
+                    _reap_webhook_resolver(process)
+                except OSError:
+                    if original_error is None:
+                        raise
+                    # Cleanup must not replace the deadline/cancellation that
+                    # caused it. Record a safe secondary failure on that error.
+                    original_error.add_note("Webhook resolver shutdown failed")
+    except TimeoutError:
+        raise
     except (OSError, UnicodeError, ValueError):
         return ()
+    if len(data) > WEBHOOK_RESOLUTION_MAX_BYTES:
+        return ()
+    try:
+        addresses = json.loads(data)
+    except (UnicodeError, ValueError):
+        return ()
+    if not isinstance(addresses, list):
+        return ()
+    candidates = cast(list[object], addresses)
+    if len(candidates) > WEBHOOK_RESOLUTION_MAX_ADDRESSES:
+        return ()
+    validated: list[str] = []
+    for address in candidates:
+        if not isinstance(address, str) or len(address) > 64:
+            return ()
+        validated.append(address)
+    return tuple(validated)
 
-    addresses: list[str] = []
-    seen: set[str] = set()
-    for result in results:
-        sockaddr = result[4]
-        if len(sockaddr) < 1:
-            continue
-        address = str(sockaddr[0])
-        if address not in seen:
-            addresses.append(address)
-            seen.add(address)
-    return tuple(addresses)
+
+def _webhook_resolver_environment() -> dict[str, str]:
+    """Keep only Windows assembly startup plumbing; never inherit app secrets."""
+    if sys.platform != "win32":
+        return {}
+    # Python's subprocess contract requires SystemRoot for Windows side-by-side
+    # assemblies. Environment names are case-insensitive on Windows.
+    # No PATH lookup or child-created temporary file is needed by the fixed script.
+    for key, value in os.environ.items():
+        if key.casefold() == "systemroot" and value:
+            return {"SystemRoot": value}
+    return {}
+
+
+def _reap_webhook_resolver(process: subprocess.Popen[bytes]) -> None:
+    """Attempt graceful shutdown, forced shutdown, and bounded reaping."""
+    if process.poll() is not None:
+        return
+    # A failed signal is not evidence of exit. Still attempt wait, escalation,
+    # and reap. The final wait determines whether cleanup actually completed.
+    with suppress(OSError):
+        process.terminate()
+    try:
+        process.wait(timeout=WEBHOOK_RESOLUTION_POLL_SECONDS)
+        return
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    with suppress(OSError):
+        process.kill()
+    try:
+        process.wait(timeout=WEBHOOK_RESOLUTION_SHUTDOWN_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        raise OSError("Webhook resolver shutdown failed") from None
 
 
 def send_pinned_https_webhook_request(request: WebhookDeliveryRequest) -> WebhookResponse:
@@ -188,9 +375,16 @@ def _deliver_slowpics_webhook_sync(
     slowpics_url: str,
     resolver: WebhookResolver,
     connector: WebhookConnector,
-    sleeper: WebhookSleeper,
+    sleeper: WebhookSleeper | None,
+    cancellation_event: Event,
 ) -> SlowpicsWebhookResult:
-    target = _validate_webhook_url(webhook_url, resolver)
+    _raise_if_cancelled(cancellation_event)
+    try:
+        target = _validate_webhook_url(webhook_url, resolver)
+    except TimeoutError:
+        _raise_if_cancelled(cancellation_event)
+        return _failure_result(WebhookFailureKind.TIMEOUT)
+    _raise_if_cancelled(cancellation_event)
     if target is None:
         return _failure_result(
             WebhookFailureKind.VALIDATION,
@@ -206,6 +400,7 @@ def _deliver_slowpics_webhook_sync(
         ("Connection", "close"),
     )
     for attempt in range(1, WEBHOOK_ATTEMPTS + 1):
+        _raise_if_cancelled(cancellation_event)
         resolved_ip = target.resolved_ips[(attempt - 1) % len(target.resolved_ips)]
         request = WebhookDeliveryRequest(
             hostname=target.hostname,
@@ -219,6 +414,7 @@ def _deliver_slowpics_webhook_sync(
         )
         try:
             response = connector(request)
+            _raise_if_cancelled(cancellation_event)
         except WebhookDeliveryUncertainError:
             return _failure_result(WebhookFailureKind.DELIVERY_UNCERTAIN)
         except ssl.SSLCertVerificationError:
@@ -226,12 +422,20 @@ def _deliver_slowpics_webhook_sync(
         except TimeoutError:
             if attempt == WEBHOOK_ATTEMPTS:
                 return _failure_result(WebhookFailureKind.TIMEOUT)
-            sleeper(_retry_backoff_seconds(attempt))
+            _sleep_before_retry(
+                _retry_backoff_seconds(attempt),
+                cancellation_event,
+                sleeper,
+            )
             continue
         except (OSError, UnicodeError, ValueError):
             if attempt == WEBHOOK_ATTEMPTS:
                 return _failure_result(WebhookFailureKind.TRANSPORT)
-            sleeper(_retry_backoff_seconds(attempt))
+            _sleep_before_retry(
+                _retry_backoff_seconds(attempt),
+                cancellation_event,
+                sleeper,
+            )
             continue
 
         if 200 <= response.status_code <= 299:
@@ -243,14 +447,18 @@ def _deliver_slowpics_webhook_sync(
                 and retry_after is not None
                 and 0.0 <= retry_after <= WEBHOOK_MAX_RETRY_AFTER_SECONDS
             ):
-                sleeper(retry_after)
+                _sleep_before_retry(retry_after, cancellation_event, sleeper)
                 continue
             return _failure_result(
                 WebhookFailureKind.RATE_LIMITED,
                 status_code=response.status_code,
             )
         if 500 <= response.status_code <= 599 and attempt < WEBHOOK_ATTEMPTS:
-            sleeper(_retry_backoff_seconds(attempt))
+            _sleep_before_retry(
+                _retry_backoff_seconds(attempt),
+                cancellation_event,
+                sleeper,
+            )
             continue
         return _failure_result(
             WebhookFailureKind.HTTP_STATUS,
@@ -260,10 +468,30 @@ def _deliver_slowpics_webhook_sync(
     raise AssertionError("Webhook retry loop exhausted without a terminal result")
 
 
+def _raise_if_cancelled(cancellation_event: Event) -> None:
+    if cancellation_event.is_set():
+        raise _WebhookDeliveryCancelled
+
+
+def _sleep_before_retry(
+    delay_seconds: float,
+    cancellation_event: Event,
+    sleeper: WebhookSleeper | None,
+) -> None:
+    """Wait for a retry without allowing cancellation to start another one."""
+    _raise_if_cancelled(cancellation_event)
+    if sleeper is None:
+        if cancellation_event.wait(delay_seconds):
+            raise _WebhookDeliveryCancelled
+    else:
+        sleeper(delay_seconds)
+        _raise_if_cancelled(cancellation_event)
+
+
 def _failure_result(
     failure_kind: WebhookFailureKind,
     *,
-    warning: str = WEBHOOK_FAILURE_WARNING,
+    warning: RunWarning = WEBHOOK_FAILURE_WARNING,
     status_code: int | None = None,
 ) -> SlowpicsWebhookResult:
     return SlowpicsWebhookResult(
@@ -330,6 +558,8 @@ def _validate_webhook_url(
 
     try:
         resolved_ips = resolver(hostname, port)
+    except TimeoutError:
+        raise
     except (OSError, UnicodeError, ValueError):
         return None
     if not resolved_ips:

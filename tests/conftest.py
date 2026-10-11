@@ -57,6 +57,8 @@ if _vs_needs_mock():
     _global_mock_vs.__spec__ = MagicMock()
     _global_mock_vs.RGBS = 0
     _global_mock_vs.RGB24 = 0
+    # Mock format identity only; distinct from RGBS so YUV conversion is exercised.
+    _global_mock_vs.YUV420P10 = 1
     _global_mock_vs.YUV = 1
     _global_mock_vs.GRAY = 2
     _global_mock_vs.INTEGER = 0
@@ -80,6 +82,12 @@ def reset_structlog_state() -> Iterator[None]:
     yield
     structlog.reset_defaults()
     structlog.contextvars.clear_contextvars()
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Pin anyio tests to asyncio; the async tests use asyncio APIs directly."""
+    return "asyncio"
 
 
 @pytest.fixture

@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import shutil
+import signal
 import ssl
-from collections.abc import Callable
+import subprocess
+import sys
+import sysconfig
+import time
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from threading import Event
+from typing import IO
 
 import pytest
 
+from frame_compare.services import slowpics_webhook as webhook
 from frame_compare.services.slowpics_webhook import (
     WEBHOOK_ATTEMPTS,
     WEBHOOK_CONTENT_TYPE,
@@ -69,8 +80,8 @@ async def test_rejects_non_https_and_localhost_names(url: str) -> None:
 
     assert result.success is False
     assert result.warning is not None
-    assert "hooks.example.test" not in result.warning
-    assert "localhost" not in result.warning
+    assert "hooks.example.test" not in result.warning.text
+    assert "localhost" not in result.warning.text
 
 
 @pytest.mark.parametrize(
@@ -141,8 +152,8 @@ async def test_resolution_failure_is_rejected_without_connecting() -> None:
 
     assert result.success is False
     assert result.warning is not None
-    assert "secret.example.test" not in result.warning
-    assert "/path" not in result.warning
+    assert "secret.example.test" not in result.warning.text
+    assert "/path" not in result.warning.text
 
 
 async def test_malformed_ipv6_url_returns_sanitized_validation_warning() -> None:
@@ -154,7 +165,7 @@ async def test_malformed_ipv6_url_returns_sanitized_validation_warning() -> None
         failure_kind=WebhookFailureKind.VALIDATION,
     )
     assert result.warning is not None
-    assert "::1" not in result.warning
+    assert "::1" not in result.warning.text
 
 
 @pytest.mark.parametrize(
@@ -181,7 +192,7 @@ async def test_non_ascii_url_components_return_sanitized_validation_warning(
     )
     assert result.warning is not None
     for fragment in sensitive_fragments:
-        assert fragment not in result.warning
+        assert fragment not in result.warning.text
 
 
 async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host_header() -> None:
@@ -239,9 +250,9 @@ async def test_connector_serialization_failure_returns_sanitized_warning() -> No
     )
     assert calls == WEBHOOK_ATTEMPTS
     assert result.warning is not None
-    assert "hooks.example.test" not in result.warning
-    assert "/webhook/token" not in result.warning
-    assert "secret=value" not in result.warning
+    assert "hooks.example.test" not in result.warning.text
+    assert "/webhook/token" not in result.warning.text
+    assert "secret=value" not in result.warning.text
 
 
 def test_request_serialization_rejects_non_ascii_target_before_socket(
@@ -327,6 +338,113 @@ async def test_retryable_connection_and_server_failures_use_bounded_backoff(
     ]
 
 
+async def test_cancellation_stops_retry_worker_before_next_attempt() -> None:
+    first_attempt = Event()
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        first_attempt.set()
+        return WebhookResponse(status_code=503)
+
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            resolver=_public_resolver,
+            connector=_connector,
+        )
+    )
+    assert await asyncio.to_thread(first_attempt.wait, 1.0)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert calls == 1
+    await asyncio.sleep(0.05)
+    assert calls == 1
+
+
+async def test_repeated_cancellation_drains_blocked_worker_before_propagating() -> None:
+    connector_started = Event()
+    release_connector = Event()
+    calls = 0
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        nonlocal calls
+        calls += 1
+        connector_started.set()
+        assert release_connector.wait(1.0)
+        return WebhookResponse(status_code=503)
+
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            resolver=_public_resolver,
+            connector=_connector,
+        )
+    )
+    assert await asyncio.to_thread(connector_started.wait, 1.0)
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    try:
+        assert not task.done()
+    finally:
+        release_connector.set()
+
+    _done, pending = await asyncio.wait({task}, timeout=1.0)
+    assert not pending
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == 1
+
+
+async def test_repeated_cancellation_consumes_concurrent_worker_failure() -> None:
+    connector_started = Event()
+    release_connector = Event()
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled_contexts: list[dict[str, object]] = []
+
+    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
+        connector_started.set()
+        assert release_connector.wait(1.0)
+        raise RuntimeError("connector failed during cancellation")
+
+    loop.set_exception_handler(lambda _loop, context: unhandled_contexts.append(context))
+    try:
+        task = asyncio.create_task(
+            deliver_slowpics_webhook(
+                webhook_url="https://hooks.example.test/path",
+                slowpics_url="https://slow.pics/c/example",
+                resolver=_public_resolver,
+                connector=_connector,
+            )
+        )
+        assert await asyncio.to_thread(connector_started.wait, 1.0)
+
+        task.cancel()
+        await asyncio.sleep(0)
+        release_connector.set()
+        task.cancel()
+
+        _done, pending = await asyncio.wait({task}, timeout=1.0)
+        assert not pending
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+        assert unhandled_contexts == []
+    finally:
+        release_connector.set()
+        loop.set_exception_handler(previous_handler)
+
+
 async def test_delivery_unknown_after_request_send_is_not_retried() -> None:
     calls = 0
 
@@ -363,48 +481,33 @@ async def test_certificate_verification_failure_is_not_retried() -> None:
     assert calls == 1
 
 
-async def test_rate_limit_retries_after_short_server_delay() -> None:
+@pytest.mark.parametrize("retry_after", [2.5, None, WEBHOOK_MAX_RETRY_AFTER_SECONDS + 0.1])
+async def test_rate_limit_uses_only_bounded_server_delay(retry_after: float | None) -> None:
     calls = 0
     sleep_calls: list[float] = []
 
     def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            return WebhookResponse(status_code=429, retry_after_seconds=2.5)
-        return WebhookResponse(status_code=204)
-
-    result = await _deliver(
-        "https://hooks.example.test/path",
-        connector=_connector,
-        sleeper=sleep_calls.append,
-    )
-
-    assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
-    assert calls == 2
-    assert sleep_calls == [2.5]
-
-
-@pytest.mark.parametrize("retry_after", [None, WEBHOOK_MAX_RETRY_AFTER_SECONDS + 0.1])
-async def test_rate_limit_without_usable_bounded_delay_is_not_retried(
-    retry_after: float | None,
-) -> None:
-    calls = 0
-
-    def _connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
-        nonlocal calls
-        calls += 1
+        if retry_after == 2.5 and calls > 1:
+            return WebhookResponse(status_code=204)
         return WebhookResponse(status_code=429, retry_after_seconds=retry_after)
 
-    result = await _deliver("https://hooks.example.test/path", connector=_connector)
-
-    assert result == SlowpicsWebhookResult(
-        success=False,
-        warning=WEBHOOK_FAILURE_WARNING,
-        failure_kind=WebhookFailureKind.RATE_LIMITED,
-        status_code=429,
+    result = await _deliver(
+        "https://hooks.example.test/path", connector=_connector, sleeper=sleep_calls.append
     )
-    assert calls == 1
+    if retry_after == 2.5:
+        assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
+        assert calls == 2
+        assert sleep_calls == [2.5]
+    else:
+        assert result == SlowpicsWebhookResult(
+            success=False,
+            warning=WEBHOOK_FAILURE_WARNING,
+            failure_kind=WebhookFailureKind.RATE_LIMITED,
+            status_code=429,
+        )
+        assert calls == 1
 
 
 async def test_retryable_failures_rotate_across_validated_addresses() -> None:
@@ -444,10 +547,10 @@ async def test_warnings_redact_configured_webhook_url_details() -> None:
 
     assert result.success is False
     assert result.warning is not None
-    assert "secret.example.test" not in result.warning
-    assert "webhook" in result.warning
-    assert "/webhook/token" not in result.warning
-    assert "secret=value" not in result.warning
+    assert "secret.example.test" not in result.warning.text
+    assert "webhook" in result.warning.text
+    assert "/webhook/token" not in result.warning.text
+    assert "secret=value" not in result.warning.text
 
 
 def test_pinned_transport_parses_retry_after_and_preserves_sni(
@@ -611,3 +714,388 @@ def test_pinned_transport_enforces_absolute_response_deadline(
 
     assert sent == 1
     assert recv_calls == 3
+
+
+@pytest.fixture
+def resolver_children(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[subprocess.Popen[bytes]]]:
+    """Observe real owned children without replacing their process boundary."""
+    children: list[subprocess.Popen[bytes]] = []
+    popen = subprocess.Popen
+
+    def start(
+        args: list[str], *, stdin: int, stdout: IO[bytes], stderr: int, env: dict[str, str]
+    ) -> subprocess.Popen[bytes]:
+        child = popen(args, stdin=stdin, stdout=stdout, stderr=stderr, env=env, text=False)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(webhook.subprocess, "Popen", start)
+    try:
+        yield children
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=2)
+
+
+def _blocked_resolver_code(marker: Path) -> str:
+    # Run the production protocol, replacing only getaddrinfo inside the real
+    # isolated interpreter. The marker proves the child reached blocked DNS.
+    setup = f"""
+import pathlib
+import time
+def blocked(*args, **kwargs):
+    pathlib.Path({str(marker)!r}).touch()
+    time.sleep(60)
+socket.getaddrinfo = blocked
+"""
+    return webhook._WEBHOOK_RESOLVER_CODE.replace("try:\n", setup + "\ntry:\n", 1)
+
+
+async def _wait_for_resolver_marker(marker: Path) -> None:
+    deadline = time.monotonic() + 2
+    while not marker.exists():
+        assert time.monotonic() < deadline, "resolver child did not start"
+        await asyncio.sleep(0.01)
+
+
+def test_default_resolver_runs_isolated_current_interpreter(
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    assert webhook.resolve_webhook_addresses("127.0.0.1", 443) == ("127.0.0.1",)
+    assert len(resolver_children) == 1
+    child = resolver_children[0]
+    assert child.returncode == 0
+    assert child.args == [
+        sys.executable,
+        "-I",
+        "-S",
+        "-c",
+        webhook._WEBHOOK_RESOLVER_CODE,
+        "127.0.0.1",
+        "443",
+    ]
+
+
+@pytest.mark.parametrize("ignore_termination", [False, True])
+async def test_default_resolution_timeout_reaps_child_without_transport(
+    ignore_termination: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    marker = tmp_path / "resolving"
+    code = _blocked_resolver_code(marker)
+    if ignore_termination:
+        code = "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" + code
+    monkeypatch.setattr(webhook, "_WEBHOOK_RESOLVER_CODE", code)
+    monkeypatch.setattr(webhook, "WEBHOOK_TIMEOUT_SECONDS", 1.0)
+    started = time.monotonic()
+    result = await deliver_slowpics_webhook(
+        webhook_url="https://hooks.example.test/secret-path?token=secret-query",
+        slowpics_url="https://slow.pics/c/example",
+        connector=_unexpected_connector,
+    )
+    assert marker.exists()
+    assert time.monotonic() - started < 3
+    assert result == SlowpicsWebhookResult(
+        success=False,
+        warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.TIMEOUT,
+    )
+    assert len(resolver_children) == 1
+    assert resolver_children[0].returncode is not None
+    if ignore_termination and sys.platform != "win32":
+        assert resolver_children[0].returncode == -signal.SIGKILL
+    args = resolver_children[0].args
+    assert isinstance(args, list)
+    assert args[-2:] == ["hooks.example.test", "443"]
+
+
+@pytest.mark.parametrize("when", ["early", "blocked", "repeated"])
+async def test_default_resolution_cancellation_reaps_child_without_transport(
+    when: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    calls: list[WebhookDeliveryRequest] = []
+
+    def connector(request: WebhookDeliveryRequest) -> WebhookResponse:
+        calls.append(request)
+        return WebhookResponse(status_code=503)
+
+    marker = tmp_path / "resolving"
+    monkeypatch.setattr(webhook, "_WEBHOOK_RESOLVER_CODE", _blocked_resolver_code(marker))
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            connector=connector,
+        )
+    )
+    if when != "early":
+        await _wait_for_resolver_marker(marker)
+    task.cancel()
+    if when == "repeated":
+        for _ in range(5):
+            await asyncio.sleep(0)
+            task.cancel()
+    done, pending = await asyncio.wait({task}, timeout=2)
+    assert done and not pending
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == []
+    assert all(child.returncode is not None for child in resolver_children)
+    if when != "early":
+        assert len(resolver_children) == 1
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        b"invalid-json",
+        b"[123]",
+        b"{}",
+        b'["93.184.216.34"]' * 1000,
+        b"[" + b'"93.184.216.34",' * 64 + b'"93.184.216.34"]',
+        b'["93.184.216.34", "10.0.0.1"]',
+        b'["not-an-address"]',
+    ],
+    ids=["invalid-json", "non-string", "non-list", "oversized", "too-many", "mixed", "invalid-ip"],
+)
+async def test_default_resolver_rejects_invalid_process_output(
+    output: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    monkeypatch.setattr(
+        webhook, "_WEBHOOK_RESOLVER_CODE", f"import sys; sys.stdout.buffer.write({output!r})"
+    )
+    result = await deliver_slowpics_webhook(
+        webhook_url="https://hooks.example.test/path",
+        slowpics_url="https://slow.pics/c/example",
+        connector=_unexpected_connector,
+    )
+    assert result.failure_kind is WebhookFailureKind.VALIDATION
+    assert resolver_children[0].returncode == 0
+
+
+async def test_default_resolver_process_failure_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    monkeypatch.setattr(
+        webhook,
+        "_WEBHOOK_RESOLVER_CODE",
+        "import sys; sys.stderr.write('secret diagnostic'); sys.exit(1)",
+    )
+    result = await deliver_slowpics_webhook(
+        webhook_url="https://hooks.example.test/path",
+        slowpics_url="https://slow.pics/c/example",
+        connector=_unexpected_connector,
+    )
+    assert result == SlowpicsWebhookResult(
+        success=False,
+        warning=WEBHOOK_VALIDATION_WARNING,
+        failure_kind=WebhookFailureKind.VALIDATION,
+    )
+    assert resolver_children[0].returncode == 1
+
+
+@pytest.mark.parametrize(
+    ("hostname", "port"),
+    [("a" * 254, 443), ("host\nname", 443), ("host", 0), ("host", 65536), ("host", True)],
+)
+def test_default_resolver_rejects_unbounded_input_before_starting_child(
+    hostname: str,
+    port: int,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    assert webhook.resolve_webhook_addresses(hostname, port) == ()
+    assert resolver_children == []
+
+
+async def test_default_resolution_termination_error_still_kills_and_reaps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    marker = tmp_path / "resolving"
+    monkeypatch.setattr(webhook, "_WEBHOOK_RESOLVER_CODE", _blocked_resolver_code(marker))
+    calls: list[WebhookDeliveryRequest] = []
+
+    def connector(request: WebhookDeliveryRequest) -> WebhookResponse:
+        calls.append(request)
+        return WebhookResponse(status_code=503)
+
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            connector=connector,
+        )
+    )
+    await _wait_for_resolver_marker(marker)
+    child = resolver_children[0]
+    wait = child.wait
+    waits: list[float | None] = []
+    termination_attempts: list[bool] = []
+
+    def fail_terminate() -> None:
+        termination_attempts.append(True)
+        raise OSError("simulated signal failure")
+
+    def observed_wait(timeout: float | None = None) -> int:
+        waits.append(timeout)
+        return wait(timeout=timeout)
+
+    monkeypatch.setattr(child, "terminate", fail_terminate)
+    monkeypatch.setattr(child, "wait", observed_wait)
+    task.cancel()
+    done, pending = await asyncio.wait({task}, timeout=2)
+    assert done and not pending
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert termination_attempts == [True]
+    assert child.returncode is not None
+    assert calls == []
+    assert waits and all(timeout is not None and 0 < timeout <= 1 for timeout in waits)
+    if sys.platform != "win32":
+        assert child.returncode == -signal.SIGKILL
+
+
+def test_default_resolver_excludes_application_and_proxy_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    secret_keys = (
+        "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
+        "FRAME_COMPARE_TMDB__API_KEY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "UNRELATED_SECRET",
+    )
+    for key in secret_keys:
+        monkeypatch.setenv(key, "synthetic-secret-sentinel")
+    # Observe exclusion inside the real interpreter, without emitting any values.
+    code = f"import os; assert not any(k in os.environ for k in {secret_keys!r})\n"
+    monkeypatch.setattr(webhook, "_WEBHOOK_RESOLVER_CODE", code + webhook._WEBHOOK_RESOLVER_CODE)
+    assert webhook.resolve_webhook_addresses("127.0.0.1", 443) == ("127.0.0.1",)
+    assert resolver_children[0].returncode == 0
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"SystemRoot": "C:\\Windows", "UNRELATED_SECRET": "synthetic-secret"},
+        {"sYsTeMrOoT": "C:\\Windows", "HTTPS_PROXY": "synthetic-proxy"},
+        {"UNRELATED_SECRET": "synthetic-secret"},
+    ],
+)
+def test_windows_resolver_environment_keeps_only_system_root(
+    environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # This is environment policy proof, not Windows interpreter acceptance.
+    with monkeypatch.context() as patch:
+        patch.setattr(webhook.sys, "platform", "win32")
+        patch.setattr(webhook.os, "environ", environment)
+        actual = webhook._webhook_resolver_environment()
+    expected = next((v for k, v in environment.items() if k.casefold() == "systemroot"), None)
+    assert actual == ({"SystemRoot": expected} if expected else {})
+
+
+@pytest.fixture
+def copied_pth_interpreter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Host POSIX CPython startup proof; does not model the portable Windows bundle."""
+    if sys.platform == "win32" or sys.implementation.name != "cpython":
+        pytest.skip("copied ._pth fixture requires the host POSIX CPython interpreter")
+    source = Path(sys.executable).resolve()
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    executable = binary_dir / source.name
+    shutil.copy2(source, executable)
+    # Preserve the copied executable's relative shared-library lookup, without
+    # changing any original runtime files. Stdlib paths are pinned in exact ._pth.
+    (tmp_path / "lib").symlink_to(source.parent.parent / "lib", target_is_directory=True)
+    stdlib = sysconfig.get_path("stdlib")
+    extensions = sysconfig.get_config_var("DESTSHARED")
+    assert isinstance(extensions, str)
+    executable.with_name(executable.name + "._pth").write_text(
+        "\n".join((stdlib, extensions, str(tmp_path), "import site")) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(webhook.sys, "executable", str(executable))
+    return tmp_path
+
+
+async def test_exact_pth_startup_output_is_rejected_without_connector(
+    copied_pth_interpreter: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    marker = copied_pth_interpreter / "startup-ran"
+    (copied_pth_interpreter / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\nprint('startup-output')\n",
+        encoding="utf-8",
+    )
+    # Supply valid fixed address output without any DNS/network access. Startup
+    # noise alone must invalidate the otherwise valid child result.
+    monkeypatch.setattr(
+        webhook, "_WEBHOOK_RESOLVER_CODE", """import sys; sys.stdout.write('["93.184.216.34"]')"""
+    )
+    result = await deliver_slowpics_webhook(
+        webhook_url="https://hooks.example.test/path",
+        slowpics_url="https://slow.pics/c/example",
+        connector=_unexpected_connector,
+    )
+    assert marker.exists(), "exact ._pth did not enable site startup on this host"
+    assert result.failure_kind is WebhookFailureKind.VALIDATION
+    assert resolver_children[0].returncode == 0
+
+
+@pytest.mark.parametrize("stop", ["timeout", "cancel"])
+async def test_exact_pth_blocked_startup_is_bounded_and_reaped(
+    stop: str,
+    copied_pth_interpreter: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resolver_children: list[subprocess.Popen[bytes]],
+) -> None:
+    marker = copied_pth_interpreter / "startup-ran"
+    (copied_pth_interpreter / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nimport time\nPath({str(marker)!r}).touch()\ntime.sleep(60)\n",
+        encoding="utf-8",
+    )
+    if stop == "timeout":
+        monkeypatch.setattr(webhook, "WEBHOOK_TIMEOUT_SECONDS", 1.0)
+    calls: list[WebhookDeliveryRequest] = []
+
+    def connector(request: WebhookDeliveryRequest) -> WebhookResponse:
+        calls.append(request)
+        return WebhookResponse(503)
+
+    task = asyncio.create_task(
+        deliver_slowpics_webhook(
+            webhook_url="https://hooks.example.test/path",
+            slowpics_url="https://slow.pics/c/example",
+            connector=connector,
+        )
+    )
+    await _wait_for_resolver_marker(marker)
+    if stop == "cancel":
+        task.cancel()
+        for _ in range(5):
+            await asyncio.sleep(0)
+            task.cancel()
+    done, pending = await asyncio.wait({task}, timeout=2)
+    assert done and not pending
+    if stop == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        assert (await task).failure_kind is WebhookFailureKind.TIMEOUT
+    assert calls == []
+    assert len(resolver_children) == 1 and resolver_children[0].returncode is not None

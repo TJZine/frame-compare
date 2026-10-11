@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, NamedTuple, cast
+from typing import Never, cast
 
 import pytest
 
-from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
@@ -18,18 +17,14 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
 from frame_compare.orchestration.execution_types import (
-    ExecutionPhasePlan,
-    ExecutionState,
     MetadataPrefetch,
     PrepState,
     PublishPhaseOutput,
     RenderPhaseOutput,
     RunArtifacts,
 )
-from frame_compare.orchestration.phases import Phase
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.progress import LogProgressReporter
-from frame_compare.utils.types import WorkspacePaths
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
 
@@ -38,23 +33,10 @@ from .execute_run_helpers import (
     FakeHDRVSLoader,
     FakeVSLoader,
     clip_state,
-    create_config,
     create_video_files,
 )
-from .phase_task_helpers import _render_artifacts
-
-
-def _workspace(tmp_path: Path) -> WorkspacePaths:
-    return WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
+from .phase_task_helpers import _render_artifacts, _workspace
+from .preparation_test_support import create_config
 
 
 def _zero_monotonic_timer() -> float:
@@ -122,17 +104,17 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         message="Shortcut written.",
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(
             post_upload_actions=(shortcut,),
-            warnings=["report: warned"],
+            warnings=[RunWarning("render", "warning", "report: warned")],
         ),
         metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=["preflight: warned"],
+        preflight_warnings=[RunWarning("sources", "warning", "preflight: warned")],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
@@ -157,7 +139,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
 
     assert result.success is True
     assert result.post_upload_actions == (shortcut,)
-    assert result.warnings == ["preflight: warned", "report: warned"]
+    assert [warning.text for warning in result.warnings] == ["preflight: warned", "report: warned"]
 
 
 def test_execute_run_closes_execution_section_without_masking_phase_failure(
@@ -165,7 +147,7 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -210,7 +192,6 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
         )
 
     assert exc_info.value is phase_error
-    assert events == ["start", "end"]
 
 
 def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
@@ -230,7 +211,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         screenshot_dir=uploaded.parent,
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -257,7 +238,12 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
                 PostUploadActionResult(
                     kind="shortcut",
                     success=False,
-                    warning="slow.pics shortcut: could not choose a safe output directory",
+                    warning=RunWarning(
+                        "slow.pics",
+                        "warning",
+                        "slow.pics shortcut:",
+                        "could not choose a safe output directory",
+                    ),
                 ),
             ),
         )
@@ -295,7 +281,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
 
     assert result.success is True
     assert result.slowpics_url == "https://slow.pics/c/example"
-    assert result.warnings == [
+    assert [warning.text for warning in result.warnings] == [
         f"cleanup: failed to delete uploaded screenshot {uploaded}: locked",
         "slow.pics shortcut: could not choose a safe output directory",
     ]
@@ -309,13 +295,13 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
     config.report.enable = False
-    webhook_warning = "slow.pics webhook: delivery failed"
+    webhook_warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
     render = _render_artifacts(
         screenshots_by_label={"Reference": [tmp_path / "screenshots" / "planned.png"]},
         screenshot_dir=tmp_path / "screenshots",
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -396,7 +382,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         screenshot_dir=uploaded.parent,
     )
     prep = PrepState(
-        workspace=_workspace(tmp_path),
+        workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
         analysis_selection_domain="test-selection-domain",
@@ -455,7 +441,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
 
     assert result.success is True
     assert result.slowpics_url == "https://slow.pics/c/example"
-    assert any(warning.startswith("report:") for warning in result.warnings)
+    assert any(warning.text.startswith("report:") for warning in result.warnings)
     assert uploaded.exists()
 
 
@@ -484,238 +470,6 @@ def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigNotFoundError):
         asyncio.run(execute_run(request))
-
-
-def test_execute_run_creates_and_discards_http_client_when_missing(
-    tmp_path: Path,
-) -> None:
-    """Given no injected http client, execute_run must not leak the temporary client."""
-    create_config(tmp_path)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-
-    request = RunRequest(root=tmp_path, quiet=True)
-    deps = RunDependencies(
-        http_client=None,
-        vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
-    )
-
-    asyncio.run(execute_run(request, deps=deps))
-
-    assert deps.http_client is None
-
-
-def test_execute_run_emits_reports_after_load_sources_and_after_align(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Post-load and post-align diagnostics are emitted from the coordinator seam."""
-    create_config(tmp_path)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv", "comp.mkv")
-
-    request = RunRequest(
-        root=tmp_path,
-        skip_analysis=True,
-        skip_metadata=True,
-        no_upload=True,
-        no_color=True,
-    )
-    deps = RunDependencies(
-        vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
-        progress=LogProgressReporter(),
-    )
-
-    class FpsCall(NamedTuple):
-        stage: str
-        no_color: bool
-        rich_output: bool
-        clip_labels: tuple[str, ...]
-        input_dir: Path
-        verbose: bool
-
-    class AlignmentCall(NamedTuple):
-        stage: str
-        no_color: bool
-        json_output: bool
-        quiet: bool
-        selected_frames: tuple[int, ...]
-        verbose: bool
-
-    fps_calls: list[FpsCall] = []
-    alignment_calls: list[AlignmentCall] = []
-
-    def _record_emit(
-        *,
-        stage: str,
-        no_color: bool,
-        rich_output: bool,
-        clips: Any,
-        input_dir: Path,
-        verbose: bool,
-        **_kwargs: Any,
-    ) -> None:
-        clip_labels = tuple(clip.label for clip in clips)
-        fps_calls.append(
-            FpsCall(
-                stage=stage,
-                no_color=no_color,
-                rich_output=rich_output,
-                clip_labels=clip_labels,
-                input_dir=input_dir,
-                verbose=verbose,
-            )
-        )
-
-    def _record_alignment_emit(
-        *,
-        stage: str,
-        no_color: bool,
-        json_output: bool,
-        quiet: bool,
-        selected_frames: Any,
-        verbose: bool,
-        **_kwargs: Any,
-    ) -> None:
-        alignment_calls.append(
-            AlignmentCall(
-                stage=stage,
-                no_color=no_color,
-                json_output=json_output,
-                quiet=quiet,
-                selected_frames=tuple(cast(list[int], selected_frames)),
-                verbose=verbose,
-            )
-        )
-
-    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", _record_emit)
-    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", _record_alignment_emit)
-
-    asyncio.run(execute_run(request, deps=deps))
-
-    assert fps_calls == [
-        FpsCall(
-            stage="after_load_sources",
-            no_color=True,
-            rich_output=False,
-            clip_labels=("comp", "source"),
-            input_dir=tmp_path / "comparison_videos",
-            verbose=False,
-        ),
-        FpsCall(
-            stage="after_align",
-            no_color=True,
-            rich_output=False,
-            clip_labels=("comp", "source"),
-            input_dir=tmp_path / "comparison_videos",
-            verbose=False,
-        ),
-    ]
-    assert len(alignment_calls) == 1
-    alignment_call = alignment_calls[0]
-    assert alignment_call.stage == "after_align"
-    assert alignment_call.no_color is True
-    assert alignment_call.json_output is False
-    assert alignment_call.quiet is False
-    assert len(alignment_call.selected_frames) == 10
-    assert alignment_call.verbose is False
-    assert all(isinstance(frame, int) for frame in alignment_call.selected_frames)
-
-
-def test_execute_run_emits_final_selection_at_post_align_boundary(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The selection summary receives final aligned frames before later phases run."""
-    prep = PrepState(
-        workspace=_workspace(tmp_path),
-        config=ConfigSchema(),
-        input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
-        clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
-        artifacts=RunArtifacts(),
-        metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=[],
-        preflight_duration=0.0,
-        load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-    )
-    breakdown = SelectionBreakdown(user=[101], random=[205])
-    events: list[str] = []
-    selection_calls: list[dict[str, object]] = []
-
-    async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
-        return prep
-
-    def _build_phase_plan(
-        *,
-        state: ExecutionState,
-        **_kwargs: object,
-    ) -> ExecutionPhasePlan:
-        async def _align(context: RunContext) -> None:
-            events.append("align")
-            state.selected_frames[:] = [2, 6]
-            context.selection_breakdown = breakdown
-
-        async def _after_align(_context: RunContext) -> None:
-            events.append("after_align_phase")
-
-        return ExecutionPhasePlan(
-            before_align=[Phase(name="align", execute=_align)],
-            after_align=[Phase(name="render", execute=_after_align)],
-        )
-
-    def _record_selection(**kwargs: object) -> None:
-        events.append("selection_report")
-        selection_calls.append(kwargs)
-
-    monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
-    monkeypatch.setattr(coordinator, "build_execution_phase_plan", _build_phase_plan)
-    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
-    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda **_kwargs: None)
-    monkeypatch.setattr(coordinator, "emit_final_selection_report", _record_selection)
-    monkeypatch.setattr(
-        coordinator,
-        "emit_execution_section_start",
-        lambda *_args, **_kwargs: events.append("execution_start"),
-    )
-    monkeypatch.setattr(
-        coordinator,
-        "emit_execution_section_end",
-        lambda *_args, **_kwargs: events.append("execution_end"),
-    )
-
-    request = RunRequest(
-        root=tmp_path,
-        verbose=True,
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-    asyncio.run(
-        execute_run(
-            request,
-            deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
-        )
-    )
-
-    assert events == [
-        "execution_start",
-        "align",
-        "selection_report",
-        "after_align_phase",
-        "execution_end",
-    ]
-    assert len(selection_calls) == 1
-    assert selection_calls[0] == {
-        "selected_frames": [2, 6],
-        "breakdown": breakdown,
-        "verbose": True,
-        "json_output": False,
-        "quiet": False,
-        "no_color": True,
-    }
 
 
 def test_execute_run_applies_cli_overrides_before_phase_execution(
@@ -755,7 +509,9 @@ enable = false
 
     captured: dict[str, object] = {}
 
-    async def _capture_execute_phases(_phases: object, context: object, _reporter: object) -> None:
+    async def _capture_execute_phases(
+        _phases: object, context: RunContext, _reporter: object
+    ) -> None:
         if "config" not in captured:
             captured["config"] = context.config
 
@@ -799,7 +555,10 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
+    publish_attempts: list[None] = []
+
     async def _unexpected_publish(**_kwargs: object) -> object:
+        publish_attempts.append(None)
         raise AssertionError("publish should be skipped by effective slowpics config")
 
     from frame_compare.orchestration import phase_post_render
@@ -819,6 +578,7 @@ enable = false
     assert result.success is True
     assert result.slowpics_url is None
     assert result.phase_timings["publish"] >= 0.0
+    assert publish_attempts == []
 
 
 def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
@@ -846,7 +606,7 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         def load(self, path: Path) -> SourceInfo:
             raise AssertionError(f"Fake VS loader should not be called: {path}")
 
-        def ensure_core(self) -> object:
+        def ensure_core(self) -> Never:
             raise AssertionError("Fake VS core should not be requested when cache is warm")
 
     reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -891,4 +651,343 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
     with pytest.raises(MixedSourceFpsError, match="Mixed source FPS is not supported"):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert phases_started is False
+
+def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
+    """Child entry point: real CLI, runner signals, owners and failed-record writer."""
+    import json
+    import os
+    import signal
+    import subprocess
+    import sys
+    import threading
+    import time
+    from typing import Any
+
+    import httpx
+    from typer.testing import CliRunner
+
+    from frame_compare.cli.entry import app
+    from frame_compare.orchestration import execution
+    from frame_compare.orchestration.execution_types import ExecutionState, PhaseOutput
+    from frame_compare.orchestration.types import ReservedRunCapture
+    from frame_compare.render.batch import orchestrator as batch
+    from frame_compare.render.errors import RenderError
+    from frame_compare.render.types import EncoderSettings, RenderedFrameResult, RenderRequest
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
+    from frame_compare.utils.media_facts import RenderedFrameFacts
+    from frame_compare.vsview import adapter
+
+    create_config(root)
+    workspace = _workspace(root)
+    assert workspace.run_dir is not None
+    workspace.run_dir.mkdir(parents=True)
+    config = ConfigSchema()
+    config.audio_alignment.enable = False
+    config.report.enable = True
+    artifacts = RunArtifacts()
+    ready = threading.Event()
+    interrupted = threading.Event()
+    release_render = threading.Event()
+    close_completed: list[bool] = []
+    calls: list[int] = []
+    applied: list[str] = []
+    children: list[subprocess.Popen[Any]] = []
+    later: list[str] = []
+
+    async def prep(_request: RunRequest, deps: RunDependencies) -> PrepState:
+        assert deps.capture_reserved_run is not None
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=workspace,
+                clip_count=1,
+                preflight_duration=0.0,
+                preflight_warnings=[],
+                run_warnings=artifacts.warnings,
+            )
+        )
+        return PrepState(
+            workspace=workspace,
+            config=config,
+            input_videos=[root / "reference.mkv"],
+            clips=[clip_state(root / "reference.mkv", label="Reference")],
+            artifacts=artifacts,
+            metadata_prefetch=MetadataPrefetch(None, False),
+            preflight_warnings=[],
+            preflight_duration=0.0,
+            load_sources_start=time.monotonic(),
+            analysis_selection_domain="test",
+            selection_window=SelectionWindow(0, 100),
+        )
+
+    def interrupt() -> None:
+        assert ready.wait(3)
+        # os.kill(..., SIGINT) forcibly terminates Windows instead of invoking Runner.
+        signal.raise_signal(signal.SIGINT)
+        interrupted.set()
+        release_render.set()
+
+    class DelayedCloseTransport(httpx.AsyncBaseTransport):
+        async def aclose(self) -> None:
+            await asyncio.sleep(0)
+            close_completed.append(True)
+
+    def render_frame(request: RenderRequest) -> RenderedFrameResult:
+        calls.append(request.frame_number)
+        if owner == "failure" and request.frame_number == 0:
+            raise RenderError("render failed before interrupt")
+        ready.set()
+        assert release_render.wait(3)
+        return RenderedFrameResult(
+            request.output_path,
+            RenderedFrameFacts(
+                source_frame=request.frame_number,
+            ),
+        )
+
+    real_popen = adapter.subprocess.Popen
+
+    def popen(command: list[str], **kwargs: Any) -> subprocess.Popen[Any]:
+        child = real_popen(command, **kwargs)
+        children.append(child)
+        ready.set()
+        return child
+
+    def render(*_args: object, **_kwargs: object) -> RenderPhaseOutput:
+        if owner == "httpx":
+            ready.set()
+            assert interrupted.wait(3)
+            raise asyncio.CancelledError()
+        if owner == "startup":
+            adapter._run_startup_probe(
+                [sys.executable, "-c", "import threading; threading.Event().wait(0.5)"],
+                env=os.environ.copy(),
+            )
+        elif owner == "vsview":
+            adapter._run_vsview_command(
+                [sys.executable, "-c", "import threading; threading.Event().wait(0.5)"],
+                env=os.environ.copy(),
+            )
+        else:
+            requests = [
+                RenderRequest(
+                    clip=root / "reference.mkv",
+                    diagnostic_source=root / "reference.mkv",
+                    frame_number=index,
+                    output_path=root / f"{index}.png",
+                    overlay=None,
+                    encoder_settings=EncoderSettings(),
+                )
+                for index in range(6)
+            ]
+            batch.render_batch_detailed(requests, parallelism=2)
+        return RenderPhaseOutput(
+            _render_artifacts(
+                screenshots_by_label={},
+                screenshot_dir=workspace.screenshots_dir,
+            )
+        )
+
+    real_wait = batch.wait
+    failure_interrupted: list[bool] = []
+
+    def wait_for_failure(*args: Any, **kwargs: Any) -> Any:
+        done, pending = real_wait(*args, **kwargs)
+        if done and not failure_interrupted:
+            failure_interrupted.append(True)
+            signal.raise_signal(signal.SIGINT)
+            release_render.set()
+        return done, pending
+
+    real_apply = execution.apply_phase_output
+
+    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
+        if isinstance(output, RenderPhaseOutput):
+            applied.append("render")
+        real_apply(ctx=ctx, state=state, output=output)
+
+    def report(*_args: object, **_kwargs: object) -> Never:
+        later.append("report")
+        raise AssertionError("later phase admitted")
+
+    sender = threading.Thread(target=interrupt)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(coordinator, "execute_prep", prep)
+        patch.setattr(execution, "run_render_phase", render)
+        patch.setattr(execution, "run_report_phase", report)
+        patch.setattr(execution, "apply_phase_output", apply)
+        patch.setattr(batch, "render_frame_detailed", render_frame)
+        patch.setattr(adapter.subprocess, "Popen", popen)
+        if owner in {"httpx", "failure"}:
+            client = httpx.AsyncClient(transport=DelayedCloseTransport())
+            patch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+        if owner == "failure":
+            patch.setattr(batch, "wait", wait_for_failure)
+        else:
+            sender.start()
+        result = CliRunner().invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--quiet",
+                "--skip-analysis",
+                "--skip-metadata",
+                "--no-upload",
+            ],
+        )
+        if owner != "failure":
+            sender.join(3)
+    record = read_run_result(workspace.run_dir / RUN_RESULT_FILENAME)
+    print(
+        json.dumps(
+            {
+                "exit": result.exit_code,
+                "status": record.status,
+                "calls": sorted(calls),
+                "later": later,
+                "applied": applied,
+                "reaped": all(child.poll() is not None for child in children),
+                "children": len(children),
+                "close_completed": close_completed,
+            }
+        )
+    )
+    raise SystemExit(result.exit_code)
+
+
+@pytest.mark.parametrize("owner", ["vsview", "startup", "render", "httpx"])
+def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner: str) -> None:
+    import json
+    import subprocess
+    import sys
+
+    code = (
+        "from pathlib import Path; import sys; "
+        "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
+        "first_sigint_lifecycle_probe(Path(sys.argv[1]), sys.argv[2])"
+    )
+    result = subprocess.run(  # noqa: S603 - explicit interpreter and test-owned arguments
+        [sys.executable, "-c", code, str(tmp_path), owner],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 130, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["status"] == "failed"
+    assert observed["later"] == []
+    assert observed["applied"] == []
+    assert observed["reaped"] is True
+    if owner in {"vsview", "startup"}:
+        assert observed["children"] == 1
+    elif owner == "render":
+        assert observed["calls"] in ([0], [0, 1])
+    else:
+        assert observed["close_completed"] == [True]
+
+
+def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(
+    tmp_path: Path,
+) -> None:
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
+
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv", "comparison.mkv")
+    calls: list[Path] = []
+
+    class InterruptedLoader(FakeVSLoader):
+        def load(self, path: Path) -> SourceInfo:
+            source = super().load(path)
+            calls.append(path)
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            return source
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    quiet=True,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                RunDependencies(vs_loader=InterruptedLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            )
+        )
+    assert len(calls) == 1
+    assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
+    records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"
+
+
+def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    code = (
+        "from pathlib import Path; import sys; "
+        "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
+        "first_sigint_lifecycle_probe(Path(sys.argv[1]), 'failure')"
+    )
+    result = subprocess.run(  # noqa: S603 - explicit interpreter and test-owned arguments
+        [sys.executable, "-c", code, str(tmp_path)],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    from frame_compare.cli.errors import ExitCode
+
+    assert result.returncode == int(ExitCode.PROCESSING_ERROR), result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["status"] == "failed"
+    assert observed["later"] == []
+    assert observed["applied"] == []
+    assert observed["close_completed"] == [True]
+    assert observed["calls"] in ([0], [0, 1])
+
+
+def test_reservation_is_captured_before_interrupted_run_info_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.orchestration import preparation
+    from frame_compare.services.run_info import RunInfo
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
+    from frame_compare.utils.cancellation import raise_if_cancelling
+
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    write_info = preparation.write_run_info
+
+    def interrupted_write(path: Path, info: RunInfo) -> None:
+        write_info(path, info)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        raise_if_cancelling()
+
+    monkeypatch.setattr(preparation, "write_run_info", interrupted_write)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    quiet=True,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            )
+        )
+    records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"

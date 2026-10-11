@@ -32,25 +32,6 @@ class ResolvedSourceLabel:
     explicit: bool
 
 
-def resolve_source_labels(
-    *,
-    ordered_paths: list[Path],
-    overrides_by_path: dict[Path, SourceOverrideConfig],
-    label_mode: Literal["stem", "filename", "parsed"],
-    label_parser: Literal["auto", "guessit", "anitopy"],
-) -> dict[Path, str]:
-    """Resolve unique presentation labels without changing source identity."""
-    return {
-        path: label.value
-        for path, label in resolve_source_label_details(
-            ordered_paths=ordered_paths,
-            overrides_by_path=overrides_by_path,
-            label_mode=label_mode,
-            label_parser=label_parser,
-        ).items()
-    }
-
-
 def resolve_source_label_details(
     *,
     ordered_paths: list[Path],
@@ -199,5 +180,4 @@ __all__ = [
     "ResolvedSourceLabel",
     "normalize_derived_display_text",
     "resolve_source_label_details",
-    "resolve_source_labels",
 ]
