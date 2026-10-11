@@ -6,7 +6,6 @@ from PIL import Image
 from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
-    render_screenshots_from_batch,
     render_screenshots_from_batch_detailed,
 )
 from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
@@ -61,12 +60,12 @@ def test_render_screenshots_naming_and_output(
     frames = [0, 1]
     output_dir = integration_output_dir
 
-    results = render_screenshots_from_batch(
+    results = render_screenshots_from_batch_detailed(
         [_request(mock_video_path, "TestLabel", frames)],
         output_dir,
         integration_config,
         BatchRenderOptions(renderer="ffmpeg"),
-    )
+    ).screenshots_by_label
 
     assert "TestLabel" in results
     assert len(results["TestLabel"]) == 2
@@ -167,12 +166,12 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
 def test_render_screenshots_empty_frames_returns_label_with_empty_list(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots_from_batch(
+    results = render_screenshots_from_batch_detailed(
         [_request(mock_video_path, "EmptyFrames", [])],
         integration_output_dir,
         integration_config,
         BatchRenderOptions(renderer="ffmpeg"),
-    )
+    ).screenshots_by_label
 
     assert results == {"EmptyFrames": []}
 
@@ -181,7 +180,9 @@ def test_render_screenshots_empty_frames_returns_label_with_empty_list(
 def test_render_screenshots_from_batch_empty_clips_returns_empty_dict(
     integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots_from_batch([], integration_output_dir, integration_config)
+    results = render_screenshots_from_batch_detailed(
+        [], integration_output_dir, integration_config
+    ).screenshots_by_label
 
     assert results == {}
 
@@ -190,11 +191,11 @@ def test_render_screenshots_from_batch_empty_clips_returns_empty_dict(
 def test_render_screenshots_from_batch_uses_supplied_label(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots_from_batch(
+    results = render_screenshots_from_batch_detailed(
         [_request(mock_video_path, mock_video_path.stem, [])],
         integration_output_dir,
         integration_config,
         BatchRenderOptions(renderer="ffmpeg"),
-    )
+    ).screenshots_by_label
 
     assert results == {mock_video_path.stem: []}

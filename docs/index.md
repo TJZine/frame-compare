@@ -1,123 +1,140 @@
-<div class="fc-hero" markdown>
+---
+hide:
+  - toc
+---
+
+<div class="fc-home" markdown>
+
+<section class="fc-stage" markdown>
+
+<div class="fc-stage-copy" markdown>
 
 <p class="fc-kicker">Deterministic video comparison</p>
 
-# Compare sources, not guesswork
+<h1 id="compare-sources-not-guesswork">Compare sources,<br><span class="fc-split">not guesswork</span></h1>
 
-Frame Compare selects representative frames, aligns source timing, renders HDR-aware
-screenshots, and produces a static review report for local encodes, remasters, and
-archival quality-control workflows.
+Select useful frames, align source timing, render HDR-aware screenshots, and review
+every difference in a report that opens without a server.
 
 <div class="fc-actions" markdown>
 
 [Choose an installation](getting-started/index.md){ .md-button .md-button--primary }
-[Run a first comparison](guides/first-comparison.md){ .md-button }
-[Explore the report viewer](guides/reports-and-overlays.md){ .md-button }
+[Run your first comparison](guides/first-comparison.md){ .fc-text-link }
 
 </div>
 
 </div>
 
-## Start with the route that fits your system
+<figure class="fc-stage-shot">
+  <img src="images/report-overview.webp" alt="Frame Compare report in Slider mode comparing the EBU DVB PQ10 reference with the HLG10 comparison at frame 1000." width="1600" height="1000" loading="eager">
+  <figcaption><span class="fc-chip">Slider</span> EBU DVB PQ10 reference and HLG10 comparison, frame 1000.</figcaption>
+</figure>
 
-<div class="fc-card-grid" markdown>
+</section>
 
-<div class="fc-card" markdown>
+<ol class="fc-strip" aria-label="Report viewer views">
+  <li><img src="images/report-overview.webp" alt="" width="1600" height="1000" loading="lazy"><span>Slider</span></li>
+  <li><img src="images/report-grid.webp" alt="" width="1600" height="1000" loading="lazy"><span>Grid</span></li>
+  <li><img src="images/report-inspector.webp" alt="" width="1600" height="1000" loading="lazy"><span>Inspector</span></li>
+  <li><img src="images/report-lens.webp" alt="" width="1600" height="1000" loading="lazy"><span>Lens</span></li>
+</ol>
 
-### Windows portable
+<p class="fc-credit">Footage: EBU/DVB HEVC test content © EBU, shot by Frans de Jong (EBU), PQ10 conversion by Andrew Cotton (BBC), licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Source: <a href="https://dvb.org/specifications/verification-validation/hevc-test-content/">DVB HEVC test content</a>.</p>
 
-The complete Windows 10/11 x64 distribution. It includes the supported Python and
-media runtime, VSPreview, installer, updater, and rollback tooling.
+## Pick the route that owns your runtime
 
-[Install on Windows](windows-portable.md)
+<div class="fc-routes" markdown>
 
-</div>
+<div class="fc-route" markdown>
 
-<div class="fc-card" markdown>
+<p class="fc-route-tag">Windows 10/11 x64</p>
 
-### Docker
+### [Windows portable](windows-portable.md)
 
-The recommended reproducible, headless route for macOS and Linux. It isolates the
-media toolchain and writes reports and cache data to explicit host mounts.
-
-[Start with Docker](getting-started/docker.md)
-
-</div>
-
-<div class="fc-card" markdown>
-
-### Native source
-
-For advanced users who already manage FFmpeg, VapourSynth, source plugins, and a
-compatible Vulkan implementation on the host.
-
-[Install from source](getting-started/native.md)
+Complete runtime, VSView alignment panel, installer, and signed code-only updates.
 
 </div>
 
-</div>
+<div class="fc-route" markdown>
 
-[Compare route capabilities and support posture](getting-started/route-comparison.md)
+<p class="fc-route-tag">macOS · Linux</p>
 
-## What a comparison includes
+### [Docker](getting-started/docker.md)
 
-- Reproducible user, random, dark, bright, and motion frame selection.
-- Shared-window and active-picture-aware analysis across the selected sources.
-- Automatic audio alignment with optional prior-offset reuse and VSPreview review.
-- HDR-to-SDR tonemapping when required, plus minimal, standard, or diagnostic overlays.
-- A portable offline report experience with slider, overlay, diff, blink, grid,
-  filmstrip, zoom, inspection, and review tools.
-- Optional slow.pics publication and Discord-compatible webhook notification after a
-  local result has been reviewed.
-
-## Follow a workflow
-
-<div class="fc-card-grid" markdown>
-
-<div class="fc-card" markdown>
-
-### Understand the pipeline
-
-See where probing, frame selection, alignment, rendering, caches, and optional network
-outputs fit together.
-
-[How Frame Compare works](guides/how-it-works.md)
+Headless managed runtime with software-Vulkan HDR. Reports stay on the host.
 
 </div>
 
-<div class="fc-card" markdown>
+<div class="fc-route" markdown>
 
-### Control the comparison
+<p class="fc-route-tag">Advanced</p>
 
-Choose the reference, label sources, handle trims or FPS metadata, and configure frame
-selection without reading the full behavioral contract.
+### [Native source](getting-started/native.md)
 
-[Sources and labels](guides/sources-and-labels.md) ·
-[Frame selection](guides/analysis-modes.md)
-
-</div>
-
-<div class="fc-card" markdown>
-
-### Review the result
-
-Learn the viewer modes, keyboard-oriented review workflow, metadata inspector, and
-portable report layout.
-
-[Reports and overlays](guides/reports-and-overlays.md)
+Bring your own FFmpeg, VapourSynth, L-SMASH-Works, vs-placebo, and Vulkan.
 
 </div>
 
 </div>
+
+## From sources to a report in four commands
+
+<div class="fc-flow" markdown>
+
+<div markdown>
+
+<span class="fc-step">01</span>
+
+### Configure
+
+`frame-compare wizard` sets the input folder, reference, and frame goal.
+
+</div>
+
+<div markdown>
+
+<span class="fc-step">02</span>
+
+### Diagnose
+
+`frame-compare doctor` checks the media runtime you will render with.
+
+</div>
+
+<div markdown>
+
+<span class="fc-step">03</span>
+
+### Preview
+
+`frame-compare run --dry-run` shows sources, frames, and outputs without side effects.
+
+</div>
+
+<div markdown>
+
+<span class="fc-step">04</span>
+
+### Compare
+
+`frame-compare run` aligns, renders, and writes `report.html`.
+
+</div>
+
+</div>
+
+Docker and `uv` add a command prefix; [Your first comparison](guides/first-comparison.md)
+shows every route.
 
 ## Find an answer
 
-- Use [Configuration Recipes](guides/configuration-recipes.md) for common outcomes.
-- Start with [Troubleshooting](guides/troubleshooting.md) when a run fails.
-- Use [Commands and Configuration](reference/commands-and-configuration.md) for
-  command discovery and reference links.
-- Consult the [CLI Behavioral Contract](current-cli-contract.md) only when exact
-  precedence, persistence, JSON, stream, or exit behavior matters.
-- Contributors and maintainers should begin with
-  [Contributing](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md)
-  and the [Engineering Runbook](ENGINEERING_RUNBOOK.md).
+<div class="fc-answer-links" markdown>
+
+- [Configuration](reference/configuration.md) — every key, type, and default.
+- [Troubleshooting](guides/troubleshooting.md) — symptoms by pipeline stage.
+- [Audio alignment](guides/audio-alignment.md) — what `APPLIED` and `NOT APPLIED` mean.
+- [CLI behavioral contract](current-cli-contract.md) — exact streams, JSON, and exit codes.
+
+</div>
+
+</div>

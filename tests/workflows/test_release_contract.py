@@ -92,6 +92,7 @@ def _run_contract(
     tag: str,
     expected_sha: str,
     main_sha: str | None,
+    release_notes_output: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
@@ -109,6 +110,8 @@ def _run_contract(
     ]
     if main_sha is not None:
         command.extend(("--main-sha", main_sha))
+    if release_notes_output is not None:
+        command.extend(("--release-notes-output", str(release_notes_output)))
     return subprocess.run(
         command,
         check=False,
@@ -118,46 +121,34 @@ def _run_contract(
     )
 
 
-def test_stable_release_contract_accepts_exact_final_state(
-    repo_root: Path,
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "channel, version, tag, message",
+    [
+        (
+            "stable",
+            "0.1.0",
+            "v0.1.0",
+            "Release contract valid: channel=stable version=0.1.0 tag=v0.1.0",
+        ),
+        ("rc", "0.1.0rc2", "v0.1.0-rc.2", "Release contract valid: channel=rc version=0.1.0rc2"),
+    ],
+)
+def test_release_contract_accepts_exact_channel_state(
+    repo_root: Path, tmp_path: Path, channel: str, version: str, tag: str, message: str
 ) -> None:
-    _write_release_state(tmp_path, version="0.1.0")
+    _write_release_state(tmp_path, version=version)
     sha = _commit_release_state(tmp_path)
-
     result = _run_contract(
         repo_root,
         tmp_path,
-        channel="stable",
-        version="0.1.0",
-        tag="v0.1.0",
+        channel=channel,
+        version=version,
+        tag=tag,
         expected_sha=sha,
-        main_sha=sha,
+        main_sha=sha if channel == "stable" else None,
     )
-
     assert result.returncode == 0, result.stderr
-    assert "Release contract valid: channel=stable version=0.1.0 tag=v0.1.0" in result.stdout
-
-
-def test_rc_release_contract_accepts_pep440_version_and_rc_tag(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    _write_release_state(tmp_path, version="0.1.0rc2")
-    sha = _commit_release_state(tmp_path)
-
-    result = _run_contract(
-        repo_root,
-        tmp_path,
-        channel="rc",
-        version="0.1.0rc2",
-        tag="v0.1.0-rc.2",
-        expected_sha=sha,
-        main_sha=None,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "Release contract valid: channel=rc version=0.1.0rc2" in result.stdout
+    assert message in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -219,25 +210,28 @@ def test_release_contract_rejects_version_source_disagreement(
     assert "version sources disagree" in result.stderr
 
 
-def test_release_contract_rejects_non_main_stable_sha(
-    repo_root: Path,
-    tmp_path: Path,
+@pytest.mark.parametrize("mismatch", ["main", "checkout"])
+def test_release_contract_rejects_sha_mismatch(
+    repo_root: Path, tmp_path: Path, mismatch: str
 ) -> None:
     _write_release_state(tmp_path, version="0.1.0")
     sha = _commit_release_state(tmp_path)
-
     result = _run_contract(
         repo_root,
         tmp_path,
         channel="stable",
         version="0.1.0",
         tag="v0.1.0",
-        expected_sha=sha,
-        main_sha=OTHER_SHA,
+        expected_sha=OTHER_SHA if mismatch == "checkout" else sha,
+        main_sha=OTHER_SHA if mismatch == "main" else sha,
     )
-
     assert result.returncode != 0
-    assert "is not current main head" in result.stderr
+    message = (
+        "is not current main head"
+        if mismatch == "main"
+        else f"Checked-out HEAD {sha} does not equal expected SHA {OTHER_SHA}"
+    )
+    assert message in result.stderr
 
 
 def test_release_contract_rejects_temporary_bootstrap_fields_for_stable(
@@ -293,11 +287,61 @@ def test_release_contract_rejects_missing_changelog_version(
     assert "[0.1.0]" in result.stderr
 
 
-def test_release_contract_rejects_checked_out_sha_mismatch(
+def test_release_contract_writes_only_requested_changelog_section(
     repo_root: Path,
     tmp_path: Path,
 ) -> None:
     _write_release_state(tmp_path, version="0.1.0")
+    (tmp_path / "CHANGELOG.md").write_text(
+        """# Changelog
+
+## [Unreleased]
+
+- Future work.
+
+## [0.1.0]
+
+### Added
+
+- Release proof.
+
+## Migration notes
+
+- Not part of the requested release section.
+
+## [0.0.1]
+
+- Older work.
+""",
+        encoding="utf-8",
+    )
+    sha = _commit_release_state(tmp_path)
+    release_notes = tmp_path / "release-notes.md"
+
+    result = _run_contract(
+        repo_root,
+        tmp_path,
+        channel="stable",
+        version="0.1.0",
+        tag="v0.1.0",
+        expected_sha=sha,
+        main_sha=sha,
+        release_notes_output=release_notes,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert release_notes.read_text(encoding="utf-8") == "### Added\n\n- Release proof.\n"
+
+
+def test_release_contract_rejects_empty_changelog_section(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    _write_release_state(tmp_path, version="0.1.0")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [0.1.0]\n\n## [0.0.1]\n\n- Older work.\n",
+        encoding="utf-8",
+    )
     sha = _commit_release_state(tmp_path)
 
     result = _run_contract(
@@ -306,9 +350,35 @@ def test_release_contract_rejects_checked_out_sha_mismatch(
         channel="stable",
         version="0.1.0",
         tag="v0.1.0",
-        expected_sha=OTHER_SHA,
+        expected_sha=sha,
         main_sha=sha,
     )
 
     assert result.returncode != 0
-    assert f"Checked-out HEAD {sha} does not equal expected SHA {OTHER_SHA}" in result.stderr
+    assert "[0.1.0] section must contain release notes" in result.stderr
+
+
+def test_release_contract_rejects_legacy_release_placeholder(
+    repo_root: Path,
+    tmp_path: Path,
+) -> None:
+    _write_release_state(tmp_path, version="0.1.0")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [0.1.0]\n\n"
+        "Frame Compare v0.1.0. See CHANGELOG.md at the tagged commit.\n",
+        encoding="utf-8",
+    )
+    sha = _commit_release_state(tmp_path)
+
+    result = _run_contract(
+        repo_root,
+        tmp_path,
+        channel="stable",
+        version="0.1.0",
+        tag="v0.1.0",
+        expected_sha=sha,
+        main_sha=sha,
+    )
+
+    assert result.returncode != 0
+    assert "must not use the legacy release placeholder" in result.stderr

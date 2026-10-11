@@ -20,12 +20,26 @@ def test_inspector_harness_owns_formatting_and_inspector_policy() -> None:
     assert json.loads(result.stdout.strip().splitlines()[-1]) == {
         "pureFormattingOwner": True,
         "focusedInspectorOwner": True,
-        "safeSlowpicsBoundary": True,
+        "frameTabRows": True,
+        "sourceTable": True,
+        "clipCards": True,
+        "sharedLine": True,
+        "dvL5Provenance": True,
+        "bareClipRoles": True,
+        "rolesFromDefaultLeft": True,
+        "nonZeroLeftOffset": True,
+        "hdrSdrBadges": True,
+        "compactInfoCards": True,
+        "infoOpensInModeNames": True,
+        "infoDefaultPairNames": True,
+        "infoSharedFpsOnly": True,
     }
 
 
 @pytest.mark.unit
 def test_viewer_assets_have_deterministic_owner_assembly_order() -> None:
     assembled = get_js()
-    assert assembled.index("const ViewerFormat") < assembled.index("const Inspector")
+    format_index = assembled.index("const ViewerFormat")
+    for owner in ("const ReviewState", "const Lens", "const GridView", "const Inspector"):
+        assert format_index < assembled.index(owner)
     assert assembled.index("const Inspector") < assembled.index("const ReportViewer")

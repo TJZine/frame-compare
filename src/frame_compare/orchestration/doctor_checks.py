@@ -7,8 +7,6 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from typing import cast
 
-import httpx
-
 from frame_compare.config.errors import ConfigParseError, ConfigValidationError
 from frame_compare.config.loader import load_config
 from frame_compare.errors import JSONValue
@@ -38,7 +36,7 @@ from frame_compare.vs.runtime_contract import (
     runtime_kind,
 )
 
-__all__ = ["SLOWPICS_HEALTHCHECK_URL", "collect_checks"]
+__all__ = ["collect_checks"]
 
 
 # Canonical check ordering
@@ -48,12 +46,13 @@ _CHECK_ORDER: list[tuple[str, str]] = [
     ("vs_placebo", "optional"),
     ("ffms2", "optional"),
     ("ffmpeg", "optional"),
-    ("vspreview", "optional"),
-    ("slowpics", "network"),
+    ("vsview", "optional"),
     ("tmdb_api_key", "network"),
 ]
 
-SLOWPICS_HEALTHCHECK_URL = "https://slow.pics/"
+_NATIVE_RUNTIME_DOC_URL = (
+    "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
+)
 _LSMAS_REQUIRED_FUNCTIONS = ("LibavSMASHSource", "LWLibavSource")
 # FFMS2's pinned C++ callback is named GetVersion internally, but VapourSynth
 # registers the public function as Version. Keep the registered name here.
@@ -69,10 +68,7 @@ def _check_vapoursynth() -> CheckResult:
         return CheckResult(
             passed=False,
             message="VapourSynth not found",
-            hint=(
-                "Make VapourSynth importable; see "
-                "https://github.com/TJZine/frame-compare#quick-start"
-            ),
+            hint=f"Make VapourSynth importable; see {_NATIVE_RUNTIME_DOC_URL}",
         )
 
     version = getattr(vs, "__version__", None)
@@ -143,10 +139,7 @@ def _lsmas_setup_failure(error: Exception) -> CheckResult:
     return CheckResult(
         passed=False,
         message="lsmas check failed",
-        hint=(
-            "Check the VapourSynth/plugin setup, then rerun doctor; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
-        ),
+        hint=f"Check the VapourSynth/plugin setup, then rerun doctor; see {_NATIVE_RUNTIME_DOC_URL}",
         details={"exception_type": type(error).__name__},
     )
 
@@ -161,7 +154,7 @@ def _check_lsmas() -> CheckResult:
             message="Cannot check lsmas (VapourSynth not available)",
             hint=(
                 "Make VapourSynth importable before checking L-SMASH-Works; "
-                "see https://github.com/TJZine/frame-compare#quick-start"
+                f"see {_NATIVE_RUNTIME_DOC_URL}"
             ),
         )
     except Exception as error:
@@ -179,10 +172,7 @@ def _check_lsmas() -> CheckResult:
             return CheckResult(
                 passed=False,
                 message="L-SMASH-Works plugin not found in core.lsmas namespace",
-                hint=(
-                    "Make L-SMASH-Works available under core.lsmas; see "
-                    "https://github.com/TJZine/frame-compare#quick-start"
-                ),
+                hint=f"Make L-SMASH-Works available under core.lsmas; see {_NATIVE_RUNTIME_DOC_URL}",
                 details=_lsmas_plugin_path_details(),
             )
 
@@ -489,10 +479,7 @@ def _check_ffmpeg() -> CheckResult:
             return CheckResult(
                 passed=False,
                 message=f"{executable} not found in the configured runtime",
-                hint=(
-                    "Provide FFmpeg and ffprobe executables; see "
-                    "https://github.com/TJZine/frame-compare#requirements"
-                ),
+                hint=f"Provide FFmpeg and ffprobe executables; see {_NATIVE_RUNTIME_DOC_URL}",
                 details=details,
             )
 
@@ -548,28 +535,28 @@ def _check_ffmpeg() -> CheckResult:
     )
 
 
-def _check_vspreview() -> CheckResult:
-    """Check VSPreview is available.
+def _check_vsview() -> CheckResult:
+    """Check VSView is available.
 
-    Uses frame_compare.vspreview.adapter.check_vspreview_availability() for consistent detection.
-    Per vspreview spec §6.1, this is an optional check that reports passed=True
-    even when VSPreview is missing or the availability probe itself fails.
+    Uses frame_compare.vsview.adapter.check_vsview_availability() for consistent detection.
+    This is an optional check that reports passed=True even when VSView is missing
+    or the availability probe itself fails.
     """
-    from frame_compare.vspreview.adapter import (
-        VSPreviewAvailabilityStatus,
-        check_vspreview_availability,
+    from frame_compare.vsview.adapter import (
+        VSViewAvailabilityStatus,
+        check_vsview_availability,
     )
 
-    availability = check_vspreview_availability()
+    availability = check_vsview_availability()
 
     if availability.is_available:
         return CheckResult(
             passed=True,
-            message="VSPreview is available for interactive alignment",
+            message="VSView and the Frame Compare alignment panel are available",
             available=True,
         )
 
-    if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+    if availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
         return CheckResult(
             passed=True,
             message=availability.message,
@@ -584,46 +571,6 @@ def _check_vspreview() -> CheckResult:
         available=False,
         hint=availability.hint,
     )
-
-
-def _check_slowpics() -> CheckResult:
-    """Check slow.pics reachability per docs/current-architecture.md.
-
-    URL: SLOWPICS_HEALTHCHECK_URL
-    Method: HEAD
-    Timeout: 5.0 seconds
-    Pass if status < 400; fail on status >= 400 or request errors.
-    """
-    timeout = 5.0
-
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.head(SLOWPICS_HEALTHCHECK_URL)
-            if response.status_code < 400:
-                return CheckResult(
-                    passed=True,
-                    message="slow.pics reachable",
-                    details={"status_code": response.status_code},
-                )
-            return CheckResult(
-                passed=False,
-                message=f"slow.pics returned status {response.status_code}",
-                hint="Review the returned HTTP status before retrying",
-                details={"status_code": response.status_code},
-            )
-    except httpx.TimeoutException:
-        return CheckResult(
-            passed=False,
-            message="slow.pics connection timed out",
-            hint="Check network access to slow.pics, then retry",
-            details={"timeout": timeout},
-        )
-    except httpx.RequestError as e:
-        return CheckResult(
-            passed=False,
-            message=f"slow.pics connection failed: {e}",
-            hint="Review the request failure and network path to slow.pics before retrying",
-        )
 
 
 def _check_tmdb_api_key() -> CheckResult:
@@ -706,9 +653,8 @@ def collect_checks() -> list[DoctorCheck]:
         3. vs_placebo (optional)
         4. ffms2 (optional)
         5. ffmpeg (optional)
-        6. vspreview (optional)
-        7. slowpics (network)
-        8. tmdb_api_key (network)
+        6. vsview (optional)
+        7. tmdb_api_key (network; local configuration only)
     """
     check_fns: dict[str, Callable[[], CheckResult]] = {
         "vapoursynth": _check_vapoursynth,
@@ -716,8 +662,7 @@ def collect_checks() -> list[DoctorCheck]:
         "vs_placebo": _check_vs_placebo,
         "ffms2": _check_ffms2,
         "ffmpeg": _check_ffmpeg,
-        "vspreview": _check_vspreview,
-        "slowpics": _check_slowpics,
+        "vsview": _check_vsview,
         "tmdb_api_key": _check_tmdb_api_key,
     }
     managed_runtime = runtime_kind().casefold() in {"docker", "windows-portable"}

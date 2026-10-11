@@ -16,21 +16,30 @@ on:
         description: Require the protected signing path
         required: true
         type: boolean
+      environment_name:
+        description: GitHub environment that owns approval and signing-secret access
+        required: true
+        type: string
       prepare_release_assets:
         description: Prepare the exact four versioned release assets
         required: true
         type: boolean
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML:
-        required: false
 
 jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 90
+    environment:
+      name: ${{ inputs.environment_name }}
     env:
       REQUIRE_SIGNING: ${{ inputs.require_signing }}
     steps:
+      - name: Validate reusable-workflow inputs
+        if: inputs.prepare_release_assets && !inputs.require_signing
+        shell: pwsh
+        run: |
+          throw "prepare_release_assets requires require_signing=true so orchestrated release assets are always signed."
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,19 +57,19 @@ jobs:
             throw "Reusable Windows workflow checked out $actualSha instead of expected SHA."
           }
 
-      - name: Setup Python 3.13.15
+      - name: Setup Python 3.13.16
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13.15"
+          python-version: "3.13.16"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.12.7"
+          version: "0.13.0"
           enable-cache: ${{ inputs.require_signing }}
 
       - name: Install dev dependencies (frozen)
-        run: uv sync --group dev --frozen
+        run: uv sync --all-groups --extra vsview --frozen
 
       - name: Unit tests (mocked VS)
         run: uv run --no-sync pytest -q
@@ -109,17 +118,32 @@ jobs:
             "placebo_tonemap_api",
             "apply_tonemap_frame",
             "placebo_tonemap_frame",
-            "qt_media_runtime"
+            "vsview_runtime"
           )) {
             if ($proof -notmatch "WINDOWS_BUNDLE_PROOF phase=$phase ok") {
               throw "Required portable runtime proof phase missing: $phase"
             }
           }
-          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF qt_media_runtime=ok") {
-            throw "Required combined Qt media runtime proof marker missing."
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF vsview_runtime=ok") {
+            throw "Required combined VSView runtime proof marker missing."
           }
-          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF bundled_native_plugins=ok akarin=.+ zstd=1\.5\.7-2 vszip=.+") {
-            throw "Required Akarin/VSZip plugin-loading proof marker missing."
+          foreach ($marker in @(
+            "pyside6_event_loop=ok",
+            "vsview_deep_imports=ok",
+            "qt_ffmpeg_runtime=ok",
+            "qt_webengine_runtime=absent deployment=excluded",
+            "project_entrypoint=ok source=app/src",
+            "alignment_panel=ok state=inactive platform=offscreen",
+            "bestsource_frame=ok",
+            "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 topology=one_reference_ordered_comparisons",
+            "alignment_result_roundtrip=ok",
+            "alignment_result_validation=ok malformed=rejected",
+            "generated_vsview_session=ok",
+            "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
+          )) {
+            if ($proof -notmatch "WINDOWS_BUNDLE_PROOF $marker") {
+              throw "Required VSView runtime proof marker missing: $marker"
+            }
           }
           if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
             Write-Host "Direct placebo frame proof completed."
@@ -136,11 +160,8 @@ jobs:
           $bundleConfigDir = Join-Path $bundle "config"
           $bundleInputDir = Join-Path $bundle "comparison_videos"
           $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
-          $akarinPlugin = Join-Path $vsPackagePlugins "akarin/libakarin.dll"
-          $akarinZstd = Join-Path $vsPackagePlugins "akarin/libzstd.dll"
-          $vszipManifest = Join-Path $vsPackagePlugins "vszip/manifest.vs"
+          $canonicalLsmasPlugin = Join-Path $vsPackagePlugins "LSMASHSource.dll"
           $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
-          $lsmasManifest = Join-Path $extraPluginRoot "lsmas/manifest.vs"
 
           if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
             throw "Missing default workspace directory in bundle: $bundleConfigDir"
@@ -151,20 +172,11 @@ jobs:
           if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
             throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
           }
-          if (!(Test-Path -LiteralPath $akarinPlugin -PathType Leaf)) {
-            throw "Missing bundled Akarin plugin: $akarinPlugin"
+          if (!(Test-Path -LiteralPath $canonicalLsmasPlugin -PathType Leaf)) {
+            throw "Missing canonical L-SMASH plugin: $canonicalLsmasPlugin"
           }
-          if (!(Test-Path -LiteralPath $akarinZstd -PathType Leaf)) {
-            throw "Missing bundled Akarin zstd runtime: $akarinZstd"
-          }
-          if (!(Test-Path -LiteralPath $vszipManifest -PathType Leaf)) {
-            throw "Missing bundled VSZip plugin manifest: $vszipManifest"
-          }
-          if (!(Test-Path -LiteralPath $extraPluginRoot -PathType Container)) {
-            throw "Missing extra VapourSynth plugin directory: $extraPluginRoot"
-          }
-          if (!(Test-Path -LiteralPath $lsmasManifest -PathType Leaf)) {
-            throw "Missing L-SMASH manifest: $lsmasManifest"
+          if (Test-Path -LiteralPath $extraPluginRoot) {
+            throw "Unexpected duplicate extra-plugin tree: $extraPluginRoot"
           }
 
       - name: "Smoke: absolute candidate launcher"
@@ -224,6 +236,7 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
+          $extractedProofLog = Join-Path $env:RUNNER_TEMP "windows-extracted-proof.log"
           pwsh -NoProfile -ExecutionPolicy Bypass `
             -File tools/windows_portable/verify_extracted_bundle.ps1 `
             -ZipPath dist/frame-compare-portable-win-x64.zip `
@@ -231,8 +244,19 @@ jobs:
             -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
             -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
             -ExpectedCommitSha "$env:EXPECTED_SHA" `
-            -CommandTimeoutSeconds 300
+            -CommandTimeoutSeconds 300 2>&1 | Tee-Object -FilePath $extractedProofLog
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $extractedProof = Get-Content -LiteralPath $extractedProofLog -Raw
+          foreach ($marker in @(
+            "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
+            "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
+            "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
+            "WINDOWS_EXTRACTED_PROOF result=ok"
+          )) {
+            if ($extractedProof -notmatch [regex]::Escape($marker)) {
+              throw "Required extracted-bundle proof marker missing: $marker"
+            }
+          }
 
       - name: Build code-only update zip
         shell: pwsh
@@ -410,14 +434,14 @@ jobs:
 
       - name: Attest release ZIP provenance
         if: inputs.prepare_release_assets
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             dist/release-assets/frame-compare-portable-win-x64-${{ inputs.release_tag }}.zip
             dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frame-compare-portable-win-x64
           path: |
@@ -426,7 +450,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload code-only update artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frame-compare-update-win-x64
           path: |
@@ -436,7 +460,7 @@ jobs:
 
       - name: Upload exact orchestrated release assets
         if: inputs.prepare_release_assets
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frame-compare-release-assets
           path: |

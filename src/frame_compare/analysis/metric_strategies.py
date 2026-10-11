@@ -17,6 +17,7 @@ from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.timing import AnalysisTimingRecorder, record_span
 from frame_compare.analysis.types import MetricActiveRect, MetricFrameRange
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.perf import perf_span
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
@@ -186,7 +187,7 @@ def calculate_performance_planestats_metrics(
                 sampled_source_frames.extend(range(burst.start, burst.end_exclusive))
                 if reporter:
                     reporter.advance(burst.frame_count)
-    except Exception:
+    except BaseException:
         phase_status = ProgressPhaseStatus.FAILED
         raise
     finally:
@@ -318,6 +319,7 @@ def _calculate_dense_planestats_metrics(
             failure_stage = "frame access"
             for n in range(luma.num_frames):
                 frame_started = perf_counter() if timing_recorder is not None else 0.0
+                raise_if_cancelling()
                 frame = stats.get_frame(n)
                 if timing_recorder is not None:
                     timing_recorder.add_seconds(
@@ -339,6 +341,9 @@ def _calculate_dense_planestats_metrics(
                 f"Failure during {error_label} metric analysis ({failure_stage}) "
                 f"at frame {len(luminance)}: {exc}"
             ) from exc
+        except BaseException:
+            phase_status = ProgressPhaseStatus.FAILED
+            raise
         finally:
             if reporter:
                 reporter.complete_phase(phase_status)

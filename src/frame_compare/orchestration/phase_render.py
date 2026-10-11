@@ -20,6 +20,7 @@ from frame_compare.utils.media_facts import (
     HDRStaticFacts,
     SourceSignalFacts,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.props import range_label_from_props
 
 _MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
@@ -79,7 +80,7 @@ def run_render_phase(
             )
         )
 
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
     rendered = render_screenshots_from_batch_detailed(
         batch_requests=requests,
         output_dir=output_dir,
@@ -100,10 +101,20 @@ def run_render_phase(
         )
         if missing_count:
             warnings.append(
-                f"render: picture type unavailable for {missing_count} selected frame(s) in "
-                f"{label}; screenshots were rendered without picture-type metadata"
+                RunWarning(
+                    "render",
+                    "warning",
+                    f"render: picture type unavailable for {missing_count} selected frame(s) in "
+                    f"{label}; screenshots were rendered without picture-type metadata",
+                )
             )
 
+    screenshot_total = sum(len(paths) for paths in rendered.screenshots_by_label.values())
+    source_total = len(rendered.screenshots_by_label)
+    frame_total = screenshot_total // source_total if source_total else 0
+    screenshots_unit = "screenshot" if screenshot_total == 1 else "screenshots"
+    frames_unit = "frame" if frame_total == 1 else "frames"
+    sources_unit = "source" if source_total == 1 else "sources"
     return RenderPhaseOutput(
         render=RenderArtifacts(
             screenshots_by_label=rendered.screenshots_by_label,
@@ -111,7 +122,11 @@ def run_render_phase(
             clip_facts_by_label=rendered.clip_facts_by_label,
             screenshot_dir=output_dir,
             warnings=warnings,
-        )
+        ),
+        success_summary=(
+            f"{screenshot_total} {screenshots_unit} "
+            f"({frame_total} {frames_unit} × {source_total} {sources_unit})"
+        ),
     )
 
 
@@ -120,7 +135,9 @@ def _render_progress_label(clip: ClipState, index: int) -> str:
         return clip.label
     role = clip_role(index)
     descriptor = (
-        format_micro_descriptor(clip.release_identity) if clip.release_identity is not None else ""
+        format_micro_descriptor(clip.release_identity, separator=" · ")
+        if clip.release_identity is not None
+        else ""
     )
     return f"{role} | {descriptor or clip.label}"
 

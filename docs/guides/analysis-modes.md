@@ -1,4 +1,4 @@
-# Frame selection and analysis modes
+# Frame selection and analysis
 
 Frame Compare can combine exact user-selected frames with deterministic random and
 metric-selected dark, bright, or motion frames. The right configuration depends on
@@ -12,7 +12,7 @@ search for visually distinct frames.
 | User frames | No | Exact moments already known to matter |
 | Random frames | No | Broad, reproducible coverage without metric cost |
 | Dark frames | Yes | Shadow detail, black levels, and low-light compression behavior |
-| Bright frames | Yes | Highlights, clipping, grain, and tone-mapping behavior |
+| Bright frames | Yes | Highlights, clipping, grain, and tonemapping behavior |
 | Motion frames | Yes | High frame-to-frame change such as action, camera movement, flashes, or cuts; useful for locating potentially stressful scenes |
 
 Frame numbers are interpreted in the selected reference source domain before alignment.
@@ -67,6 +67,9 @@ motion_frame_count = 3
 random_seed = 42
 ```
 
+Short media with large lead or trail exclusions may not have enough eligible frames;
+reduce the counts or the exclusions.
+
 The exact defaults and accepted ranges are documented in the
 [analysis configuration contract](../current-cli-contract.md#config-only-analysis-surface).
 
@@ -81,7 +84,7 @@ ignore_lead_seconds = 60.0
 ignore_trail_seconds = 90.0
 ```
 
-Use conservative values. Large exclusions on short clips can leave too few frames for
+Use conservative values. Large exclusions on short sources can leave too few frames for
 the requested plan.
 
 In an interactive run, Frame Compare can offer a one-time full-window retry when the
@@ -118,9 +121,6 @@ but the following changes can legitimately change the result:
 - relevant managed media-runtime components;
 - alignment results that reduce the shared renderable overlap.
 
-Automatic frame choices may also differ from releases that predate temporal
-stratification, even when the same inputs and configuration are reused.
-
 Frame Compare does not hash complete media contents for cache freshness. If media is
 replaced while preserving its path, byte size, and modification time, advance the
 modification time or remove the smallest relevant cache entry before reuse.
@@ -144,6 +144,20 @@ Use `performance` when:
 - random and user frames already provide broad coverage;
 - approximate dark, bright, and motion examples are sufficient.
 
+A faster iteration setup for a long source:
+
+```toml
+[analysis]
+performance_mode = "performance"
+random_frame_count = 8
+dark_frame_count = 2
+bright_frame_count = 2
+motion_frame_count = 2
+```
+
+Brief events can fall between sampled bursts. Switch back to `quality` for a final
+publication-bound run.
+
 For measured hardware-dependent evidence, see
-[Analysis Performance Validation](../analysis-performance-validation.md) and
-[Benchmark History](../analysis-benchmark-history.md).
+[Analysis performance validation](../analysis-performance-validation.md) and
+[Analysis benchmark history](../analysis-benchmark-history.md).

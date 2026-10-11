@@ -13,8 +13,6 @@
 .venv-*/
 .agent/
 .hypothesis/
-AGENTS.md
-CODEX.md
 .codannaignore
 
 # Generated comparison outputs
@@ -37,7 +35,7 @@ CODEX.md
 **/generated/clip_probe.toml
 **/generated/manual_overrides.toml
 **/generated/cache/
-**/generated/vspreview_sessions/
+**/generated/vsview_sessions/
 .desloppify/
 .agents/skills/desloppify/
 /scorecard.png
@@ -104,3 +102,6 @@ htmlcov/
 Thumbs.db
 .portable_cache/
 comparison_videos/**
+
+# Claude Code personal settings
+.claude/settings.local.json

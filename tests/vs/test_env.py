@@ -1,10 +1,12 @@
 """Tests for VapourSynth environment detection."""
 
-import runpy
+from collections.abc import Mapping, Sequence
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from vapoursynth import Core
 
 import frame_compare.vs.env as env_module
 from frame_compare.vs.env import (
@@ -18,14 +20,6 @@ from frame_compare.vs.env import (
     try_load_lsmas_plugin,
 )
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
-
-
-def test_env_module_annotations_do_not_require_runtime_vapoursynth(repo_root) -> None:
-    """Import-time annotations must not require the optional VS runtime."""
-    env_path = repo_root / "src" / "frame_compare" / "vs" / "env.py"
-    namespace = runpy.run_path(str(env_path))
-
-    assert namespace["ensure_vs_environment"].__annotations__["return"] == "vs.Core"
 
 
 def make_mock_core(*, lsmas: bool = False, libplacebo: bool = False) -> SimpleNamespace:
@@ -86,15 +80,13 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
     vapoursynth_libs = app_site_packages / "vapoursynth.libs"
     vs_placebo_package = app_site_packages / "vs_placebo"
     vs_placebo_libs = app_site_packages / "vs_placebo.libs"
-    lsmas_dir = bundle_root / "vs" / "extra-plugins" / "lsmas"
-    qt_bin = app_site_packages / "PyQt6" / "Qt6" / "bin"
+    pyside_package = app_site_packages / "PySide6"
     for directory in (
         vapoursynth_package,
         vapoursynth_libs,
         vs_placebo_package,
         vs_placebo_libs,
-        lsmas_dir,
-        qt_bin,
+        pyside_package,
     ):
         directory.mkdir(parents=True)
     ffmpeg_bin = bundle_root / "ffmpeg" / "bin"
@@ -129,11 +121,10 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
         str(vapoursynth_libs),
         str(vs_placebo_package),
         str(vs_placebo_libs),
-        str(lsmas_dir),
     ]
     assert calls == expected_calls
     assert str(ffmpeg_bin) not in calls
-    assert str(qt_bin) not in calls
+    assert str(pyside_package) not in calls
 
 
 def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(
@@ -143,13 +134,19 @@ def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(
     mock_vs = MagicMock()
     vs_attempts = {"count": 0}
 
-    def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+    def _fake_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] | None = (),
+        level: int = 0,
+    ) -> object:
         if name == "vapoursynth":
             vs_attempts["count"] += 1
             if vs_attempts["count"] == 1:
                 raise ImportError("missing runtime DLL")
             return mock_vs
-        return original_import(name, *args, **kwargs)
+        return original_import(name, globals, locals, fromlist, level)
 
     register_dirs = MagicMock()
     monkeypatch.setattr(env_module, "register_windows_dll_dirs", register_dirs)
@@ -184,10 +181,7 @@ def test_candidate_lsmas_plugin_paths_preserves_order_and_deduplicates(
 
     result = candidate_lsmas_plugin_paths()
 
-    assert result == [
-        *_expected_lsmas_candidates(bundle_root / "vs" / "plugins"),
-        *_expected_lsmas_candidates(plugin_dir),
-    ]
+    assert result == _expected_lsmas_candidates(plugin_dir)
 
 
 def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
@@ -211,12 +205,7 @@ def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
 
     result = candidate_lsmas_plugin_paths()
 
-    assert result[: len(_expected_lsmas_candidates(bundle_root / "vs" / "plugins"))] == (
-        _expected_lsmas_candidates(bundle_root / "vs" / "plugins")
-    )
-    assert len(result) == len(_expected_lsmas_candidates(tmp_path / "plugins")) + len(
-        _expected_lsmas_candidates(bundle_root / "vs" / "plugins")
-    )
+    assert result == _expected_lsmas_candidates(tmp_path / "plugins")
 
 
 def os_pathsep_join(parts: list[str]) -> str:
@@ -273,10 +262,6 @@ def test_candidate_lsmas_plugin_path_details_prefers_r74_discovery_order(
     assert (
         first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
         == _expected_lsmas_candidates(extra_dir)[0]
-    )
-    assert (
-        first_for_source["bundle_vs_plugins"]
-        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
     )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 
@@ -388,10 +373,6 @@ def test_candidate_lsmas_plugin_path_details_continues_when_canonical_dir_unusab
         first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
         == _expected_lsmas_candidates(extra_dir)[0]
     )
-    assert (
-        first_for_source["bundle_vs_plugins"]
-        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
-    )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 
 
@@ -422,10 +403,6 @@ def test_candidate_lsmas_plugin_path_details_continues_when_vapoursynth_import_f
     assert (
         first_for_source["VAPOURSYNTH_EXTRA_PLUGIN_PATH"]
         == _expected_lsmas_candidates(extra_dir)[0]
-    )
-    assert (
-        first_for_source["bundle_vs_plugins"]
-        == _expected_lsmas_candidates(bundle_root / "vs" / "plugins")[0]
     )
     assert first_for_source["VAPOURSYNTH_PLUGIN_PATH"] == _expected_lsmas_candidates(legacy_dir)[0]
 
@@ -479,33 +456,18 @@ def test_try_load_lsmas_plugin_continues_after_load_failure(
     assert load_calls == [str(first), str(second)]
 
 
-def test_detect_plugins_all_present() -> None:
-    """Verify all plugins detected when present."""
-    core = make_mock_core(lsmas=True, libplacebo=True)
-    # Cast to MagicMock/Core for typing if needed, or rely on duck typing
-    plugins = detect_plugins(core)  # type: ignore
-    assert set(plugins.keys()) == {"lsmas", "libplacebo"}
-    assert plugins["lsmas"] is True
-    assert plugins["libplacebo"] is True
-
-
-def test_detect_plugins_none_present() -> None:
-    """Verify no plugins detected when missing."""
-    core = make_mock_core()
-    plugins = detect_plugins(core)  # type: ignore
-    assert set(plugins.keys()) == {"lsmas", "libplacebo"}
-    assert all(not v for v in plugins.values())
-
-
 def test_require_plugin_missing_raises_error() -> None:
     """Verify error raised for missing plugin."""
     core = make_mock_core()
     with pytest.raises(PluginNotFoundError) as exc:
-        require_plugin(core, "libplacebo")  # type: ignore
+        require_plugin(cast(Core, core), "libplacebo")
     assert exc.value.code == "FC-2003"
 
 
-def test_require_plugin_present_passes() -> None:
-    """Verify no error raised for present plugin."""
-    core = make_mock_core(lsmas=True)
-    require_plugin(core, "lsmas")  # type: ignore
+@pytest.mark.parametrize("present", [True, False], ids=["all_present", "none_present"])
+def test_detect_plugins_presence(present: bool) -> None:
+    core = make_mock_core(lsmas=present, libplacebo=present)
+    plugins = detect_plugins(cast(Core, core))
+    assert set(plugins) == {"lsmas", "libplacebo"}
+    assert plugins["lsmas"] is present
+    assert plugins["libplacebo"] is present

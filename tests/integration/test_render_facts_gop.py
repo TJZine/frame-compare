@@ -32,11 +32,14 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.vs.env import detect_plugins
 from frame_compare.vs.loader import DefaultVSLoader
 
 vs = pytest.importorskip("vapoursynth")
 if isinstance(vs, MagicMock):
     pytest.skip("vapoursynth is mocked", allow_module_level=True)
+if not detect_plugins(vs.core).get("lsmas", False):
+    pytest.skip("lsmas plugin not available", allow_module_level=True)
 
 
 @pytest.mark.integration

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from frame_compare.analysis.errors import (
@@ -25,6 +25,7 @@ from frame_compare.orchestration.selection_domain import (
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.types import FullWindowRetryConfirmationRequest
+from frame_compare.utils.run_warnings import RunWarning
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.context import ClipState, RunContext
@@ -66,7 +67,7 @@ class FullWindowSelectionState:
     config: ConfigSchema
     selection_window: SelectionWindow
     override: FullWindowRetryOverride | None = None
-    warnings: tuple[str, ...] = ()
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 def compute_selection_window_with_recovery(
@@ -74,7 +75,7 @@ def compute_selection_window_with_recovery(
     clips: list[ClipState],
     config: ConfigSchema,
     confirm: FullWindowRetryConfirmationFn | None,
-    warning_sink: list[str] | None = None,
+    warning_sink: list[RunWarning] | None = None,
 ) -> FullWindowSelectionState:
     """Compute the authoritative window and recover when exclusions remove it entirely."""
     try:
@@ -112,7 +113,7 @@ def compute_selection_window_with_recovery(
                 ignore_lead_seconds=analysis.ignore_lead_seconds,
                 ignore_trail_seconds=analysis.ignore_trail_seconds,
             ),
-            warnings=() if warning_sink is not None else (override_warning,),
+            warnings=[] if warning_sink is not None else [override_warning],
         )
     return FullWindowSelectionState(config=config, selection_window=selection_window)
 
@@ -122,7 +123,7 @@ def recover_from_exclusion_selection_failure(
     error: SelectionError,
     *,
     vs_loader: VSLoader | None,
-) -> list[str]:
+) -> list[RunWarning]:
     """Confirm and apply one full-window retry, or raise a fatal typed selection error."""
     if ctx.full_window_retry_override is not None:
         raise _fatal_selection_error(error, retry_failed=True) from error
@@ -189,7 +190,7 @@ def _apply_confirmed_override(
     *,
     override: FullWindowRetryOverride,
     vs_loader: VSLoader | None,
-) -> list[str]:
+) -> list[RunWarning]:
     effective_config = _full_window_config(ctx.config)
     clips, active_rect_warnings = _refine_active_rects_for_full_window(
         clips=[ctx.reference, *ctx.comparisons],
@@ -224,7 +225,7 @@ def _apply_confirmed_override(
         ctx.preflight_warnings[:] = [
             warning
             for warning in ctx.preflight_warnings
-            if not warning.startswith("active-rect auto detection ")
+            if warning.source != "active-rect auto detection"
         ]
     return active_rect_warnings
 
@@ -274,11 +275,15 @@ def _full_window_config(config: ConfigSchema) -> ConfigSchema:
     )
 
 
-def _override_warning(ignore_lead_seconds: float, ignore_trail_seconds: float) -> str:
-    return (
-        f"{_FULL_WINDOW_RETRY_WARNING} "
-        f"(configured lead={ignore_lead_seconds:g}s, trail={ignore_trail_seconds:g}s; "
-        "effective lead=0s, trail=0s)"
+def _override_warning(ignore_lead_seconds: float, ignore_trail_seconds: float) -> RunWarning:
+    return RunWarning(
+        "analysis",
+        "warning",
+        (
+            f"{_FULL_WINDOW_RETRY_WARNING} "
+            f"(configured lead={ignore_lead_seconds:g}s, trail={ignore_trail_seconds:g}s; "
+            "effective lead=0s, trail=0s)"
+        ),
     )
 
 
@@ -311,7 +316,7 @@ def _refine_active_rects_for_full_window(
     clips: list[ClipState],
     config: ConfigSchema,
     vs_loader: VSLoader | None,
-) -> tuple[list[ClipState], list[str]]:
+) -> tuple[list[ClipState], list[RunWarning]]:
     selection_window = compute_selection_window_for_clips(clips=clips, config=config)
     if config.screenshots.active_rect_detection != ScreenshotActiveRectDetection.AUTO:
         return clips, []

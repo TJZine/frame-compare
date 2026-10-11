@@ -1,10 +1,4 @@
-# CODEX.md
+# Codex entrypoint
 
-Codex-specific guidance is intentionally thin in this repo.
-
-Start at [AGENTS.md](AGENTS.md).
-
-Repo-wide operating policy lives in [docs/ENGINEERING_RUNBOOK.md](docs/ENGINEERING_RUNBOOK.md).
-Present-state codebase truth lives in [docs/current-architecture.md](docs/current-architecture.md).
-
-Use this file as a pointer only. Do not treat it as a second runbook or second entrypoint map.
+Start at [AGENTS.md](AGENTS.md) and [`.agents/project.md`](.agents/project.md).
+Shared skills own the general workflow. This file is a compatibility pointer only.

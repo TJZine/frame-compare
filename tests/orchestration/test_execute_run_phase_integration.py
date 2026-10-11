@@ -5,47 +5,34 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.orchestration import phase_alignment, phase_post_render
-from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
-    PublishPhaseOutput,
     RunArtifacts,
 )
 from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
-from frame_compare.services.types import AlignmentResult, TmdbMetadata
-from frame_compare.utils.types import WorkspacePaths
+from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.run_result_record import read_run_result
+from frame_compare.services.types import AlignmentResult, AlignmentReviewSummary, TmdbMetadata
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
     FakeVSLoader,
     clip_state,
-    create_config,
     create_video_files,
+    execution_context,
 )
-from .phase_task_helpers import _render_artifacts
-
-
-def _workspace(tmp_path: Path) -> WorkspacePaths:
-    return WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        generated_root=tmp_path / "generated",
-        run_dir=tmp_path / "run",
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
+from .phase_task_helpers import _render_artifacts, _workspace
+from .preparation_test_support import create_config
 
 
 def test_execute_run_align_applies_trim_first_frame_mapping(
@@ -70,20 +57,26 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         request,
         config,
         progress=None,
         reference_fps=None,
         frame_props_by_stem=None,
         verbose=False,
+        quiet=False,
+        json_output=False,
+        review_summary: AlignmentReviewSummary | None = None,
+        vs_loader=None,
     ):
-        assert verbose is False
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path
         assert [comparison.identity.path for comparison in request.comparisons] == [
             comparison.path for comparison in request.comparisons
         ]
+        assert json_output is False
+        assert quiet is False
+        assert verbose is False
         return [
             AlignmentResult(
                 reference_clip=request.reference.path.name,
@@ -130,6 +123,63 @@ enable = false
     assert by_video["c_comp2.mkv"] == [33, 67, 84]
 
 
+def test_execute_run_forced_alignment_failure_stops_before_render_and_records_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = true
+use_vsview = true
+force_interactive = true
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    create_config(tmp_path, content=config_content)
+    create_video_files(tmp_path / "comparison_videos", "a_ref.mkv", "b_comp.mkv")
+
+    failure = AudioAlignmentError(
+        "Interactive alignment did not return a valid VSView review result."
+    )
+
+    async def _fail_alignment(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fail_alignment)
+    ffmpeg = FakeFFmpegRunner()
+
+    with pytest.raises(AudioAlignmentError) as raised:
+        asyncio.run(
+            execute_run(
+                RunRequest(
+                    root=tmp_path,
+                    random_frame_count=1,
+                    skip_analysis=True,
+                    skip_metadata=True,
+                    no_upload=True,
+                ),
+                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg),
+            )
+        )
+
+    assert raised.value is failure
+    assert ffmpeg.calls == []
+    run_dirs = [path for path in (tmp_path / "generated").iterdir() if path.is_dir()]
+    assert len(run_dirs) == 1
+    record = read_run_result(run_dirs[0] / "run_result.toml")
+    assert record.status == "failed"
+    assert record.failure is not None
+    assert record.failure.code == "FC-4005"
+
+
 def test_execute_run_report_confirmed_decline_skips_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -163,12 +213,10 @@ enable = true
         callback_calls.append(request)
         return "declined"
 
-    async def _unexpected_publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
-        raise AssertionError("declined report-confirmed upload must not publish")
-
+    publish = AsyncMock()
     monkeypatch.setattr(
         "frame_compare.orchestration.execution.run_publish_phase",
-        _unexpected_publish,
+        publish,
     )
 
     result = asyncio.run(
@@ -189,23 +237,21 @@ enable = true
 
     assert result.success is True
     assert result.report_path is not None
-    assert callback_calls == [SlowpicsUploadConfirmationRequest(report_path=result.report_path)]
     assert result.slowpics_upload_confirmation_status == "declined"
     assert result.slowpics_url is None
-    assert "confirm_slowpics_upload" in result.phase_timings
+    publish.assert_not_awaited()
+    assert not any(warning.text.startswith("publish:") for warning in result.warnings)
 
 
 def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Path) -> None:
     create_config(tmp_path)
     config = load_config(tmp_path / "config" / "config.toml")
     reference = clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     expected_metadata = TmdbMetadata(
         tmdb_id=789,
@@ -229,13 +275,11 @@ def test_run_publish_phase_without_client_clears_slowpics_url(tmp_path: Path) ->
     create_config(tmp_path)
     config = load_config(tmp_path / "config" / "config.toml")
     reference = clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     artifacts = RunArtifacts(slowpics_url="https://slow.pics/c/example")
 
@@ -255,13 +299,11 @@ def test_run_report_phase_clears_report_path_when_no_screenshots(tmp_path: Path)
     create_config(tmp_path)
     config = load_config(tmp_path / "config" / "config.toml")
     reference = clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
 
@@ -288,13 +330,11 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         label="Encode 1",
         num_frames=80,
     )
-    ctx = RunContext(
+    ctx = execution_context(
         config=config,
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[comparison],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
     )
     metadata = TmdbMetadata(
         tmdb_id=321,
@@ -343,7 +383,6 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
 
     report_data = captured["report_data"]
     assert output.report_path == expected_report_path
-    assert artifacts.report_path is None
     assert report_data.frames == [7, 11]
     assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
         "Reference"

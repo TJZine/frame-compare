@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 0.6.x   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
@@ -30,25 +30,19 @@ We take security seriously. If you discover a security vulnerability in Frame Co
 
 Frame Compare handles local video files and optional network operations. Key security areas include:
 
-- **Path Boundaries**: Media inputs may be read from outside the workspace. Selected
-  config files and writable config, screenshot, generated, cache, run-folder, and
-  report paths are checked after symlink resolution and must remain under the
-  resolved workspace root. The sole selected-config exception is the installed
-  Windows portable shim's exact
-  `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` fallback; other paths in
-  LocalAppData receive no exception, and a symlinked fallback config that resolves
-  elsewhere is rejected.
+- **Path Boundaries**: Media inputs may be read from outside the workspace. The selected config file and `paths.config_dir` must resolve inside the workspace root after symlink resolution. `paths.generated_dir` may name an external directory, and every run folder, cache, and report Frame Compare writes stays inside that resolved generated-data root. Outside it, Frame Compare writes only the selected config file (inside the workspace root), preset files under `<root>/config/presets` (`preset save` follows a user-authored symlink there), and its own L-SMASH-Works `.lwi` index beside each media file. The only selected-config exception is the
+  installed Windows portable shim's exact
+  `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` fallback; a symlinked
+  fallback that resolves elsewhere is rejected.
 - **Subprocess Hardening**: External tool invocations (FFmpeg, VapourSynth) use validated arguments
-- **Network Operations**: Optional slow.pics/TMDB integrations follow SSRF prevention policies
+- **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an external HTTPS endpoint, follows no redirects, and keeps the URL out of diagnostics.
 
-For implementation details, see:
-
-- [Decisions](docs/DECISIONS.md)
+For implementation details, see [Current architecture](docs/current-architecture.md).
 
 ## Security-Related Error Codes
 
 | Code    | Description                                          |
 | ------- | ---------------------------------------------------- |
-| FC-3009 | Path escapes workspace root (path traversal blocked) |
-| FC-3012 | Invalid path format                                  |
-| FC-3xxx | Security-related errors                              |
+| FC-3009 | Path escapes its permitted root (blocked) |
+
+All error families and exit codes are listed in the [CLI contract](docs/current-cli-contract.md#exit-codes-and-error-families).

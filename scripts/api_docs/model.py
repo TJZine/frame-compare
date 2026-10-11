@@ -38,7 +38,7 @@ LOCKED_MODULES: tuple[tuple[str, str], ...] = (
     ("frame_compare.services", "src/frame_compare/services/__init__.py"),
     ("frame_compare.utils", "src/frame_compare/utils/__init__.py"),
     ("frame_compare.vs", "src/frame_compare/vs/__init__.py"),
-    ("frame_compare.vspreview", "src/frame_compare/vspreview/__init__.py"),
+    ("frame_compare.vsview", "src/frame_compare/vsview/__init__.py"),
     ("frame_compare.runner", "src/frame_compare/runner.py"),
 )
 

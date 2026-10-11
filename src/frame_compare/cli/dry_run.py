@@ -35,7 +35,7 @@ CHECKS_NOT_PERFORMED: tuple[str, ...] = (
     "run_folder_reservation_or_metadata_writes",
     "render_or_report_generation",
     "network_publishing_or_metadata",
-    "browser_clipboard_or_vspreview",
+    "browser_clipboard_or_vsview",
 )
 
 
@@ -462,7 +462,7 @@ def _human_check(name: str) -> str:
         "run_folder_reservation_or_metadata_writes": "run-folder reservation and metadata writes",
         "render_or_report_generation": "screenshot rendering and report generation",
         "network_publishing_or_metadata": "network metadata lookup and publishing",
-        "browser_clipboard_or_vspreview": "browser, clipboard, and VSPreview actions",
+        "browser_clipboard_or_vsview": "browser, clipboard, and VSView actions",
     }.get(name, name.replace("_", " "))
 
 

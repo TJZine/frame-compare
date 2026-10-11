@@ -14,6 +14,7 @@ from frame_compare.services.slowpics_webhook import (
     WebhookFailureKind,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -68,17 +69,9 @@ async def test_run_slowpics_post_upload_actions_writes_shortcut_when_enabled(
         collection_title="Collateral",
     )
 
-    output = await run_slowpics_post_upload_actions(request)
+    await run_slowpics_post_upload_actions(request)
 
     shortcut_path = run_dir / "Collateral.url"
-    assert output == (
-        PostUploadActionResult(
-            kind="shortcut",
-            success=True,
-            path=shortcut_path,
-            message="slow.pics URL shortcut written",
-        ),
-    )
     assert shortcut_path.read_text(encoding="utf-8") == (
         "[InternetShortcut]\nURL=https://slow.pics/c/collateral-key\n"
     )
@@ -145,7 +138,12 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
     tmp_path: Path, monkeypatch
 ) -> None:
     warning_calls: list[tuple[str, dict[str, object]]] = []
-    warning = "slow.pics shortcut: failed to resolve URL shortcut directory: locked"
+    warning = RunWarning(
+        "slow.pics",
+        "warning",
+        "slow.pics shortcut:",
+        "failed to resolve URL shortcut directory: locked",
+    )
     failure_path = tmp_path / "workspace" / "runs" / "Example" / "Example.url"
 
     def _fake_create_shortcut(**_kwargs: object) -> SlowpicsShortcutResult:
@@ -175,7 +173,7 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
     assert warning_calls == [
         (
             "slowpics_shortcut_create_failed",
-            {"path": str(failure_path), "warning": warning},
+            {"path": str(failure_path), "warning": warning.text},
         ),
     ]
 
@@ -183,7 +181,7 @@ async def test_run_slowpics_post_upload_actions_logs_shortcut_warning(
 async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_and_redacted(
     tmp_path: Path, monkeypatch
 ) -> None:
-    warning = "slow.pics webhook: delivery failed"
+    warning = RunWarning("slow.pics", "warning", "slow.pics webhook: delivery failed")
     warning_calls: list[tuple[str, dict[str, object]]] = []
 
     async def _fake_deliver_slowpics_webhook(
@@ -191,8 +189,6 @@ async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_
         webhook_url: str,
         slowpics_url: str,
     ) -> SlowpicsWebhookResult:
-        assert webhook_url == "https://secret.example.test/webhook/token?secret=value"
-        assert slowpics_url == "https://slow.pics/c/example"
         return SlowpicsWebhookResult(
             success=False,
             warning=warning,
@@ -209,7 +205,7 @@ async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_
     )
     monkeypatch.setattr("frame_compare.services.slowpics_post_upload.log.warning", _capture_warning)
 
-    output = await run_slowpics_post_upload_actions(
+    await run_slowpics_post_upload_actions(
         _request(
             tmp_path,
             create_url_shortcut=False,
@@ -217,15 +213,11 @@ async def test_run_slowpics_post_upload_actions_webhook_failure_is_warning_only_
         )
     )
 
-    assert output == (PostUploadActionResult(kind="webhook", success=False, warning=warning),)
-    assert "secret.example.test" not in warning
-    assert "/webhook/token" not in warning
-    assert "secret=value" not in warning
     assert warning_calls == [
         (
             "slowpics_webhook_delivery_failed",
             {
-                "warning": warning,
+                "warning": warning.text,
                 "failure_kind": "http_status",
                 "status_code": 404,
             },

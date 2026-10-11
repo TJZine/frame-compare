@@ -27,6 +27,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
@@ -181,7 +182,7 @@ def read_cache_version(cache_path: Path) -> str | None:
     """Read the top-level version from a cache payload for error reporting."""
     try:
         raw_data: object = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         return None
     if not isinstance(raw_data, Mapping):
         return None
@@ -200,12 +201,8 @@ def _sanitize_cache_label(value: str) -> str:
 def load_cached_metrics(
     cache_dir: Path,
     fingerprint: str,
-    clips: list[ClipIdentity],
 ) -> CacheLoadResult:
-    """Load analysis metrics when the cache file matches the expected schema.
-
-    The `clips` parameter is reserved for future validation; currently ignored.
-    """
+    """Load analysis metrics when the cache file matches the expected schema."""
     cache_path = find_metrics_cache_file(cache_dir, fingerprint)
     if cache_path is None:
         return CacheLoadResult(success=False, reason="not_found")
@@ -215,7 +212,7 @@ def load_cached_metrics(
     try:
         with cache_path.open("r", encoding="utf-8") as f:
             raw_data: object = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         return CacheLoadResult(success=False, reason="corrupted")
 
     try:
@@ -241,11 +238,10 @@ def load_cached_metrics(
 def load_cached_metrics_for_request(
     cache_dir: Path,
     fingerprint: str,
-    clips: list[ClipIdentity],
     request: MetricCacheRequest,
 ) -> CacheLoadResult:
     """Load metrics only when stored metadata matches the complete request identity."""
-    result = load_cached_metrics(cache_dir, fingerprint, clips)
+    result = load_cached_metrics(cache_dir, fingerprint)
     if not (result.success and result.metrics is not None):
         return result
     if not _metrics_metadata_matches_request(result.metrics.metadata, request):
@@ -349,13 +345,20 @@ def _parse_numeric_series(value: object) -> list[float]:
 
     series: list[float] = []
     for item in cast(list[object], value):
-        if not isinstance(item, (int, float)) or isinstance(item, bool):
-            raise _CacheParseError
-        value = float(item)
-        if not math.isfinite(value):
-            raise _CacheParseError
-        series.append(value)
+        series.append(_parse_finite_float(item))
     return series
+
+
+def _parse_finite_float(value: object) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise _CacheParseError
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise _CacheParseError from exc
+    if not math.isfinite(result):
+        raise _CacheParseError
+    return result
 
 
 def _validate_metric_arrays(
@@ -616,7 +619,7 @@ def _parse_clip_identity(data: Mapping[str, object]) -> ClipIdentity:
     if sha1 is not None and not isinstance(sha1, str):
         raise _CacheParseError
 
-    return ClipIdentity(path=path, size=size, mtime=float(mtime), sha1=sha1)
+    return ClipIdentity(path=path, size=size, mtime=_parse_finite_float(mtime), sha1=sha1)
 
 
 def _parse_cache_version(value: object) -> int:
@@ -696,7 +699,9 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
         },
     }
 
-    write_text_atomic(cache_path, json.dumps(data, indent=2), encoding="utf-8")
+    write_text_atomic(
+        cache_path, json.dumps(data, indent=2), encoding="utf-8", publish_guard=raise_if_cancelling
+    )
 
 
 def _serialize_metric_active_rect(rect: MetricActiveRect | None) -> dict[str, int] | None:

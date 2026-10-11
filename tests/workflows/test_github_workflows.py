@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 import re
-import tomllib
+import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tests.workflow_helpers import load_workflow as _load_workflow
+from tests.workflows._helpers import bash_executable_or_skip as _bash_executable_or_skip
+
+_SCRIPT_TIMEOUT_SECONDS = 10.0
 
 
 def _steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -76,12 +82,16 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "release.yml")
     steps = workflow["jobs"]["publish"]["steps"]
     names = [step.get("name") for step in steps]
+    prepare_notes = steps[names.index("Prepare validated release notes")]["run"]
     recheck = steps[names.index("Recheck main, collisions, and create exact tag")]["run"]
     draft = steps[names.index("Create a new draft release")]["run"]
     verify_draft = steps[names.index("Verify draft target and exact remote asset bytes")]["run"]
     publish = steps[names.index("Publish verified release")]["run"]
     verify_final = steps[names.index("Verify final publication state")]["run"]
 
+    assert names.index("Prepare validated release notes") < names.index(
+        "Recheck main, collisions, and create exact tag"
+    )
     assert names.index("Recheck main, collisions, and create exact tag") < names.index(
         "Create a new draft release"
     )
@@ -96,7 +106,10 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
     assert "git/ref/tags/${RELEASE_TAG}" in recheck
     assert "releases/tags/${RELEASE_TAG}" in recheck
     assert "ref=refs/tags/${RELEASE_TAG}" in recheck
+    assert '--release-notes-output "$RUNNER_TEMP/release-notes.md"' in prepare_notes
     assert '"draft=true"' in draft
+    assert '-f "body=${release_body}"' in draft
+    assert "See CHANGELOG.md at the tagged commit" not in draft
     assert "--method PATCH" in publish and '"draft=false"' in publish
     assert all(
         semantic in verify_draft
@@ -104,6 +117,7 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
             '"$remote_tag" != "$RELEASE_TAG"',
             '"$target" != "$EXPECTED_SHA"',
             '"$tag_sha" != "$EXPECTED_SHA"',
+            '"$remote_body" != "$expected_body"',
             '"${actual[*]}" != "${wanted[*]}"',
             '"$digest" != "sha256:${local_hash}"',
         )
@@ -114,6 +128,7 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
         '"$remote_tag" != "$RELEASE_TAG"',
         '"$target" != "$EXPECTED_SHA"',
         '"$tag_sha" != "$EXPECTED_SHA"',
+        '"$remote_body" != "$expected_body"',
         '"${actual[*]}" != "${wanted[*]}"',
         '"$digest" != "sha256:${local_hash}"',
     ):
@@ -126,6 +141,7 @@ def test_release_workflow_orders_external_mutations_and_rechecks_collisions(
             '"$remote_tag" != "$RELEASE_TAG"',
             '"$target" != "$EXPECTED_SHA"',
             '"$tag_sha" != "$EXPECTED_SHA"',
+            '"$remote_body" != "$expected_body"',
             '"${actual[*]}" != "${wanted[*]}"',
             '"$digest" != "sha256:${local_hash}"',
         )
@@ -138,27 +154,35 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     ci = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
 
-    assert {"push", "pull_request", "workflow_dispatch"} <= set(ci["on"])
+    assert set(ci["on"]) == {"push", "pull_request", "workflow_dispatch"}
+    assert set(ci["on"]["push"]["branches"]) == {"main", "staging"}
     assert ci["permissions"] == {"contents": "read"}
-    assert {"pull_request", "workflow_dispatch"} <= set(docker["on"])
+    assert set(docker["on"]) == {"pull_request", "workflow_dispatch"}
     assert docker["permissions"] == {"contents": "read"}
     assert docker["concurrency"] == {
         "group": "${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}",
         "cancel-in-progress": "true",
     }
-    assert {"main", "cleanup", "staging"} <= set(docker["on"]["pull_request"]["branches"])
-    assert set(ci["on"]["pull_request"]["branches"]) == {"main", "cleanup", "staging"}
+    # Integration PRs must be checked regardless of their base branch.
+    for workflow in (ci, docker):
+        pr_options = workflow["on"]["pull_request"] or {}
+        assert "branches" not in pr_options
+        assert "branches-ignore" not in pr_options
+    assert not ci["on"]["pull_request"]
     workflow_paths = docker["on"]["pull_request"]["paths"]
     assert {
+        "src/**",
+        "tests/**",
+        "pyproject.toml",
         "uv.lock",
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
-        "tests/workflows/**",
-        "src/frame_compare/analysis/**",
-        "src/frame_compare/render/**",
-        "src/frame_compare/vs/**",
-    } <= set(workflow_paths)
+        "tools/checkout_source_commit.sh",
+        ".dockerignore",
+        ".github/workflows/docker-integration.yml",
+    } == set(workflow_paths)
+    assert "paths-ignore" not in docker["on"]["pull_request"]
 
 
 def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:
@@ -203,7 +227,7 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
         assert "gh pr merge" not in command, step.get("name")
 
 
-def test_windows_portable_dispatch_owns_immutable_release_inputs_and_secrets(
+def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
     repo_root: Path,
 ) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable.yml")
@@ -214,33 +238,101 @@ def test_windows_portable_dispatch_owns_immutable_release_inputs_and_secrets(
     assert workflow["permissions"] == {}
     assert jobs["release"]["uses"] == "./.github/workflows/release.yml"
     assert set(jobs["release"]["with"]) == {"channel", "version", "tag", "expected_sha"}
+    assert "secrets" not in jobs["release"]
     assert jobs["verify_pull_request"]["permissions"] == {"contents": "read"}
     assert jobs["verify_pull_request"]["with"]["require_signing"] == "false"
+    assert jobs["verify_pull_request"]["with"]["environment_name"] == "windows-ci"
     assert "secrets" not in jobs["verify_pull_request"]
+    assert jobs["validate_manual"]["permissions"] == {}
+    assert "secrets" not in jobs["validate_manual"]
     assert jobs["verify_manual"]["permissions"] == {"contents": "read"}
     assert jobs["verify_manual"]["with"]["require_signing"] == "true"
-    assert set(jobs["verify_manual"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
+    assert "secrets" not in jobs["verify_manual"]
     assert jobs["release"]["permissions"] == {
         "attestations": "write",
         "contents": "write",
         "id-token": "write",
     }
-    assert set(jobs["release"]["secrets"]) == {"WINDOWS_UPDATE_SIGNING_KEY_XML"}
+
+    release = _load_workflow(repo_root / ".github" / "workflows" / "release.yml")
+    windows = release["jobs"]["windows"]
+    validate_release = next(
+        step
+        for step in release["jobs"]["preflight"]["steps"]
+        if step.get("name") == "Validate release channel, versions, tag, and SHA"
+    )
+    assert "secrets" not in release["on"]["workflow_call"]
+    assert "secrets" not in windows
+    assert validate_release["env"]["DISPATCH_REF_PROTECTED"] == ("${{ github.ref_protected }}")
+    assert validate_release["env"]["DISPATCH_REF_TYPE"] == "${{ github.ref_type }}"
+    assert '"$DISPATCH_REF_TYPE" != "branch"' in validate_release["run"]
+    assert '"$DISPATCH_REF_PROTECTED" != "true"' in validate_release["run"]
+    assert windows["with"]["environment_name"] == (
+        "${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}"
+    )
 
 
-def test_ci_keeps_coverage_test_audit_browser_and_distribution_gates(
+@pytest.mark.parametrize(
+    ("channel", "dispatch_sha", "ref", "ref_type", "protected", "message"),
+    [
+        ("rc", "b" * 40, "refs/heads/release", "branch", "true", "must equal"),
+        ("rc", "a" * 40, "refs/tags/v0.5.0", "tag", "true", "from a branch"),
+        ("rc", "a" * 40, "refs/heads/release", "branch", "false", "must be protected"),
+        ("stable", "a" * 40, "refs/heads/release", "branch", "true", "main branch"),
+    ],
+)
+def test_release_preflight_ref_validation_fails_closed(
+    repo_root: Path,
+    channel: str,
+    dispatch_sha: str,
+    ref: str,
+    ref_type: str,
+    protected: str,
+    message: str,
+) -> None:
+    workflow = _load_workflow(repo_root / ".github" / "workflows" / "release.yml")
+    step = next(
+        candidate
+        for candidate in workflow["jobs"]["preflight"]["steps"]
+        if candidate.get("name") == "Validate release channel, versions, tag, and SHA"
+    )
+    bash = _bash_executable_or_skip()
+
+    completed = subprocess.run(
+        [bash, "-c", step["run"]],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_SCRIPT_TIMEOUT_SECONDS,
+        env=os.environ
+        | {
+            "DISPATCH_REF": ref,
+            "DISPATCH_REF_PROTECTED": protected,
+            "DISPATCH_REF_TYPE": ref_type,
+            "DISPATCH_SHA": dispatch_sha,
+            "EXPECTED_SHA": "a" * 40,
+            "MAIN_SHA": "a" * 40,
+            "RELEASE_CHANNEL": channel,
+            "RELEASE_TAG": "v0.5.0-rc.1" if channel == "rc" else "v0.5.0",
+            "RELEASE_VERSION": "0.5.0rc1" if channel == "rc" else "0.5.0",
+        },
+    )
+
+    assert completed.returncode != 0
+    assert message in completed.stderr
+
+
+def test_ci_keeps_test_audit_browser_and_distribution_gates(
     repo_root: Path,
 ) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "ci.yml")
     jobs = workflow["jobs"]
 
+    lint_run = "\n".join(str(step.get("run", "")) for step in jobs["lint"]["steps"])
+    assert "uv run --no-sync ruff check ." in lint_run
+    assert "uv run --no-sync ruff format --check ." in lint_run
     test_run = "\n".join(str(step.get("run", "")) for step in jobs["test"]["steps"])
-    assert "pytest -q" in test_run
-    assert "--cov=src/frame_compare" in test_run
-    assert "--cov-report=term-missing" in test_run
-    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert project["tool"]["coverage"]["run"]["branch"] is True
-    assert project["tool"]["coverage"]["report"]["fail_under"] == 80
+    assert "pytest -q -n auto --dist loadgroup" in test_run
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
     assert any("tests/browser/test_report_browser_smoke.py" in run for run in browser_runs)

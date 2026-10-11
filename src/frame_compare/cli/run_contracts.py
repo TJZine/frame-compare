@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import JSONValue
+from frame_compare.orchestration.analysis_policy import validate_cache_mode_flags
 from frame_compare.orchestration.analysis_policy import (
     validate_skip_analysis_frame_selection_contract as validate_skip_analysis_policy,
 )
@@ -58,27 +59,11 @@ def validate_dry_run_mode_contract(args: RunCliRawArgs) -> None:
     )
 
 
-def validate_dry_run_cache_contract(args: RunCliRawArgs) -> None:
+def validate_cache_flag_contract(args: RunCliRawArgs) -> None:
     """Validate cache flags without touching cache state."""
-    if not args.no_cache or not args.from_cache_only:
-        return
-    raise ConfigValidationError(
-        [
-            {
-                "type": "value_error",
-                "loc": ["cli", "no_cache"],
-                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
-                "input": True,
-            },
-            {
-                "type": "value_error",
-                "loc": ["cli", "from_cache_only"],
-                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
-                "input": True,
-            },
-        ],
-        message="Cache mode flags are mutually exclusive",
-        hint="Use either --no-cache or --from-cache-only, not both",
+    validate_cache_mode_flags(
+        no_cache=args.no_cache,
+        from_cache_only=args.from_cache_only,
     )
 
 
@@ -150,8 +135,8 @@ def json_interactive_alignment_contract_errors(
         return []
 
     interactive_fields: list[tuple[str, str]] = []
-    if config.audio_alignment.use_vspreview:
-        interactive_fields.append(("audio_alignment", "use_vspreview"))
+    if config.audio_alignment.use_vsview:
+        interactive_fields.append(("audio_alignment", "use_vsview"))
     if config.audio_alignment.force_interactive:
         interactive_fields.append(("audio_alignment", "force_interactive"))
     if not interactive_fields:
@@ -314,7 +299,7 @@ def validation_error_message(failures: frozenset[RunContractFailure]) -> str:
 def validation_error_hint(failures: frozenset[RunContractFailure]) -> str:
     if RunContractFailure.JSON_INTERACTIVE_ALIGNMENT in failures:
         return (
-            "Disable audio_alignment.use_vspreview and "
+            "Disable audio_alignment.use_vsview and "
             "audio_alignment.force_interactive, or run without --json"
         )
     if RunContractFailure.PREVIOUS_OFFSETS in failures:

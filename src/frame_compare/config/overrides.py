@@ -149,7 +149,7 @@ def apply_cli_overrides(
         _set_nested(overrides, CLI_OVERRIDE_MAP[cli_name], value)
 
     if cli_args.force_interactive_alignment is True:
-        _set_nested(overrides, "audio_alignment.use_vspreview", True)
+        _set_nested(overrides, "audio_alignment.use_vsview", True)
 
     if not overrides:
         return config

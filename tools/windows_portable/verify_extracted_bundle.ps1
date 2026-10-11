@@ -618,7 +618,7 @@ Assert-ExactProperties -Object $bundleInfo -Expected @(
   "media_runtime_fingerprints"
 ) -Context "bundle_info"
 if (
-  (Get-RequiredProperty $bundleInfo "schema_version" "bundle_info") -ne 2 -or
+  (Get-RequiredProperty $bundleInfo "schema_version" "bundle_info") -ne 3 -or
   (Get-RequiredProperty $bundleInfo "manifest_version" "bundle_info") -ne 2 -or
   (Get-RequiredString $bundleInfo "bundle_kind" "bundle_info") -cne "full" -or
   (Get-RequiredString $bundleInfo "platform" "bundle_info") -cne "windows-x64" -or
@@ -756,6 +756,56 @@ foreach ($collectionName in @("corresponding_sources", "python_distributions")) 
     }
   }
 }
+
+$requiredVsViewDistributions = [ordered]@{
+  "jetpytools" = "3.1.2"
+  "pyside6" = "6.11.2"
+  "pyside6-addons" = "6.11.2"
+  "pyside6-essentials" = "6.11.2"
+  "shiboken6" = "6.11.2"
+  "vapoursynth-bestsource" = "22"
+  "vspackrgb" = "2.0.0"
+  "vsview" = "0.12.1"
+  "cyclopts" = "5.2.0"
+  "vsjetengine" = "1.8.0"
+}
+$inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
+  [System.StringComparer]::OrdinalIgnoreCase
+)
+foreach ($distribution in (Get-RequiredArray $inventory "python_distributions" "bundle_inventory")) {
+  $distributionName = Get-RequiredString $distribution "name" "python distribution"
+  $distributionVersion = Get-RequiredString $distribution "version" "python distribution"
+  $normalizedDistributionName = ($distributionName -replace "[-_.]+", "-").ToLowerInvariant()
+  $inventoryDistributionVersions.Add($normalizedDistributionName, $distributionVersion)
+}
+foreach ($entry in $requiredVsViewDistributions.GetEnumerator()) {
+  if (
+    -not $inventoryDistributionVersions.ContainsKey($entry.Key) -or
+    $inventoryDistributionVersions[$entry.Key] -cne $entry.Value
+  ) {
+    throw "Extracted bundle VSView distribution mismatch: $($entry.Key)=$($entry.Value) required."
+  }
+}
+Write-Host "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok"
+
+$pySideRoot = Join-Path $bundle "app\site-packages\PySide6"
+$resolvedPySideRoot = (Resolve-Path -LiteralPath $pySideRoot).Path
+$chromiumRuntimeNames = @(
+  "icudtl.dat",
+  "v8_context_snapshot.bin",
+  "v8_context_snapshot.debug.bin"
+)
+$qtWebEngineFiles = @(
+  Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
+    Where-Object {
+      $_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine" -or
+      ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
+    }
+)
+if ($qtWebEngineFiles.Count -ne 0) {
+  throw "Extracted bundle unexpectedly contains Qt WebEngine/Chromium runtime files: $($qtWebEngineFiles.FullName -join ', ')"
+}
+Write-Host "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded"
 
 $manifestSources = Get-RequiredArray $manifest "corresponding_sources" "manifest"
 $inventorySources = Get-RequiredArray $inventory "corresponding_sources" "bundle_inventory"

@@ -39,11 +39,14 @@ from frame_compare.orchestration.preflight import (
     validate_and_normalize_config_paths,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal import interruptible_prompt
+from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 from .run_contracts import (
     report_confirmed_slowpics_enabled,
-    validate_dry_run_cache_contract,
+    validate_cache_flag_contract,
     validate_dry_run_mode_contract,
     validate_run_contracts,
     validate_write_config_contracts,
@@ -129,12 +132,39 @@ def confirm_full_window_retry_on_stderr(text: str) -> bool:
     return response.strip().lower() in {"y", "yes"}
 
 
+def format_enum_choices(enum_type: type[Enum]) -> str:
+    """Unquoted comma-separated enum values for user-facing choice lists.
+
+    Shared by the invalid-choice hint below and by ``entry.py``'s per-option
+    help text, so the CLI's displayed choices cannot drift from the enum.
+    """
+    return ", ".join(member.value for member in enum_type)
+
+
+_MAX_ECHOED_CLI_VALUE = 80
+
+
+def _echo_cli_value(value: str) -> str:
+    """Bound a raw CLI value and escape control characters before echoing it in an error."""
+    printable = "".join(
+        char if char.isprintable() else repr(char)[1:-1] for char in value[:_MAX_ECHOED_CLI_VALUE]
+    )
+    return printable if len(value) <= _MAX_ECHOED_CLI_VALUE else f"{printable}... (truncated)"
+
+
 def coerce_cli_choice[CliChoiceT: Enum](
     value: str | None,
     enum_type: type[CliChoiceT],
     loc: tuple[str, ...],
+    *,
+    flag: str,
 ) -> CliChoiceT | None:
-    """Convert a CLI string choice after Typer parsing so JSON errors stay structured."""
+    """Convert a CLI string choice after Typer parsing so JSON errors stay structured.
+
+    ``flag`` is the public option name (for example ``--overlay``) so the
+    resulting error names the flag the user actually passed, not just the
+    config path it maps to.
+    """
     if value is None:
         return None
     try:
@@ -150,7 +180,9 @@ def coerce_cli_choice[CliChoiceT: Enum](
                     "input": value,
                     "ctx": {"expected": expected},
                 }
-            ]
+            ],
+            message=f"Invalid value for {flag}: {_echo_cli_value(value)}",
+            hint=f"Choose one of: {format_enum_choices(enum_type)}.",
         ) from exc
 
 
@@ -268,7 +300,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         validate_dry_run_mode_contract(args)
         if args.dry_run:
             validate_run_contracts(args, deps, normalized_config)
-            validate_dry_run_cache_contract(args)
+            validate_cache_flag_contract(args)
             handle_dry_run(args, normalized_config, console)
             return
 
@@ -290,6 +322,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             return
 
         validate_run_contracts(args, deps, normalized_config)
+        validate_cache_flag_contract(args)
         request = build_run_request_from_cli(run_options)
 
         if not args.json_output and not args.quiet:
@@ -406,10 +439,11 @@ def build_confirm_full_window_retry_callback(
         request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
         del request
-        confirmed = deps.confirm_full_window_retry(
-            "Configured lead/trail exclusions leave too little media to satisfy the\n"
-            "requested frame selection. Analyze the full shared clip for this run? [y/N] "
-        )
+        with interruptible_prompt():
+            confirmed = deps.confirm_full_window_retry(
+                "Configured lead/trail exclusions leave too little media to satisfy the\n"
+                "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+            )
         return "confirmed" if confirmed else "declined"
 
     return _confirm_full_window_retry
@@ -435,26 +469,28 @@ def build_confirm_slowpics_upload_callback(
             resolve_effective_config=resolve_effective_config,
         )
         details = Table.grid(padding=(0, 2))
-        details.add_column(style="grey70", no_wrap=True)
+        details.add_column(style="dim", no_wrap=True)
         details.add_column(overflow="fold")
         details.add_row("Visibility", escape(visibility_text.title()))
         if not opened:
             details.add_row("Report", escape(str(request.report_path)))
+        waiting_glyph = glyphs_for_console(console).waiting
         console.print()
         console.print(
             Padding(
                 Panel.fit(
                     Group("[dim]Review the local report before publishing.[/]", details),
-                    title="[bold magenta][WAIT][/] [bold bright_cyan]Publishing confirmation[/]",
-                    border_style="cyan",
+                    title=f"[bold {ACCENT}]{waiting_glyph} Publish to slow.pics?[/]",
+                    border_style=ACCENT,
                 ),
                 (0, 0, 0, 2),
             )
         )
-        confirmed = deps.confirm_upload(
-            f"    Upload to {visibility_text} slow.pics?",
-            default=False,
-        )
+        with interruptible_prompt():
+            confirmed = deps.confirm_upload(
+                f"    Upload to {visibility_text} slow.pics?",
+                default=False,
+            )
         console.print()
         if confirmed:
             return "confirmed"
@@ -464,9 +500,15 @@ def build_confirm_slowpics_upload_callback(
 
 
 def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
-    parsed_tm_preset = coerce_cli_choice(args.tm_preset, TonemapPreset, ("color", "preset"))
-    parsed_tm_curve = coerce_cli_choice(args.tm_curve, ToneCurve, ("color", "tone_curve"))
-    parsed_overlay = coerce_cli_choice(args.overlay, OverlayMode, ("screenshots", "overlay_mode"))
+    parsed_tm_preset = coerce_cli_choice(
+        args.tm_preset, TonemapPreset, ("color", "preset"), flag="--tm-preset"
+    )
+    parsed_tm_curve = coerce_cli_choice(
+        args.tm_curve, ToneCurve, ("color", "tone_curve"), flag="--tm-curve"
+    )
+    parsed_overlay = coerce_cli_choice(
+        args.overlay, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+    )
 
     return RunCliOptions(
         root=args.resolved_root,
@@ -511,6 +553,9 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     )
 
 
+_FRAMES_EXAMPLE = "Example: --frames 12,48,100"
+
+
 def parse_frame_list(value: str | None) -> list[int] | None:
     if value is None:
         return None
@@ -518,6 +563,7 @@ def parse_frame_list(value: str | None) -> list[int] | None:
         raise _frame_selection_cli_error(
             loc=("analysis", "user_frames"),
             msg="--frames must be a comma-separated list of non-negative integers",
+            hint=_FRAMES_EXAMPLE,
             input_value=value,
         )
     frames: list[int] = []
@@ -527,6 +573,7 @@ def parse_frame_list(value: str | None) -> list[int] | None:
             raise _frame_selection_cli_error(
                 loc=("analysis", "user_frames"),
                 msg="--frames must not contain empty entries",
+                hint=_FRAMES_EXAMPLE,
                 input_value=value,
             )
         try:
@@ -535,12 +582,14 @@ def parse_frame_list(value: str | None) -> list[int] | None:
             raise _frame_selection_cli_error(
                 loc=("analysis", "user_frames"),
                 msg="--frames must contain only non-negative integers",
+                hint=_FRAMES_EXAMPLE,
                 input_value=value,
             ) from exc
         if frame < 0:
             raise _frame_selection_cli_error(
                 loc=("analysis", "user_frames"),
                 msg="--frames must contain only non-negative integers",
+                hint=_FRAMES_EXAMPLE,
                 input_value=value,
             )
         frames.append(frame)
@@ -561,12 +610,14 @@ def parse_non_negative_int_option(
         raise _frame_selection_cli_error(
             loc=loc,
             msg=f"{option_name} must be a non-negative integer",
+            hint=f"Example: {option_name} 3",
             input_value=value,
         ) from exc
     if parsed < 0:
         raise _frame_selection_cli_error(
             loc=loc,
             msg=f"{option_name} must be a non-negative integer",
+            hint=f"Example: {option_name} 3",
             input_value=value,
         )
     return parsed
@@ -577,6 +628,7 @@ def _frame_selection_cli_error(
     loc: tuple[str, ...],
     msg: str,
     input_value: str,
+    hint: str,
 ) -> ConfigValidationError:
     return ConfigValidationError(
         [
@@ -588,6 +640,7 @@ def _frame_selection_cli_error(
             }
         ],
         message=msg,
+        hint=hint,
     )
 
 
@@ -741,7 +794,7 @@ def _copy_slowpics_url(
         return PostUploadActionResult(
             kind="clipboard",
             success=False,
-            warning="slow.pics clipboard: failed to copy URL",
+            warning=RunWarning("slow.pics", "warning", "slow.pics clipboard: failed to copy URL"),
         )
     return PostUploadActionResult(
         kind="clipboard",
@@ -766,13 +819,18 @@ def _open_slowpics_url(
         return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning="slow.pics browser: failed to open URL",
+            warning=RunWarning("slow.pics", "warning", "slow.pics browser: failed to open URL"),
         )
     if not opened:
         return PostUploadActionResult(
             kind="browser",
             success=False,
-            warning="slow.pics browser: failed to open URL: no browser accepted the request",
+            warning=RunWarning(
+                "slow.pics",
+                "warning",
+                "slow.pics browser: failed to open URL:",
+                "no browser accepted the request",
+            ),
         )
     return PostUploadActionResult(
         kind="browser",

@@ -1,14 +1,47 @@
+import subprocess
+import sys
+
 import pytest
 import typer.rich_utils as typer_rich_utils
 from pytest import MonkeyPatch
+from typer.core import TyperGroup
 from typer.main import get_command
 
-from frame_compare.cli.entry import _stabilize_typer_help_width, app
+from frame_compare.cli.cli_helpers import stabilize_typer_help_width
+from frame_compare.cli.entry import app
+from frame_compare.config.overrides import CLI_OVERRIDE_MAP
+from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
 
 from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
 
-def test_app_help_lists_all_commands():
+@pytest.mark.parametrize(
+    ("argument", "expected_output"),
+    [("--help", "Reproducible video comparisons"), ("version", "frame-compare ")],
+)
+def test_terminal_import_and_cli_entry_work_without_click(
+    argument: str, expected_output: str
+) -> None:
+    code = """
+import sys
+sys.modules["click"] = None
+import frame_compare.utils.terminal
+from frame_compare.cli.entry import app
+app()
+"""
+    result = subprocess.run(  # noqa: S603 - explicit interpreter and CLI arguments
+        [sys.executable, "-c", code, argument],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert expected_output in _normalize_cli_output(result.stdout)
+
+
+def test_root_help_mentions_run_wizard_doctor_preset_and_version():
     result = runner.invoke(
         app,
         ["--help"],
@@ -25,7 +58,7 @@ def test_app_help_lists_all_commands():
     assert "version" in output
 
 
-def test_run_help_shows_all_options():
+def test_run_help_declares_required_options_and_displays_selected_flags():
     REQUIRED_RUN_OPTIONS = [
         "--root",
         "-r",
@@ -143,7 +176,8 @@ def test_run_rejects_retired_frame_count_options(
             [
                 "Compare video sources and generate screenshots and an optional report.",
                 "Workspace root containing configuration, input, and generated output.",
-                "persists with --write-config",
+                "apply to this run only",
+                "Add --write-config to save the effective configuration",
                 "Require valid cached analysis",
                 "Preview what a run would use and create without probing or side effects.",
                 "Write the effective config, then exit without running.",
@@ -258,6 +292,125 @@ def test_run_help_groups_options_by_task() -> None:
     assert positions == sorted(positions)
 
 
+_PERSISTENT_HELP_PANELS = frozenset(
+    {"Sources and frame selection", "Rendering and alignment", "Reports and publishing"}
+)
+
+
+def test_run_help_panel_persistence_matches_cli_override_map() -> None:
+    """Options grouped under the three "persists" panels are exactly the CLI_OVERRIDE_MAP flags.
+
+    The run command's docstring states the persistence rule once, by panel name,
+    instead of repeating it on every option. This locks that claim to the actual
+    override map so the two cannot silently drift apart.
+    """
+    command = get_command(app)
+    assert isinstance(command, TyperGroup)
+    run_command = command.commands["run"]
+    persistent_flags = {f"--{name.replace('_', '-')}" for name in CLI_OVERRIDE_MAP}
+
+    for param in run_command.params:
+        long_opts = {opt for opt in getattr(param, "opts", ()) if opt.startswith("--")}
+        if not long_opts:
+            continue
+        panel = getattr(param, "rich_help_panel", None)
+        flags_that_persist = long_opts & persistent_flags
+        if panel in _PERSISTENT_HELP_PANELS:
+            assert flags_that_persist == long_opts, (
+                f"{long_opts} is shown in persistent panel {panel!r} "
+                "but is missing from CLI_OVERRIDE_MAP"
+            )
+        else:
+            assert not flags_that_persist, (
+                f"{long_opts} persists through CLI_OVERRIDE_MAP but its panel "
+                f"{panel!r} is not one of the documented persistent panels"
+            )
+
+
+def test_run_help_does_not_repeat_persistence_clause_per_option() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert "persists with --write-config" not in output
+    assert "requires analysis and persists" not in output
+    # The unified explanation still appears exactly once, near the top.
+    assert output.count("apply to this run only") == 1
+
+
+@pytest.mark.parametrize(
+    ("flag", "enum_type"),
+    [
+        ("--overlay", OverlayMode),
+        ("--tm-preset", TonemapPreset),
+        ("--tm-curve", ToneCurve),
+    ],
+)
+def test_run_help_lists_enum_choices_without_drift(
+    flag: str, enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve]
+) -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert flag in output
+    for member in enum_type:
+        assert member.value in output
+
+
+def test_run_help_uses_improved_metavariables() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert "COUNT" in output
+    assert "FRAME[,FRAME…]" in output
+    assert "NITS" in output
+
+
+def test_run_help_shows_three_examples() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    output = _normalize_cli_help(result.stdout)
+
+    assert result.exit_code == 0
+    assert "Examples:" in output
+    assert "Preview the configured comparison: frame-compare run --dry-run" in output
+    assert (
+        "(configured frame selection still applies): frame-compare run "
+        "--frames 120,1200,2400 --overlay diagnostic --no-upload"
+    ) in output
+    assert (
+        "Save an override without running: frame-compare run --overlay diagnostic --write-config"
+    ) in output
+    # The frames example must not claim to disable other selection categories.
+    assert "only these frames" not in output
+    assert "disables" not in output
+
+
 def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("_TYPER_COMPLETE_TEST_DISABLE_SHELL_DETECTION", "True")
     result = runner.invoke(
@@ -279,7 +432,7 @@ def test_root_generates_shell_completion_source(monkeypatch: MonkeyPatch) -> Non
 def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("TERMINAL_WIDTH", "200")
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
-    _stabilize_typer_help_width()
+    stabilize_typer_help_width()
     assert typer_rich_utils.MAX_WIDTH == 200
 
 
@@ -290,29 +443,6 @@ def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
 ) -> None:
     monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", 120)
 
-    _stabilize_typer_help_width(terminal_width)
+    stabilize_typer_help_width(terminal_width)
 
     assert typer_rich_utils.MAX_WIDTH == 120
-
-
-def test_import_does_not_mutate_terminal_width():
-    import os
-    import subprocess
-    import sys
-
-    env = os.environ.copy()
-    env.pop("TERMINAL_WIDTH", None)
-    cmd = [
-        sys.executable,
-        "-c",
-        "import os; "
-        "import frame_compare.cli.entry; "
-        "assert 'TERMINAL_WIDTH' not in os.environ, 'should not set env on import'; "
-        "import typer.rich_utils as tru; "
-        "assert tru.MAX_WIDTH is None, 'should not set MAX_WIDTH on import'; ",
-    ]
-    try:
-        res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
-    except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"CLI import subprocess timed out after {exc.timeout} seconds")
-    assert res.returncode == 0, res.stderr

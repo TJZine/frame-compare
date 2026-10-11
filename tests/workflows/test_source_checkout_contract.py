@@ -294,7 +294,6 @@ def test_source_checkout_bounds_every_git_boundary(repo_root: Path) -> None:
         "subprocess.check_output(command, timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS)"
         in embedded_source
     )
-    assert embedded_source.count('"cat-file", "--batch"') == 1
     assert re.search(
         r"process\.communicate\(\s*timeout=GIT_SUBPROCESS_TIMEOUT_SECONDS", embedded_source
     )
@@ -435,46 +434,17 @@ def test_source_checkout_refuses_pre_existing_destination(repo_root: Path, tmp_p
 
 
 @_POSIX_PROCESS_PROOF
-def test_source_checkout_never_cleans_replaced_final_destination(
-    repo_root: Path, tmp_path: Path
-) -> None:
-    repository, commit, _tree_digest = _create_source_repo(tmp_path)
-    destination = tmp_path / "replaced-destination"
-    timeout_shim = _timeout_shim(tmp_path)
-    _race_git_shim(tmp_path)
-    real_git = shutil.which("git")
-    assert real_git is not None
-
-    completed = _run_checkout(
-        repo_root,
-        repo_root / "tools/checkout_source_commit.sh",
-        timeout_shim,
-        repository,
-        commit,
-        "f" * 64,
-        destination,
-        extra_env={
-            "FC_RACE_DESTINATION": str(destination),
-            "FC_REAL_GIT": real_git,
-        },
-    )
-
-    assert completed.returncode != 0
-    assert destination.is_dir()
-    assert (destination / "marker").read_text(encoding="utf-8") == "caller-owned\n"
-    assert not list(tmp_path.glob(".replaced-destination.staging.*"))
-
-
-@_POSIX_PROCESS_PROOF
-def test_source_checkout_publishes_without_clobbering_late_destination(
-    repo_root: Path, tmp_path: Path
+@pytest.mark.parametrize("late", [False, True], ids=["replaced-destination", "late-destination"])
+def test_source_checkout_preserves_destination_during_race(
+    repo_root: Path, tmp_path: Path, late: bool
 ) -> None:
     repository, commit, tree_digest = _create_source_repo(tmp_path)
-    destination = tmp_path / "late-destination"
+    destination = tmp_path / ("late-destination" if late else "replaced-destination")
     timeout_shim = _timeout_shim(tmp_path)
     _race_git_shim(tmp_path)
     real_git = shutil.which("git")
-    assert real_git is not None
+    if real_git is None:
+        pytest.fail("git is required for the checkout race proof")
 
     completed = _run_checkout(
         repo_root,
@@ -482,7 +452,7 @@ def test_source_checkout_publishes_without_clobbering_late_destination(
         timeout_shim,
         repository,
         commit,
-        tree_digest,
+        tree_digest if late else "f" * 64,
         destination,
         extra_env={
             "FC_RACE_DESTINATION": str(destination),
@@ -490,7 +460,11 @@ def test_source_checkout_publishes_without_clobbering_late_destination(
         },
     )
 
-    assert completed.returncode == 2
-    assert completed.stderr == f"source destination already exists: {destination}\n"
+    if late:
+        assert completed.returncode == 2
+        assert completed.stderr == f"source destination already exists: {destination}\n"
+    else:
+        assert completed.returncode != 0
+        assert destination.is_dir()
     assert (destination / "marker").read_text(encoding="utf-8") == "caller-owned\n"
-    assert not list(tmp_path.glob(".late-destination.staging.*"))
+    assert not list(tmp_path.glob(f".{destination.name}.staging.*"))

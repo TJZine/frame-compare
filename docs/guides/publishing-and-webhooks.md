@@ -1,8 +1,12 @@
 # Publishing and webhooks
 
-Frame Compare is offline-first. slow.pics upload is disabled by default, and a
-first-use wizard writes `slowpics.auto_upload = false`. Enable it deliberately only
-after a local report looks right:
+## Turn on publishing
+
+Frame Compare is offline-first. slow.pics upload is disabled by default, and the
+first-use wizard does not prompt for or enable an upload toggle; it writes
+`slowpics.auto_upload = false` for a new configuration. Enable it deliberately only
+after a local report looks right, using the config file, the
+`FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true` environment variable, or a saved preset:
 
 ```toml
 [slowpics]
@@ -10,9 +14,7 @@ auto_upload = true
 visibility = "unlisted"
 ```
 
-`--no-upload` forces upload off for a run. For an interactive report-first decision,
-you can also set `confirm_upload_after_report = true`; this requires an interactive,
-report-enabled run and has no dedicated run flag.
+`--no-upload` forces upload off for a run.
 
 Uploads use the explicitly planned screenshots from the current render. At most three
 image requests are in flight. Navigation and metadata requests use
@@ -21,6 +23,21 @@ and `max_retries = 3`. Rate-limited responses honor the service's retry timing w
 the configured retry budget. See the
 [slow.pics contract](../current-cli-contract.md#slowpics-upload-behavior) before changing
 retention, deletion, retry, or post-upload behavior.
+
+## Confirm after reviewing the report
+
+Set `confirm_upload_after_report = true` with `auto_upload = true` to render locally,
+review the report, and then confirm the upload:
+
+```toml
+[slowpics]
+auto_upload = true
+confirm_upload_after_report = true
+visibility = "unlisted"
+```
+
+This needs an interactive run with the report enabled; JSON, quiet, and non-interactive
+runs cannot prompt.
 
 ## Webhook notification
 

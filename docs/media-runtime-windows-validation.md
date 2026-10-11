@@ -29,16 +29,18 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.15 |
-| VapourSynth | R79, API R4.2 |
+| Python | 3.13.16 |
+| VapourSynth | R81, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
-| Akarin | 1.5.0, `akarin` namespace loaded |
-| VSZip | 22.1.0, `vszip` namespace loaded |
-| FFmpeg | `n8.1.2-34-g9b6c8969e0`, BtbN win64 LGPL 8.1 build |
-| Full runtime fingerprint | `2c043dabb96a4ad68d51fa46eff7504f9200fe781fe2705a6cbb384d13c18974` |
-| L-SMASH index token | `lsw1310-56c451f754fd` |
+| BestSource (VSView/UI only) | 22 |
+| VSView / CLI parser | 0.12.0 / Cyclopts 5.2.0 |
+| vspackrgb | 2.0.0 (Rust extension) |
+| PySide6 family | 6.11.2 |
+| FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |
+| Full runtime fingerprint | `b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320` |
+| L-SMASH index token | `lsw1310-f125953022b6` |
 
 ## 1. Exact source and repository gates
 
@@ -87,7 +89,7 @@ the repository-pinned Python and `uv` versions:
 
 ```powershell
 uv lock --check
-uv sync --all-groups --frozen
+uv sync --all-groups --extra vsview --frozen
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync pyright --warnings
@@ -137,10 +139,15 @@ Required evidence:
 - No artifact is accepted from a mutable fallback URL.
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
+- `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
+  schema-2 pre-native-panel bundles are not eligible for code-only updates.
 - The recorded source SHA equals the tested pull-request SHA.
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
+- PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
+  files are absent and both build/extraction verifiers report the required exclusion
+  markers.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
@@ -196,12 +203,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R79 independently from API R4.2.
+- VapourSynth reports R81 independently from API R4.3.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
 - `ffmpeg` and `ffprobe` resolve inside the bundle and report the selected BtbN build.
-- Plugin loading uses deterministic package/extra-plugin paths.
+- Plugin loading uses only the deterministic canonical package plugin path.
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 
@@ -297,7 +304,7 @@ Verify all of the following:
 
 - A legacy adjacent `<media>.lwi` is ignored and not deleted.
 - The candidate creates
-  `<media>.frame-compare-lsw1310-56c451f754fd.lwi`.
+  `<media>.frame-compare-lsw1310-f125953022b6.lwi`.
 - A second run reuses the candidate-owned index.
 - A corrupt candidate-owned index is removed and regenerated once.
 - A missing index is created normally.
@@ -319,23 +326,28 @@ Verify with old and newly generated data:
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the immediate predecessor to this 1310 candidate:
-the R79 / L-SMASH-Works 1296 / Akarin 1.4.1 bundle with full runtime fingerprint
-`59c875f1d2a3eb3df541ed6c7a434eea6ebe40473666920699b698e8738840dd`.
+Keep one untouched installation of the immediate predecessor to this R81 candidate:
+the R80 / VSView 0.11.0 / vspackrgb 1.4.0 / August 2026 FFmpeg bundle with
+full runtime fingerprint
+`a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8`.
+Retain an older schema-2 installation separately when available for the
+pre-native-panel refusal case.
 
 Required cases:
 
 1. Build the candidate code-only update ZIP and its manifest.
 2. Attempt to apply it to the previous bundle.
-3. Confirm refusal occurs before file replacement because the native-runtime
-   fingerprint differs.
-4. Confirm an unsafe Python-dependency override does not bypass that refusal.
-5. Confirm the error directs the user to install the complete portable bundle.
-6. Install/extract the complete candidate bundle and confirm generated data stored
+3. Confirm refusal occurs before file replacement because the previous bundle's
+   full media-runtime fingerprint differs from the candidate's.
+4. With otherwise matching candidate fingerprints, confirm a schema-2 bundle still
+   refuses before file replacement.
+5. Confirm an unsafe Python-dependency override does not bypass that refusal.
+6. Confirm the error directs the user to install the complete portable bundle.
+7. Install/extract the complete candidate bundle and confirm generated data stored
    outside the bundle remains available.
-7. Apply a code-only update whose required fingerprint matches the candidate bundle.
-8. Verify backup creation, successful apply, rollback, and hash restoration.
-9. Test missing, malformed, and legacy runtime-fingerprint metadata; each must fail
+8. Apply a code-only update whose required fingerprint matches the candidate bundle.
+9. Verify backup creation, successful apply, rollback, and hash restoration.
+10. Test missing, malformed, and legacy runtime-fingerprint metadata; each must fail
    closed without partially updating the installation.
 
 ## 9. End-to-end comparisons
@@ -357,7 +369,40 @@ For each run retain:
 Confirm deterministic repeatability from a clean generated-data directory and from a
 warm candidate cache.
 
-## 10. Completion record
+## 10. Native VSView panel acceptance
+
+Hosted Windows verification is required to prove the exact package, embedded runtime,
+same-environment entry-point discovery/loading, offscreen panel construction,
+generated-session metadata, atomic result round trip, and fail-closed result
+validation. After that proof
+passes, record these remaining interactive checks on a physical Windows 10/11 x64
+system:
+
+- open a real Frame Compare-generated session through the installed portable launcher;
+- verify the panel is discoverable from VSView's Tool Panel and remains inert in an
+  ordinary VSView session;
+- verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
+  suggestion markers, source-frame bounds, signed relationship, and trim-direction text;
+- unlink playheads, visit every source, use the whole-set positions action, then close
+  VSView and verify Frame Compare applies only the validated offsets;
+- exercise the manual source-frame and known-offset bases plus the whole-set keep-audio
+  action;
+- close or cancel before saving and verify optional mode retains the current result
+  while forced mode fails with an actionable diagnostic;
+- exercise missing/malformed/stale/mixed/duplicate/incomplete/out-of-bounds sidecars,
+  bounded readiness failure, child-process failure, and timeout behavior;
+- use real L-SMASH-backed media to verify native decoder/index diagnostics, then inspect
+  early, middle, late, and final shared-content evidence for drift or edit changes;
+- on the production GPU, verify Vulkan/HDR behavior and compare report output against
+  the prior supported bundle where the release changes runtime behavior.
+
+Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
+screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
+as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
+unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
+its offscreen contract does not establish visible ergonomics.
+
+## 11. Completion record
 
 Summarize the physical pass in the pull request with:
 

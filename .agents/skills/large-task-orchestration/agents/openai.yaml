@@ -1,6 +1,0 @@
-interface:
-  display_name: "Large Task Orchestration"
-  short_description: "Coordinate bounded subagents for very large work"
-  default_prompt: "Use $large-task-orchestration to coordinate this very large repository task."
-policy:
-  allow_implicit_invocation: false

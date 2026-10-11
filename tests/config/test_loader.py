@@ -13,15 +13,8 @@ from frame_compare.config.errors import (
 from frame_compare.config.loader import (
     get_default_config,
     load_config,
-    load_config_from_env,
     load_raw_config,
 )
-
-
-def test_load_default_config() -> None:
-    """Test loading default config without TOML or env."""
-    config = get_default_config()
-    assert config.analysis.random_frame_count == 10
 
 
 def test_load_from_toml_file(tmp_path: Path) -> None:
@@ -81,21 +74,35 @@ def test_load_slowpics_naming_and_source_label_fields_from_toml(tmp_path: Path) 
     assert config.slowpics.image_upload_timeout_seconds == 240.0
 
 
-def test_toml_file_not_found_raises() -> None:
-    """Test that missing config file raises ConfigNotFoundError."""
-    with pytest.raises(ConfigNotFoundError) as exc:
-        load_config(config_path=Path("non_existent.toml"))
-    assert "Configuration file not found" in str(exc.value)
-
-
-def test_toml_syntax_error_raises(tmp_path: Path) -> None:
-    """Test that invalid TOML syntax raises ConfigParseError."""
-    config_file = tmp_path / "bad.toml"
-    config_file.write_text("invalid = [", encoding="utf-8")
-
-    with pytest.raises(ConfigParseError) as exc:
-        load_config(config_path=config_file)
-    assert "Failed to parse" in str(exc.value)
+@pytest.mark.parametrize(
+    ("raw", "filename", "content", "error_type", "message"),
+    [
+        (False, "non_existent.toml", None, ConfigNotFoundError, "Configuration file not found"),
+        (False, "bad.toml", "invalid = [", ConfigParseError, "Failed to parse"),
+        (True, "missing.toml", None, ConfigNotFoundError, None),
+    ],
+)
+def test_config_load_rejects_missing_or_malformed_files(
+    tmp_path: Path,
+    raw: bool,
+    filename: str,
+    content: str | None,
+    error_type: type[ConfigNotFoundError] | type[ConfigParseError],
+    message: str | None,
+) -> None:
+    path = tmp_path / filename
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    with pytest.raises(error_type) as exc:
+        if raw:
+            load_raw_config(path)
+        else:
+            load_config(config_path=path)
+    if message is not None:
+        assert message in str(exc.value)
+    else:
+        assert isinstance(exc.value, ConfigNotFoundError)
+        assert exc.value.path == path
 
 
 def test_toml_with_utf8_bom_is_accepted(tmp_path: Path) -> None:
@@ -105,6 +112,14 @@ def test_toml_with_utf8_bom_is_accepted(tmp_path: Path) -> None:
 
     config = load_config(config_path=config_file)
     assert config.analysis.random_frame_count == 20
+
+
+def test_config_with_invalid_utf8_raises_config_parse_error(tmp_path: Path) -> None:
+    config_file = tmp_path / "invalid-encoding.toml"
+    config_file.write_bytes(b"[analysis]\nrandom_frame_count = 20\n\xff")
+
+    with pytest.raises(ConfigParseError, match="not valid UTF-8"):
+        load_config(config_path=config_file)
 
 
 def test_validation_error_raises(tmp_path: Path) -> None:
@@ -164,91 +179,6 @@ def test_raw_config_load_ignores_environment_and_redacts_invalid_input(
     assert "raw-secret" not in str(exc_info.value.context.to_dict())
 
 
-def test_raw_config_load_empty_document_uses_defaults_without_environment(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_file = tmp_path / "empty.toml"
-    config_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "77")
-
-    document = load_raw_config(config_file)
-
-    assert document.payload == {}
-    assert document.config.model_dump() == get_default_config().model_dump()
-    assert document.config.analysis.random_frame_count == 10
-
-
-def test_raw_config_load_missing_file_uses_config_not_found_error(tmp_path: Path) -> None:
-    config_file = tmp_path / "missing.toml"
-
-    with pytest.raises(ConfigNotFoundError) as exc_info:
-        load_raw_config(config_file)
-
-    assert exc_info.value.path == config_file
-
-
-def test_config_validation_error_context_is_json_serializable(tmp_path: Path) -> None:
-    """Test that validation error context can be serialized to JSON."""
-    config_file = tmp_path / "invalid.toml"
-    config_file.write_text(
-        """
-        [analysis]
-        random_frame_count = -1
-        """,
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigValidationError) as exc:
-        load_config(config_path=config_file)
-
-    # This should not raise
-    import json
-
-    json.dumps(exc.value.context.to_dict())
-
-
-def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test overriding config via environment variables."""
-    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "30")
-
-    config = load_config_from_env()
-    assert config.analysis.random_frame_count == 30
-
-
-def test_env_override_empty_string_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Empty-string env var should raise ConfigValidationError."""
-    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "")
-
-    with pytest.raises(ConfigValidationError):
-        load_config_from_env()
-
-
-def test_cli_override_takes_precedence(tmp_path: Path) -> None:
-    """Test that CLI overrides take precedence over file."""
-    config_file = tmp_path / "config.toml"
-    config_file.write_text(
-        """
-        [analysis]
-        random_frame_count = 20
-        """,
-        encoding="utf-8",
-    )
-
-    overrides: dict[str, Any] = {"analysis": {"random_frame_count": 50}}
-    config = load_config(config_path=config_file, overrides=overrides)
-
-    assert config.analysis.random_frame_count == 50
-
-
-def test_load_config_none_path_with_empty_overrides_returns_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    config = load_config(config_path=None, overrides={})
-    assert config.analysis.random_frame_count == 10
-
-
 def test_empty_overrides_leave_defaults_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -281,43 +211,95 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert config.analysis.random_frame_count == 30
 
 
-def test_tmdb_api_key_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy TMDB_API_KEY alias is no longer supported."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
-
-    config = load_config()
-    assert config.tmdb.api_key is None
-
-
-def test_tmdb_api_key_nested_var_takes_precedence(
+def test_nested_runtime_memory_limit_environment_value_is_decoded_without_relaxing_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Canonical TMDB nested var is used when both vars are set."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
-    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "sentinel-tmdb-api-key")
-
-    config = load_config()
-    assert config.tmdb.api_key == "sentinel-tmdb-api-key"
-
-
-def test_log_level_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy FRAME_COMPARE_LOG_LEVEL alias is no longer supported."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("FRAME_COMPARE_LOG_LEVEL", "DEBUG")
-
-    config = load_config()
-    assert config.logging.level == "INFO"
-
-
-@pytest.mark.parametrize("value", ["mobius", "linear"])
-def test_tone_curve_is_rejected(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_COLOR__TONE_CURVE", value)
-
-    with pytest.raises(ConfigValidationError) as excinfo:
-        load_config_from_env()
-    assert any(
-        isinstance(loc, list) and any(str(part).lower() == "tone_curve" for part in loc)
-        for loc in (err.get("loc") for err in excinfo.value.validation_errors)
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        "[runtime]\nmemory_limit_mb = 1024\n",
+        encoding="utf-8",
     )
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "2048")
+
+    config = load_config(config_path=config_file)
+
+    assert config.runtime.memory_limit_mb == 2048
+
+    with pytest.raises(ConfigValidationError):
+        load_config(
+            config_path=config_file,
+            overrides={"runtime": {"memory_limit_mb": "2048"}},
+        )
+
+    monkeypatch.delenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB")
+    config_file.write_text(
+        '[runtime]\nmemory_limit_mb = "2048"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError):
+        load_config(config_path=config_file)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["511", "512.0", "true", "not-an-integer", "9" * 5000],
+    ids=["below-minimum", "float", "bool", "non-integer", "overlong-decimal"],
+)
+def test_invalid_nested_runtime_memory_limit_environment_value_is_typed_failure(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", value)
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        load_config()
+
+    assert exc_info.value.validation_errors
+
+
+def test_raw_config_ignores_runtime_memory_limit_environment_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[runtime]\nmemory_limit_mb = 1024\n", encoding="utf-8")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "not-an-integer")
+
+    document = load_raw_config(config_file)
+
+    assert document.payload["runtime"] == {"memory_limit_mb": 1024}
+    assert document.config.runtime.memory_limit_mb == 1024
+
+
+def test_default_config_ignores_runtime_memory_limit_environment_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "2048")
+
+    assert get_default_config().runtime.memory_limit_mb is None
+
+
+@pytest.mark.parametrize(
+    ("environment", "section", "field", "expected"),
+    [
+        ({"TMDB_API_KEY": "legacy_key"}, "tmdb", "api_key", None),
+        (
+            {"TMDB_API_KEY": "legacy_key", "FRAME_COMPARE_TMDB__API_KEY": "sentinel-tmdb-api-key"},
+            "tmdb",
+            "api_key",
+            "sentinel-tmdb-api-key",
+        ),
+        ({"FRAME_COMPARE_LOG_LEVEL": "DEBUG"}, "logging", "level", "INFO"),
+    ],
+)
+def test_config_environment_aliases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: dict[str, str],
+    section: str,
+    field: str,
+    expected: object,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    config = load_config()
+    assert getattr(getattr(config, section), field) == expected

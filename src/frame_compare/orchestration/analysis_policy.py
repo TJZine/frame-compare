@@ -16,6 +16,30 @@ def needs_analysis(config: AnalysisConfig) -> bool:
     )
 
 
+def validate_cache_mode_flags(*, no_cache: bool, from_cache_only: bool) -> None:
+    """Reject mutually exclusive cache modes before runtime work."""
+    if not no_cache or not from_cache_only:
+        return
+    raise ConfigValidationError(
+        [
+            {
+                "type": "value_error",
+                "loc": ["cli", "no_cache"],
+                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
+                "input": True,
+            },
+            {
+                "type": "value_error",
+                "loc": ["cli", "from_cache_only"],
+                "msg": "--no-cache and --from-cache-only are mutually exclusive.",
+                "input": True,
+            },
+        ],
+        message="Cache mode flags are mutually exclusive",
+        hint="Use either --no-cache or --from-cache-only, not both",
+    )
+
+
 def validate_skip_analysis_frame_selection_contract(
     *,
     skip_analysis: bool,

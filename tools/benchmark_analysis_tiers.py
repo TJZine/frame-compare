@@ -405,7 +405,7 @@ def _run_tier(
     cpu_started = time.process_time()
     trial_started = time.perf_counter()
     analyze_started = time.perf_counter()
-    metrics = calculate_metrics(
+    acquisition = calculate_metrics(
         list(video_paths),
         tier_config,
         cache_dir,
@@ -419,6 +419,7 @@ def _run_tier(
         selection_domain=selection_domain,
         timing_recorder=recorder,
     )
+    metrics = acquisition.metrics
     analyze_seconds = time.perf_counter() - analyze_started
     _require_cache_policy(
         policy=metric_cache_policy,

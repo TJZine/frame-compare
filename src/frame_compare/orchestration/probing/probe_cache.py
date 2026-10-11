@@ -16,6 +16,7 @@ import tomli_w
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 from frame_compare.vs.types import HDRMetadata
@@ -130,7 +131,10 @@ def _load_fps(entry: Mapping[str, object]) -> Fraction:
     fps_den = _require_int(entry, "fps_den")
     if fps_den == 0:
         raise ValueError("fps_den must be non-zero")
-    return Fraction(fps_num, fps_den)
+    fps = Fraction(fps_num, fps_den)
+    if fps <= 0:
+        raise ValueError("fps must be positive")
+    return fps
 
 
 def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
@@ -142,9 +146,15 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
     entry = entry_raw
 
     try:
+        path = entry["path"]
+        if not isinstance(path, str):
+            raise TypeError("path must be a string")
+        size_bytes = _require_int(entry, "size_bytes")
+        if size_bytes < 0:
+            raise ValueError("size_bytes must be non-negative")
         fingerprint = ClipFingerprint(
-            path=Path(str(entry["path"])),
-            size_bytes=_require_int(entry, "size_bytes"),
+            path=Path(path),
+            size_bytes=size_bytes,
             mtime_ns=_require_int(entry, "mtime_ns"),
         )
 
@@ -161,9 +171,9 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         return _CacheEntryLoadOutcome(
             snapshot=ClipProbeSnapshot(
                 fingerprint=fingerprint,
-                width=_require_int(entry, "width"),
-                height=_require_int(entry, "height"),
-                num_frames=_require_int(entry, "num_frames"),
+                width=_positive_int(entry, "width"),
+                height=_positive_int(entry, "height"),
+                num_frames=_positive_int(entry, "num_frames"),
                 fps=_load_fps(entry),
                 is_hdr=is_hdr,
                 hdr_metadata=hdr_metadata,
@@ -175,6 +185,13 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         )
     except (KeyError, TypeError, ValueError) as e:
         return _CacheEntryLoadOutcome(snapshot=None, warning=str(e))
+
+
+def _positive_int(entry: Mapping[str, object], field: str) -> int:
+    value = _require_int(entry, field)
+    if value <= 0:
+        raise ValueError(f"{field} must be positive")
+    return value
 
 
 def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
@@ -213,7 +230,7 @@ def _load_clip_probe_cache(
         if abort_on_read_error:
             raise _ProbeCacheReadError from e
         return {}
-    except tomllib.TOMLDecodeError as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
         if abort_on_read_error:
             raise _ProbeCacheReadError("Malformed shared probe cache") from e
@@ -242,6 +259,15 @@ def _load_clip_probe_cache(
             log.warning("probe_cache_invalid_entry", key=key, error=outcome.warning)
             continue
 
+        expected_key = compute_probe_cache_key(outcome.snapshot.fingerprint)
+        if key != expected_key:
+            log.warning(
+                "probe_cache_invalid_entry",
+                key=key,
+                error="entry key does not match persisted fingerprint",
+            )
+            continue
+
         snapshots[key] = outcome.snapshot
 
     return snapshots
@@ -266,7 +292,7 @@ def _load_shared_clip_probe_cache_for_update(
 def _write_cache_file(cache_path: Path, output: Mapping[str, Any]) -> _CacheWriteOutcome:
     try:
         content = tomli_w.dumps(output).encode("utf-8")
-        write_bytes_atomic(cache_path, content)
+        write_bytes_atomic(cache_path, content, publish_guard=raise_if_cancelling)
     except OSError as e:
         return _CacheWriteOutcome(error=str(e))
 
@@ -357,7 +383,7 @@ def merge_shared_clip_probe_cache(
     """Merge current entries into a shared cache under one locked transaction."""
     lock_path = cache_path.with_name(f"{cache_path.name}.lock")
     try:
-        with exclusive_file_lock(lock_path):
+        with exclusive_file_lock(lock_path, abort_check=raise_if_cancelling):
             entries_by_key = _load_shared_clip_probe_cache_for_update(cache_path)
             entries_by_key.update(current_entries)
             save_clip_probe_cache(cache_path, entries_by_key)
