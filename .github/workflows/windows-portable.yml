@@ -104,6 +104,8 @@ jobs:
       require_signing: true
       environment_name: ${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}
       prepare_release_assets: false
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
 
   release:
     name: Run guarded release
@@ -121,3 +123,5 @@ jobs:
       version: ${{ inputs.version }}
       tag: ${{ inputs.tag }}
       expected_sha: ${{ inputs.expected_sha }}
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}

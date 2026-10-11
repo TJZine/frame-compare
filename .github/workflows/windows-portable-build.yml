@@ -24,6 +24,9 @@ on:
         description: Prepare the exact four versioned release assets
         required: true
         type: boolean
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML:
+        required: false
 
 jobs:
   build:

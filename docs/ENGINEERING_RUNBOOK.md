@@ -458,6 +458,7 @@ reference's probed FPS, matching `sources.match_fps = "assume_reference"`.
 Required when changing:
 
 - `.github/workflows/release.yml`
+- `.github/workflows/release-on-merge.yml`
 - `.github/workflows/release-please.yml`
 - `.github/workflows/windows-portable.yml`
 - `.github/workflows/windows-portable-build.yml`
@@ -546,11 +547,34 @@ Canonical verification path:
    GitHub resolves same-named environment secrets ahead of repository/organization
    secrets rather than enforcing an environment-only namespace. The migration and
    hosted negative-access proof are therefore release-blocking prerequisites.
-   Guarded RC and stable releases must also be dispatched from a protected branch;
+   Guarded RC and stable releases must also run from a protected branch;
    the release workflow creates the validated release tag only after its preflight.
 
 Current CI ownership:
 
+- Every signed caller explicitly passes `WINDOWS_UPDATE_SIGNING_KEY_XML` through
+  each reusable-workflow boundary. The final build job keeps its protected
+  environment and required approval. The existing repository key works during
+  migration; an environment key of the same name takes precedence when configured.
+  Unsigned PR calls pass no signing secret. Keep named forwarding at every boundary;
+  an environment binding alone does not supply an omitted secret in a reusable
+  workflow. Do not replace the explicit mapping with broad `secrets: inherit`.
+- `.github/workflows/release-on-merge.yml` observes pushes to `main`. A changed
+  stable manifest version starts publication only when GitHub identifies that exact
+  pushed commit as the merge commit of a release PR targeting this repository's
+  `main`. Supported titles are `chore(release): X.Y.Z` (Release Please),
+  `chore(release): prepare Frame Compare vX.Y.Z`, and
+  `chore(release)!: prepare Frame Compare vX.Y.Z`; the title version must match
+  the manifest. Ordinary merges, unchanged versions, and RC versions do not
+  publish. The version is compared with `main` before the push, supporting squash,
+  merge, and rebase merges even when the version bump precedes the final commit.
+  The release PR's final merged commit must be the pushed head.
+  Human merges trigger this workflow; merges performed using `GITHUB_TOKEN`
+  suppress downstream push workflows and require the manual entrypoint instead.
+  The workflow calls the same guarded release owner with the exact pushed SHA,
+  stable channel, and manifest version/tag. Production reviewer approval and
+  environment-scoped signing remain required. If `main` advances before publication,
+  the existing exact-SHA checks reject the release.
 - `.github/workflows/windows-portable.yml` is the existing default-branch
   PR/manual entrypoint. Its `release` operation calls
   `.github/workflows/release.yml` from the selected exact commit, which requires
@@ -564,7 +588,8 @@ Current CI ownership:
   and release. This keeps it dormant while the guarded release entrypoint is
   publishing that manifest version, then resumes human-reviewed version/changelog
   PR behavior for later changes. GitHub-release creation remains disabled; the
-  guarded entrypoint owns publication.
+  guarded release workflow owns publication through either automatic merge or
+  manual dispatch.
 - `.github/workflows/windows-portable-build.yml` is the reusable full portable
   build/sign/verification boundary called by PR, manual verification, and the
   release orchestrator.
@@ -619,9 +644,30 @@ that handoff as complete based only on hosted CI.
   mark it documented-only and require maintainer confirmation; this section is
   the authoritative record.
 
-The first stable lifecycle is release-branch finalization, one squash merge into
-`main`, then an exact-SHA guarded dispatch. Do not use a Release Please-generated
-initial version-bump commit. Remove temporary `bootstrap-sha` and `release-as`
+Before merging a release PR, review the entire matching `CHANGELOG.md` version
+section and complete any missing user-facing changes, migration guidance, or
+known limitations. The guarded workflow publishes that full section, rather than
+generating a replacement summary from the merge commit. All version sources must
+agree as enforced by `scripts/validate_release_contract.py`.
+
+The stable lifecycle is release-PR finalization, merging into
+`main`, then approval of the automatically requested production deployment. Manual
+publication remains available for an already-merged release or a merge that did
+not trigger automation (provided the tag/release does not already exist):
+
+```bash
+ReleaseSha=$(gh api repos/TJZine/frame-compare/git/ref/heads/main --jq '.object.sha')
+gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref main \
+  -f operation=release -f channel=stable -f version=X.Y.Z -f tag=vX.Y.Z \
+  -f expected_sha="$ReleaseSha"
+```
+
+Replace `X.Y.Z` with the prepared version on `main`. Manual and automatic release
+jobs share a per-tag concurrency group; existing tag/release checks still reject
+duplicate publication. Keep `main` at the intended release commit while approving
+and running the build. The first stable release must be `0.1.0`.
+For initial stable preparation, do not use a Release Please-generated initial
+version-bump commit. Remove temporary `bootstrap-sha` and `release-as`
 only during final stable preparation after RC acceptance; the stable validator
 rejects them if they remain. Live RC/stable dispatches, production approval,
 remote tag/release cleanup, and the final merge are maintainer-only.

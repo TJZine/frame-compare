@@ -238,7 +238,10 @@ def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
     assert workflow["permissions"] == {}
     assert jobs["release"]["uses"] == "./.github/workflows/release.yml"
     assert set(jobs["release"]["with"]) == {"channel", "version", "tag", "expected_sha"}
-    assert "secrets" not in jobs["release"]
+    signing_secret = {
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
+    }
+    assert jobs["release"]["secrets"] == signing_secret
     assert jobs["verify_pull_request"]["permissions"] == {"contents": "read"}
     assert jobs["verify_pull_request"]["with"]["require_signing"] == "false"
     assert jobs["verify_pull_request"]["with"]["environment_name"] == "windows-ci"
@@ -247,7 +250,7 @@ def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
     assert "secrets" not in jobs["validate_manual"]
     assert jobs["verify_manual"]["permissions"] == {"contents": "read"}
     assert jobs["verify_manual"]["with"]["require_signing"] == "true"
-    assert "secrets" not in jobs["verify_manual"]
+    assert jobs["verify_manual"]["secrets"] == signing_secret
     assert jobs["release"]["permissions"] == {
         "attestations": "write",
         "contents": "write",
@@ -261,8 +264,14 @@ def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
         for step in release["jobs"]["preflight"]["steps"]
         if step.get("name") == "Validate release channel, versions, tag, and SHA"
     )
-    assert "secrets" not in release["on"]["workflow_call"]
-    assert "secrets" not in windows
+    assert release["on"]["workflow_call"]["secrets"] == {
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": {"required": "true"}
+    }
+    assert windows["secrets"] == signing_secret
+    build = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable-build.yml")
+    assert build["on"]["workflow_call"]["secrets"] == {
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": {"required": "false"}
+    }
     assert validate_release["env"]["DISPATCH_REF_PROTECTED"] == ("${{ github.ref_protected }}")
     assert validate_release["env"]["DISPATCH_REF_TYPE"] == "${{ github.ref_type }}"
     assert '"$DISPATCH_REF_TYPE" != "branch"' in validate_release["run"]
