@@ -9,157 +9,177 @@ notes used by the guarded publication workflow.
 
 ## [0.6.1]
 
-### Added
+This release includes the changes since **0.5.0**. Version 0.6.0 was prepared but
+not published; its changes are included here.
 
-- Optional `[runtime].memory_limit_mb` (integer, minimum 512) caps the
-  VapourSynth frame cache for analysis, rendering, alignment video checks, and
-  the separate VSView session. Unset retains the native default; this is not
-  a hard limit on total process memory and does not affect audio buffers.
+### Highlights
 
-### Changed
+- **Safer alignment:** audio offsets are checked against video before automatic
+  application, with clearer evidence for candidates that still need review.
+- **VSView replaces VSPreview:** alignment confirmation now lives in the native
+  VSView panel, with the source lineup and audio evidence together.
+- **Easier report review:** a reorganized Inspector, source details, lens captions,
+  and better recovery when images fail to load.
+- **Clearer setup and troubleshooting:** refreshed documentation, terminal output,
+  wizard guidance, and local-only runtime checks.
 
-- Merging a stable release PR into `main` automatically starts the guarded Windows
-  build and release workflow. Production approval remains required, and published
-  release notes include the full matching versioned changelog section.
-- Replace the distributed-window audio estimator with whole-track chunked GCC-PHAT
-  correlation plus container start compensation and bounded L-SMASH video
-  confirmation. Fresh results apply only when global audio authority, the exact-frame
-  video vote, and every frame-distinct credible disagreement gate pass; unresolved
-  runs/chunks and video-confirmed alternatives remain reviewable but unapplied.
-  Level, compression, downmix, stem, quiet, and locally inconclusive weak-audio
-  differences remain context rather than false vetoes; a video-confirmed alternative
-  still blocks at any target. Terminal and VSView review now share the same
-  bounded region/check-point projection, and only `trusted_automatic` results reach
-  trims or the computed cache. Review regions use reference-video time, retain the
-  actual winning local video offset, and report every applicable audio/video
-  refusal reason.
-- Select video-check positions by reference motion instead of even spacing: each
-  base and examined-target slot scores the candidate frame with the most luma
-  motion, while unexamined targets keep evenly spaced planned frames that are
-  never scored. Without stream overrides, the reference now switches to its
-  best-ranked stream in a language both sides share when its default language
-  is missing from the comparison, and `screenshots.active_rect_detection`
-  defaults to `auto`.
-- Analyse retimed sources' audio on their effective timeline: when a source's
-  effective frame rate differs from its native rate (`match_fps` or a per-source
-  `effective_fps` override), alignment stretches its audio by the exact
-  source-over-effective ratio before chunking, so 24 fps releases of 23.976
-  content and PAL 25 fps releases hold a constant frame offset. Verbose output
-  and panel details note each retimed side.
-- Replace the retired interactive viewer integration with VSView 0.12.1 using its
-  documented named-output API. The supported dependency is the base `vsview` extra;
-  its `recommended` and `full` extras are not selected.
-- Preserve generated-session L-SMASH-Works loading, Frame Compare overlays, source
-  ordering, and audio offset sign and review conventions while moving confirmation
-  into the native VSView panel and removing the old viewer compatibility bootstrap.
-  VSView's BestSource workspace remains UI-only and does not replace Frame
-  Compare's analysis, probe, render, index, or cache-key source loader.
-- Rename interactive diagnostic and machine-readable identifiers to VSView, including
-  `audio_alignment.use_vsview`, the `vsview` doctor check, and the
-  `browser_clipboard_or_vsview` dry-run field. Numeric error codes remain unchanged.
-- Refresh the report viewer: the Inspector has Frame, Clips, Image offset, and Review
-  tabs with a per-source frame table; review export and import moved into the Review
-  tab; the lens can caption the magnified source; source labels show file size; the
-  header shows a localized generation time; and the fit-width control is removed.
-- Refresh the terminal presentation of the run plan, sources, alignment, and the
-  completion summary. Machine-readable JSON output is unchanged.
+### Before upgrading
+
+- **Windows portable users:** install the complete 0.6.1 bundle into a fresh,
+  empty folder when upgrading from a VSPreview-era or pre-native-panel schema-2
+  installation. Do not overlay the new bundle on an old one. Code-only updates
+  refuse incompatible runtime fingerprints, requirements, or unknown installed
+  versions.
+- **Rename the viewer setting:** replace `audio_alignment.use_vspreview = true`
+  with `audio_alignment.use_vsview = true`. The old key is no longer accepted.
+  Native installations need the base `vsview` extra; its `recommended` and `full`
+  extras are not required.
+- **Remove retired alignment settings:** these `[audio_alignment]` keys now fail
+  validation as unknown fields: `sample_rate`, `correlation_mode`,
+  `preprocessing_mode`, `confidence_threshold`, `ambiguity_peak_ratio`,
+  `window_length_seconds`, `window_stride_seconds`, `minimum_valid_windows`,
+  `consensus_minimum_ratio`, `refinement_mode`, and `refinement_sample_rate`.
+- **Expect alignment recomputation:** older shared-cache schema-v1 entries are
+  ignored, and stale computed or shared entries are recomputed under the new
+  alignment policy. Run-local `manual_overrides.toml` keeps its v1 format, path,
+  and offset convention.
+- **Windows source installers need PowerShell 7.** Installing a published portable
+  bundle still supports PowerShell 5.1. Run `frame-compare doctor` after installing
+  the new runtime.
+
+### Audio alignment and VSView review
+
+- Alignment now compares the whole audio track in chunks, compensates for container
+  start times, and checks candidate offsets against decoded video. New automatic
+  audio candidates affect trims or the computed cache only when the audio authority,
+  exact-frame video, and competing-offset checks pass. A video-confirmed candidate can still need
+  review; video confirmation alone does not authorize automatic application.
+- Level, compression, downmix, stem, quiet, and locally weak-audio differences are
+  considered as context rather than automatic vetoes. Unresolved runs, credible
+  chunk disagreements, and video-confirmed alternative offsets remain reasons to
+  withhold automatic application.
+- Video checks favor motion-rich reference frames over evenly spaced frames.
+  Planned positions at targets that were not examined are not counted as evidence.
+- Without stream overrides, alignment chooses the reference's best-ranked stream
+  in a shared language when its default language is absent from the comparison.
+- Audio follows the effective timeline when `match_fps` or `effective_fps` retimes
+  a source. This supports constant offsets for 24 fps releases of 23.976 content
+  and PAL 25 fps releases; verbose output and panel details identify retimed sides.
+- VSView 0.12.1 replaces the old viewer integration. Confirmation uses the native
+  alignment panel while preserving source ordering, overlays, generated-session
+  L-SMASH-Works loading, and the `reference − comparison` offset convention.
+  VSView's BestSource workspace is UI-only; Frame Compare's analysis, rendering,
+  indexing, and cache source loader remain unchanged.
+- Terminal and panel review share the same bounded evidence regions and check
+  points. Regions use reference-video time, retain the winning local video offset,
+  and explain why a candidate was not applied. Manual and cached applied offsets
+  are identified as applied too.
+- Alignment stops if a prepared source changes, even when audio is unavailable,
+  rather than allowing rendering to use stale metadata. Excessive metadata-derived
+  audio chunk counts are rejected before allocating the plan. Interrupted VSView
+  waits now clean up their child processes.
+
+### Reports and screenshot review
+
+- The Inspector now separates **Frame**, **Clips**, **Image offset**, and **Review**.
+  A per-source frame table makes timing easier to inspect, and review import and
+  export live in the Review tab.
+- The lens can caption the magnified source, source labels show file sizes, and the
+  report header displays the generation time in your local format. The fit-width
+  control has been removed.
+- Failed images in Slider, Single, Diff, and Blink show source-specific unavailable
+  messages and Retry actions. Navigation and successful retries recover without
+  stale image events or pending Diff loads overwriting the current frame.
+  Blink preserves focused Retry controls and avoids repeated error announcements.
+- An explicitly paused Blink view stays paused through viewport and lens gestures.
+  Review imports apply the exact file and conflict choices shown in their preview.
+- `screenshots.active_rect_detection` now defaults to `auto`.
+
+### CLI, configuration, and documentation
+
+- Run plans, source details, alignment results, and completion summaries have a
+  refreshed terminal presentation. Warning source, severity, and details no longer
+  depend on clip-label wording, and full labels are retained in messages.
 - The wizard prints suggested `doctor`, `run --dry-run`, and `run` commands for the
-  exact workspace and config it saved.
-- `run --help` groups options by purpose, and an invalid `--overlay`, `--tm-preset`,
-  or `--tm-curve` value lists the allowed choices before any work starts.
-- Update the supported runtime to VapourSynth R81, VSView 0.12.1, CPython 3.13.16,
-  vsjetengine 1.8.0, vspackrgb 2.0.0, BestSource 22, and Windows FFmpeg
-  `n8.1.3-9-g29e619e767`. Refresh the locked dependency graph and coordinated
-  uv toolchain to 0.13.0. Install a complete portable bundle for this runtime.
+  workspace and configuration it saved. `run --help` groups options by purpose;
+  invalid `--overlay`, `--tm-preset`, and `--tm-curve` values list valid choices
+  before any work starts.
+- `doctor` checks local runtime readiness without probing slow.pics reachability;
+  `doctor --json` no longer includes a slow.pics check. Its TMDB check validates
+  configuration and credential format without making a network request.
+  Guidance links are repaired. Documentation now has refreshed onboarding, focused
+  guides, CLI/configuration references, and current report and Windows screenshots.
+- Configure `[runtime].memory_limit_mb` (integer, minimum 512) to cap the VapourSynth
+  frame cache for analysis, rendering, alignment video checks, and the separate
+  VSView session. Unset keeps the native default. This does **not** cap total process
+  memory or audio buffers. The documented
+  `FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB` integer override is now accepted.
+- Malformed UTF-8 configuration/presets, invalid filesystem paths, and nonfinite
+  lead/trail windows now produce typed validation errors. Oversized numeric values
+  in persisted history and caches are recoverable; valid entries are retained and
+  missing cache authority requires recomputation.
+- `--no-cache` and `--from-cache-only` are rejected together before runtime work,
+  including in dry runs. CLI help, version, and prompts use Typer without requiring
+  Click. General JSON output behavior is preserved; viewer-specific identifiers
+  change to `vsview`, `audio_alignment.use_vsview`, and
+  `browser_clipboard_or_vsview`. Numeric error codes are unchanged.
 
-### Fixed
+### Cancellation, integrations, and update safety
 
-- Forward signing secrets explicitly through the guarded reusable workflows so
-  the existing repository key and protected environment keys remain available
-  after production approval.
-- Populate guarded GitHub releases from the matching validated changelog section
-  instead of a placeholder, and verify the release body through publication.
-- Preserve successful TMDB variant results when another lookup fails, while keeping
-  credentials and request details out of diagnostics.
-- Isolate VSView child imports from caller-controlled Python paths and repair stable
-  `doctor` guidance links.
-- Make phase, render-failure, and slow.pics webhook cancellation outcomes deterministic,
-  including repeated cancellation while a thread-backed request is draining.
-- Require signed, canonical Windows update manifests; verify signatures before parsing,
-  bind updates to an exact clean source/version, and bound archive extraction.
-- Stop optional alignment runs when a prepared source changes, including when audio
-  is unavailable, before rendering can consume stale source metadata.
-- Accept the documented `FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB` integer override
-  while retaining strict validation for TOML and explicit configuration inputs.
-- Reject excessive metadata-derived audio chunk counts before allocating the plan.
-- Restore analysis benchmark metric acquisition and alignment benchmark media links
-  when the labels file is given as a relative path.
-- Report malformed UTF-8 configuration and presets, invalid filesystem paths,
-  and nonfinite lead/trail windows as typed validation errors. Recover from
-  oversized numeric values in persisted run history and caches while retaining
-  valid entries and requiring recomputation when cache authority is unavailable.
-- After the first Ctrl+C, Frame Compare starts no new phase or audio work, and
-  stops starting new frames within a fraction of a second; frames already being
-  rendered or analysed finish first. Render admission uses a 50 ms poll with
-  100 ms scheduling slack. Results, caches and diagnostics stop publication;
-  interrupted runs retain their failure record and exit 130. A native frame
-  request already in flight drains without a guaranteed finite deadline;
-  FFmpeg batch extraction is stopped and reaped with bounded cleanup. Extraction
-  retains its timeout, already-written PNGs may remain, and repeated Ctrl+C
-  retains its existing behavior.
-- Show source-specific unavailable messages and Retry actions when main-stage
-  images fail in Slider, Single, Diff or Blink; navigation and successful retry
-  recover without stale image events affecting the current frame. Blink retains
-  focused Retry controls and avoids repeating unchanged error announcements.
-- Preserve an explicitly paused report Blink mode through viewport and Lens
-  gestures, and apply the exact review-import file and conflict choices shown
-  in its preview.
-- Keep warning source, severity and details independent of clip-label wording,
-  preserve complete labels in messages, and describe every applied alignment as
-  applied, including manual and cached results.
-- Isolate the libplacebo capability probe from caller-controlled import paths
-  while retaining dependencies in the trusted runtime's user site. CLI help,
-  version and prompts use the declared Typer dependency without requiring Click.
-- Retain separate Docker-verifier artifacts for successful and failed runs, and
-  select Docker CI when its source-checkout helper or build exclusions change.
-- Read Windows install state as UTF-8 under PowerShell 5.1. Source installation
-  now refuses early without PowerShell 7; published-bundle installation continues
-  to support PowerShell 5.1. Rollback refuses backups with missing or incompatible
-  runtime identity before changing files.
-- Reject `--no-cache` combined with `--from-cache-only` in runs and dry runs before any
-  runtime work.
-- Redact `slowpics.webhook_url` and `tmdb.api_key` inputs in every configuration
-  error.
-- Bound webhook DNS resolution and keep application secrets out of the resolver.
-- Reap VSView review processes after interrupted waits.
-- Discard pending Diff image loads after Grid navigation so a newer frame is never
-  overwritten.
+- The first Ctrl+C stops new phase/audio work and promptly stops starting new
+  render or analysis frames. In-flight native frames must finish first and have no
+  guaranteed completion deadline. Interrupted runs stop publishing results, caches,
+  and diagnostics, retain their failure record, and exit with code 130.
+  FFmpeg batch extraction is stopped with bounded cleanup; PNGs already written
+  may remain. Repeated Ctrl+C keeps its existing behavior.
+- Phase, render-failure, and slow.pics webhook cancellation outcomes are more
+  predictable, including repeated cancellation while a thread-backed request drains.
+  Webhook DNS resolution is bounded and its resolver does not receive application
+  secrets.
+- Successful TMDB variant lookups are retained when another lookup fails.
+  Diagnostics keep credentials and request details private; configuration errors
+  redact `slowpics.webhook_url` and `tmdb.api_key`.
+- VSView child imports and the libplacebo capability probe are isolated from
+  caller-controlled Python paths. The probe still uses dependencies in the trusted
+  runtime's user site.
+- Windows updates require signed, canonical manifests and verify signatures before
+  parsing. Updates are bound to an exact clean source/version, archive extraction
+  is bounded, install state is read as UTF-8 under PowerShell 5.1, and rollback
+  rejects backups with missing or incompatible runtime identity before changing files.
 
-### Upgrade notes
+### Runtime versions
 
-- Configs that still set any removed `[audio_alignment]` key (`sample_rate`,
-  `correlation_mode`, `preprocessing_mode`, `confidence_threshold`,
-  `ambiguity_peak_ratio`, `window_length_seconds`, `window_stride_seconds`,
-  `minimum_valid_windows`, `consensus_minimum_ratio`, `refinement_mode`,
-  `refinement_sample_rate`) now fail validation as unknown keys; delete each such key.
-- Replace `audio_alignment.use_vspreview = true` with
-  `audio_alignment.use_vsview = true` in authored configuration. The old key is no
-  longer accepted.
-- The shared alignment reuse cache moves to schema v2 with neutral interactive
-  origins; schema-v1 entries are ignored and recomputed. Stale computed or shared
-  entries miss and recompute under the
-  `whole-track-chunked-phat-video-check-motion-20260929` policy.
-  Run-local `manual_overrides.toml` remains a v1 file with the same path and
-  offset semantics.
-- The diagnostic artifact moves to schema v4 and VSView session metadata to v5,
-  with explicit chunk/run/context records under one shared 2 MiB per-comparison
-  bound; native metadata omits per-chunk rows.
-- VSPreview-era and pre-native-panel schema-2 Windows portable installations must
-  install the complete VSView bundle. A code-only update fails closed when the
-  installed requirements or media-runtime fingerprint does not match, or when the
-  installed version cannot be established. It never mixes the old UI/native graph
-  with new application code. Reinstall full bundles into a fresh, empty folder
-  rather than overlaying an existing bundle.
+Install the complete portable bundle when moving to this runtime.
+
+| Component | Version |
+| --- | --- |
+| Python | 3.13.16 |
+| VapourSynth | R81 |
+| VSView | 0.12.1 |
+| vsjetengine | 1.8.0 |
+| vspackrgb | 2.0.0 |
+| BestSource | 22 |
+| Windows FFmpeg | `n8.1.3-9-g29e619e767` |
+| uv | 0.13.0 |
+
+The locked dependency graph and coordinated uv toolchain are refreshed.
+
+### For maintainers and diagnostic-tool authors
+
+- Merging a matching stable release PR into `main` now starts the guarded Windows
+  build and release workflow automatically. Production approval remains required.
+  Named signing-secret forwarding fixes key availability across reusable workflows.
+  Published notes come from the full validated versioned changelog section, replacing
+  the old placeholder, and the workflow verifies the body through publication.
+- Shared alignment reuse uses schema v2 with neutral interactive origins. The
+  recomputation policy is `whole-track-chunked-phat-video-check-motion-20260929`.
+  Diagnostics use schema v4 and VSView session metadata v5, including explicit
+  chunk/run/context records under one shared 2 MiB per-comparison limit; native
+  metadata omits per-chunk rows.
+- Docker verification retains separate artifacts for successful and failed runs,
+  and Docker CI runs when source-checkout helpers or build exclusions change.
+  Analysis benchmark metric acquisition and alignment benchmark media links work
+  when the labels file is supplied as a relative path.
 
 ## [0.5.0]
 
