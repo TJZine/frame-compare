@@ -19,6 +19,9 @@ on:
         description: Exact 40-character source commit SHA
         required: true
         type: string
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML:
+        required: true
 
 permissions: {}
 
@@ -168,6 +171,8 @@ jobs:
       require_signing: true
       environment_name: ${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}
       prepare_release_assets: true
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
 
   publish:
     name: Draft, verify, and publish

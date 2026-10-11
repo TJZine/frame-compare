@@ -39,7 +39,9 @@ def test_merged_release_delegates_to_guarded_publication(repo_root: Path) -> Non
         "contents": "write",
         "id-token": "write",
     }
-    assert "secrets" not in release
+    assert release["secrets"] == {
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
+    }
     manual = load_workflow(repo_root / ".github/workflows/windows-portable.yml")
     assert release["concurrency"]["cancel-in-progress"] == "false"
     assert release["concurrency"]["group"].startswith("frame-compare-release-")

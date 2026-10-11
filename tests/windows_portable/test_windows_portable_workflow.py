@@ -84,7 +84,9 @@ def test_windows_portable_manual_verify_binds_exact_sha_to_selected_ref(repo_roo
     assert verify["with"]["environment_name"] == (
         "${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}"
     )
-    assert "secrets" not in verify
+    assert verify["secrets"] == {
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
+    }
 
 
 @pytest.mark.parametrize(
@@ -155,7 +157,9 @@ def test_windows_portable_workflow_signing_and_uploads_fail_closed(repo_root: Pa
         "environment_name",
         "prepare_release_assets",
     }
-    assert "secrets" not in workflow["on"]["workflow_call"]
+    assert workflow["on"]["workflow_call"]["secrets"] == {
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": {"required": "false"}
+    }
     assert build["environment"] == {"name": "${{ inputs.environment_name }}"}
     assert sign["if"] == "env.REQUIRE_SIGNING == 'true'"
     assert sign["env"]["WINDOWS_UPDATE_SIGNING_KEY_XML"] == (

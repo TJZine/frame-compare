@@ -13,6 +13,13 @@ notes used by the guarded publication workflow.
   build and release workflow. Production approval remains required, and published
   release notes include the full matching versioned changelog section.
 
+### Fixed
+
+- Forward signing secrets explicitly through the guarded reusable workflows so
+  protected environment keys remain available after production approval. Add a
+  one-time approved migration for the existing repository signing key when its
+  original private file is unavailable.
+
 ## [0.6.0]
 
 ### Added

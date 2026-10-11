@@ -80,3 +80,5 @@ jobs:
       version: ${{ needs.identify_release.outputs.version }}
       tag: ${{ needs.identify_release.outputs.tag }}
       expected_sha: ${{ needs.identify_release.outputs.expected_sha }}
+    secrets:
+      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}

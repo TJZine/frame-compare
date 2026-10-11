@@ -540,9 +540,10 @@ Canonical verification path:
      `release-candidate` and `production`;
    - store `WINDOWS_UPDATE_SIGNING_KEY_XML` only as an environment secret in both
      protected environments; and
-   - atomically remove the same-named repository secret and any organization secret
-     that grants this repository access, then confirm `windows-ci` and an ordinary
-     workflow cannot resolve it.
+   - after confirming the protected copies and signed verification, remove the
+     same-named repository secret and any organization secret that grants this
+     repository access, then confirm `windows-ci` and an ordinary workflow cannot
+     resolve it. The one-time migration below retains the source until that proof.
 
    GitHub resolves same-named environment secrets ahead of repository/organization
    secrets rather than enforcing an environment-only namespace. The migration and
@@ -552,6 +553,12 @@ Canonical verification path:
 
 Current CI ownership:
 
+- Every signed caller explicitly passes `WINDOWS_UPDATE_SIGNING_KEY_XML` through
+  each reusable-workflow boundary. The final build job's protected environment
+  supplies the environment value after approval; unsigned PR calls pass no signing
+  secret. An environment binding alone does not make an omitted secret available
+  inside a reusable workflow. Keep named forwarding when removing the legacy
+  repository secret; do not replace it with broad `secrets: inherit`.
 - `.github/workflows/release-on-merge.yml` observes pushes to `main`. A changed
   stable manifest version starts publication only when GitHub identifies that exact
   pushed commit as the merge commit of a release PR targeting this repository's
@@ -672,7 +679,66 @@ documented-only in the task handoff and require explicit maintainer or
 Windows-runner confirmation before treating the signed update release path as
 fully verified.
 
+### One-time signing-key migration from the repository secret
+
+Use this only to transfer the existing key when its original private XML file is
+unavailable. It does not generate a key, rotate the committed public key, publish
+a release, or change environment protection rules. The migration runs on
+`v0.7.0` through the existing `windows-portable.yml` dispatcher, so its code need
+not be pushed to `main`. The reviewed branch must be available on GitHub before
+dispatch; the reusable migration workflow does not have a separate dispatch trigger.
+
+1. Create a short-lived fine-grained personal access token restricted to
+   `TJZine/frame-compare` with **Environments: read and write** (Metadata read is
+   implicit). Store it as `SIGNING_KEY_MIGRATION_TOKEN` under the **production
+   environment's secrets**, not as a repository secret or workflow input. Do not
+   reuse `RELEASE_PLEASE_TOKEN`. GitHub's normal workflow token cannot administer
+   environment secrets. See [environment-secret API permissions](https://docs.github.com/en/rest/actions/secrets#create-or-update-an-environment-secret).
+2. In production's deployment branch rules, temporarily add the exact branch
+   `v0.7.0` alongside `main`. Keep required reviewer approval enabled. Both
+   `production` and `release-candidate` must retain their required reviewers; the
+   migration checks both before it writes either secret.
+3. Review the exact branch head and dispatch it:
+
+   ```bash
+   MigrationSha=$(gh api repos/TJZine/frame-compare/git/ref/heads/v0.7.0 --jq '.object.sha')
+   gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref v0.7.0 \
+     -f operation=migrate-signing-key -f expected_sha="$MigrationSha"
+   ```
+
+4. Approve the pending **production** deployment for that reviewed SHA. The
+   migration validates the existing private key against the committed public key
+   and checks its RSA private parameters before it writes. It passes the XML to
+   `gh secret set` on stdin; the CLI encrypts it before upload. The XML is never
+   put in command arguments, temporary files, artifacts, outputs, or logs. CLI
+   output and errors are captured and sanitized. See [GitHub CLI secret handling](https://cli.github.com/manual/gh_secret_set).
+5. Confirm the run reports both protected environment secrets configured. It
+   verifies secret metadata, not a readback of the value (GitHub does not provide
+   that). A partial failure leaves the repository source intact; repeating the
+   approved migration safely copies the same validated key to both destinations.
+6. Revoke the temporary token, delete `SIGNING_KEY_MIGRATION_TOKEN`, and remove
+   production's temporary `v0.7.0` deployment rule. This disables further migration
+   writes. Run signed verification using the corrected named-secret forwarding
+   on a protected, permitted branch; a successful signing run is the value proof.
+   Then remove the legacy repository signing secret and confirm ordinary jobs
+   cannot resolve it. Preserve a private backup through your own secure storage
+   if the original file is later recovered.
+
+The code on the current `main` revision omits named signing-secret forwarding;
+copying secrets alone does not repair that revision. A signed verification can
+exercise the corrected workflow on this branch after its protection and environment
+rules permit it. Stable publication still requires the corrected code on `main`
+and the exact-main release checks; this migration does not bypass that contract.
+
+Local proof for this migration is
+`uv run --no-sync pytest -q tests/workflows/test_signing_key_migration.py tests/workflows/test_github_workflows.py tests/workflows/test_release_on_merge.py`.
+It uses public, synthetic RSA parameters and simulated CLI/API responses. Hosted
+approval, environment-secret resolution, encryption/upload, and signed execution
+remain separate acceptance evidence. Remove the one-time migration operation,
+workflow, and script after the hosted migration and signing are accepted.
+
 ### Workflow And Documentation Verification
+
 
 For entrypoints, `.agents/project.md`, host configuration, review-tool instructions,
 or workflow-only prose, use structural proof for the edited surface: run
