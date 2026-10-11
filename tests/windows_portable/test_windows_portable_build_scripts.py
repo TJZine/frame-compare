@@ -705,7 +705,9 @@ def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: 
         )
     ]
 
-    assert '$_.FullName -match "(?i)webengine"' in exclusion
+    assert (
+        '$_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine"' in exclusion
+    )
     assert '"icudtl.dat"' in exclusion
     assert '"v8_context_snapshot.bin"' in exclusion
     assert "$excludedFiles.Count -ne 123" in exclusion

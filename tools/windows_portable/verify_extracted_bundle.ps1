@@ -789,15 +789,16 @@ foreach ($entry in $requiredVsViewDistributions.GetEnumerator()) {
 Write-Host "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok"
 
 $pySideRoot = Join-Path $bundle "app\site-packages\PySide6"
+$resolvedPySideRoot = (Resolve-Path -LiteralPath $pySideRoot).Path
 $chromiumRuntimeNames = @(
   "icudtl.dat",
   "v8_context_snapshot.bin",
   "v8_context_snapshot.debug.bin"
 )
 $qtWebEngineFiles = @(
-  Get-ChildItem -LiteralPath $pySideRoot -Recurse -File |
+  Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
     Where-Object {
-      $_.FullName -match "(?i)webengine" -or
+      $_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine" -or
       ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
     }
 )

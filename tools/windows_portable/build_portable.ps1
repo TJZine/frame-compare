@@ -685,7 +685,7 @@ function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
   $excludedFiles = @(
     Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
       Where-Object {
-        $_.FullName -match "(?i)webengine" -or
+        $_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine" -or
         ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
       }
   )
@@ -700,7 +700,7 @@ function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
   $remainingFiles = @(
     Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
       Where-Object {
-        $_.FullName -match "(?i)webengine" -or
+        $_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine" -or
         ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
       }
   )
@@ -1022,7 +1022,7 @@ def prove_qt_webengine_excluded() -> None:
         for path in pyside_root.rglob("*")
         if path.is_file()
         and (
-            "webengine" in str(path).lower()
+            "webengine" in str(path.relative_to(pyside_root)).lower()
             or (path.parent.name == "resources" and path.name in chromium_runtime_names)
         )
     ]
